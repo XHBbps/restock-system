@@ -206,7 +206,8 @@
 - **global_config**: 单行 KV 存所有全局参数（含默认主仓、含税标记、店铺模式）
 - **warehouse**: `id` (PK, 来自赛狐 warehouse.id) / `name` / `type` (1国内/0默认/2FBA/3海外) / `country` (手动维护，可空) / `replenish_site_raw` (原始值仅供参考) / `last_sync_at`
 - **product_listing**: `id` (PK) / `commodity_sku` / `commodity_id` / `shop_id` / `marketplace_id` (二字码) / `seller_sku` / `parent_sku` / `commodity_name` / `main_image` / `day7_sale_num` / `day14_sale_num` / `day30_sale_num` / `is_matched` / `online_status` / `last_sync_at`。唯一索引 `(shop_id, marketplace_id, seller_sku)`；普通索引 `(commodity_sku, marketplace_id)`
-- **inventory_snapshot**: `commodity_sku` / `warehouse_id` / `country` (派生自 warehouse) / `available` / `reserved` / `in_transit` / `snapshot_at`
+- **inventory_snapshot_latest**: `commodity_sku` / `warehouse_id` / `country` (派生自 warehouse) / `available` / `reserved` / `in_transit` / `updated_at`（PK `(commodity_sku, warehouse_id)`）
+- **inventory_snapshot_history**: 每日归档，字段同 latest，额外 `snapshot_date`
 - **order_header**: 订单骨架，`shop_id` / `amazon_order_id` (唯一) / `marketplace_id` / `country_code` / `purchase_date` / `order_status` / `last_sync_at`
 - **order_item**: `order_id` FK / `commodity_sku` / `seller_sku` / `quantity_ordered` / `quantity_shipped` / `refund_num`
 - **order_detail**: `shop_id` / `amazon_order_id` (唯一) / `postal_code` / `country_code` / `state_or_region` / `detail_address` / `fetched_at`
@@ -256,6 +257,106 @@
 - 赛狐 ERP OpenAPI：client_id、client_secret、access_token 获取端点、出口 IP 已加白
 - 域名 + Let's Encrypt HTTPS 证书
 - 云对象存储（OSS/COS）用于数据库备份
+
+## Backend Design Direction
+
+### 技术栈（锁定）
+
+| 层 | 选型 | 理由 |
+|---|---|---|
+| 语言/运行时 | **Python 3.11+** | I/O 密集场景、生态完整 |
+| Web 框架 | **FastAPI 0.115+** | async、Pydantic v2、自动 OpenAPI |
+| ORM | **SQLAlchemy 2.0 (async)** | 最成熟、类型支持好 |
+| 数据库迁移 | **Alembic** | SQLA 官方配套 |
+| 数据校验 | **Pydantic v2** | DTO + 配置 |
+| HTTP 客户端 | **httpx** (async) | 对接赛狐 API |
+| 接口限流 | **aiolimiter** | 每接口独立 1 QPS token bucket |
+| 重试 | **tenacity** | 赛狐失败重试 + 指数退避 |
+| 定时任务 | **APScheduler** | 嵌入 FastAPI 进程，无需 Celery |
+| 配置 | **pydantic-settings** | `.env` + 类型 |
+| 日志 | **structlog** | 结构化 JSON |
+| 密码 | **passlib[bcrypt]** | 单用户 hash |
+| JWT | **python-jose** | 会话 token |
+| 测试 | **pytest + pytest-asyncio** | 官方方案 |
+| Lint/Format/Type | **ruff + black + mypy** | 对应宪法 Code Style 门禁 |
+
+### 数据库：PostgreSQL 16
+
+- **JSONB 字段**用于：`global_config_snapshot`、`country_breakdown`、`warehouse_breakdown`、`t_purchase`、`t_ship`、`overstock_countries`
+- **核心索引**：
+  - `product_listing`: UNIQUE(shop_id, marketplace_id, seller_sku) + INDEX(commodity_sku, marketplace_id)
+  - `inventory_snapshot_latest`: PK(commodity_sku, warehouse_id)
+  - `inventory_snapshot_history`: INDEX(snapshot_date, commodity_sku)
+  - `order_header`: UNIQUE(shop_id, amazon_order_id) + INDEX(purchase_date) + INDEX(country_code, purchase_date)
+  - `order_detail`: UNIQUE(shop_id, amazon_order_id)
+  - `suggestion`: INDEX(created_at DESC)
+  - `api_call_log`: INDEX(endpoint, called_at DESC)
+
+### 库存快照双表策略（修订 FR-018）
+
+为避免"每小时全量快照"导致的爆炸性增长（500 SKU × 60 仓 × 24 × 365 ≈ 2.6 亿行），库存采用双表结构：
+
+- **`inventory_snapshot_latest`**（单行/仓+SKU）
+  - 每次同步 UPSERT，规则引擎运行时只读此表
+  - 始终反映最近一次同步结果
+  - 表体稳定（约 5000 行）
+- **`inventory_snapshot_history`**
+  - 每日凌晨 02:00 定时任务将 `latest` 表整体归档追加一份
+  - 保留字段：`commodity_sku / warehouse_id / available / reserved / in_transit / snapshot_date`
+  - 永久保留（符合 FR-054）
+  - 主要用于事后回查 + 积压分析
+  - 年增量约 180 万行，5 年内无压力
+
+### 订单同步策略（落地 FR-020 ~ FR-024）
+
+- **列表拉取**：全量拉近 30 天订单（每页 100 条，分页 ~340 次请求/次），落入 `order_header` + `order_item`
+- **过滤**：对比 `product_listing.seller_sku` 提取"已配对 SKU 相关订单"的 `(shop_id, amazon_order_id)` 集合
+- **详情增量**：仅对已配对相关订单调用订单详情接口拉取邮编，写入 `order_detail`；维护 `order_detail_fetch_log` 避免重复
+- **首次回填**：近 30 天订单 × ~100/天 ≈ 3000 订单 → 详情 1 QPS 约 50 分钟
+- **日常增量**：每日新订单 ~100 → 详情约 100 秒
+
+### 项目结构
+
+```
+restock_system/
+├── backend/
+│   ├── app/
+│   │   ├── main.py           # FastAPI 入口
+│   │   ├── config.py         # pydantic-settings
+│   │   ├── db/               # SQLAlchemy session + Alembic
+│   │   ├── models/           # ORM models
+│   │   ├── schemas/          # Pydantic DTOs
+│   │   ├── api/              # 路由 (auth/suggestion/config/...)
+│   │   ├── saihu/            # 赛狐 API 客户端
+│   │   │   ├── client.py     # httpx + sign + 限流
+│   │   │   ├── endpoints/    # 各接口封装
+│   │   │   └── models.py     # 赛狐返回 DTO
+│   │   ├── engine/           # 规则引擎 Step 1-6
+│   │   ├── sync/             # 同步任务
+│   │   ├── pushback/         # 推送采购单
+│   │   ├── tasks/            # APScheduler 任务
+│   │   └── core/             # 日志 / 异常 / JWT
+│   ├── tests/
+│   ├── alembic/
+│   ├── pyproject.toml
+│   ├── Dockerfile
+│   └── .env.example
+├── frontend/                 # Vue 3 + Element Plus
+├── deploy/
+│   ├── docker-compose.yml
+│   └── Caddyfile
+├── docs/
+├── specs/
+└── .specify/
+```
+
+### 新增 FR（纳入正式条款）
+
+- **FR-067**: 后端 MUST 使用 Python 3.11+ / FastAPI / SQLAlchemy 2.0 async / PostgreSQL 16 技术栈
+- **FR-068**: 赛狐 API 客户端 MUST 使用 httpx + aiolimiter（每接口独立 token bucket）+ tenacity（指数退避重试）实现
+- **FR-069**: 库存快照 MUST 按"latest 单行 + history 每日归档"双表结构存储；规则引擎只读 latest 表
+- **FR-070**: 定时任务 MUST 使用 APScheduler 嵌入 FastAPI 进程，不引入外部消息队列或任务调度中间件
+- **FR-071**: 订单同步 MUST 先全量拉列表到 `order_header/order_item`，再过滤"已配对 SKU 相关订单"后对这些订单增量调用订单详情接口
 
 ## Frontend Design Direction
 
