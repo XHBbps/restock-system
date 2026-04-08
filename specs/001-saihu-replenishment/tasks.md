@@ -156,20 +156,20 @@ description: "Task list for 赛狐补货计算工具 implementation"
 
 ### Rule engine (Step 1–6)
 
-- [ ] T079 [US1] Create `backend/app/engine/step1_velocity.py` implementing FR-028: query `order_item JOIN order_header` filtered by `order_status IN (Shipped, PartiallyShipped)`, `purchase_date IN [昨天-29, 昨天]`, `marketplace_to_country(mkt_id)`, compute `effective = max(shipped - refund, 0)`, bucket by date, apply `d7/7×0.5 + d14/14×0.3 + d30/30×0.2`
-- [ ] T080 [US1] Create `backend/app/engine/step2_sale_days.py` implementing FR-030: aggregate `inventory_snapshot_latest(available+reserved)` by country + `in_transit_item JOIN in_transit_record WHERE is_in_transit=true` by country → `sale_days = stock/velocity`
-- [ ] T081 [US1] Create `backend/app/engine/step3_country_qty.py` implementing FR-031: `raw = TARGET × velocity − stock`, `country_qty = max(raw, 0)`, collect negatives as `overstock_countries`
-- [ ] T082 [US1] Create `backend/app/engine/step4_total.py` implementing FR-032: filter `country_qty > 0`, `total = Σcountry_qty + Σvelocity×BUFFER − (local_available + local_reserved)`, `total = max(total, 0)`, local warehouses via `warehouse.type = 1`
-- [ ] T083 [US1] Create `backend/app/engine/zipcode_matcher.py` implementing FR-034/034a: `normalize_postal(code)` (strip + remove `-` and spaces) → iterate `zipcode_rule` ordered by priority → first hit wins → unknown otherwise
-- [ ] T084 [US1] Create `backend/app/engine/step5_warehouse_split.py` implementing simplified FR-033: load SKU's country orders (via JOIN with order_detail), apply zipcode_matcher, compute real-distribution ratios, zero-data fallback = equal split across maintained country warehouses
-- [ ] T085 [US1] Create `backend/app/engine/step6_timing.py` implementing FR-035: `T_ship = today + round(sale_days − TARGET)`, `T_purchase = T_ship − lead_time`, lead_time priority sku_config > global, set `urgent = any(T_purchase <= today)`
-- [ ] T086 [US1] Create `backend/app/engine/runner.py` orchestrating Step 1–6 over all `sku_config.enabled=true`: pre-check push_blocker (FR-047) by looking up `commodity_id` in `product_listing`, insert `suggestion` header, bulk-insert `suggestion_item` rows, archive prior draft/partial `suggestion` records; emit progress step updates
-- [ ] T087 [US1] Register `calc_engine` job in `backend/app/tasks/jobs/calc_engine.py` with scheduler trigger at `calc_cron` (default 08:00 Asia/Shanghai)
-- [ ] T088 [P] [US1] Add unit tests in `backend/tests/unit/test_engine_step1.py` covering velocity date bucketing + effective formula with fixtures (incl. refund, canceled, partial shipped)
-- [ ] T089 [P] [US1] Add unit tests in `backend/tests/unit/test_engine_step3.py` for negative-raw clamping + overstock collection
-- [ ] T090 [P] [US1] Add unit tests in `backend/tests/unit/test_engine_step4.py` for total formula (with/without local warehouses, with/without overstock countries)
-- [ ] T091 [P] [US1] Add unit tests in `backend/tests/unit/test_zipcode_matcher.py` covering number/string/all-operators/priority/normalize (`-`, spaces, EU + JP formats)
-- [ ] T092 [P] [US1] Add unit tests in `backend/tests/unit/test_engine_step5.py` for real-distribution path + zero-data fallback path
+- [X] T079 [US1] Create `backend/app/engine/step1_velocity.py` implementing FR-028: query `order_item JOIN order_header` filtered by `order_status IN (Shipped, PartiallyShipped)`, `purchase_date IN [昨天-29, 昨天]`, `marketplace_to_country(mkt_id)`, compute `effective = max(shipped - refund, 0)`, bucket by date, apply `d7/7×0.5 + d14/14×0.3 + d30/30×0.2`
+- [X] T080 [US1] Create `backend/app/engine/step2_sale_days.py` implementing FR-030: aggregate `inventory_snapshot_latest(available+reserved)` by country + `in_transit_item JOIN in_transit_record WHERE is_in_transit=true` by country → `sale_days = stock/velocity`
+- [X] T081 [US1] Create `backend/app/engine/step3_country_qty.py` implementing FR-031: `raw = TARGET × velocity − stock`, `country_qty = max(raw, 0)`, collect negatives as `overstock_countries`
+- [X] T082 [US1] Create `backend/app/engine/step4_total.py` implementing FR-032: filter `country_qty > 0`, `total = Σcountry_qty + Σvelocity×BUFFER − (local_available + local_reserved)`, `total = max(total, 0)`, local warehouses via `warehouse.type = 1`
+- [X] T083 [US1] Create `backend/app/engine/zipcode_matcher.py` implementing FR-034/034a: `normalize_postal(code)` (strip + remove `-` and spaces) → iterate `zipcode_rule` ordered by priority → first hit wins → unknown otherwise
+- [X] T084 [US1] Create `backend/app/engine/step5_warehouse_split.py` implementing simplified FR-033: load SKU's country orders (via JOIN with order_detail), apply zipcode_matcher, compute real-distribution ratios, zero-data fallback = equal split across maintained country warehouses
+- [X] T085 [US1] Create `backend/app/engine/step6_timing.py` implementing FR-035: `T_ship = today + round(sale_days − TARGET)`, `T_purchase = T_ship − lead_time`, lead_time priority sku_config > global, set `urgent = any(T_purchase <= today)`
+- [X] T086 [US1] Create `backend/app/engine/runner.py` orchestrating Step 1–6 over all `sku_config.enabled=true`: pre-check push_blocker (FR-047) by looking up `commodity_id` in `product_listing`, insert `suggestion` header, bulk-insert `suggestion_item` rows, archive prior draft/partial `suggestion` records; emit progress step updates
+- [X] T087 [US1] Register `calc_engine` job in `backend/app/engine/calc_engine_job.py` with scheduler trigger at `calc_cron` (default 08:00 Asia/Shanghai) — 调度触发器在 Batch 4 已注册
+- [X] T088 [P] [US1] Add unit tests in `backend/tests/unit/test_engine_step1.py` covering velocity date bucketing + effective formula with fixtures (incl. refund, canceled, partial shipped)
+- [X] T089 [P] [US1] Add unit tests in `backend/tests/unit/test_engine_step3.py` for negative-raw clamping + overstock collection
+- [X] T090 [P] [US1] Add unit tests in `backend/tests/unit/test_engine_step4.py` for total formula (with/without local warehouses, with/without overstock countries)
+- [X] T091 [P] [US1] Add unit tests in `backend/tests/unit/test_zipcode_matcher.py` covering number/string/all-operators/priority/normalize (`-`, spaces, EU + JP formats)
+- [X] T092 [P] [US1] Add unit tests in `backend/tests/unit/test_engine_step5.py` for real-distribution path + zero-data fallback path
 
 ### Suggestion API
 

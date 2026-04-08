@@ -27,6 +27,7 @@ from app.sync import out_records as _job_or  # noqa: F401
 from app.sync import product_listing as _job_pl  # noqa: F401
 from app.sync import shop as _job_shop  # noqa: F401
 from app.sync import warehouse as _job_wh  # noqa: F401
+from app.engine import calc_engine_job as _job_calc  # noqa: F401
 from app.config import get_settings
 from app.core.exceptions import BusinessError, SaihuAPIError
 from app.core.logging import configure_logging, get_logger
