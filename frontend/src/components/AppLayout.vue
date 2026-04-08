@@ -212,6 +212,17 @@ const menuGroups = [
     ]
   },
   {
+    title: 'External Data',
+    items: [
+      { to: '/data/orders', icon: IconClipboard, label: '订单列表' },
+      { to: '/data/inventory', icon: IconBoxes, label: '库存明细' },
+      { to: '/data/out-records', icon: IconPackage, label: '其他出库' },
+      { to: '/data/warehouses', icon: IconWarehouse, label: '仓库列表' },
+      { to: '/data/shops', icon: IconStore, label: '店铺列表' },
+      { to: '/data/products', icon: IconPackage, label: '在线产品信息' }
+    ]
+  },
+  {
     title: 'Config',
     items: [
       { to: '/config/sku', icon: IconPackage, label: 'SKU 配置' },
@@ -223,14 +234,11 @@ const menuGroups = [
   },
   {
     title: 'Observability',
-    items: [
-      { to: '/monitor/overstock', icon: IconBoxes, label: '积压提示' },
-      { to: '/monitor/api', icon: IconActivity, label: '接口监控' }
-    ]
+    items: [{ to: '/monitor/overstock', icon: IconActivity, label: '积压提示' }]
   },
   {
     title: 'Operations',
-    items: [{ to: '/tasks/manual', icon: IconPlay, label: '手动同步/计算' }]
+    items: [{ to: '/ops/sync', icon: IconPlay, label: '同步管理' }]
   }
 ]
 
