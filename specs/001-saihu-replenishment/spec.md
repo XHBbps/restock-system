@@ -97,7 +97,8 @@
 - **FR-004**: 请求时间戳 MUST 与赛狐服务器相差 ≤ 15 分钟；nonce MUST 每次请求随机生成避免 40012 重复提交
 - **FR-005**: 系统 MUST 在接口失败时自动重试，最终失败 MUST 写入 `api_call_log`
 - **FR-006**: 所有赛狐请求 MUST 为 POST + `Content-Type: application/json`，公共参数拼在 URL 查询串，业务参数放 requestBody
-- **FR-007**: 系统 MUST 硬编码维护 `marketplaceId → country_code` 映射表（订单列表返回长串如 `A1VC38T7YXB528`，订单详情返回二字码如 `JP`，MUST 统一转为二字码存储）
+- **FR-007**: 系统 MUST 硬编码维护 `marketplaceId → country_code → timezone` 映射表（订单列表返回长串如 `A1VC38T7YXB528`，订单详情返回二字码如 `JP`，MUST 统一转为二字码存储；每个 country_code 对应一个 IANA 时区如 `Asia/Tokyo`，来源于 `docs/saihu_api/开发指南/站点对应关系.md` + 标准站点时区）
+- **FR-007a**: 系统 MUST 将赛狐返回的所有时间字段（`purchaseDate` / `lastUpdateDate` / `updateTime` 等）按订单所在站点时区解析，再**统一转换为 `Asia/Shanghai`（北京时间）存储**，避免跨时区订单的窗口边界错位
 - **FR-008**: 系统 MUST 在每次赛狐调用后写入 `api_call_log`，字段含接口名、请求时间、耗时、HTTP 状态、OpenAPI code、msg、requestId
 
 **数据同步 — 在线产品信息 (FR-009 ~ FR-012)**
@@ -124,7 +125,7 @@
 
 - **FR-019**: Velocity 数据 MUST 由系统基于 `order_item` 自行聚合计算，**不信任赛狐在线产品信息接口的 `day*SaleNum` 字段**（未经真实测试验证、口径可能与"已发货净销量"不一致）
 - **FR-020**: 订单接口同时服务于 Step 1（velocity 聚合）和 Step 5（邮编分配）。订单列表 MUST 全量拉取近 30 天（接口不支持按 SKU 过滤），订单详情仅对"已配对 SKU 相关订单"增量拉取
-- **FR-021**: 系统 MUST 定时调用"订单列表"接口 `/api/order/pageList.json`，增量同步使用 `dateType=updateDateTime` + `dateStart=上次同步时间` + `dateEnd=now`，确保捕获状态变化（发货/取消/退款）；按 `(shop_id, amazon_order_id)` UPSERT 到 `order_header + order_item`
+- **FR-021**: 系统 MUST 定时调用"订单列表"接口 `/api/order/pageList.json`，增量同步使用 `dateType=updateDateTime` + `dateStart=sync_state.last_success_at - 5min` + `dateEnd=now`（预留 5 分钟重叠防漏单），确保捕获状态变化（发货/取消/退款）；`order_header` 按 `(shop_id, amazon_order_id)` UPSERT，`order_item` 按 `(order_id, order_item_id)` UPSERT，覆盖 quantityShipped / refundNum / status 等动态字段
 - **FR-022**: 订单列表不返回邮编。系统 MUST 对尚未拉过详情的订单增量调用"订单详情"接口 `/api/order/detailByOrderId.json`（需 `shopId + amazonOrderId`），返回的 `postalCode`、`countryCode`、`stateOrRegion`、`detailAddress` 落入 `order_detail` 表
 - **FR-023**: 系统 MUST 维护"订单详情已拉列表" `order_detail_fetch_log`，已拉过的 (shopId, amazonOrderId) MUST NOT 重复调用
 - **FR-024**: 订单邮编一经入库 MUST 永久保留，不随后续同步更新
@@ -174,13 +175,18 @@
 - **FR-031 (Step 3)**: `raw[国] = TARGET_DAYS × velocity[国] − 库存三项之和`；`country_qty[国] = max(raw, 0)`；`raw < 0` 的国家记入 `overstock_countries`（只读）
 - **FR-032 (Step 4)**: `total = Σ country_qty[国] + Σ velocity[国] × BUFFER_DAYS − (本地仓可用 + 本地仓占用)`，两个 Σ 仅累加 `country_qty > 0` 的国家；本地仓在途不参与扣减；`total = max(total, 0)`
 - **FR-033 (Step 5)**: 对每个 `country_qty > 0` 的国家：
-  - 取该国近 30 天已拉详情的订单
-  - 对每单按 `postalCode` 匹配 `zipcode_rule`（按 priority 升序遍历，首命中即归属；未命中 / 无邮编 归"未知仓"）
-  - 未知仓从分母剔除；`ratio = 该仓件数 / 该国已知仓总件数`
-  - 若已知仓总件数 < `MIN_ORDER_SAMPLE`(10)，则在该国已维护国家的所有海外仓间均分
-  - 不对小占比仓做归零处理
-  - `warehouse_qty[国][仓] = country_qty[国] × ratio`
+  - 取**该 SKU 在该国近 30 天**已拉详情且有 `postal_code` 的订单（order_header JOIN order_detail）
+  - 对每单按 `postal_code` 匹配 `zipcode_rule`（按 priority 升序遍历，首命中即归属；未命中 / 无邮编 归"未知仓"）
+  - 未知仓从分母剔除
+  - **情况 A**（`已知仓总件数 > 0`，常见）：按实际比例分配
+    `ratio[仓] = 该仓件数 / 已知仓总件数`
+    `warehouse_qty[仓] = country_qty × ratio[仓]`
+    **不设样本阈值，不做小占比归零，按真实数据分配**
+  - **情况 B**（`已知仓总件数 = 0`，零数据兜底）：该 SKU 在该国没有可匹配的订单
+    → 均分到该国所有"已维护国家"的海外仓
+    → UI 上在该 SKU 该国维度提示"零样本均分"
 - **FR-034**: 邮编规则实体字段：国家、前缀截取长度、值类型 (number/string)、比较操作符 (`= / != / > / >= / < / <=`)、比较值、目标仓、priority
+- **FR-034a**: 邮编匹配前 MUST 对 `postal_code` 做归一化清洗：`strip()` 去首尾空白，移除内部 `-` 与空格，再按 `prefix_length` 截取比较。涵盖所有国家邮编格式（含欧盟字母数字混合如 `"SW1A 1AA"`、日本 `"640-8453"` 等）
 - **FR-035 (Step 6)**: `T_发货[国] = 今天 + round(sale_days − TARGET_DAYS)`；`T_采购[国] = T_发货 − lead_time`；lead_time 优先 SKU 级，缺省用全局；若任一国 `T_采购 ≤ 今天` 则整个 SKU 标记"立即采购"红色高亮
 - **FR-036**: 每次规则引擎运行 MUST 将当时 `global_config` 整体快照写入 `suggestion.global_config_snapshot`
 - **FR-037**: 规则引擎触发时：自动触发若存在 `draft/partial` 单则自动归档；手动触发须弹窗确认后归档
@@ -189,7 +195,7 @@
 
 - **FR-038**: 用户 MUST 能维护 SKU 级配置：`commodity_sku`、`enabled`、`lead_time_days`（可空）
 - **FR-039**: SKU 不存储商品名/类别/供应商/成本；展示时从 `product_listing.commodity_name / main_image` 读取
-- **FR-040**: 用户 MUST 能维护全局参数：`BUFFER_DAYS`(30)、`TARGET_DAYS`(60)、`LEAD_TIME_DAYS`(50)、`MIN_ORDER_SAMPLE`(10)、`SYNC_INTERVAL`(1h)、`CALC_CRON`(08:00)、`DEFAULT_PURCHASE_WAREHOUSE_ID`、`INCLUDE_TAX`("0"/"1")、`SHOP_SYNC_MODE`(`all`/`specific`)
+- **FR-040**: 用户 MUST 能维护全局参数：`BUFFER_DAYS`(30)、`TARGET_DAYS`(60)、`LEAD_TIME_DAYS`(50)、`SYNC_INTERVAL`(1h)、`CALC_CRON`(08:00)、`DEFAULT_PURCHASE_WAREHOUSE_ID`、`INCLUDE_TAX`("0"/"1")、`SHOP_SYNC_MODE`(`all`/`specific`)。`MIN_ORDER_SAMPLE` 参数已废弃不再使用（Step 5 采用"有数据就按真实比例、零数据才均分"策略，不设样本阈值）
 - **FR-041**: 用户 MUST 能通过页面 UI 维护仓库→国家映射、邮编规则（新增/编辑/删除/调序）
 
 **审核与推送 (FR-042 ~ FR-049)**
@@ -201,10 +207,12 @@
   - `warehouseId` = 全局参数 `DEFAULT_PURCHASE_WAREHOUSE_ID`
   - `action` = `"1"`（提交）
   - `includeTax` = 全局参数 `INCLUDE_TAX`（字符串 `"0"` 或 `"1"`，**不是 true/false**）
-  - `items[]` = 每条对应一个 SKU：`{ commodityId: <查 product_listing>, num: <total_qty> }`
+  - `items[]` = 每条对应一个 SKU：`{ commodityId: <查 product_listing>, num: "<total_qty>" }`
+  - `num` 字段 MUST 序列化为**字符串**（赛狐 schema 要求 string 类型，如 `"928"` 非 `928`）
   - 其他字段（supplierId/partyaId/paymentMethodId/purchaserId 等）第一版**不填**，由赛狐 Web 端事后补全
+- **FR-045a**: 前端 MUST 限制单次推送最多 50 条 `suggestion_item`；超过时提示用户分批推送（赛狐 items 数量上限未知，50 为保守值，联调后可调）
 - **FR-046**: 推送结果 MUST 按条目记录状态：成功 → 保存赛狐返回的 `purchaseOrderNo`；失败 → 保存 `code/msg`。失败支持系统自动重试（默认 3 次）+ 手动重试
-- **FR-047**: 若某 commoditySku 在 `product_listing` 中查不到 `commodityId`，推送该条目 MUST 失败并提示"SKU 尚未建立 commodityId 映射，请先确保该 SKU 至少同步过一次在线产品信息"，不阻塞其他条目
+- **FR-047**: 规则引擎生成 `suggestion_item` 时 MUST 预检查 `commoditySku` 是否能在 `product_listing` 中查到 `commodity_id`，查不到则在 `suggestion_item.push_blocker` 字段中标记原因（如 "未建立 commodity_id 映射"）；UI MUST 在该条目显著位置展示"无法推送"标签；用户勾选时 MUST 自动过滤或弹窗拒绝有 push_blocker 的条目
 - **FR-048**: 建议单状态 MUST 支持：`draft` / `partial` / `pushed` / `archived`
 - **FR-049**: 同一 SKU 展开时 MUST 展示积压国家列表（raw<0 的国家）及其库存、动销、预计消化天数
 
@@ -215,6 +223,33 @@
 - **FR-052**: 用户 MUST 能访问"接口监控页"查看各接口最近调用时间、近 24h 成功率与次数、最近错误原因，失败记录可手动重试
 - **FR-053**: 用户 MUST 能按日期范围、状态、SKU 关键字查询历史建议单及明细、配置快照、推送结果
 - **FR-054**: 历史建议单、库存快照、订单骨架 + 详情、api_call_log、积压记录 MUST 永久保留；历史单只读不可编辑/重推
+
+**任务调度与执行 (FR-058a ~ FR-058h)**
+
+- **FR-058a**: 系统 MUST 实现"Scheduler + Queue + Worker"三层任务架构：
+  - **Scheduler**（APScheduler）只负责按时触发 enqueue，不直接执行业务逻辑
+  - **task_run** 表同时作为队列 + 历史 + 进度记录
+  - **Worker**（后台 asyncio 循环）从 task_run 领取 pending 任务执行
+- **FR-058b**: 入队 MUST 通过"数据库部分唯一索引"保证幂等：对 `dedupe_key` 在 `status IN ('pending','running')` 状态下创建 UNIQUE 约束。入队时走事务 INSERT，捕获 UniqueViolation 即视为"已存在活跃任务"
+- **FR-058c**: 去重行为：
+  - `scheduler` 触发遇重复 → 额外插入一条 `status='skipped'` 记录留痕
+  - `manual` 触发遇重复 → 返回已有任务的 `task_id`，前端复用轮询
+- **FR-058d**: Worker 取任务 MUST 原子化，使用：
+  ```sql
+  UPDATE task_run SET status='running', worker_id=?, started_at=now(),
+                       heartbeat_at=now(),
+                       lease_expires_at=now()+interval '2 minutes',
+                       attempt_count=attempt_count+1
+  WHERE id = (
+      SELECT id FROM task_run WHERE status='pending'
+      ORDER BY priority, created_at
+      FOR UPDATE SKIP LOCKED LIMIT 1
+  ) RETURNING *;
+  ```
+- **FR-058e**: Worker 执行期间 MUST 每 30 秒续租：更新 `heartbeat_at = now()` 和 `lease_expires_at = now() + 2 min`，并可同步更新 `current_step / step_detail` 供前端进度展示
+- **FR-058f**: 系统 MUST 每分钟运行"僵尸任务回收"：`UPDATE task_run SET status='failed', error_msg='Lease expired' WHERE status='running' AND lease_expires_at < now()`。回收后**不自动重新入队**，由业务侧决定是否触发新任务
+- **FR-058g**: `task_run.status` 枚举 MUST 为：`pending / running / success / failed / skipped / cancelled`，其中 `skipped` 仅由 scheduler 去重产生，`cancelled` 为后续人工中止预留
+- **FR-058h**: 前端 MUST 通过 `GET /api/tasks/{task_id}` 每 2 秒轮询任务状态，返回 `{status, current_step, step_detail, total_steps, attempt_count, error_msg, result_summary}`；任务终态后停止轮询
 
 **安全与规模 (FR-055 ~ FR-058)**
 
@@ -234,7 +269,7 @@
 - **in_transit_record**: 出库单级在途追踪，`saihu_out_record_id` (PK) / `out_warehouse_no` / `target_warehouse_id` / `target_country` / `remark` / `status` / `is_in_transit` (bool) / `last_seen_at` / `created_at` / `updated_at`
 - **in_transit_item**: 出库单明细，`id` (PK) / `saihu_out_record_id` (FK) / `commodity_sku` / `goods` (可用数，即在途数量)
 - **order_header**: 订单骨架，`shop_id` / `amazon_order_id` (唯一) / `marketplace_id` / `country_code` / `purchase_date` / `order_status` / `last_sync_at`
-- **order_item**: `order_id` FK / `commodity_sku` / `seller_sku` / `quantity_ordered` / `quantity_shipped` / `refund_num`
+- **order_item**: `order_id` FK / `order_item_id`（赛狐 orderItemId）/ `commodity_sku` / `seller_sku` / `quantity_ordered` / `quantity_shipped` / `refund_num`；PK = `(order_id, order_item_id)`
 - **order_detail**: `shop_id` / `amazon_order_id` (唯一) / `postal_code` / `country_code` / `state_or_region` / `detail_address` / `fetched_at`
 - **order_detail_fetch_log**: `shop_id` / `amazon_order_id` / `fetched_at`（避免重复拉详情）
 - **zipcode_rule**: `id` / `country` / `prefix_length` / `value_type` (number/string) / `operator` / `compare_value` / `warehouse_id` / `priority`
@@ -244,6 +279,8 @@
 - **api_call_log**: `id` / `endpoint` / `called_at` / `duration_ms` / `http_status` / `openapi_code` / `openapi_msg` / `request_id`
 - **shop**: 店铺缓存，`id` (PK, 来自赛狐) / `name` / `seller_id` / `region` (na/eu/fe) / `marketplace_id` / `status` (0/1/2) / `ad_status` / `sync_enabled` (bool, 指定店铺模式下采购员勾选) / `last_sync_at`
 - **access_token_cache**: `access_token` / `acquired_at` / `expires_at`（单行）
+- **sync_state**: `job_name` (PK) / `last_run_at` / `last_success_at` / `last_status` / `last_error`；供 `order_list` / `product_listing` / `out_records` 等增量任务记录"上次同步时间"
+- **task_run**: `id` (PK) / `job_name` / `dedupe_key` / `status` (pending/running/success/failed/skipped/cancelled) / `trigger_source` (scheduler/manual) / `priority` / `payload` (JSONB) / `current_step` / `step_detail` / `total_steps` / `attempt_count` / `error_msg` / `result_summary` / `result_payload` (JSONB) / `worker_id` / `heartbeat_at` / `lease_expires_at` / `started_at` / `finished_at` / `created_at`。**关键约束**：`CREATE UNIQUE INDEX ON task_run(dedupe_key) WHERE status IN ('pending','running')`
 
 ## Success Criteria *(mandatory)*
 
@@ -315,6 +352,8 @@
   - `inventory_snapshot_history`: INDEX(snapshot_date, commodity_sku)
   - `in_transit_record`: PK(saihu_out_record_id), INDEX(is_in_transit, target_country), INDEX(last_seen_at)
   - `in_transit_item`: PK(id), INDEX(saihu_out_record_id), INDEX(commodity_sku)
+  - `sync_state`: PK(job_name)
+  - `task_run`: PK(id), UNIQUE INDEX(dedupe_key) WHERE status IN ('pending','running'), INDEX(status, priority, created_at), INDEX(job_name, created_at DESC), INDEX(lease_expires_at) WHERE status='running'
   - `order_header`: UNIQUE(shop_id, amazon_order_id) + INDEX(purchase_date) + INDEX(country_code, purchase_date)
   - `order_detail`: UNIQUE(shop_id, amazon_order_id)
   - `suggestion`: INDEX(created_at DESC)
@@ -383,7 +422,7 @@ restock_system/
 - **FR-067**: 后端 MUST 使用 Python 3.11+ / FastAPI / SQLAlchemy 2.0 async / PostgreSQL 16 技术栈
 - **FR-068**: 赛狐 API 客户端 MUST 使用 httpx + aiolimiter（每接口独立 token bucket）+ tenacity（指数退避重试）实现
 - **FR-069**: 库存快照 MUST 按"latest 单行 + history 每日归档"双表结构存储；规则引擎只读 latest 表
-- **FR-070**: 定时任务 MUST 使用 APScheduler 嵌入 FastAPI 进程，不引入外部消息队列或任务调度中间件
+- **FR-070**: 定时任务 MUST 使用 APScheduler 嵌入 FastAPI 进程作为 Scheduler 层，业务执行交由 `task_run` + Worker 机制（见 FR-058a ~ FR-058h），不引入外部消息队列或任务调度中间件
 - **FR-071**: 订单同步 MUST 先全量拉列表到 `order_header/order_item`，再过滤"已配对 SKU 相关订单"后对这些订单增量调用订单详情接口
 
 ## Frontend Design Direction
