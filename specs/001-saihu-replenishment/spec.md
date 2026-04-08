@@ -113,8 +113,12 @@
 - **FR-014**: 仓库 MUST 识别为"国内仓 / 海外仓"：`warehouse.type = "1"` 为国内仓库（本地仓），其他类型（0默认/2FBA/3海外仓）为海外仓；`type = -1` 虚拟仓不参与计算
 - **FR-015**: 仓库的国家归属（`warehouse.country`）由采购员**手动维护**。`replenishSite` 字段实测不可靠（返回 `"-"`），仅作为 UI 辅助提示
 - **FR-016**: 新同步入库的仓库 MUST 标记"待指定国家"，未指定前不参与计算；UI MUST 提示待维护
-- **FR-017**: 系统 MUST 定时（默认每小时）调用"查询库存明细"接口 `/api/warehouseManage/warehouseItemList.json` 同步库存快照到 `inventory_snapshot` 表；字段映射：`stockAvailable → available`、`stockOccupy → reserved`、`stockWait → in_transit`（任何字段为 null 时按 0 处理）
-- **FR-018**: 库存快照 MUST 保留时间戳，不覆盖历史；后续计算使用最新一次成功快照
+- **FR-017**: 系统 MUST 定时（默认每小时）调用"查询库存明细"接口 `/api/warehouseManage/warehouseItemList.json` 同步库存快照到 `inventory_snapshot_latest` 表；字段映射：`stockAvailable → available`、`stockOccupy → reserved`（null→0）。**在途数据不从此接口取**（见 FR-017a）
+- **FR-017a**: 系统 MUST 定时（默认每小时）调用"其他出库列表页"接口 `/api/warehouseInOut/outRecords.json`，传 `searchField=remark, searchValue=在途中`，分页拉取所有"单据备注包含'在途中'"的出库单
+- **FR-017b**: 每条出库单 MUST 以 `saihu_out_record_id` 为主键 UPSERT 到 `in_transit_record` 表，含 `out_warehouse_no`、`target_warehouse_id`、`target_country`（通过 warehouse 映射派生）、`remark`、`is_in_transit=true`、`last_seen_at=本次同步开始时间`、`status`；出库单下的每条 item MUST UPSERT 到 `in_transit_item` 表，含 `commodity_sku`、`goods`（即 `可用数`）
+- **FR-017c**: 每次同步结束后，系统 MUST 将 `in_transit_record` 中 `last_seen_at < 本次同步开始时间 AND is_in_transit=true` 的记录标记为 `is_in_transit=false`，对应在途数量自动归零（即备注中"在途中"消失/被移除）
+- **FR-017d**: 规则引擎 Step 2 的在途总量 MUST 通过 `in_transit_item JOIN in_transit_record WHERE is_in_transit=true GROUP BY commodity_sku, target_country` 聚合得到，不再读取 `stockWait` 字段
+- **FR-018**: `inventory_snapshot_latest` 只存最近一次同步结果（UPSERT），同时每日 02:00 整表归档到 `inventory_snapshot_history`（含 `snapshot_date`），history 永久保留
 
 **数据同步 — 订单（服务于 Step 1 velocity + Step 5 仓内分配） (FR-019 ~ FR-024)**
 
@@ -163,7 +167,10 @@
 
 **规则引擎 — Step 2/3/4/5/6 (FR-030 ~ FR-037)**
 
-- **FR-030 (Step 2)**: `sale_days[国] = (海外仓可用 + 海外仓占用 + 海外仓在途) / velocity[国]`，库存按仓库国家归属聚合，各字段 null 按 0 处理
+- **FR-030 (Step 2)**: `sale_days[国] = (海外仓可用 + 海外仓占用 + 海外仓在途) / velocity[国]`。其中：
+  - 可用/占用：从 `inventory_snapshot_latest` 按 `warehouse.country` 聚合（所有非本地仓 type ≠ 1）
+  - 在途：从 `in_transit_item JOIN in_transit_record WHERE is_in_transit=true` 按 `target_country` 聚合
+  - 所有 null 字段按 0 处理
 - **FR-031 (Step 3)**: `raw[国] = TARGET_DAYS × velocity[国] − 库存三项之和`；`country_qty[国] = max(raw, 0)`；`raw < 0` 的国家记入 `overstock_countries`（只读）
 - **FR-032 (Step 4)**: `total = Σ country_qty[国] + Σ velocity[国] × BUFFER_DAYS − (本地仓可用 + 本地仓占用)`，两个 Σ 仅累加 `country_qty > 0` 的国家；本地仓在途不参与扣减；`total = max(total, 0)`
 - **FR-033 (Step 5)**: 对每个 `country_qty > 0` 的国家：
@@ -222,8 +229,10 @@
 - **global_config**: 单行 KV 存所有全局参数（含默认主仓、含税标记、店铺模式）
 - **warehouse**: `id` (PK, 来自赛狐 warehouse.id) / `name` / `type` (1国内/0默认/2FBA/3海外) / `country` (手动维护，可空) / `replenish_site_raw` (原始值仅供参考) / `last_sync_at`
 - **product_listing**: `id` (PK) / `commodity_sku` / `commodity_id` / `shop_id` / `marketplace_id` (二字码) / `seller_sku` / `parent_sku` / `commodity_name` / `main_image` / `day7_sale_num` / `day14_sale_num` / `day30_sale_num` / `is_matched` / `online_status` / `last_sync_at`。唯一索引 `(shop_id, marketplace_id, seller_sku)`；普通索引 `(commodity_sku, marketplace_id)`
-- **inventory_snapshot_latest**: `commodity_sku` / `warehouse_id` / `country` (派生自 warehouse) / `available` / `reserved` / `in_transit` / `updated_at`（PK `(commodity_sku, warehouse_id)`）
+- **inventory_snapshot_latest**: `commodity_sku` / `warehouse_id` / `country` (派生自 warehouse) / `available` / `reserved` / `updated_at`（PK `(commodity_sku, warehouse_id)`）。**不存 in_transit**（在途由 in_transit_item 聚合）
 - **inventory_snapshot_history**: 每日归档，字段同 latest，额外 `snapshot_date`
+- **in_transit_record**: 出库单级在途追踪，`saihu_out_record_id` (PK) / `out_warehouse_no` / `target_warehouse_id` / `target_country` / `remark` / `status` / `is_in_transit` (bool) / `last_seen_at` / `created_at` / `updated_at`
+- **in_transit_item**: 出库单明细，`id` (PK) / `saihu_out_record_id` (FK) / `commodity_sku` / `goods` (可用数，即在途数量)
 - **order_header**: 订单骨架，`shop_id` / `amazon_order_id` (唯一) / `marketplace_id` / `country_code` / `purchase_date` / `order_status` / `last_sync_at`
 - **order_item**: `order_id` FK / `commodity_sku` / `seller_sku` / `quantity_ordered` / `quantity_shipped` / `refund_num`
 - **order_detail**: `shop_id` / `amazon_order_id` (唯一) / `postal_code` / `country_code` / `state_or_region` / `detail_address` / `fetched_at`
@@ -253,7 +262,7 @@
 
 - 单一采购员使用，无角色权限模型
 - 部署于公网云服务器（2核4G），HTTPS + 密码登录
-- 赛狐 ERP OpenAPI 账号已开通以下接口：access_token / 店铺列表 / 在线产品信息 / 查询仓库列表 / 查询库存明细 / 订单列表 / 订单详情 / 其他出库列表（备用）/ 采购单创建；出口 IP 已加赛狐白名单
+- 赛狐 ERP OpenAPI 账号已开通以下接口：access_token / 店铺列表 / 在线产品信息 / 查询仓库列表 / 查询库存明细 / 其他出库列表 / 订单列表 / 订单详情 / 采购单创建；出口 IP 已加赛狐白名单
 - 赛狐限流：每个业务接口 ≤1 QPS（实测 40019 阈值）；token 接口另有独立频率限制不可频繁调用
 - access_token 默认有效期约 24 小时（实测 `expires_in ≈ 84850421ms`），系统按 expires_in 管理缓存
 - 在线产品信息接口仅用于：① `match=true && onlineStatus=active` 筛选 ② 建立 `commoditySku ↔ commodityId` 映射 ③ 提供商品名/图片展示。其 `day*SaleNum` 字段存库但不参与 velocity 计算
@@ -304,6 +313,8 @@
   - `product_listing`: UNIQUE(shop_id, marketplace_id, seller_sku) + INDEX(commodity_sku, marketplace_id)
   - `inventory_snapshot_latest`: PK(commodity_sku, warehouse_id)
   - `inventory_snapshot_history`: INDEX(snapshot_date, commodity_sku)
+  - `in_transit_record`: PK(saihu_out_record_id), INDEX(is_in_transit, target_country), INDEX(last_seen_at)
+  - `in_transit_item`: PK(id), INDEX(saihu_out_record_id), INDEX(commodity_sku)
   - `order_header`: UNIQUE(shop_id, amazon_order_id) + INDEX(purchase_date) + INDEX(country_code, purchase_date)
   - `order_detail`: UNIQUE(shop_id, amazon_order_id)
   - `suggestion`: INDEX(created_at DESC)
@@ -490,6 +501,7 @@ restock_system/
 - 在线产品信息筛选 `match=true` 可直接获得"已配对"产品
 
 **推迟到 plan 阶段或后续迭代**：
-- **其他出库列表**作为在途数据备用方案，待 `stockWait` 口径不符时启用
+- "其他出库列表"接口的 `status` 字段过滤（0待确认 / 1已确认）：第一版默认不过滤，后续若发现"待确认"出库单污染在途数据再加过滤
+- "在途中"关键字匹配方式：默认走接口服务端搜索 `searchField=remark, searchValue=在途中`（子串匹配）；若匹配精度不符预期，再改为客户端正则过滤
 - 赛狐"采购单创建"的完整必填字段验证（当前仅知 4 个必填，supplier/partya 等留空是否可被赛狐接受需联调验证）
 - 同一 commoditySku 不同 listing 的 commodityId 一致性（测试数据中未观察到冲突，暂按"任取一个 + 告警"处理）
