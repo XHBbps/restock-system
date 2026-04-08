@@ -214,6 +214,12 @@ async def archive_suggestion(
 
 # ==================== helpers ====================
 async def _build_detail(db: AsyncSession, sug: Suggestion) -> SuggestionDetailOut:
+    """加载建议单详情。
+
+    一次性批量 JOIN `product_listing` 拉取 commodity_name / main_image，
+    避免按条目逐个查询（N+1）。同时不使用进程级缓存——确保同步后
+    的 listing 更新能立即在 UI 反映。
+    """
     items = (
         (
             await db.execute(
@@ -225,29 +231,52 @@ async def _build_detail(db: AsyncSession, sug: Suggestion) -> SuggestionDetailOu
         .scalars()
         .all()
     )
-    enriched = [await _enrich_item(db, it) for it in items]
+
+    # 批量加载本批次涉及的 commodity_sku 对应的产品展示信息
+    sku_codes = [it.commodity_sku for it in items]
+    name_map: dict[str, tuple[str | None, str | None]] = {}
+    if sku_codes:
+        rows = (
+            await db.execute(
+                select(
+                    ProductListing.commodity_sku,
+                    ProductListing.commodity_name,
+                    ProductListing.main_image,
+                ).where(ProductListing.commodity_sku.in_(sku_codes))
+            )
+        ).all()
+        for sku, name, image in rows:
+            # 同一 sku 可能有多条 listing（不同店铺/站点），取第一个命中
+            if sku not in name_map:
+                name_map[sku] = (name, image)
+
+    enriched = [
+        SuggestionItemOut.model_validate(
+            {
+                **it.__dict__,
+                "commodity_name": name_map.get(it.commodity_sku, (None, None))[0],
+                "main_image": name_map.get(it.commodity_sku, (None, None))[1],
+            }
+        )
+        for it in items
+    ]
     return SuggestionDetailOut(
         **SuggestionOut.model_validate(sug).model_dump(),
         items=enriched,
     )
 
 
-_listing_cache: dict[str, tuple[str | None, str | None]] = {}
-
-
 async def _enrich_item(db: AsyncSession, item: SuggestionItem) -> SuggestionItemOut:
-    name, image = _listing_cache.get(item.commodity_sku, (None, None))
-    if name is None:
-        row = (
-            await db.execute(
-                select(ProductListing.commodity_name, ProductListing.main_image)
-                .where(ProductListing.commodity_sku == item.commodity_sku)
-                .limit(1)
-            )
-        ).first()
-        if row:
-            name, image = row[0], row[1]
-            _listing_cache[item.commodity_sku] = (name, image)
+    """单条目 enrich（用于 PATCH 返回值）。"""
+    row = (
+        await db.execute(
+            select(ProductListing.commodity_name, ProductListing.main_image)
+            .where(ProductListing.commodity_sku == item.commodity_sku)
+            .limit(1)
+        )
+    ).first()
+    name = row[0] if row else None
+    image = row[1] if row else None
     return SuggestionItemOut.model_validate(
         {**item.__dict__, "commodity_name": name, "main_image": image}
     )

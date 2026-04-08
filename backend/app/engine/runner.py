@@ -29,8 +29,8 @@ from app.engine.step2_sale_days import run_step2
 from app.engine.step3_country_qty import compute_country_qty
 from app.engine.step4_total import compute_total, load_local_inventory
 from app.engine.step5_warehouse_split import (
+    load_all_sku_country_orders,
     load_country_warehouses,
-    load_sku_country_orders,
     load_zipcode_rules,
     split_country_qty,
 )
@@ -101,6 +101,9 @@ async def run_engine(ctx: JobContext, *, triggered_by: str = "scheduler") -> int
         country_warehouses = await load_country_warehouses(db)
         zipcode_rules = await load_zipcode_rules(db)
 
+        # ★ 一次性批量加载所有 SKU 近 30 天订单，避免 N+1（宪法 V）
+        all_orders = await load_all_sku_country_orders(db, sku_list, today)
+
         # 加载 commodity_id 映射（取每个 sku 任一 listing 的 commodity_id）
         commodity_id_map = await _load_commodity_id_map(db, sku_list)
 
@@ -123,12 +126,12 @@ async def run_engine(ctx: JobContext, *, triggered_by: str = "scheduler") -> int
             if total_qty <= 0:
                 continue
 
-            # 仓内分配（每个国家独立调用）
+            # 仓内分配（订单已批量加载，内存查表，无 DB 访问）
             warehouse_breakdown: dict[str, dict[str, int]] = {}
             for country, q in sku_country_qty.items():
                 if q <= 0:
                     continue
-                orders = await load_sku_country_orders(db, sku, country, today)
+                orders = all_orders.get((sku, country), [])
                 breakdown = split_country_qty(
                     sku=sku,
                     country=country,

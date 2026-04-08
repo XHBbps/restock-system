@@ -41,9 +41,10 @@ def test_jp_number_ge_50_to_haiyuan() -> None:
         _rule(1, "JP", 2, ">=", "50", "haiyuan", priority=10),
         _rule(2, "JP", 2, "<", "50", "xiapu", priority=20),
     ]
-    assert match_warehouse("640-8453", "JP", rules) == "haiyuan"
-    assert match_warehouse("050-0001", "JP", rules) == "haiyuan"
-    assert match_warehouse("100-0001", "JP", rules) == "xiapu"
+    assert match_warehouse("640-8453", "JP", rules) == "haiyuan"  # 前2位 64 >= 50
+    assert match_warehouse("500-0001", "JP", rules) == "haiyuan"  # 前2位 50 >= 50
+    assert match_warehouse("050-0001", "JP", rules) == "xiapu"  # 前2位 05 < 50
+    assert match_warehouse("100-0001", "JP", rules) == "xiapu"  # 前2位 10 < 50
 
 
 def test_jp_priority_first_match_wins() -> None:

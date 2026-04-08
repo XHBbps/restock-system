@@ -71,6 +71,8 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(db_session)) -> Lo
                 .where(GlobalConfig.id == 1)
                 .values(login_failed_count=new_count)
             )
+        # ★ 必须显式 commit：get_db() 的异常分支会 rollback，计数器更新会丢失
+        await db.commit()
         raise Unauthorized("密码错误")
 
     # 成功：清零计数与锁定

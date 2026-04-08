@@ -65,9 +65,10 @@ async def load_sku_country_orders(
     country: str,
     today: date,
 ) -> list[tuple[str | None, int]]:
-    """加载该 SKU 在该国近 30 天的订单（postal_code, qty_shipped）。
+    """加载单个 SKU 在某国近 30 天的订单（postal_code, qty_shipped）。
 
-    仅返回有 order_detail 的订单。
+    仅返回有 order_detail 的订单。单次查询适用于 PATCH 等单条场景；
+    批量场景请用 `load_all_sku_country_orders`。
     """
     earliest_dt = datetime.combine(
         today - timedelta(days=WINDOW_DAYS), datetime.min.time(), tzinfo=BEIJING
@@ -90,6 +91,51 @@ async def load_sku_country_orders(
     )
     rows = (await db.execute(stmt)).all()
     return [(r[0], int(r[1] or 0)) for r in rows]
+
+
+async def load_all_sku_country_orders(
+    db: AsyncSession,
+    commodity_skus: list[str],
+    today: date,
+) -> dict[tuple[str, str], list[tuple[str | None, int]]]:
+    """批量加载所有指定 SKU 近 30 天订单，按 (sku, country) 分组返回。
+
+    规则引擎 runner 用一次查询替代 N×M 次（N SKU × M 国家），
+    符合宪法 V 原则"禁止 N+1"。
+    """
+    if not commodity_skus:
+        return {}
+
+    earliest_dt = datetime.combine(
+        today - timedelta(days=WINDOW_DAYS), datetime.min.time(), tzinfo=BEIJING
+    )
+    end_dt = datetime.combine(today, datetime.min.time(), tzinfo=BEIJING)
+
+    stmt = (
+        select(
+            OrderItem.commodity_sku,
+            OrderHeader.country_code,
+            OrderDetail.postal_code,
+            OrderItem.quantity_shipped,
+        )
+        .join(OrderHeader, OrderHeader.id == OrderItem.order_id)
+        .join(
+            OrderDetail,
+            (OrderDetail.shop_id == OrderHeader.shop_id)
+            & (OrderDetail.amazon_order_id == OrderHeader.amazon_order_id),
+        )
+        .where(OrderItem.commodity_sku.in_(commodity_skus))
+        .where(OrderHeader.purchase_date >= earliest_dt)
+        .where(OrderHeader.purchase_date < end_dt)
+        .where(OrderHeader.order_status.in_(("Shipped", "PartiallyShipped")))
+    )
+    rows = (await db.execute(stmt)).all()
+
+    grouped: dict[tuple[str, str], list[tuple[str | None, int]]] = {}
+    for sku, country, postal, qty in rows:
+        key = (sku, country)
+        grouped.setdefault(key, []).append((postal, int(qty or 0)))
+    return grouped
 
 
 def split_country_qty(

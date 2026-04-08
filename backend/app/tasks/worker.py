@@ -9,8 +9,9 @@
 """
 
 import asyncio
+import os
 import socket
-from datetime import timedelta
+import uuid
 from typing import Any
 
 from sqlalchemy import text, update
@@ -26,7 +27,8 @@ from app.tasks.jobs import JOB_REGISTRY, JobContext
 logger = get_logger(__name__)
 
 
-_WORKER_ID = f"{socket.gethostname()}:{id(object())}"
+# 稳定可读的 worker 标识：host:pid:短 uuid
+_WORKER_ID = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
 
 
 class Worker:
@@ -38,6 +40,16 @@ class Worker:
 
     def start(self) -> None:
         if self._task is None or self._task.done():
+            # ★ 不变式检查：心跳必须至少跑 2 次才到达租约过期点，否则一次心跳失败就被误杀
+            settings = get_settings()
+            lease_seconds = settings.worker_lease_minutes * 60
+            heartbeat_seconds = settings.worker_heartbeat_seconds
+            if heartbeat_seconds * 2 >= lease_seconds:
+                raise RuntimeError(
+                    f"worker heartbeat ({heartbeat_seconds}s) × 2 must be < lease "
+                    f"({lease_seconds}s); otherwise the reaper will kill healthy workers. "
+                    f"fix config: WORKER_HEARTBEAT_SECONDS < WORKER_LEASE_MINUTES*60/2"
+                )
             self._stop.clear()
             self._task = asyncio.create_task(self._run_loop(), name="task-worker")
             logger.info("worker_started", worker_id=_WORKER_ID)
@@ -78,7 +90,7 @@ class Worker:
                 worker_id = :worker_id,
                 started_at = now(),
                 heartbeat_at = now(),
-                lease_expires_at = now() + (:lease_seconds || ' seconds')::interval,
+                lease_expires_at = now() + make_interval(secs => :lease_seconds),
                 attempt_count = attempt_count + 1
             WHERE id = (
                 SELECT id FROM task_run
@@ -146,7 +158,7 @@ class Worker:
                             """
                             UPDATE task_run
                             SET heartbeat_at = now(),
-                                lease_expires_at = now() + (:lease_seconds || ' seconds')::interval
+                                lease_expires_at = now() + make_interval(secs => :lease_seconds)
                             WHERE id = :id AND status = 'running'
                             """
                         ),
