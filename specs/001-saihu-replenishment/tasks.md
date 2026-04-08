@@ -208,12 +208,12 @@ description: "Task list for 赛狐补货计算工具 implementation"
 
 **Independent Test**: 修改 SKU lead_time → 触发引擎 → 该 SKU 的 T_purchase 变化。
 
-- [ ] T108 [US2] Create `backend/app/schemas/config.py` Pydantic DTOs per `contracts/config.yaml` (GlobalConfig, SkuConfig patches)
-- [ ] T109 [US2] Create `backend/app/api/config.py` routes: `GET/PATCH /api/config/global`, `GET /api/config/sku`, `PATCH /api/config/sku/{commodity_sku}` with JOIN to `product_listing` for display fields
-- [ ] T110 [US2] In global config PATCH validate `include_tax ∈ {"0","1"}` and `shop_sync_mode ∈ {all, specific}`
-- [ ] T111 [P] [US2] Create `frontend/src/api/config.ts`
-- [ ] T112 [P] [US2] Create `frontend/src/views/GlobalConfigView.vue`: form with all global params + save
-- [ ] T113 [P] [US2] Create `frontend/src/views/SkuConfigView.vue`: searchable paginated table of enabled SKUs with inline edit for `enabled` and `lead_time_days`
+- [X] T108 [US2] Create `backend/app/schemas/config.py` Pydantic DTOs per `contracts/config.yaml` (GlobalConfig, SkuConfig patches)
+- [X] T109 [US2] Create `backend/app/api/config.py` routes: `GET/PATCH /api/config/global`, `GET /api/config/sku`, `PATCH /api/config/sku/{commodity_sku}` with JOIN to `product_listing` for display fields
+- [X] T110 [US2] In global config PATCH validate `include_tax ∈ {"0","1"}` and `shop_sync_mode ∈ {all, specific}` (Pydantic Literal 强约束)
+- [X] T111 [P] [US2] Create `frontend/src/api/config.ts`
+- [X] T112 [P] [US2] Create `frontend/src/views/GlobalConfigView.vue`: form with all global params + save
+- [X] T113 [P] [US2] Create `frontend/src/views/SkuConfigView.vue`: searchable paginated table with inline edit
 
 **Checkpoint**: US1 + US2 work independently.
 
@@ -225,13 +225,13 @@ description: "Task list for 赛狐补货计算工具 implementation"
 
 **Independent Test**: 新增邮编规则 → 运行引擎 → 该 SKU 的 warehouse_breakdown 按规则分配。
 
-- [ ] T114 [US3] Extend `backend/app/api/config.py` with routes: `GET /api/config/warehouse`, `PATCH /api/config/warehouse/{id}/country`
-- [ ] T115 [US3] Extend `backend/app/api/config.py` with zipcode-rule CRUD: `GET /api/config/zipcode-rules`, `POST`, `PATCH /{id}`, `DELETE /{id}`
-- [ ] T116 [US3] Add validation in zipcode-rule PATCH/POST: `prefix_length 1–10`, `operator` enum, `value_type` enum, `warehouse_id` exists
-- [ ] T117 [US3] Extend `backend/app/api/config.py` with shop routes: `GET /api/config/shops`, `POST /api/config/shops/refresh` (enqueues `sync_shop` task), `PATCH /api/config/shops/{id}` (sync_enabled toggle)
-- [ ] T118 [P] [US3] Create `frontend/src/views/WarehouseView.vue`: table of warehouses with inline country edit, "待指定国家" badge, replenish_site_raw shown as hint
-- [ ] T119 [P] [US3] Create `frontend/src/views/ZipcodeRuleView.vue`: rule CRUD with priority drag-sort + operator dropdown + number/string type switch
-- [ ] T120 [P] [US3] Create `frontend/src/views/ShopView.vue`: list + manual refresh button (calling refresh endpoint → subscribe task) + sync_enabled toggle + disable rows with `status!='0'`
+- [X] T114 [US3] Extend `backend/app/api/config.py` with routes: `GET /api/config/warehouse`, `PATCH /api/config/warehouse/{id}/country`
+- [X] T115 [US3] Extend `backend/app/api/config.py` with zipcode-rule CRUD: `GET /api/config/zipcode-rules`, `POST`, `PATCH /{id}`, `DELETE /{id}`
+- [X] T116 [US3] Add validation in zipcode-rule PATCH/POST: `prefix_length 1–10`, `operator` enum, `value_type` enum, `warehouse_id` exists
+- [X] T117 [US3] Extend `backend/app/api/config.py` with shop routes: `GET /api/config/shops`, `POST /api/config/shops/refresh` (enqueues `sync_shop` task), `PATCH /api/config/shops/{id}` (sync_enabled toggle)
+- [X] T118 [P] [US3] Create `frontend/src/views/WarehouseView.vue`: inline country edit, 待指定国家 badge, replenish_site_raw hint
+- [X] T119 [P] [US3] Create `frontend/src/views/ZipcodeRuleView.vue`: rule CRUD dialog + 6 operator dropdown + number/string type switch + priority sort
+- [X] T120 [P] [US3] Create `frontend/src/views/ShopView.vue`: list + manual refresh button + sync_enabled toggle + disable status≠0 rows
 
 **Checkpoint**: US1 + US2 + US3 work.
 

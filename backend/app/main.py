@@ -18,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.api import auth as auth_api
+from app.api import config as config_api
 from app.api import suggestion as suggestion_api
 from app.api import sync as sync_api
 from app.api import task as task_api
@@ -129,6 +130,7 @@ app.include_router(auth_api.router)
 app.include_router(task_api.router)
 app.include_router(suggestion_api.router)
 app.include_router(sync_api.router)
+app.include_router(config_api.router)
 
 
 @app.get("/healthz", tags=["health"])
