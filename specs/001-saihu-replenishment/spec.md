@@ -90,7 +90,9 @@
 **赛狐 API 客户端 (FR-001 ~ FR-008)**
 
 - **FR-001**: 系统 MUST 实现赛狐统一请求签名（HmacSHA256），签名字段为 `access_token / client_id / method / nonce / timestamp / url` 按键名排序后用 `&` 拼接，HMAC 秘钥为 client_secret
-- **FR-002**: 系统 MUST 缓存 `access_token`，仅在收到 `40001 access_token 失效` 时重新获取
+- **FR-002**: 系统 MUST 通过 **GET** `/api/oauth/v2/token.json` 获取 access_token（query 参数 `client_id / client_secret / grant_type=client_credentials`），**此接口是唯一不走签名且使用 GET 的接口**
+- **FR-002a**: 系统 MUST 缓存 access_token 至内存 + 持久化，按返回的 `expires_in`（毫秒）管理有效期，提前 5 分钟主动续期；收到 `40001 access_token 失效` 时 MUST 立即重新获取并重试原请求一次
+- **FR-002b**: 系统 MUST NOT 频繁调用 token 接口（有频率限制），禁止每次业务请求前刷新
 - **FR-003**: 系统 MUST 对每个赛狐接口独立限流至 ≤ 1 QPS（实测 40019 触发阈值）
 - **FR-004**: 请求时间戳 MUST 与赛狐服务器相差 ≤ 15 分钟；nonce MUST 每次请求随机生成避免 40012 重复提交
 - **FR-005**: 系统 MUST 在接口失败时自动重试，最终失败 MUST 写入 `api_call_log`
@@ -123,10 +125,12 @@
 - **FR-023**: 系统 MUST 维护"订单详情已拉列表" `order_detail_fetch_log`，已拉过的 (shopId, amazonOrderId) MUST NOT 重复调用
 - **FR-024**: 订单邮编一经入库 MUST 永久保留，不随后续同步更新
 
-**数据同步 — 店铺列表（预留） (FR-025 ~ FR-026)**
+**数据同步 — 店铺列表 (FR-025 ~ FR-026b)**
 
 - **FR-025**: 系统 MUST 在全局参数中提供"店铺拉取模式"开关：默认为**全量模式**（订单列表不传 `shopIdList`，拉取所有店铺）
-- **FR-026**: 系统 MUST 预留"指定店铺模式"：切换后调用"店铺列表接口"（待接入）实时拉取店铺清单并缓存，采购员勾选参与同步的店铺；接口文档齐备前该模式在 UI 上置灰标注"待接入"
+- **FR-026**: 系统 MUST 支持"指定店铺模式"：切换后调用"店铺列表"接口 `/api/shop/pageList.json` **实时拉取并缓存**到本地 `shop` 表，采购员在 UI 勾选参与同步的店铺，订单接口的 `shopIdList` 参数只传勾选项的 `shop.id`
+- **FR-026a**: 店铺列表 MUST 按 `status = "0"`（默认/正常授权）过滤，`status = "1"`（授权失效）或 `"2"`（SP授权失效）的店铺 MUST 在 UI 中标记为"授权失效"且不可勾选
+- **FR-026b**: 店铺缓存 MUST 提供"手动刷新"按钮，采购员在 UI 点击后调用店铺列表接口更新本地缓存；系统不做定时同步（授权状态变化频率低）
 
 **规则引擎 — Step 1 动销速度 (FR-027 ~ FR-029)**
 
@@ -212,6 +216,8 @@
 - **suggestion_item**: `id` / `suggestion_id` FK / `commodity_sku` / `total_qty` / `country_breakdown` (JSON) / `warehouse_breakdown` (JSON) / `t_purchase` (JSON per country) / `t_ship` (JSON per country) / `overstock_countries` (JSON) / `urgent` (bool) / `push_status` / `saihu_po_number` / `push_error`
 - **overstock_sku_mark**: `commodity_sku` / `country` / `warehouse_id` / `processed_at` / `note`
 - **api_call_log**: `id` / `endpoint` / `called_at` / `duration_ms` / `http_status` / `openapi_code` / `openapi_msg` / `request_id`
+- **shop**: 店铺缓存，`id` (PK, 来自赛狐) / `name` / `seller_id` / `region` (na/eu/fe) / `marketplace_id` / `status` (0/1/2) / `ad_status` / `sync_enabled` (bool, 指定店铺模式下采购员勾选) / `last_sync_at`
+- **access_token_cache**: `access_token` / `acquired_at` / `expires_at`（单行）
 
 ## Success Criteria *(mandatory)*
 
@@ -230,8 +236,9 @@
 
 - 单一采购员使用，无角色权限模型
 - 部署于公网云服务器（2核4G），HTTPS + 密码登录
-- 赛狐 ERP OpenAPI 账号已开通以下接口：access_token / 在线产品信息 / 查询仓库列表 / 查询库存明细 / 订单列表 / 订单详情 / 其他出库列表（备用）/ 采购单创建；出口 IP 已加赛狐白名单
-- 赛狐限流：每个接口 ≤1 QPS（实测 40019 阈值）；token 15 分钟时效
+- 赛狐 ERP OpenAPI 账号已开通以下接口：access_token / 店铺列表 / 在线产品信息 / 查询仓库列表 / 查询库存明细 / 订单列表 / 订单详情 / 其他出库列表（备用）/ 采购单创建；出口 IP 已加赛狐白名单
+- 赛狐限流：每个业务接口 ≤1 QPS（实测 40019 阈值）；token 接口另有独立频率限制不可频繁调用
+- access_token 默认有效期约 24 小时（实测 `expires_in ≈ 84850421ms`），系统按 expires_in 管理缓存
 - 在线产品信息接口返回的 `day7/14/30SaleNum` 是赛狐已算好的销量口径，系统直接信任
 - 只处理 `match=true && onlineStatus=active` 的 listing
 - 数据同步默认每小时一次；规则引擎默认每日 08:00 北京时间
@@ -262,7 +269,6 @@
 - 在线产品信息筛选 `match=true` 可直接获得"已配对"产品
 
 **推迟到 plan 阶段或后续迭代**：
-- **店铺列表接口**：文档尚未提供，"指定店铺模式"UI 先置灰
 - **其他出库列表**作为在途数据备用方案，待 `stockWait` 口径不符时启用
 - 赛狐"采购单创建"的完整必填字段验证（当前仅知 4 个必填，supplier/partya 等留空是否可被赛狐接受需联调验证）
 - 同一 commoditySku 不同 listing 的 commodityId 一致性（测试数据中未观察到冲突，暂按"任取一个 + 告警"处理）
