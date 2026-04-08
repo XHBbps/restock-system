@@ -1,0 +1,41 @@
+# Caddy 配置：自动 HTTPS（Let's Encrypt）+ 反向代理
+{$APP_DOMAIN} {
+    # 自动 Let's Encrypt 证书
+    encode gzip zstd
+
+    # 后端 API
+    handle /api/* {
+        reverse_proxy backend:8000 {
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    # OpenAPI docs（可选，生产可以注释掉）
+    handle /docs* {
+        reverse_proxy backend:8000
+    }
+    handle /openapi.json {
+        reverse_proxy backend:8000
+    }
+
+    # 健康检查
+    handle /healthz {
+        reverse_proxy backend:8000
+    }
+
+    # 其他全部走前端静态
+    handle {
+        reverse_proxy frontend:80
+    }
+
+    # 日志
+    log {
+        output file /data/access.log {
+            roll_size 10mb
+            roll_keep 10
+        }
+        format json
+    }
+}

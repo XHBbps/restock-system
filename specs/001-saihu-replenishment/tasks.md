@@ -26,17 +26,17 @@ description: "Task list for 赛狐补货计算工具 implementation"
 
 ## Phase 1: Setup (Shared Infrastructure)
 
-- [ ] T001 Create top-level project structure: `backend/`, `frontend/`, `deploy/`, `.github/` per plan.md
-- [ ] T002 [P] Initialize backend Python project in `backend/pyproject.toml` with deps: fastapi, uvicorn[standard], sqlalchemy[asyncio], alembic, asyncpg, pydantic, pydantic-settings, httpx, aiolimiter, tenacity, apscheduler, structlog, passlib[bcrypt], python-jose[cryptography], python-dateutil
-- [ ] T003 [P] Add backend dev deps in `backend/pyproject.toml`: ruff, black, mypy, pytest, pytest-asyncio, pytest-cov, httpx (test client), freezegun
-- [ ] T004 [P] Configure backend tooling: `backend/pyproject.toml` `[tool.ruff]`, `[tool.black]`, `[tool.mypy]`, `[tool.pytest.ini_options]` with strict settings aligned to constitution; **additionally** wire up pre-commit hooks via `.pre-commit-config.yaml` running ruff + black + mypy on every commit (宪法 NON-NEGOTIABLE 要求每次提交即通过)
-- [ ] T005 [P] Initialize frontend Vue 3 project in `frontend/package.json` with deps: vue, vue-router, pinia, element-plus, axios, lucide-vue-next, dayjs; dev deps: vite, typescript, @vitejs/plugin-vue, vue-tsc, eslint, @typescript-eslint, prettier, sass, vitest
-- [ ] T006 [P] Configure frontend tooling: `frontend/vite.config.ts`, `frontend/tsconfig.json`, `frontend/.eslintrc.cjs`, `frontend/.prettierrc`; **additionally** add `lint-staged` + husky 或 pre-commit 钩子跑 `eslint --max-warnings=0 && vue-tsc --noEmit` on every commit
-- [ ] T007 [P] Create Docker Compose stack in `deploy/docker-compose.yml` with services: caddy, db (postgres:16-alpine), backend, frontend; volumes for pg data + caddy data
-- [ ] T008 [P] Create `deploy/Caddyfile` with HTTPS + reverse proxy for `/api/*` → backend:8000, rest → frontend:80
-- [ ] T009 [P] Create `deploy/.env.example` and `backend/.env.example` with all required keys (DB, Saihu, JWT, login password)
-- [ ] T010 [P] Create backend `Dockerfile` (multi-stage: build deps → runtime) and frontend `Dockerfile` (build vue → nginx static)
-- [ ] T011 [P] Create `.gitignore`, `.editorconfig`, `.dockerignore` at repo root
+- [X] T001 Create top-level project structure: `backend/`, `frontend/`, `deploy/`, `.github/` per plan.md
+- [X] T002 [P] Initialize backend Python project in `backend/pyproject.toml` with deps: fastapi, uvicorn[standard], sqlalchemy[asyncio], alembic, asyncpg, pydantic, pydantic-settings, httpx, aiolimiter, tenacity, apscheduler, structlog, passlib[bcrypt], python-jose[cryptography], python-dateutil
+- [X] T003 [P] Add backend dev deps in `backend/pyproject.toml`: ruff, black, mypy, pytest, pytest-asyncio, pytest-cov, httpx (test client), freezegun
+- [X] T004 [P] Configure backend tooling: `backend/pyproject.toml` `[tool.ruff]`, `[tool.black]`, `[tool.mypy]`, `[tool.pytest.ini_options]` with strict settings aligned to constitution; **additionally** wire up pre-commit hooks via `.pre-commit-config.yaml` running ruff + black + mypy on every commit (宪法 NON-NEGOTIABLE 要求每次提交即通过)
+- [X] T005 [P] Initialize frontend Vue 3 project in `frontend/package.json` with deps: vue, vue-router, pinia, element-plus, axios, lucide-vue-next, dayjs; dev deps: vite, typescript, @vitejs/plugin-vue, vue-tsc, eslint, @typescript-eslint, prettier, sass, vitest
+- [X] T006 [P] Configure frontend tooling: `frontend/vite.config.ts`, `frontend/tsconfig.json`, `frontend/eslint.config.js`, `frontend/.prettierrc.json`; **additionally** add `lint-staged` + husky 或 pre-commit 钩子跑 `eslint --max-warnings=0 && vue-tsc --noEmit` on every commit
+- [X] T007 [P] Create Docker Compose stack in `deploy/docker-compose.yml` with services: caddy, db (postgres:16-alpine), backend, frontend; volumes for pg data + caddy data
+- [X] T008 [P] Create `deploy/Caddyfile` with HTTPS + reverse proxy for `/api/*` → backend:8000, rest → frontend:80
+- [X] T009 [P] Create `deploy/.env.example` and `backend/.env.example` with all required keys (DB, Saihu, JWT, login password)
+- [X] T010 [P] Create backend `Dockerfile` (multi-stage: build deps → runtime) and frontend `Dockerfile` (build vue → nginx static)
+- [X] T011 [P] Create `.gitignore`, `.editorconfig`, `.dockerignore` at repo root
 
 **Checkpoint**: Project scaffolding ready, `docker compose config` passes.
 

@@ -1,0 +1,95 @@
+# ========== Python / Backend ==========
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+.Python
+.venv/
+venv/
+env/
+ENV/
+dist/
+build/
+develop-eggs/
+eggs/
+.eggs/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+MANIFEST
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+
+# ========== Node / Frontend ==========
+node_modules/
+.pnpm-store/
+.vite/
+dist-ssr/
+*.local
+.eslintcache
+.prettierrc.cache
+.turbo/
+.next/
+.nuxt/
+.output/
+
+# ========== Environment ==========
+.env
+.env.*
+!.env.example
+
+# ========== Docker ==========
+# 不要忽略 deploy/docker-compose.yml / Dockerfile
+
+# ========== OS ==========
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# ========== IDE ==========
+.idea/
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.swp
+*.swo
+*~
+
+# ========== 项目特有 ==========
+# 部署数据目录
+deploy/data/
+deploy/backup/
+
+# 日志
+*.log
+logs/
+
+# 临时文件
+*.tmp
+*.bak
+
+# 编辑器本地配置
+.cursor/

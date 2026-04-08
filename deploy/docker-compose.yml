@@ -1,0 +1,82 @@
+name: restock
+
+# 赛狐补货计算工具 - 单机 Docker Compose 部署
+# 服务：caddy (HTTPS 反代) + frontend (nginx 静态) + backend (FastAPI) + db (PostgreSQL 16)
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: replenish
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      TZ: Asia/Shanghai
+      # 性能调优：2C4G 单机合理配置
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    volumes:
+      - ./data/pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d replenish"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # 注意：不暴露 5432 端口到宿主机，避免公网爆破
+    networks:
+      - internal
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:${DB_PASSWORD}@db:5432/replenish
+      APP_TIMEZONE: Asia/Shanghai
+      APP_ENV: production
+      APP_LOG_LEVEL: INFO
+
+      SAIHU_BASE_URL: https://openapi.sellfox.com
+      SAIHU_CLIENT_ID: ${SAIHU_CLIENT_ID}
+      SAIHU_CLIENT_SECRET: ${SAIHU_CLIENT_SECRET}
+
+      LOGIN_PASSWORD: ${LOGIN_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_HOURS: 24
+
+      TZ: Asia/Shanghai
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - internal
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    networks:
+      - internal
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./data/caddy:/data
+      - ./data/caddy-config:/config
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - internal
+
+networks:
+  internal:
+    driver: bridge
