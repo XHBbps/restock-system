@@ -18,7 +18,7 @@
 from datetime import date
 from typing import Any
 
-from sqlalchemy import insert, select, update
+from sqlalchemy import func, insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
@@ -36,6 +36,9 @@ from app.engine.step5_warehouse_split import (
 )
 from app.engine.step6_timing import compute_timing_for_sku
 from app.models.global_config import GlobalConfig
+from app.models.inventory import InventorySnapshotLatest
+from app.models.order import OrderHeader, OrderItem
+from app.models.overstock import OverstockSkuMark
 from app.models.product_listing import ProductListing
 from app.models.sku import SkuConfig
 from app.models.suggestion import Suggestion, SuggestionItem
@@ -82,6 +85,9 @@ async def run_engine(ctx: JobContext, *, triggered_by: str = "scheduler") -> int
 
         await ctx.progress(current_step="Step 2: 计算 sale_days")
         sale_days, inventory = await run_step2(db, velocity, sku_list)
+
+        # FR-032 / US5：刷新积压 SKU 提示表
+        await _refresh_overstock_marks(db, velocity, inventory, today)
 
         await ctx.progress(current_step="Step 3: 各国补货量")
         country_qty, overstock_countries = compute_country_qty(
@@ -258,6 +264,86 @@ async def _persist_suggestion(
         await db.execute(insert(SuggestionItem).values(items))
     await db.commit()
     return suggestion_id
+
+
+async def _refresh_overstock_marks(
+    db: AsyncSession,
+    velocity: dict[str, dict[str, float]],
+    inventory: dict[str, dict[str, dict[str, int]]],
+    today: date,
+) -> None:
+    """对所有"全球 velocity 全为 0 且任一仓库存 > 0"的 SKU 维护积压标记。
+
+    UPSERT 语义：保留已有的 processed_at，避免重置用户操作。
+    """
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    # 1. 找出所有 全球 velocity 全为 0 的 sku
+    overstock_skus: set[str] = set()
+    all_skus_with_inventory = set(inventory.keys())
+    for sku in all_skus_with_inventory:
+        v_map = velocity.get(sku, {})
+        if not v_map or all(v == 0 for v in v_map.values()):
+            overstock_skus.add(sku)
+
+    if not overstock_skus:
+        return
+
+    # 2. 对这些 sku 查 inventory_snapshot_latest 找 available > 0 的仓
+    rows = (
+        await db.execute(
+            select(
+                InventorySnapshotLatest.commodity_sku,
+                InventorySnapshotLatest.country,
+                InventorySnapshotLatest.warehouse_id,
+                InventorySnapshotLatest.available,
+            )
+            .where(InventorySnapshotLatest.commodity_sku.in_(overstock_skus))
+            .where(InventorySnapshotLatest.available > 0)
+            .where(InventorySnapshotLatest.country.is_not(None))
+        )
+    ).all()
+    if not rows:
+        return
+
+    # 3. 批量计算 last_sale_date（最近一次该 SKU 任意国家的 shipped > 0 订单日期）
+    last_sale_rows = (
+        await db.execute(
+            select(
+                OrderItem.commodity_sku,
+                func.max(OrderHeader.purchase_date).label("last_sale"),
+            )
+            .join(OrderHeader, OrderHeader.id == OrderItem.order_id)
+            .where(OrderItem.commodity_sku.in_(overstock_skus))
+            .where(OrderItem.quantity_shipped > 0)
+            .where(OrderHeader.order_status.in_(("Shipped", "PartiallyShipped")))
+            .group_by(OrderItem.commodity_sku)
+        )
+    ).all()
+    last_sale_map: dict[str, date] = {
+        sku: last_dt.date() for sku, last_dt in last_sale_rows if last_dt
+    }
+
+    # 4. UPSERT
+    for sku, country, warehouse_id, available in rows:
+        values = {
+            "commodity_sku": sku,
+            "country": country,
+            "warehouse_id": warehouse_id,
+            "current_stock": int(available or 0),
+            "last_sale_date": last_sale_map.get(sku),
+        }
+        stmt = pg_insert(OverstockSkuMark).values(**values)
+        # 不覆盖 processed_at（用户手动状态）
+        stmt = stmt.on_conflict_do_update(
+            constraint="uq_overstock_sku_mark_key",
+            set_={
+                "current_stock": values["current_stock"],
+                "last_sale_date": values["last_sale_date"],
+            },
+        )
+        await db.execute(stmt)
+    await db.commit()
 
 
 async def _archive_active(db: AsyncSession) -> None:

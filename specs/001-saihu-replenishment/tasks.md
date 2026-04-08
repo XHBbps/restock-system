@@ -243,9 +243,9 @@ description: "Task list for 赛狐补货计算工具 implementation"
 
 **Independent Test**: 跑几天计算 → 查询前一天建议单 → 看到明细 + 配置快照 + 推送结果。
 
-- [ ] T121 [US4] Extend `backend/app/api/suggestion.py` `GET /api/suggestions` to support filters `date_from / date_to / status / sku` + pagination per contracts
-- [ ] T122 [US4] Ensure historical detail endpoint returns `global_config_snapshot` read-only (already FR-036)
-- [ ] T123 [P] [US4] Create `frontend/src/views/HistoryView.vue`: date range + status + SKU search → paginated list → click into read-only detail view reusing `SuggestionDetailView` in read-only mode
+- [X] T121 [US4] Extend `backend/app/api/suggestion.py` `GET /api/suggestions` to support filters `date_from / date_to / status / sku` + pagination per contracts（Batch 7 已完成）
+- [X] T122 [US4] Ensure historical detail endpoint returns `global_config_snapshot` read-only （Batch 7 SuggestionDetailOut 已包含）
+- [X] T123 [P] [US4] Create `frontend/src/views/HistoryView.vue`: date range + status + SKU search → paginated list → click into detail view (复用 SuggestionDetailView)
 
 **Checkpoint**: US1 + US2 + US3 + US4 work.
 
@@ -257,13 +257,13 @@ description: "Task list for 赛狐补货计算工具 implementation"
 
 **Independent Test**: 某 SKU 全局 velocity=0 + 库存>0 → 积压提示页显示 → 标为已处理后从默认视图隐藏；某接口调用失败 → 监控页显示错误原因 → 点击重试生成新任务。
 
-- [ ] T124 [US5] Extend `backend/app/engine/runner.py` to populate `overstock_sku_mark` during Step 1 (FR-032): UPSERT rows for SKUs with all-zero velocity + any warehouse available > 0, keeping prior `processed_at` if exists
-- [ ] T125 [US5] Create `backend/app/api/monitor.py` routes per `contracts/monitor.yaml`: `GET /api/monitor/api-calls` (aggregated last 24h per endpoint), `GET /api/monitor/api-calls/recent`, `POST /api/monitor/api-calls/{id}/retry` (enqueues corresponding sync job); 在聚合视图中**额外计算** "订单邮编合规度"：`COUNT(order_header WHERE purchase_date < now() - interval '50 days' AND (shop_id, amazon_order_id) NOT IN order_detail_fetch_log)`，大于 0 时在 UI 警示 (FR-004 合规)
-- [ ] T126 [US5] Add routes: `GET /api/monitor/overstock` (with show_processed filter) + `PATCH /api/monitor/overstock/{id}/processed`
-- [ ] T127 [US5] Implement `last_sale_date` lookup in overstock response by querying latest non-zero `order_item` for the SKU
-- [ ] T128 [P] [US5] Create `frontend/src/api/monitor.ts`
-- [ ] T129 [P] [US5] Create `frontend/src/views/OverstockView.vue`: table with "标为已处理" button + show_processed toggle
-- [ ] T130 [P] [US5] Create `frontend/src/views/ApiMonitorView.vue`: per-endpoint cards (last call, 24h rate, last error) + recent failures table + retry button
+- [X] T124 [US5] Extend `backend/app/engine/runner.py` to populate `overstock_sku_mark` after Step 2 (FR-032): UPSERT rows for SKUs with all-zero velocity + any warehouse available > 0, keeping prior `processed_at` if exists
+- [X] T125 [US5] Create `backend/app/api/monitor.py` routes per `contracts/monitor.yaml`: `GET /api/monitor/api-calls` (aggregated last 24h per endpoint), `GET /api/monitor/api-calls/recent`, `POST /api/monitor/api-calls/{id}/retry`; 含订单邮编 50 天合规计数 (FR-004)
+- [X] T126 [US5] Add routes: `GET /api/monitor/overstock` (with show_processed filter) + `PATCH /api/monitor/overstock/{id}/processed`
+- [X] T127 [US5] Implement `last_sale_date` lookup in `_refresh_overstock_marks` via batch GROUP BY query on order_item + order_header
+- [X] T128 [P] [US5] Create `frontend/src/api/monitor.ts`
+- [X] T129 [P] [US5] Create `frontend/src/views/OverstockView.vue`: table with "标为已处理" button + show_processed toggle
+- [X] T130 [P] [US5] Create `frontend/src/views/ApiMonitorView.vue`: per-endpoint cards (last call, 24h rate, last error) + recent failures table + retry button + 邮编合规警告 alert
 
 **Checkpoint**: All five user stories fully functional.
 
