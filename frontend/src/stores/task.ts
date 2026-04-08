@@ -19,15 +19,19 @@ export const useTaskStore = defineStore('task', () => {
     polling.value.add(taskId)
 
     const tick = async () => {
+      // 调用者通过 stopPolling 移除后，任何挂起的 tick 都应立即退出
+      if (!polling.value.has(taskId)) return
       try {
         const t = await getTask(taskId)
+        // 再次检查：网络请求期间可能被取消
+        if (!polling.value.has(taskId)) return
         tasksById[taskId] = t
         if (isTerminal(t)) {
           polling.value.delete(taskId)
           onTerminal?.(t)
           return
         }
-      } catch (err) {
+      } catch {
         // 失败也停止轮询，避免无限循环
         polling.value.delete(taskId)
         return

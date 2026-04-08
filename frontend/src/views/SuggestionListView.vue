@@ -12,8 +12,13 @@
               size="default"
               style="width: 200px"
             />
-            <el-button type="primary" :loading="pushing" @click="handlePush">
-              推送至赛狐 ({{ selected.length }})
+            <el-button
+              type="primary"
+              :loading="pushing"
+              :disabled="selected.length === 0 || selected.length > 50"
+              @click="handlePush"
+            >
+              推送至赛狐 ({{ selected.length }}{{ selected.length > 50 ? ' · 超出 50' : '' }})
             </el-button>
           </div>
         </div>

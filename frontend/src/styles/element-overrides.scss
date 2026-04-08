@@ -1,123 +1,812 @@
 // =====================================================================
-// Element Plus 组件深度定制以贴近 Ryvix 风格
+// Element Plus → shadcn/ui 严格视觉定制
+//
+// 参考：https://ui.shadcn.com/examples/dashboard
+//
+// 精度要求：
+// - 按钮 h-9 (36px), small h-8 (32px), large h-10 (40px)
+// - 输入框 h-10 (40px), small h-9 (36px)
+// - 表格行 py-3 (12px vertical)
+// - 卡片 rounded-lg border shadow-sm
+// - 标签 rounded-md border + soft fill, font-semibold text-xs
+// - Focus ring-2 ring-primary ring-offset-2
 // =====================================================================
 
-// Element Plus CSS 变量重写
+// ==================== Element Plus CSS variables ====================
 :root {
-  // 主色 → 墨绿
+  // Primary = zinc-900
   --el-color-primary: #{$color-brand-primary};
-  --el-color-primary-light-3: #{$color-brand-primary-soft};
-  --el-color-primary-light-5: #{$color-brand-primary-soft};
-  --el-color-primary-light-7: #{$color-brand-primary-soft};
-  --el-color-primary-light-8: #{$color-brand-primary-soft};
-  --el-color-primary-light-9: #{$color-brand-primary-soft};
-  --el-color-primary-dark-2: #{$color-brand-primary-active};
+  --el-color-primary-light-3: #3f3f46;
+  --el-color-primary-light-5: #52525b;
+  --el-color-primary-light-7: #a1a1aa;
+  --el-color-primary-light-8: #d4d4d8;
+  --el-color-primary-light-9: #f4f4f5;
+  --el-color-primary-dark-2: #09090b;
 
   --el-color-success: #{$color-success};
   --el-color-warning: #{$color-warning};
   --el-color-danger: #{$color-danger};
+  --el-color-error: #{$color-destructive};
+  --el-color-info: #{$color-text-secondary};
 
-  // 文字
+  // Text
   --el-text-color-primary: #{$color-text-primary};
   --el-text-color-regular: #{$color-text-primary};
   --el-text-color-secondary: #{$color-text-secondary};
+  --el-text-color-placeholder: #{$color-text-disabled};
+  --el-text-color-disabled: #{$color-text-disabled};
 
-  // 边框
+  // Borders
   --el-border-color: #{$color-border-default};
-  --el-border-color-light: #{$color-border-subtle};
+  --el-border-color-light: #{$color-border-default};
   --el-border-color-lighter: #{$color-border-subtle};
+  --el-border-color-extra-light: #{$color-border-subtle};
+  --el-border-color-hover: #{$color-border-strong};
+  --el-border-color-dark: #{$color-border-strong};
 
-  // 圆角
-  --el-border-radius-base: #{$radius-md};
-  --el-border-radius-small: #{$radius-sm};
+  // Background fills
+  --el-bg-color: #{$color-bg-card};
+  --el-bg-color-page: #{$color-bg-base};
+  --el-bg-color-overlay: #{$color-bg-elevated};
+  --el-fill-color: #{$color-bg-subtle};
+  --el-fill-color-light: #{$color-bg-subtle};
+  --el-fill-color-lighter: #{$color-bg-subtle};
+  --el-fill-color-blank: #{$color-bg-card};
+
+  // Radius
+  --el-border-radius-base: #{$radius-md}; // 6px
+  --el-border-radius-small: #{$radius-sm}; // 4px
   --el-border-radius-round: #{$radius-pill};
 
-  // 卡片
-  --el-card-padding: #{$space-6};
-  --el-card-border-radius: #{$radius-lg};
-
-  // 字体
+  // Typography
   --el-font-family: #{$font-family-sans};
-  --el-font-size-base: #{$font-size-md};
+  --el-font-size-base: #{$font-size-sm};
+  --el-font-size-small: #{$font-size-xs};
+  --el-font-size-large: #{$font-size-lg};
 
-  // 阴影
-  --el-box-shadow-light: #{$shadow-card};
+  // Shadows
+  --el-box-shadow-light: #{$shadow-sm};
   --el-box-shadow: #{$shadow-card-hover};
+  --el-box-shadow-dark: #{$shadow-popup};
+
+  // Table
+  --el-table-border-color: #{$color-border-default};
+  --el-table-border: 1px solid #{$color-border-default};
+  --el-table-text-color: #{$color-text-primary};
+  --el-table-header-text-color: #{$color-text-secondary};
+  --el-table-row-hover-bg-color: #{$color-bg-subtle};
+  --el-table-header-bg-color: #{$color-bg-card};
+  --el-table-fixed-box-shadow: none;
+
+  // Dialog
+  --el-dialog-border-radius: #{$radius-xl};
+
+  // Disabled
+  --el-disabled-bg-color: #{$color-bg-subtle};
+  --el-disabled-text-color: #{$color-text-disabled};
+  --el-disabled-border-color: #{$color-border-default};
+
+  // Overlay
+  --el-overlay-color: rgb(0 0 0 / 0.5);
+  --el-overlay-color-light: rgb(0 0 0 / 0.4);
+  --el-overlay-color-lighter: rgb(0 0 0 / 0.3);
+
+  // Scrollbar
+  --el-scrollbar-bg-color: #{$color-border-default};
+  --el-scrollbar-hover-bg-color: #{$color-border-strong};
 }
 
-// 卡片：去掉默认边框，用阴影代替
-.el-card {
-  border: none;
-  box-shadow: $shadow-card;
-  border-radius: $radius-lg;
+// ==================== Global body reset ====================
+body {
+  font-family: $font-family-sans;
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+  background: $color-bg-base;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: 'cv11', 'ss01', 'ss03';
+}
 
-  &:hover {
-    box-shadow: $shadow-card-hover;
+// ==================== Card (rounded-lg border shadow-sm) ====================
+.el-card {
+  border: 1px solid $color-border-default;
+  border-radius: $radius-lg;                  // 8px
+  box-shadow: $shadow-sm;                     // shadow-sm
+  background: $color-bg-card;
+  color: $color-text-primary;
+
+  .el-card__header {
+    padding: $space-6;
+    border-bottom: 1px solid $color-border-default;
+    background: transparent;
+    font-weight: $font-weight-semibold;
+    letter-spacing: $tracking-tight;
+  }
+
+  .el-card__body {
+    padding: $space-6;
   }
 }
 
-// 按钮：圆角 pill
+// ==================== Button (h-9, rounded-md, font-medium) ====================
 .el-button {
-  border-radius: $radius-pill;
+  height: 36px;                               // h-9
+  padding: 0 16px;                            // px-4
+  border-radius: $radius-md;                  // 6px
+  font-family: $font-family-sans;
+  font-size: $font-size-sm;                   // text-sm
   font-weight: $font-weight-medium;
-  padding: 8px 20px;
-  transition: $transition-base;
+  line-height: 1;
+  letter-spacing: 0;
+  transition: $transition-fast;
+  border: 1px solid transparent;
+
+  // Default variant = outline
+  &.el-button--default {
+    background: $color-bg-card;
+    border-color: $color-border-default;
+    color: $color-text-primary;
+
+    &:hover:not(.is-disabled) {
+      background: $color-bg-subtle;
+      border-color: $color-border-default;
+      color: $color-text-primary;
+    }
+    &:focus-visible {
+      @include focus-ring;
+    }
+  }
+
+  // Primary = solid near-black
+  &.el-button--primary {
+    background: $color-brand-primary;
+    border-color: $color-brand-primary;
+    color: $color-brand-primary-fg;
+
+    &:hover:not(.is-disabled) {
+      background: $color-brand-primary-hover;
+      border-color: $color-brand-primary-hover;
+      color: $color-brand-primary-fg;
+    }
+    &:active:not(.is-disabled) {
+      background: $color-brand-primary-active;
+    }
+    &:focus-visible {
+      @include focus-ring;
+    }
+  }
+
+  // Destructive
+  &.el-button--danger {
+    background: $color-destructive;
+    border-color: $color-destructive;
+    color: $color-destructive-fg;
+
+    &:hover:not(.is-disabled) {
+      background: #dc2626;                    // red-600
+      border-color: #dc2626;
+    }
+  }
+
+  // Ghost (link text)
+  &.is-link,
+  &.is-text {
+    height: auto;
+    padding: $space-1 $space-2;
+    background: transparent;
+    border: none;
+    color: $color-text-primary;
+    font-weight: $font-weight-medium;
+    text-decoration: none;
+
+    &:hover:not(.is-disabled) {
+      background: $color-bg-subtle;
+      color: $color-text-primary;
+    }
+    &.el-button--primary {
+      color: $color-brand-primary;
+      background: transparent;
+      &:hover {
+        background: $color-bg-subtle;
+      }
+    }
+  }
+
+  // Sizes
+  &.el-button--small {
+    height: 32px;
+    padding: 0 12px;
+    font-size: $font-size-xs;
+  }
+  &.el-button--large {
+    height: 40px;
+    padding: 0 20px;
+    font-size: $font-size-sm;
+  }
+
+  &.is-disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
 }
 
-// 表格：宽行距 + 细灰列头
-.el-table {
-  background: transparent;
-  --el-table-border-color: #{$color-border-subtle};
-  --el-table-header-bg-color: #{$color-bg-subtle};
-  --el-table-row-hover-bg-color: #{$color-brand-primary-soft};
+// ==================== Input (h-10, rounded-md, border, ring on focus) ====================
+.el-input,
+.el-textarea,
+.el-select {
+  font-family: $font-family-sans;
+  font-size: $font-size-sm;
 
+  .el-input__wrapper,
+  .el-textarea__inner,
+  .el-select__wrapper {
+    background: $color-bg-card !important;
+    border-radius: $radius-md !important;
+    box-shadow: 0 0 0 1px $color-border-default inset !important;
+    padding: 0 12px !important;                  // px-3
+    transition: $transition-fast;
+
+    &:hover {
+      box-shadow: 0 0 0 1px $color-border-strong inset !important;
+    }
+    &.is-focus {
+      box-shadow:
+        0 0 0 2px $color-bg-card inset,
+        0 0 0 3px $color-ring inset !important;
+    }
+  }
+
+  .el-input__inner {
+    height: 38px;                              // h-10 (-2 for border)
+    font-size: $font-size-sm;
+    color: $color-text-primary;
+
+    &::placeholder {
+      color: $color-text-disabled;
+    }
+  }
+
+  &.el-input--small {
+    .el-input__inner {
+      height: 30px;
+    }
+  }
+  &.el-input--large {
+    .el-input__inner {
+      height: 40px;
+    }
+  }
+}
+
+.el-textarea__inner {
+  padding: $space-2 $space-3 !important;
+  font-family: $font-family-sans;
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+  min-height: 72px;
+  line-height: $line-height-normal;
+
+  &::placeholder {
+    color: $color-text-disabled;
+  }
+}
+
+// ==================== Table ====================
+.el-table {
+  --el-table-bg-color: transparent;
+  background: transparent;
+  color: $color-text-primary;
+  font-size: $font-size-sm;
+
+  &::before,
+  &::after {
+    display: none;                              // 去掉默认上下描边
+  }
+
+  // Header: UPPERCASE text-xs tracking-wider text-muted-foreground
   th.el-table__cell {
-    background-color: $color-bg-subtle;
+    background: $color-bg-card !important;
+    border-bottom: 1px solid $color-border-default !important;
     color: $color-text-secondary;
     font-weight: $font-weight-medium;
+    font-size: $font-size-xs;
+    text-transform: uppercase;
+    letter-spacing: $tracking-wider;
+    height: 40px;                               // h-10
+    padding: 0 $space-4;                        // px-4
+    line-height: 1.2;
+
+    .cell {
+      padding: 0;
+    }
+  }
+
+  // Body row: py-3 px-4
+  td.el-table__cell {
+    border-bottom: 1px solid $color-border-default !important;
+    padding: $space-3 $space-4;                 // py-3 px-4
+    color: $color-text-primary;
+    font-size: $font-size-sm;
+
+    .cell {
+      padding: 0;
+    }
+  }
+
+  .el-table__row {
+    transition: background $transition-fast;
+    &:hover > td.el-table__cell {
+      background: $color-bg-subtle !important;
+    }
+  }
+
+  // Empty state
+  .el-table__empty-block {
+    background: transparent;
+    .el-table__empty-text {
+      color: $color-text-secondary;
+      font-size: $font-size-sm;
+    }
+  }
+}
+
+// ==================== Tag / Badge ====================
+// shadcn: inline-flex items-center rounded-md border px-2.5 py-0.5 text-xs font-semibold
+.el-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 10px;                              // px-2.5
+  border-radius: $radius-md;                    // 6px
+  border: 1px solid $color-border-default;
+  background: $color-bg-card;
+  color: $color-text-primary;
+  font-size: $font-size-xs;                     // text-xs
+  font-weight: $font-weight-semibold;
+  line-height: 1;
+  letter-spacing: 0;
+
+  // Default
+  &:not([class*='--']) {
+    background: $color-bg-card;
+    border-color: $color-border-default;
+    color: $color-text-primary;
+  }
+
+  &.el-tag--success {
+    background: $color-success-soft;
+    border-color: $color-success-border;
+    color: $color-success;
+  }
+
+  &.el-tag--warning {
+    background: $color-warning-soft;
+    border-color: $color-warning-border;
+    color: $color-warning;
+  }
+
+  &.el-tag--danger {
+    background: $color-danger-soft;
+    border-color: $color-danger-border;
+    color: $color-danger;
+  }
+
+  &.el-tag--info {
+    background: $color-bg-subtle;
+    border-color: $color-border-default;
+    color: $color-text-secondary;
+  }
+
+  &.el-tag--primary {
+    background: $color-brand-primary;
+    border-color: $color-brand-primary;
+    color: $color-brand-primary-fg;
+  }
+
+  .el-tag__close {
+    color: currentColor;
+    opacity: 0.6;
+    &:hover {
+      background: transparent;
+      opacity: 1;
+    }
+  }
+}
+
+// ==================== Dialog ====================
+.el-dialog {
+  border-radius: $radius-xl;                    // 12px
+  border: 1px solid $color-border-default;
+  box-shadow: $shadow-popup;
+  padding: 0;
+  overflow: hidden;
+  background: $color-bg-card;
+
+  .el-dialog__header {
+    padding: $space-6;
+    border-bottom: 1px solid $color-border-default;
+    margin: 0;
+  }
+
+  .el-dialog__title {
+    font-size: $font-size-lg;
+    font-weight: $font-weight-semibold;
+    color: $color-text-primary;
+    letter-spacing: $tracking-tight;
+  }
+
+  .el-dialog__headerbtn {
+    top: $space-5;
+    right: $space-5;
+    .el-dialog__close {
+      color: $color-text-secondary;
+      font-size: 18px;
+      &:hover {
+        color: $color-text-primary;
+      }
+    }
+  }
+
+  .el-dialog__body {
+    padding: $space-6;
+    color: $color-text-primary;
+    font-size: $font-size-sm;
+  }
+
+  .el-dialog__footer {
+    padding: $space-4 $space-6;
+    border-top: 1px solid $color-border-default;
+    background: $color-bg-card;
+  }
+}
+
+.el-overlay {
+  background-color: rgb(0 0 0 / 0.5);
+}
+
+// ==================== Dropdown ====================
+.el-popper,
+.el-select__popper,
+.el-dropdown__popper {
+  border-radius: $radius-md !important;
+  border: 1px solid $color-border-default !important;
+  box-shadow: $shadow-popup !important;
+  background: $color-bg-elevated !important;
+  padding: $space-1;
+}
+
+.el-select-dropdown__item {
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+  padding: $space-2 $space-3;
+  border-radius: $radius-sm;
+  margin: 2px;
+  height: 32px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+
+  &:hover,
+  &.is-hovering {
+    background: $color-bg-subtle;
+    color: $color-text-primary;
+  }
+
+  &.is-selected {
+    background: $color-bg-subtle;
+    color: $color-brand-primary;
+    font-weight: $font-weight-medium;
+  }
+}
+
+// ==================== Pagination ====================
+.el-pagination {
+  --el-pagination-font-size: #{$font-size-sm};
+  --el-pagination-bg-color: transparent;
+  --el-pagination-text-color: #{$color-text-primary};
+  --el-pagination-button-color: #{$color-text-primary};
+  --el-pagination-button-bg-color: #{$color-bg-card};
+  --el-pagination-hover-color: #{$color-text-primary};
+
+  font-family: $font-family-sans;
+
+  .btn-prev,
+  .btn-next,
+  .el-pager li {
+    min-width: 36px;
+    height: 36px;
+    line-height: 36px;
+    border-radius: $radius-md;
+    border: 1px solid $color-border-default;
+    background: $color-bg-card;
+    color: $color-text-primary;
+    font-size: $font-size-sm;
+    font-weight: $font-weight-medium;
+    margin: 0 4px;
+    padding: 0 12px;
+
+    &:hover:not(.is-disabled):not(:disabled) {
+      background: $color-bg-subtle;
+      border-color: $color-border-strong;
+      color: $color-text-primary;
+    }
+
+    &.is-active {
+      background: $color-brand-primary;
+      border-color: $color-brand-primary;
+      color: $color-brand-primary-fg;
+    }
+
+    &.is-disabled,
+    &:disabled {
+      background: $color-bg-card;
+      color: $color-text-disabled;
+      border-color: $color-border-subtle;
+    }
+  }
+
+  .el-pagination__total,
+  .el-pagination__jump,
+  .el-pagination__sizes {
+    color: $color-text-secondary;
     font-size: $font-size-sm;
   }
 }
 
-// 标签 / 徽章：pastel pill
-.el-tag {
-  border-radius: $radius-pill;
-  border: none;
-  font-weight: $font-weight-medium;
+// ==================== Message ====================
+.el-message {
+  min-width: 320px;
+  padding: $space-3 $space-4;
+  border-radius: $radius-md;
+  border: 1px solid $color-border-default;
+  background: $color-bg-card;
+  box-shadow: $shadow-popup;
+  font-size: $font-size-sm;
+  color: $color-text-primary;
 
-  &.el-tag--success {
-    background-color: $color-success-soft;
+  &.el-message--success {
+    border-color: $color-success-border;
+    background: $color-success-soft;
     color: $color-success;
+    .el-message__icon,
+    .el-message__content {
+      color: $color-success;
+    }
   }
-  &.el-tag--warning {
-    background-color: $color-warning-soft;
+  &.el-message--warning {
+    border-color: $color-warning-border;
+    background: $color-warning-soft;
     color: $color-warning;
+    .el-message__icon,
+    .el-message__content {
+      color: $color-warning;
+    }
   }
-  &.el-tag--danger {
-    background-color: $color-danger-soft;
+  &.el-message--error {
+    border-color: $color-danger-border;
+    background: $color-danger-soft;
     color: $color-danger;
+    .el-message__icon,
+    .el-message__content {
+      color: $color-danger;
+    }
   }
-  &.el-tag--info {
-    background-color: $color-info-soft;
-    color: $color-info;
+  &.el-message--info {
+    border-color: $color-border-default;
+    background: $color-bg-card;
+    color: $color-text-primary;
   }
 }
 
-// 输入框 / 选择器：大圆角
-.el-input__wrapper,
-.el-select__wrapper,
-.el-textarea__inner {
-  border-radius: $radius-md;
-  box-shadow: 0 0 0 1px $color-border-default inset;
-  transition: $transition-base;
+// ==================== MessageBox ====================
+.el-message-box {
+  border-radius: $radius-xl;
+  border: 1px solid $color-border-default;
+  box-shadow: $shadow-popup;
+  padding: 0;
+
+  .el-message-box__header {
+    padding: $space-5 $space-6 $space-3;
+  }
+  .el-message-box__title {
+    font-size: $font-size-lg;
+    font-weight: $font-weight-semibold;
+    color: $color-text-primary;
+    letter-spacing: $tracking-tight;
+  }
+  .el-message-box__content {
+    padding: 0 $space-6 $space-5;
+    color: $color-text-secondary;
+    font-size: $font-size-sm;
+  }
+  .el-message-box__btns {
+    padding: $space-4 $space-6;
+    border-top: 1px solid $color-border-default;
+  }
+}
+
+// ==================== Switch ====================
+.el-switch {
+  --el-switch-on-color: #{$color-brand-primary};
+  --el-switch-off-color: #{$color-border-strong};
+
+  .el-switch__core {
+    border-radius: $radius-pill;
+    min-width: 36px;
+    height: 20px;
+    border: none;
+  }
+}
+
+// ==================== Checkbox ====================
+.el-checkbox__inner {
+  width: 16px;
+  height: 16px;
+  border-radius: $radius-sm;
+  border: 1px solid $color-border-strong;
+  background: $color-bg-card;
+
+  &::after {
+    height: 8px;
+    left: 5px;
+    top: 1px;
+  }
+}
+
+.el-checkbox__input.is-checked .el-checkbox__inner {
+  background: $color-brand-primary;
+  border-color: $color-brand-primary;
+}
+
+.el-checkbox__input.is-focus .el-checkbox__inner {
+  border-color: $color-brand-primary;
+}
+
+.el-checkbox__label {
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+  font-weight: $font-weight-normal;
+}
+
+// ==================== Radio ====================
+.el-radio-button__inner {
+  background: $color-bg-card;
+  border: 1px solid $color-border-default;
+  color: $color-text-primary;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  height: 36px;
+  padding: 0 16px;
+  line-height: 34px;
 
   &:hover {
-    box-shadow: 0 0 0 1px $color-border-strong inset;
+    background: $color-bg-subtle;
+    color: $color-text-primary;
   }
 }
 
-// 弹窗
-.el-dialog {
-  border-radius: $radius-lg;
-  overflow: hidden;
+.el-radio-button:first-child .el-radio-button__inner {
+  border-radius: $radius-md 0 0 $radius-md;
+}
+.el-radio-button:last-child .el-radio-button__inner {
+  border-radius: 0 $radius-md $radius-md 0;
+}
+
+.el-radio-button__original-radio:checked + .el-radio-button__inner {
+  background: $color-brand-primary;
+  border-color: $color-brand-primary;
+  color: $color-brand-primary-fg;
+  box-shadow: none;
+}
+
+// ==================== Progress ====================
+.el-progress-bar__outer {
+  background: $color-bg-subtle;
+  border-radius: $radius-pill;
+}
+.el-progress-bar__inner {
+  background: $color-brand-primary;
+  border-radius: $radius-pill;
+}
+
+// ==================== Collapse ====================
+.el-collapse {
+  border-top: 1px solid $color-border-default;
+  border-bottom: 1px solid $color-border-default;
+}
+
+.el-collapse-item__header {
+  height: 48px;
+  color: $color-text-primary;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  border-bottom: 1px solid $color-border-default;
+  background: $color-bg-card;
+
+  &:hover {
+    background: $color-bg-subtle;
+  }
+}
+
+.el-collapse-item__wrap {
+  background: $color-bg-card;
+  border-bottom: 1px solid $color-border-default;
+}
+
+.el-collapse-item__content {
+  padding: $space-4 $space-5;
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+}
+
+// ==================== Scrollbar ====================
+.el-scrollbar__bar {
+  opacity: 1;
+  .el-scrollbar__thumb {
+    background: $color-border-strong;
+    border-radius: $radius-pill;
+    &:hover {
+      background: $color-text-disabled;
+    }
+  }
+}
+
+// ==================== Form ====================
+.el-form-item__label {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+  line-height: $line-height-normal;
+  padding-bottom: $space-2;
+}
+
+.el-form-item__error {
+  color: $color-destructive;
+  font-size: $font-size-xs;
+  margin-top: $space-1;
+}
+
+// ==================== Date picker ====================
+.el-date-editor {
+  .el-input__wrapper {
+    box-shadow: 0 0 0 1px $color-border-default inset !important;
+  }
+  .el-range-input {
+    color: $color-text-primary;
+    font-size: $font-size-sm;
+  }
+}
+
+// ==================== Alert ====================
+.el-alert {
+  border-radius: $radius-md;
+  border: 1px solid $color-border-default;
+  padding: $space-3 $space-4;
+  background: $color-bg-card;
+
+  &.el-alert--success {
+    background: $color-success-soft;
+    border-color: $color-success-border;
+    color: $color-success;
+  }
+  &.el-alert--warning {
+    background: $color-warning-soft;
+    border-color: $color-warning-border;
+    color: $color-warning;
+  }
+  &.el-alert--error {
+    background: $color-danger-soft;
+    border-color: $color-danger-border;
+    color: $color-danger;
+  }
+  &.el-alert--info {
+    background: $color-bg-subtle;
+    border-color: $color-border-default;
+    color: $color-text-primary;
+  }
+
+  .el-alert__title {
+    font-size: $font-size-sm;
+    font-weight: $font-weight-medium;
+  }
 }

@@ -1,30 +1,49 @@
 <template>
   <div class="login-page">
-    <div class="login-card">
-      <h1 class="login-title">赛狐补货计算工具</h1>
-      <p class="login-subtitle">登录以继续</p>
+    <div class="grid-bg" />
 
-      <el-form @submit.prevent="handleLogin">
-        <el-input
-          v-model="password"
-          type="password"
-          placeholder="登录密码"
-          size="large"
-          :disabled="loading"
-          @keyup.enter="handleLogin"
-        />
+    <div class="login-card">
+      <div class="card-header">
+        <div class="brand-mark">R</div>
+        <h1 class="card-title">Sign in to Restock</h1>
+        <p class="card-subtitle">输入密码继续访问补货管理系统</p>
+      </div>
+
+      <form class="card-form" @submit.prevent="handleLogin">
+        <div class="form-field">
+          <label class="field-label" for="password">密码</label>
+          <el-input
+            id="password"
+            v-model="password"
+            type="password"
+            placeholder="••••••••"
+            size="large"
+            :disabled="loading"
+            @keyup.enter="handleLogin"
+          />
+        </div>
+
         <el-button
           type="primary"
           size="large"
-          class="login-btn"
+          class="submit-btn"
           :loading="loading"
           @click="handleLogin"
         >
-          登录
+          Sign in
         </el-button>
-      </el-form>
 
-      <p v-if="errorMsg" class="login-error">{{ errorMsg }}</p>
+        <div v-if="errorMsg" class="error-banner">
+          <div class="error-dot" />
+          <span>{{ errorMsg }}</span>
+        </div>
+      </form>
+
+      <div class="card-footer">
+        <span class="footer-text">Restock System</span>
+        <span class="footer-dot">·</span>
+        <span class="footer-version">v0.1.0</span>
+      </div>
     </div>
   </div>
 </template>
@@ -72,43 +91,148 @@ async function handleLogin(): Promise<void> {
 
 <style lang="scss" scoped>
 .login-page {
+  position: relative;
+  min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 100vh;
   background: $color-bg-base;
+  overflow: hidden;
+}
+
+// shadcn 标志性网格纹理背景
+.grid-bg {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(to right, $color-border-subtle 1px, transparent 1px),
+    linear-gradient(to bottom, $color-border-subtle 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  pointer-events: none;
 }
 
 .login-card {
+  position: relative;
+  z-index: 1;
+  width: 400px;
   background: $color-bg-card;
+  border: 1px solid $color-border-default;
   border-radius: $radius-xl;
   box-shadow: $shadow-card;
-  padding: $space-12 $space-10;
-  width: 380px;
+  padding: 0;
+  overflow: hidden;
 }
 
-.login-title {
-  margin: 0 0 $space-2 0;
-  font-size: $font-size-2xl;
-  color: $color-text-primary;
-  font-weight: $font-weight-semibold;
-}
-
-.login-subtitle {
-  margin: 0 0 $space-8 0;
-  color: $color-text-secondary;
-  font-size: $font-size-md;
-}
-
-.login-btn {
-  width: 100%;
-  margin-top: $space-5;
-}
-
-.login-error {
-  margin-top: $space-4;
-  color: $color-danger;
-  font-size: $font-size-sm;
+.card-header {
+  padding: $space-6 $space-6 $space-4;
   text-align: center;
+  border-bottom: 1px solid $color-border-subtle;
+
+  .brand-mark {
+    width: 44px;
+    height: 44px;
+    border-radius: $radius-md;
+    background: $color-brand-primary;
+    color: $color-brand-primary-fg;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-family: $font-family-mono;
+    font-weight: $font-weight-bold;
+    font-size: $font-size-xl;
+    letter-spacing: -0.05em;
+    margin-bottom: $space-4;
+  }
+
+  .card-title {
+    margin: 0 0 $space-2 0;
+    font-size: $font-size-2xl;
+    font-weight: $font-weight-semibold;
+    color: $color-text-primary;
+    letter-spacing: $tracking-tight;
+    line-height: 1.2;
+  }
+
+  .card-subtitle {
+    margin: 0;
+    color: $color-text-secondary;
+    font-size: $font-size-sm;
+  }
+}
+
+.card-form {
+  padding: $space-6;
+  display: flex;
+  flex-direction: column;
+  gap: $space-4;
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: $space-2;
+}
+
+.field-label {
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+}
+
+.submit-btn {
+  width: 100%;
+  margin-top: $space-1;
+}
+
+.error-banner {
+  display: flex;
+  align-items: center;
+  gap: $space-2;
+  padding: $space-3 $space-4;
+  background: $color-danger-soft;
+  border: 1px solid $color-danger-border;
+  border-radius: $radius-md;
+  color: $color-danger;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-medium;
+
+  .error-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: $radius-pill;
+    background: $color-danger;
+    flex-shrink: 0;
+    animation: pulse 2s infinite;
+  }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.card-footer {
+  padding: $space-4 $space-6;
+  border-top: 1px solid $color-border-subtle;
+  background: $color-bg-subtle;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: $space-2;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+
+  .footer-text {
+    font-weight: $font-weight-medium;
+  }
+  .footer-dot {
+    color: $color-text-disabled;
+  }
+  .footer-version {
+    font-family: $font-family-mono;
+    color: $color-text-disabled;
+  }
 }
 </style>
