@@ -1,0 +1,97 @@
+openapi: 3.0.3
+info:
+  title: Restock System - Sync API
+  version: 1.0.0
+  description: 手动触发同步任务（封装 task 入队）；内部通过 POST /api/tasks 实现，这里为便捷入口
+paths:
+  /api/sync/all:
+    post:
+      summary: 触发全量同步（所有 job 串行入队）
+      security: [{bearer: []}]
+      responses:
+        '200':
+          description: 已入队
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  task_id: {type: integer}
+
+  /api/sync/product-listing:
+    post:
+      summary: 触发在线产品信息同步
+      security: [{bearer: []}]
+      responses:
+        '200':
+          description: 已入队
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  task_id: {type: integer}
+                  existing: {type: boolean}
+
+  /api/sync/inventory:
+    post:
+      summary: 触发库存明细同步
+      security: [{bearer: []}]
+      responses:
+        '200':
+          description: 已入队
+
+  /api/sync/out-records:
+    post:
+      summary: 触发在途（其他出库）同步
+      security: [{bearer: []}]
+      responses:
+        '200':
+          description: 已入队
+
+  /api/sync/orders:
+    post:
+      summary: 触发订单列表 + 详情同步
+      security: [{bearer: []}]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                days:
+                  type: integer
+                  description: 强制重拉最近 N 天（默认增量）
+                  default: 0
+      responses:
+        '200':
+          description: 已入队
+
+  /api/sync/warehouse:
+    post:
+      summary: 触发仓库列表同步
+      security: [{bearer: []}]
+      responses:
+        '200':
+          description: 已入队
+
+  /api/engine/run:
+    post:
+      summary: 触发规则引擎计算（生成建议单）
+      security: [{bearer: []}]
+      responses:
+        '200':
+          description: 已入队
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  task_id: {type: integer}
+                  existing: {type: boolean}
+                  archived_previous: {type: integer, description: 如有旧单被归档}
+
+components:
+  securitySchemes:
+    bearer: {type: http, scheme: bearer, bearerFormat: JWT}

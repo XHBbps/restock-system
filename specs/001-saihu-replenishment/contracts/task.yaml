@@ -1,0 +1,132 @@
+openapi: 3.0.3
+info:
+  title: Restock System - Task API
+  version: 1.0.0
+  description: 任务系统（Scheduler + task_run + Worker）对外接口
+paths:
+  /api/tasks:
+    get:
+      summary: 任务列表
+      security: [{bearer: []}]
+      parameters:
+        - in: query
+          name: job_name
+          schema: {type: string}
+        - in: query
+          name: status
+          schema: {type: string, enum: [pending, running, success, failed, skipped, cancelled]}
+        - in: query
+          name: limit
+          schema: {type: integer, default: 20, maximum: 100}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/TaskRun'}
+                  total: {type: integer}
+
+    post:
+      summary: 手动触发任务（入队）
+      security: [{bearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [job_name]
+              properties:
+                job_name:
+                  type: string
+                  enum:
+                    - sync_product_listing
+                    - sync_warehouse
+                    - sync_inventory
+                    - sync_out_records
+                    - sync_order_list
+                    - sync_order_detail
+                    - sync_shop
+                    - sync_all
+                    - calc_engine
+                    - push_saihu
+                payload:
+                  type: object
+                  description: 任务参数（push_saihu 需传 suggestion_item_ids）
+                dedupe_key:
+                  type: string
+                  description: 可选，默认=job_name
+      responses:
+        '200':
+          description: 已入队或复用已有活跃任务
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  task_id: {type: integer}
+                  existing: {type: boolean, description: 是否复用已有任务}
+
+  /api/tasks/{task_id}:
+    get:
+      summary: 查询任务状态（前端轮询）
+      security: [{bearer: []}]
+      parameters:
+        - in: path
+          name: task_id
+          required: true
+          schema: {type: integer}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TaskRun'}
+        '404':
+          description: 任务不存在
+
+  /api/tasks/{task_id}/cancel:
+    post:
+      summary: 取消 pending 任务
+      security: [{bearer: []}]
+      parameters:
+        - in: path
+          name: task_id
+          required: true
+          schema: {type: integer}
+      responses:
+        '200':
+          description: 已取消
+        '409':
+          description: 任务已在运行或已终态，无法取消
+
+components:
+  securitySchemes:
+    bearer: {type: http, scheme: bearer, bearerFormat: JWT}
+  schemas:
+    TaskRun:
+      type: object
+      properties:
+        id: {type: integer}
+        job_name: {type: string}
+        dedupe_key: {type: string}
+        status:
+          type: string
+          enum: [pending, running, success, failed, skipped, cancelled]
+        trigger_source: {type: string, enum: [scheduler, manual]}
+        priority: {type: integer}
+        payload: {type: object}
+        current_step: {type: string}
+        step_detail: {type: string}
+        total_steps: {type: integer}
+        attempt_count: {type: integer}
+        error_msg: {type: string}
+        result_summary: {type: string}
+        started_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time}
