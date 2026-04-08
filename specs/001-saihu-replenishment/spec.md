@@ -234,7 +234,7 @@
 - **FR-058c**: 去重行为：
   - `scheduler` 触发遇重复 → 额外插入一条 `status='skipped'` 记录留痕
   - `manual` 触发遇重复 → 返回已有任务的 `task_id`，前端复用轮询
-- **FR-058d**: Worker 取任务 MUST 原子化，使用：
+- **FR-058d**: Worker 取任务 MUST 原子化。`attempt_count` 语义为"被 Worker 成功领取执行的次数"——包含租约过期后被 reaper 置为 failed、业务重新入队后的再次领取，每次领取都 +1。使用：
   ```sql
   UPDATE task_run SET status='running', worker_id=?, started_at=now(),
                        heartbeat_at=now(),
@@ -274,7 +274,7 @@
 - **order_detail_fetch_log**: `shop_id` / `amazon_order_id` / `fetched_at`（避免重复拉详情）
 - **zipcode_rule**: `id` / `country` / `prefix_length` / `value_type` (number/string) / `operator` / `compare_value` / `warehouse_id` / `priority`
 - **suggestion**: `id` / `created_at` / `status` (draft/partial/pushed/archived) / `global_config_snapshot` (JSON)
-- **suggestion_item**: `id` / `suggestion_id` FK / `commodity_sku` / `total_qty` / `country_breakdown` (JSON) / `warehouse_breakdown` (JSON) / `t_purchase` (JSON per country) / `t_ship` (JSON per country) / `overstock_countries` (JSON) / `urgent` (bool) / `push_status` / `saihu_po_number` / `push_error`
+- **suggestion_item**: `id` / `suggestion_id` FK / `commodity_sku` / `commodity_id`（生成时预查）/ `total_qty` / `country_breakdown` (JSON) / `warehouse_breakdown` (JSON) / `t_purchase` (JSON per country) / `t_ship` (JSON per country) / `overstock_countries` (JSON) / `velocity_snapshot` (JSON，用于追溯) / `sale_days_snapshot` (JSON，用于追溯) / `urgent` (bool) / `push_blocker` / `push_status` / `saihu_po_number` / `push_error` / `push_attempt_count` / `pushed_at`
 - **overstock_sku_mark**: `commodity_sku` / `country` / `warehouse_id` / `processed_at` / `note`
 - **api_call_log**: `id` / `endpoint` / `called_at` / `duration_ms` / `http_status` / `openapi_code` / `openapi_msg` / `request_id`
 - **shop**: 店铺缓存，`id` (PK, 来自赛狐) / `name` / `seller_id` / `region` (na/eu/fe) / `marketplace_id` / `status` (0/1/2) / `ad_status` / `sync_enabled` (bool, 指定店铺模式下采购员勾选) / `last_sync_at`

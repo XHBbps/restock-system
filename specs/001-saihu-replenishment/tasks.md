@@ -29,9 +29,9 @@ description: "Task list for 赛狐补货计算工具 implementation"
 - [ ] T001 Create top-level project structure: `backend/`, `frontend/`, `deploy/`, `.github/` per plan.md
 - [ ] T002 [P] Initialize backend Python project in `backend/pyproject.toml` with deps: fastapi, uvicorn[standard], sqlalchemy[asyncio], alembic, asyncpg, pydantic, pydantic-settings, httpx, aiolimiter, tenacity, apscheduler, structlog, passlib[bcrypt], python-jose[cryptography], python-dateutil
 - [ ] T003 [P] Add backend dev deps in `backend/pyproject.toml`: ruff, black, mypy, pytest, pytest-asyncio, pytest-cov, httpx (test client), freezegun
-- [ ] T004 [P] Configure backend tooling: `backend/pyproject.toml` `[tool.ruff]`, `[tool.black]`, `[tool.mypy]`, `[tool.pytest.ini_options]` with strict settings aligned to constitution
+- [ ] T004 [P] Configure backend tooling: `backend/pyproject.toml` `[tool.ruff]`, `[tool.black]`, `[tool.mypy]`, `[tool.pytest.ini_options]` with strict settings aligned to constitution; **additionally** wire up pre-commit hooks via `.pre-commit-config.yaml` running ruff + black + mypy on every commit (宪法 NON-NEGOTIABLE 要求每次提交即通过)
 - [ ] T005 [P] Initialize frontend Vue 3 project in `frontend/package.json` with deps: vue, vue-router, pinia, element-plus, axios, lucide-vue-next, dayjs; dev deps: vite, typescript, @vitejs/plugin-vue, vue-tsc, eslint, @typescript-eslint, prettier, sass, vitest
-- [ ] T006 [P] Configure frontend tooling: `frontend/vite.config.ts`, `frontend/tsconfig.json`, `frontend/.eslintrc.cjs`, `frontend/.prettierrc`
+- [ ] T006 [P] Configure frontend tooling: `frontend/vite.config.ts`, `frontend/tsconfig.json`, `frontend/.eslintrc.cjs`, `frontend/.prettierrc`; **additionally** add `lint-staged` + husky 或 pre-commit 钩子跑 `eslint --max-warnings=0 && vue-tsc --noEmit` on every commit
 - [ ] T007 [P] Create Docker Compose stack in `deploy/docker-compose.yml` with services: caddy, db (postgres:16-alpine), backend, frontend; volumes for pg data + caddy data
 - [ ] T008 [P] Create `deploy/Caddyfile` with HTTPS + reverse proxy for `/api/*` → backend:8000, rest → frontend:80
 - [ ] T009 [P] Create `deploy/.env.example` and `backend/.env.example` with all required keys (DB, Saihu, JWT, login password)
@@ -79,7 +79,11 @@ description: "Task list for 赛狐补货计算工具 implementation"
 ### Authentication
 
 - [ ] T036 Create `backend/app/core/security.py` with bcrypt helpers (`hash_password`, `verify_password`) and JWT helpers (`create_access_token`, `decode_token`)
-- [ ] T037 Create `backend/app/api/auth.py` routes: `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me` with login-lockout logic (failed 5 → lock 10min)
+- [ ] T037 Create `backend/app/api/auth.py` routes: `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`。登录锁定语义：
+  - 登录前检查 `global_config.login_locked_until > now()` → 返回 423 + `locked_until`
+  - 密码错误 → `login_failed_count += 1`；若达到 5 → 设置 `login_locked_until = now() + 10min` 并 `login_failed_count = 0`
+  - 密码正确且未锁定 → `login_failed_count = 0`、`login_locked_until = NULL`、签发 JWT
+  - 所有计数修改走单条 `UPDATE ... WHERE id=1` SQL 避免并发竞态
 - [ ] T038 Create `backend/app/api/deps.py` with `get_current_session` dependency extracting + validating JWT from Authorization header
 
 ### Saihu API client
@@ -104,7 +108,13 @@ description: "Task list for 赛狐补货计算工具 implementation"
 - [ ] T053 Create `backend/app/tasks/queue.py` with `enqueue(job_name, dedupe_key=None, trigger_source, payload)` using transactional INSERT + catching `UniqueViolationError` → return existing task id per FR-058b/c
 - [ ] T054 Create `backend/app/tasks/worker.py` with single-worker asyncio loop: atomic claim via `UPDATE ... FOR UPDATE SKIP LOCKED RETURNING *` + heartbeat loop (30s) + 2min lease
 - [ ] T055 Create `backend/app/tasks/reaper.py` running every 60s: `UPDATE task_run SET status='failed', error_msg='Lease expired' WHERE status='running' AND lease_expires_at < now()`
-- [ ] T056 Create `backend/app/tasks/scheduler.py` with APScheduler AsyncIOScheduler configured via `global_config.sync_interval_minutes` + `calc_cron` + daily archive at 02:00; each trigger calls `enqueue(...)` not direct execution
+- [ ] T056 Create `backend/app/tasks/scheduler.py` with APScheduler `AsyncIOScheduler` configured：
+  - 全局 `job_defaults={'max_instances': 1, 'coalesce': True, 'misfire_grace_time': 60}` 防止同一调度触发器叠加
+  - 按 `global_config.sync_interval_minutes` 设置每小时同步触发器（入队 product_listing / inventory / out_records / order_list / order_detail）
+  - `warehouse` 单独设置为每日一次
+  - 按 `calc_cron`（默认 08:00 Asia/Shanghai）设置规则引擎触发器
+  - 每日 02:00 设置库存归档触发器
+  - **每次触发只调用 `enqueue(...)`，业务执行在 Worker 侧**
 - [ ] T057 Create `backend/app/tasks/jobs/__init__.py` as job registry mapping `job_name → async function`
 - [ ] T058 Create `backend/app/api/task.py` routes per `contracts/task.yaml`: list, POST enqueue, GET `{id}`, POST `{id}/cancel`
 - [ ] T059 Add worker/scheduler/reaper lifecycle to `backend/app/main.py` lifespan (start on startup, graceful shutdown)
@@ -136,13 +146,13 @@ description: "Task list for 赛狐补货计算工具 implementation"
 
 - [ ] T070 [P] [US1] Create `backend/app/sync/product_listing.py` job: paginate listing endpoint → UPSERT `product_listing`, update `sync_state.sync_product_listing`
 - [ ] T071 [P] [US1] Create `backend/app/sync/warehouse.py` job: full sync warehouse list → UPSERT `warehouse` (new records flagged "待指定国家")
-- [ ] T072 [P] [US1] Create `backend/app/sync/inventory.py` job: paginate inventory endpoint → UPSERT `inventory_snapshot_latest` (null→0 handling)
+- [ ] T072 [P] [US1] Create `backend/app/sync/inventory.py` job: paginate inventory endpoint → UPSERT `inventory_snapshot_latest` (null→0 handling); **仅写入 `available` + `reserved` 字段，跳过 `stockWait`（在途口径由 T073 "其他出库列表" 独立管理，见 FR-017/FR-017a~d）**
 - [ ] T073 [US1] Create `backend/app/sync/out_records.py` job implementing FR-017a/b/c: `sync_start_time` snapshot → paginate with `searchField=remark, searchValue=在途中` → UPSERT `in_transit_record` + `in_transit_item` → post-sync aging `UPDATE in_transit_record SET is_in_transit=false WHERE last_seen_at < sync_start_time`
 - [ ] T074 [US1] Create `backend/app/sync/order_list.py` job per FR-021: `dateType=updateDateTime` + `dateStart=sync_state.last_success_at-5min` + paginate → UPSERT `order_header` by `(shop_id, amazon_order_id)` + `order_item` by `(order_id, order_item_id)` with time conversion via `core/timezone.py`
 - [ ] T075 [US1] Create `backend/app/sync/order_detail.py` job per FR-022/023: query orders whose `seller_sku IN (SELECT seller_sku FROM product_listing)` AND `(shop_id, amazon_order_id) NOT IN order_detail_fetch_log` → call detail endpoint one-by-one (rate-limited) → UPSERT `order_detail` + `order_detail_fetch_log`
 - [ ] T076 [P] [US1] Create `backend/app/sync/shop.py` job for manual shop-list refresh (filters `status='0'`)
 - [ ] T077 [US1] Wire all sync jobs into `backend/app/tasks/jobs/` registry with progress reporting (`current_step`, `step_detail`, `total_steps`)
-- [ ] T078 [US1] Add scheduler triggers in `backend/app/tasks/scheduler.py`: every 60 min enqueue product_listing + warehouse (daily) + inventory + out_records + order_list + order_detail (chained)
+- [ ] T078 [US1] Register sync job handlers in `backend/app/tasks/jobs/` registry so that the scheduler triggers defined in T056 resolve to real executors: every-hour group = {product_listing, inventory, out_records, order_list, order_detail} chained in order; daily group = {warehouse}
 
 ### Rule engine (Step 1–6)
 
@@ -248,7 +258,7 @@ description: "Task list for 赛狐补货计算工具 implementation"
 **Independent Test**: 某 SKU 全局 velocity=0 + 库存>0 → 积压提示页显示 → 标为已处理后从默认视图隐藏；某接口调用失败 → 监控页显示错误原因 → 点击重试生成新任务。
 
 - [ ] T124 [US5] Extend `backend/app/engine/runner.py` to populate `overstock_sku_mark` during Step 1 (FR-032): UPSERT rows for SKUs with all-zero velocity + any warehouse available > 0, keeping prior `processed_at` if exists
-- [ ] T125 [US5] Create `backend/app/api/monitor.py` routes per `contracts/monitor.yaml`: `GET /api/monitor/api-calls` (aggregated last 24h per endpoint), `GET /api/monitor/api-calls/recent`, `POST /api/monitor/api-calls/{id}/retry` (enqueues corresponding sync job)
+- [ ] T125 [US5] Create `backend/app/api/monitor.py` routes per `contracts/monitor.yaml`: `GET /api/monitor/api-calls` (aggregated last 24h per endpoint), `GET /api/monitor/api-calls/recent`, `POST /api/monitor/api-calls/{id}/retry` (enqueues corresponding sync job); 在聚合视图中**额外计算** "订单邮编合规度"：`COUNT(order_header WHERE purchase_date < now() - interval '50 days' AND (shop_id, amazon_order_id) NOT IN order_detail_fetch_log)`，大于 0 时在 UI 警示 (FR-004 合规)
 - [ ] T126 [US5] Add routes: `GET /api/monitor/overstock` (with show_processed filter) + `PATCH /api/monitor/overstock/{id}/processed`
 - [ ] T127 [US5] Implement `last_sale_date` lookup in overstock response by querying latest non-zero `order_item` for the SKU
 - [ ] T128 [P] [US5] Create `frontend/src/api/monitor.ts`
@@ -287,7 +297,7 @@ description: "Task list for 赛狐补货计算工具 implementation"
 - **Foundational (Phase 2)**: Depends on Setup; BLOCKS all user stories
 - **User Story 1 (Phase 3, P1)**: Depends on Foundational only; can ship as MVP
 - **User Story 2 (Phase 4, P2)**: Depends on Foundational; orthogonal to US1
-- **User Story 3 (Phase 5, P2)**: Depends on Foundational; US3 is required for full US1 quality but US1 can ship with hardcoded warehouse/zipcode fallbacks temporarily
+- **User Story 3 (Phase 5, P2)**: Depends on Foundational; **US3 的初始化（仓库国家映射 + 至少一条 zipcode_rule）是 US1 能生成正确建议单的前置条件**。实际顺序：完成 Foundational → 完成 US3 的初始化（仅手工配置页即可，无需完整页面）→ 进入 US1 引擎开发。US3 的完整 UI 可与 US1 并行实现，但引擎运行前仓库国家与邮编规则必须落库
 - **User Story 4 (Phase 6, P3)**: Depends on US1 (needs suggestion table populated); otherwise independent
 - **User Story 5 (Phase 7, P3)**: Depends on Foundational + US1 (overstock table populated by engine); API monitor depends only on Foundational
 - **Polish (Phase 8)**: After desired user stories complete
