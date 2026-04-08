@@ -103,7 +103,7 @@
 **数据同步 — 在线产品信息 (FR-009 ~ FR-012)**
 
 - **FR-009**: 系统 MUST 定时（默认每小时）调用"获取在线产品信息"接口 `/api/order/api/product/pageList.json`，传参 `match=true` 仅拉已配对产品，上传 `onlineStatus=active` 只拉在售 listing
-- **FR-010**: 每条 listing MUST 落库到 `product_listing` 表，含 `commoditySku`、`commodityId`、`shopId`、`marketplaceId`（二字码）、`sku`（sellerSku）、`parentSku`、`commodityName`、`mainImage`、`day7SaleNum`、`day14SaleNum`、`day30SaleNum`、`onlineStatus`、`isMatched`、`lastSyncAt`
+- **FR-010**: 每条 listing MUST 落库到 `product_listing` 表，含 `commoditySku`、`commodityId`、`shopId`、`marketplaceId`（二字码）、`sku`（sellerSku）、`parentSku`、`commodityName`、`mainImage`、`onlineStatus`、`isMatched`、`lastSyncAt`；`day7/14/30SaleNum` 字段仍落库但**仅作对账参考**，不参与 velocity 计算
 - **FR-011**: 同一 `commoditySku` 在不同 listing 返回的 `commodityId` 若不一致，系统 MUST 记录告警日志但仍按 commoditySku 汇总；推送采购单时任取一条 listing 的 commodityId
 - **FR-012**: 在线产品信息 MUST 支持分页抓取（pageSize ≤ 100，一页一次请求间隔 ≥ 1s）
 
@@ -116,11 +116,11 @@
 - **FR-017**: 系统 MUST 定时（默认每小时）调用"查询库存明细"接口 `/api/warehouseManage/warehouseItemList.json` 同步库存快照到 `inventory_snapshot` 表；字段映射：`stockAvailable → available`、`stockOccupy → reserved`、`stockWait → in_transit`（任何字段为 null 时按 0 处理）
 - **FR-018**: 库存快照 MUST 保留时间戳，不覆盖历史；后续计算使用最新一次成功快照
 
-**数据同步 — 订单（仅服务于 Step 5 仓内分配） (FR-019 ~ FR-024)**
+**数据同步 — 订单（服务于 Step 1 velocity + Step 5 仓内分配） (FR-019 ~ FR-024)**
 
-- **FR-019**: 销量数据 MUST 从"在线产品信息"接口的 `day7SaleNum / day14SaleNum / day30SaleNum` 字段获取，**不再从订单聚合**
-- **FR-020**: 订单接口仅用于 Step 5 的邮编→仓库分配统计，同步范围 MUST 限定为"近 30 天"且"对应 product_listing 中已配对 SKU 的店铺/站点"
-- **FR-021**: 系统 MUST 定时调用"订单列表"接口 `/api/order/pageList.json`，必传 `dateStart/dateEnd/dateType=createDateTime`，拉取订单骨架到 `order_header` 表
+- **FR-019**: Velocity 数据 MUST 由系统基于 `order_item` 自行聚合计算，**不信任赛狐在线产品信息接口的 `day*SaleNum` 字段**（未经真实测试验证、口径可能与"已发货净销量"不一致）
+- **FR-020**: 订单接口同时服务于 Step 1（velocity 聚合）和 Step 5（邮编分配）。订单列表 MUST 全量拉取近 30 天（接口不支持按 SKU 过滤），订单详情仅对"已配对 SKU 相关订单"增量拉取
+- **FR-021**: 系统 MUST 定时调用"订单列表"接口 `/api/order/pageList.json`，增量同步使用 `dateType=updateDateTime` + `dateStart=上次同步时间` + `dateEnd=now`，确保捕获状态变化（发货/取消/退款）；按 `(shop_id, amazon_order_id)` UPSERT 到 `order_header + order_item`
 - **FR-022**: 订单列表不返回邮编。系统 MUST 对尚未拉过详情的订单增量调用"订单详情"接口 `/api/order/detailByOrderId.json`（需 `shopId + amazonOrderId`），返回的 `postalCode`、`countryCode`、`stateOrRegion`、`detailAddress` 落入 `order_detail` 表
 - **FR-023**: 系统 MUST 维护"订单详情已拉列表" `order_detail_fetch_log`，已拉过的 (shopId, amazonOrderId) MUST NOT 重复调用
 - **FR-024**: 订单邮编一经入库 MUST 永久保留，不随后续同步更新
@@ -135,14 +135,30 @@
 **规则引擎 — Step 1 动销速度 (FR-027 ~ FR-029)**
 
 - **FR-027**: 系统 MUST 每日定时（默认 08:00 Asia/Shanghai）对所有已配对 SKU 执行补货计算；支持 UI 手动触发
-- **FR-028 (Step 1)**: 对每个 `commoditySku` 的每个国家：
+- **FR-028 (Step 1)**: 对每个启用 `commoditySku` 的每个国家，从 `order_item` 聚合计算：
   ```
-  listings = product_listing 中 commodity_sku=X 且 marketplace→country=Y 的所有 listing
-  day7_sum  = Σ listing.day7SaleNum
-  day14_sum = Σ listing.day14SaleNum
-  day30_sum = Σ listing.day30SaleNum
-  velocity[国] = day7_sum/7 × 0.5 + day14_sum/14 × 0.3 + day30_sum/30 × 0.2
+  过滤条件：
+    order_header.order_status ∈ {Shipped, PartiallyShipped}
+    order_header.purchase_date ∈ [昨天-29, 昨天]（不含今天）
+    order_item.commodity_sku = X
+    marketplace_to_country(order_header.marketplace_id) = Y
+
+  对每条 order_item：
+    effective = max(
+      int(quantityShipped or 0) - int(refundNum or 0),
+      0
+    )
+
+  按日期聚合：
+    day7_sum  = Σ effective where date ∈ [昨天-6, 昨天]
+    day14_sum = Σ effective where date ∈ [昨天-13, 昨天]
+    day30_sum = Σ effective where date ∈ [昨天-29, 昨天]
+
+  velocity[sku][国] = day7_sum/7 × 0.5
+                    + day14_sum/14 × 0.3
+                    + day30_sum/30 × 0.2
   ```
+- **FR-028a**: 订单状态变更 MUST 在每次增量同步中通过 UPSERT 正确反映；已取消/已退款订单的 effective 自动归零
 - **FR-029**: 若某 commoditySku 在某国 velocity = 0，则该 (SKU, 国家) 组合在主建议单中跳过；若该 SKU 在所有国家 velocity 均为 0 且任一仓库存 > 0，则写入积压提示表
 
 **规则引擎 — Step 2/3/4/5/6 (FR-030 ~ FR-037)**
@@ -240,8 +256,9 @@
 - 赛狐 ERP OpenAPI 账号已开通以下接口：access_token / 店铺列表 / 在线产品信息 / 查询仓库列表 / 查询库存明细 / 订单列表 / 订单详情 / 其他出库列表（备用）/ 采购单创建；出口 IP 已加赛狐白名单
 - 赛狐限流：每个业务接口 ≤1 QPS（实测 40019 阈值）；token 接口另有独立频率限制不可频繁调用
 - access_token 默认有效期约 24 小时（实测 `expires_in ≈ 84850421ms`），系统按 expires_in 管理缓存
-- 在线产品信息接口返回的 `day7/14/30SaleNum` 是赛狐已算好的销量口径，系统直接信任
-- 只处理 `match=true && onlineStatus=active` 的 listing
+- 在线产品信息接口仅用于：① `match=true && onlineStatus=active` 筛选 ② 建立 `commoditySku ↔ commodityId` 映射 ③ 提供商品名/图片展示。其 `day*SaleNum` 字段存库但不参与 velocity 计算
+- Velocity 数据由系统从 `order_item` 自行聚合（定义：`effective = max(quantityShipped - refundNum, 0)`，过滤 Shipped/PartiallyShipped）
+- 订单增量同步按 `updateDateTime` 拉取，确保订单状态变化（发货/取消/退款）能被捕获并覆盖历史记录
 - 数据同步默认每小时一次；规则引擎默认每日 08:00 北京时间
 - 全局参数默认值：BUFFER=30、TARGET=60、LEAD=50、MIN_SAMPLE=10
 - 订单邮编从订单详情接口获得，已拉的 (shopId, amazonOrderId) 永不重复拉

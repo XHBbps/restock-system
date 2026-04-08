@@ -34,7 +34,8 @@
 
 - 模块 1–8 全部逐项确认完成
 - 基于 8 份真实接口文档 + 7 份测试样例完成 API 对齐
-- 71 条 FR、5 个 User Story、8 条 SC、16 个实体（inventory 拆为 latest + history）
+- 72 条 FR、5 个 User Story、8 条 SC、16 个实体
+- Step 1 velocity 从订单聚合（非在线产品信息字段），用发货量口径
 - Frontend Design Direction 章节已纳入 spec（色板 + 视觉语言 + 12 页面清单 + 信息架构 + 进度可视化策略）
 - 关键修正：velocity 改用在线产品信息的 day7/14/30SaleNum（不再聚合订单）
 - 店铺列表接口已接入（`/api/shop/pageList.json`），指定店铺模式完整可用
