@@ -271,21 +271,21 @@ description: "Task list for 赛狐补货计算工具 implementation"
 
 ## Phase 8: Polish & Cross-Cutting Concerns
 
-- [ ] T131 [P] Add daily archive job in `backend/app/tasks/jobs/daily_archive.py`: copy `inventory_snapshot_latest` → `inventory_snapshot_history` at 02:00; register in scheduler
-- [ ] T132 [P] Add DB backup cron script in `deploy/scripts/pg_backup.sh`: `pg_dump` + upload to OSS/COS using credentials from `.env`
-- [ ] T133 [P] Add `backend/app/api/health.py` with `GET /healthz` reading DB connectivity
-- [ ] T134 [P] Add structured request logging middleware in `backend/app/main.py` binding request id to structlog context
-- [ ] T135 [P] Add Prometheus-style metrics endpoint `GET /metrics` exposing task counts per status (optional, for future observability)
-- [ ] T136 [P] Run mypy strict on `backend/app/` and fix all type errors
-- [ ] T137 [P] Run ruff + black on `backend/app/` and `backend/tests/` with `--check` in CI
-- [ ] T138 [P] Run `vue-tsc --noEmit` on frontend and fix all type errors
-- [ ] T139 [P] Run `eslint --max-warnings=0` on frontend
-- [ ] T140 [P] Lighthouse/devtools measurement of SuggestionListView: verify FCP<1.5s, LCP<2.5s, first-bundle JS gzip<250KB
-- [ ] T141 [P] Load test rule engine with 500 SKU fixture: verify completion <5min per SC-004
-- [ ] T142 Verify first-time order backfill path (~3000 orders) completes within 1 hour per SC-008
-- [ ] T143 Run `quickstart.md` end-to-end on a fresh VPS: verify 30-day stability proxy by running all flows once
-- [ ] T144 Remove dead code, unused imports, TODO markers before final commit
-- [ ] T145 Verify Constitution Check still passes post-implementation (update `specs/001-saihu-replenishment/checklists/requirements.md` if needed)
+- [X] T131 [P] Add daily archive job in `backend/app/tasks/jobs/daily_archive.py`: copy `inventory_snapshot_latest` → `inventory_snapshot_history` at 02:00; register in scheduler
+- [X] T132 [P] Add DB backup cron script in `deploy/scripts/pg_backup.sh`: `pg_dump` + upload to OSS/COS using credentials from `.env`
+- [X] T133 [P] `/healthz` 已在 backend/app/main.py 提供（Batch 1）
+- [X] T134 [P] Add structured request logging middleware in `backend/app/core/middleware.py` binding request id to structlog context
+- [X] T135 [P] Add metrics endpoint `GET /metrics` in `backend/app/api/metrics.py` (Prometheus 文本格式: task_run 状态 + saihu 24h 调用率)
+- [ ] T136 [P] Run mypy strict on `backend/app/` and fix all type errors —— **延后到首次本地构建**（pre-commit 已配置自动跑）
+- [ ] T137 [P] Run ruff + black on `backend/app/` and `backend/tests/` with `--check` in CI —— **同上**
+- [ ] T138 [P] Run `vue-tsc --noEmit` on frontend and fix all type errors —— **同上**
+- [ ] T139 [P] Run `eslint --max-warnings=0` on frontend —— **同上**
+- [ ] T140 [P] Lighthouse/devtools measurement of SuggestionListView —— **延后到首次部署**（需要真实环境）
+- [ ] T141 [P] Load test rule engine with 500 SKU fixture —— **延后到首次部署 + 真实数据**
+- [ ] T142 Verify first-time order backfill path (~3000 orders) completes within 1 hour —— **延后到首次部署 + 真实赛狐账号**
+- [ ] T143 Run `quickstart.md` end-to-end on a fresh VPS —— **延后到首次部署**
+- [X] T144 Remove dead code, unused imports, TODO markers before final commit
+- [X] T145 Verify Constitution Check still passes post-implementation
 
 ---
 

@@ -19,11 +19,14 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.api import auth as auth_api
 from app.api import config as config_api
+from app.api import metrics as metrics_api
 from app.api import monitor as monitor_api
 from app.api import suggestion as suggestion_api
 from app.api import sync as sync_api
 from app.api import task as task_api
+from app.core.middleware import RequestLoggingMiddleware
 from app.pushback import purchase as _job_push  # noqa: F401
+from app.tasks.jobs import daily_archive as _job_arch  # noqa: F401
 # 触发 @register 装饰器：导入所有 sync 模块以注册 job_name
 from app.sync import inventory as _job_inv  # noqa: F401
 from app.sync import order_detail as _job_od  # noqa: F401
@@ -103,6 +106,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# 请求日志中间件
+app.add_middleware(RequestLoggingMiddleware)
+
 
 # ==================== 全局异常处理 ====================
 @app.exception_handler(BusinessError)
@@ -133,6 +139,7 @@ app.include_router(suggestion_api.router)
 app.include_router(sync_api.router)
 app.include_router(config_api.router)
 app.include_router(monitor_api.router)
+app.include_router(metrics_api.router)
 
 
 @app.get("/healthz", tags=["health"])
