@@ -1,0 +1,123 @@
+// =====================================================================
+// Element Plus 组件深度定制以贴近 Ryvix 风格
+// =====================================================================
+
+// Element Plus CSS 变量重写
+:root {
+  // 主色 → 墨绿
+  --el-color-primary: #{$color-brand-primary};
+  --el-color-primary-light-3: #{$color-brand-primary-soft};
+  --el-color-primary-light-5: #{$color-brand-primary-soft};
+  --el-color-primary-light-7: #{$color-brand-primary-soft};
+  --el-color-primary-light-8: #{$color-brand-primary-soft};
+  --el-color-primary-light-9: #{$color-brand-primary-soft};
+  --el-color-primary-dark-2: #{$color-brand-primary-active};
+
+  --el-color-success: #{$color-success};
+  --el-color-warning: #{$color-warning};
+  --el-color-danger: #{$color-danger};
+
+  // 文字
+  --el-text-color-primary: #{$color-text-primary};
+  --el-text-color-regular: #{$color-text-primary};
+  --el-text-color-secondary: #{$color-text-secondary};
+
+  // 边框
+  --el-border-color: #{$color-border-default};
+  --el-border-color-light: #{$color-border-subtle};
+  --el-border-color-lighter: #{$color-border-subtle};
+
+  // 圆角
+  --el-border-radius-base: #{$radius-md};
+  --el-border-radius-small: #{$radius-sm};
+  --el-border-radius-round: #{$radius-pill};
+
+  // 卡片
+  --el-card-padding: #{$space-6};
+  --el-card-border-radius: #{$radius-lg};
+
+  // 字体
+  --el-font-family: #{$font-family-sans};
+  --el-font-size-base: #{$font-size-md};
+
+  // 阴影
+  --el-box-shadow-light: #{$shadow-card};
+  --el-box-shadow: #{$shadow-card-hover};
+}
+
+// 卡片：去掉默认边框，用阴影代替
+.el-card {
+  border: none;
+  box-shadow: $shadow-card;
+  border-radius: $radius-lg;
+
+  &:hover {
+    box-shadow: $shadow-card-hover;
+  }
+}
+
+// 按钮：圆角 pill
+.el-button {
+  border-radius: $radius-pill;
+  font-weight: $font-weight-medium;
+  padding: 8px 20px;
+  transition: $transition-base;
+}
+
+// 表格：宽行距 + 细灰列头
+.el-table {
+  background: transparent;
+  --el-table-border-color: #{$color-border-subtle};
+  --el-table-header-bg-color: #{$color-bg-subtle};
+  --el-table-row-hover-bg-color: #{$color-brand-primary-soft};
+
+  th.el-table__cell {
+    background-color: $color-bg-subtle;
+    color: $color-text-secondary;
+    font-weight: $font-weight-medium;
+    font-size: $font-size-sm;
+  }
+}
+
+// 标签 / 徽章：pastel pill
+.el-tag {
+  border-radius: $radius-pill;
+  border: none;
+  font-weight: $font-weight-medium;
+
+  &.el-tag--success {
+    background-color: $color-success-soft;
+    color: $color-success;
+  }
+  &.el-tag--warning {
+    background-color: $color-warning-soft;
+    color: $color-warning;
+  }
+  &.el-tag--danger {
+    background-color: $color-danger-soft;
+    color: $color-danger;
+  }
+  &.el-tag--info {
+    background-color: $color-info-soft;
+    color: $color-info;
+  }
+}
+
+// 输入框 / 选择器：大圆角
+.el-input__wrapper,
+.el-select__wrapper,
+.el-textarea__inner {
+  border-radius: $radius-md;
+  box-shadow: 0 0 0 1px $color-border-default inset;
+  transition: $transition-base;
+
+  &:hover {
+    box-shadow: 0 0 0 1px $color-border-strong inset;
+  }
+}
+
+// 弹窗
+.el-dialog {
+  border-radius: $radius-lg;
+  overflow: hidden;
+}

@@ -105,32 +105,32 @@ description: "Task list for 赛狐补货计算工具 implementation"
 
 ### Task system (Scheduler + Queue + Worker)
 
-- [ ] T053 Create `backend/app/tasks/queue.py` with `enqueue(job_name, dedupe_key=None, trigger_source, payload)` using transactional INSERT + catching `UniqueViolationError` → return existing task id per FR-058b/c
-- [ ] T054 Create `backend/app/tasks/worker.py` with single-worker asyncio loop: atomic claim via `UPDATE ... FOR UPDATE SKIP LOCKED RETURNING *` + heartbeat loop (30s) + 2min lease
-- [ ] T055 Create `backend/app/tasks/reaper.py` running every 60s: `UPDATE task_run SET status='failed', error_msg='Lease expired' WHERE status='running' AND lease_expires_at < now()`
-- [ ] T056 Create `backend/app/tasks/scheduler.py` with APScheduler `AsyncIOScheduler` configured：
+- [X] T053 Create `backend/app/tasks/queue.py` with `enqueue(job_name, dedupe_key=None, trigger_source, payload)` using transactional INSERT + catching `UniqueViolationError` → return existing task id per FR-058b/c
+- [X] T054 Create `backend/app/tasks/worker.py` with single-worker asyncio loop: atomic claim via `UPDATE ... FOR UPDATE SKIP LOCKED RETURNING *` + heartbeat loop (30s) + 2min lease
+- [X] T055 Create `backend/app/tasks/reaper.py` running every 60s: `UPDATE task_run SET status='failed', error_msg='Lease expired' WHERE status='running' AND lease_expires_at < now()`
+- [X] T056 Create `backend/app/tasks/scheduler.py` with APScheduler `AsyncIOScheduler` configured：
   - 全局 `job_defaults={'max_instances': 1, 'coalesce': True, 'misfire_grace_time': 60}` 防止同一调度触发器叠加
   - 按 `global_config.sync_interval_minutes` 设置每小时同步触发器（入队 product_listing / inventory / out_records / order_list / order_detail）
   - `warehouse` 单独设置为每日一次
   - 按 `calc_cron`（默认 08:00 Asia/Shanghai）设置规则引擎触发器
   - 每日 02:00 设置库存归档触发器
   - **每次触发只调用 `enqueue(...)`，业务执行在 Worker 侧**
-- [ ] T057 Create `backend/app/tasks/jobs/__init__.py` as job registry mapping `job_name → async function`
-- [ ] T058 Create `backend/app/api/task.py` routes per `contracts/task.yaml`: list, POST enqueue, GET `{id}`, POST `{id}/cancel`
-- [ ] T059 Add worker/scheduler/reaper lifecycle to `backend/app/main.py` lifespan (start on startup, graceful shutdown)
+- [X] T057 Create `backend/app/tasks/jobs/__init__.py` as job registry mapping `job_name → async function`
+- [X] T058 Create `backend/app/api/task.py` routes per `contracts/task.yaml`: list, POST enqueue, GET `{id}`, POST `{id}/cancel`
+- [X] T059 Add worker/scheduler/reaper lifecycle to `backend/app/main.py` lifespan (start on startup, graceful shutdown)
 
 ### Frontend shell
 
-- [ ] T060 [P] Create `frontend/src/main.ts` with Vue + Pinia + Router + Element Plus + global styles
-- [ ] T061 [P] Create `frontend/src/styles/tokens.scss` with Ryvix design tokens (colors, radii, shadows, spacing) per spec Frontend Design Direction
-- [ ] T062 [P] Create `frontend/src/styles/element-overrides.scss` customizing Element Plus components to match tokens
-- [ ] T063 [P] Create `frontend/src/router/index.ts` with all 12 routes + auth guard
-- [ ] T064 [P] Create `frontend/src/stores/auth.ts` (Pinia) managing token + login state
-- [ ] T065 [P] Create `frontend/src/api/client.ts` axios wrapper with bearer injection + 401 redirect
-- [ ] T066 [P] Create `frontend/src/api/auth.ts` + `frontend/src/views/LoginView.vue` implementing login page
-- [ ] T067 [P] Create `frontend/src/components/AppLayout.vue` with left sidebar + top bar + content slot (per Ryvix layout)
-- [ ] T068 [P] Create `frontend/src/components/TaskProgress.vue` reusable progress indicator polling `GET /api/tasks/{id}` every 2s
-- [ ] T069 [P] Create `frontend/src/api/task.ts` + `frontend/src/stores/task.ts` for task polling management
+- [X] T060 [P] Create `frontend/src/main.ts` with Vue + Pinia + Router + Element Plus + global styles
+- [X] T061 [P] Create `frontend/src/styles/tokens.scss` with Ryvix design tokens (colors, radii, shadows, spacing) per spec Frontend Design Direction
+- [X] T062 [P] Create `frontend/src/styles/element-overrides.scss` customizing Element Plus components to match tokens
+- [X] T063 [P] Create `frontend/src/router/index.ts` with all 12 routes + auth guard
+- [X] T064 [P] Create `frontend/src/stores/auth.ts` (Pinia) managing token + login state
+- [X] T065 [P] Create `frontend/src/api/client.ts` axios wrapper with bearer injection + 401 redirect
+- [X] T066 [P] Create `frontend/src/api/auth.ts` + `frontend/src/views/LoginView.vue` implementing login page
+- [X] T067 [P] Create `frontend/src/components/AppLayout.vue` with left sidebar + top bar + content slot (per Ryvix layout)
+- [X] T068 [P] Create `frontend/src/components/TaskProgress.vue` reusable progress indicator polling `GET /api/tasks/{id}` every 2s
+- [X] T069 [P] Create `frontend/src/api/task.ts` + `frontend/src/stores/task.ts` for task polling management
 
 **Checkpoint**: DB migrated, auth works, Saihu client testable, task system operational, frontend shell renders login + empty layout. All user stories can now begin in parallel.
 

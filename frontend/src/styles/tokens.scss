@@ -1,0 +1,115 @@
+// =====================================================================
+// Ryvix 风格设计 tokens
+// 来源：spec.md → Frontend Design Direction
+// 通过 vite.config.ts 的 additionalData 全局自动引入
+// =====================================================================
+
+// ---------- 色彩 ----------
+$color-bg-base: #f7f6f2;          // 奶油米白全局背景
+$color-bg-card: #ffffff;
+$color-bg-elevated: #ffffff;
+$color-bg-subtle: #f0eee9;
+
+// 主色（墨绿）
+$color-brand-primary: #2d7a6a;
+$color-brand-primary-hover: #266a5c;
+$color-brand-primary-active: #1f594d;
+$color-brand-primary-soft: #e6f4f0; // 10% pastel 填充
+
+// 辅色（珊瑚橙）
+$color-accent-warm: #f18a65;
+$color-accent-warm-hover: #e8805f;
+$color-accent-warm-soft: #fde9df;
+
+// 文字
+$color-text-primary: #1f2937;
+$color-text-secondary: #8b94a3;
+$color-text-disabled: #c4cad3;
+$color-text-on-brand: #ffffff;
+
+// 边框 / 分割
+$color-border-subtle: #eef0f4;
+$color-border-default: #e2e6ec;
+$color-border-strong: #cdd3dc;
+
+// 状态色
+$color-success: #2d7a6a;        // 与品牌色一致
+$color-success-soft: #e6f4f0;
+$color-warning: #f18a65;
+$color-warning-soft: #fde9df;
+$color-danger: #e35d6a;
+$color-danger-soft: #fbe5e7;
+$color-info: #5b8def;
+$color-info-soft: #e7eefc;
+
+// ---------- 圆角 ----------
+$radius-sm: 6px;
+$radius-md: 10px;
+$radius-lg: 16px;
+$radius-xl: 20px;
+$radius-pill: 9999px;
+
+// ---------- 阴影 ----------
+$shadow-card: 0 2px 8px rgba(0, 0, 0, 0.04);
+$shadow-card-hover: 0 4px 16px rgba(0, 0, 0, 0.06);
+$shadow-popup: 0 8px 24px rgba(0, 0, 0, 0.08);
+
+// ---------- 间距 ----------
+$space-1: 4px;
+$space-2: 8px;
+$space-3: 12px;
+$space-4: 16px;
+$space-5: 20px;
+$space-6: 24px;
+$space-8: 32px;
+$space-10: 40px;
+$space-12: 48px;
+
+// ---------- 字体 ----------
+$font-family-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+  'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+$font-family-mono: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+
+$font-size-xs: 12px;
+$font-size-sm: 13px;
+$font-size-md: 14px;
+$font-size-lg: 16px;
+$font-size-xl: 18px;
+$font-size-2xl: 22px;
+$font-size-3xl: 28px;
+
+$font-weight-normal: 400;
+$font-weight-medium: 500;
+$font-weight-semibold: 600;
+$font-weight-bold: 700;
+
+$line-height-tight: 1.25;
+$line-height-normal: 1.5;
+$line-height-relaxed: 1.7;
+
+// ---------- 布局 ----------
+$layout-sidebar-width: 240px;
+$layout-sidebar-width-collapsed: 64px;
+$layout-topbar-height: 64px;
+$layout-content-padding: $space-8;
+
+// ---------- 过渡 ----------
+$transition-fast: 0.15s ease;
+$transition-base: 0.2s ease;
+$transition-slow: 0.3s ease;
+
+// ---------- 暴露为 CSS 变量 ----------
+:root {
+  --color-bg-base: #{$color-bg-base};
+  --color-bg-card: #{$color-bg-card};
+  --color-brand-primary: #{$color-brand-primary};
+  --color-brand-primary-soft: #{$color-brand-primary-soft};
+  --color-accent-warm: #{$color-accent-warm};
+  --color-accent-warm-soft: #{$color-accent-warm-soft};
+  --color-text-primary: #{$color-text-primary};
+  --color-text-secondary: #{$color-text-secondary};
+  --color-border-subtle: #{$color-border-subtle};
+  --shadow-card: #{$shadow-card};
+  --radius-card: #{$radius-lg};
+  --radius-pill: #{$radius-pill};
+}

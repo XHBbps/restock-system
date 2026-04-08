@@ -1,5 +1,19 @@
-// Phase 1 骨架 —— Phase 2 将补充 router / pinia / element-plus 等
+// 应用入口：装配 Vue + Pinia + Router + Element Plus
+import { createPinia } from 'pinia'
 import { createApp } from 'vue'
-import App from './App.vue'
 
-createApp(App).mount('#app')
+import ElementPlus from 'element-plus'
+import 'element-plus/dist/index.css'
+import zhCn from 'element-plus/es/locale/lang/zh-cn'
+
+import App from './App.vue'
+import router from './router'
+import './styles/element-overrides.scss'
+
+const app = createApp(App)
+
+app.use(createPinia())
+app.use(router)
+app.use(ElementPlus, { locale: zhCn })
+
+app.mount('#app')
