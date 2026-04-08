@@ -19,6 +19,14 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.api import auth as auth_api
 from app.api import task as task_api
+# 触发 @register 装饰器：导入所有 sync 模块以注册 job_name
+from app.sync import inventory as _job_inv  # noqa: F401
+from app.sync import order_detail as _job_od  # noqa: F401
+from app.sync import order_list as _job_ol  # noqa: F401
+from app.sync import out_records as _job_or  # noqa: F401
+from app.sync import product_listing as _job_pl  # noqa: F401
+from app.sync import shop as _job_shop  # noqa: F401
+from app.sync import warehouse as _job_wh  # noqa: F401
 from app.config import get_settings
 from app.core.exceptions import BusinessError, SaihuAPIError
 from app.core.logging import configure_logging, get_logger

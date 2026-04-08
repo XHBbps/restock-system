@@ -1,0 +1,187 @@
+"""订单列表同步。
+
+策略（spec FR-021）：
+- dateType=updateDateTime 捕获状态变化（发货/取消/退款）
+- dateStart = sync_state.last_success_at - 5min（首次回填使用 30 天窗口）
+- order_header 按 (shop_id, amazon_order_id) UPSERT
+- order_item 按 (order_id, order_item_id) UPSERT
+- 时间字段经站点时区转 Asia/Shanghai
+"""
+
+from datetime import datetime, timedelta
+from typing import Any
+
+from sqlalchemy import delete, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.logging import get_logger
+from app.core.timezone import marketplace_to_country, now_beijing, parse_saihu_time
+from app.db.session import async_session_factory
+from app.models.order import OrderHeader, OrderItem
+from app.models.shop import Shop
+from app.models.sync_state import SyncState
+from app.saihu.endpoints.order_list import list_orders
+from app.sync.common import mark_sync_failed, mark_sync_running, mark_sync_success
+from app.tasks.jobs import JobContext, register
+
+logger = get_logger(__name__)
+JOB_NAME = "sync_order_list"
+
+# 首次回填窗口
+INITIAL_BACKFILL_DAYS = 30
+# 增量同步重叠
+OVERLAP_MINUTES = 5
+
+
+@register(JOB_NAME)
+async def sync_order_list_job(ctx: JobContext) -> None:
+    await ctx.progress(current_step="同步订单列表", total_steps=1)
+    async with async_session_factory() as db:
+        started = await mark_sync_running(db, JOB_NAME)
+        date_start, date_end = await _compute_window(db, started)
+        shop_ids = await _resolve_shop_ids(db)
+
+    logger.info("sync_order_list_window", start=date_start, end=date_end, shops=len(shop_ids or []))
+    order_count = 0
+    item_count = 0
+    try:
+        async with async_session_factory() as db:
+            async for raw in list_orders(
+                date_start=date_start.strftime("%Y-%m-%d %H:%M:%S"),
+                date_end=date_end.strftime("%Y-%m-%d %H:%M:%S"),
+                date_type="updateDateTime",
+                shop_ids=shop_ids,
+            ):
+                ic = await _upsert_order(db, raw)
+                order_count += 1
+                item_count += ic
+                if order_count % 50 == 0:
+                    await db.commit()
+                    await ctx.progress(step_detail=f"已处理 {order_count} 单 / {item_count} 行")
+            await db.commit()
+
+        async with async_session_factory() as db:
+            await mark_sync_success(db, JOB_NAME, started)
+        logger.info("sync_order_list_done", orders=order_count, items=item_count)
+        await ctx.progress(
+            current_step="完成", step_detail=f"订单 {order_count} / 明细 {item_count}"
+        )
+    except Exception as exc:
+        async with async_session_factory() as db:
+            await mark_sync_failed(db, JOB_NAME, str(exc))
+        raise
+
+
+async def _compute_window(db: AsyncSession, now: datetime) -> tuple[datetime, datetime]:
+    state = (
+        await db.execute(select(SyncState).where(SyncState.job_name == JOB_NAME))
+    ).scalar_one_or_none()
+    if state and state.last_success_at:
+        date_start = state.last_success_at - timedelta(minutes=OVERLAP_MINUTES)
+    else:
+        date_start = now - timedelta(days=INITIAL_BACKFILL_DAYS)
+    return date_start, now
+
+
+async def _resolve_shop_ids(db: AsyncSession) -> list[str] | None:
+    """根据全局参数 shop_sync_mode 决定是否过滤 shop_ids。"""
+    from app.models.global_config import GlobalConfig
+
+    config = (
+        await db.execute(select(GlobalConfig).where(GlobalConfig.id == 1))
+    ).scalar_one_or_none()
+    if config is None or config.shop_sync_mode == "all":
+        return None
+    rows = (
+        await db.execute(
+            select(Shop.id).where(Shop.sync_enabled.is_(True)).where(Shop.status == "0")
+        )
+    ).scalars().all()
+    return list(rows) if rows else None
+
+
+async def _upsert_order(db: AsyncSession, raw: dict[str, Any]) -> int:
+    shop_id = str(raw.get("shopId") or "")
+    amazon_order_id = raw.get("amazonOrderId")
+    if not shop_id or not amazon_order_id:
+        return 0
+
+    marketplace_id_raw = raw.get("marketplaceId") or ""
+    country_code = marketplace_to_country(marketplace_id_raw) or ""
+    marketplace_id = country_code or marketplace_id_raw
+
+    purchase_date = parse_saihu_time(raw.get("purchaseDate"), marketplace_id_raw) or now_beijing()
+    last_update_date = (
+        parse_saihu_time(raw.get("lastUpdateDate"), marketplace_id_raw) or purchase_date
+    )
+
+    header_values = {
+        "shop_id": shop_id,
+        "amazon_order_id": amazon_order_id,
+        "marketplace_id": marketplace_id,
+        "country_code": country_code or "ZZ",
+        "order_status": raw.get("orderStatus") or "Unknown",
+        "order_total_currency": raw.get("orderTotalCurrency"),
+        "order_total_amount": _to_decimal(raw.get("orderTotalAmount")),
+        "fulfillment_channel": raw.get("fulfillmentChannel"),
+        "purchase_date": purchase_date,
+        "last_update_date": last_update_date,
+        "is_buyer_requested_cancel": str(raw.get("isBuyerRequestedCancel") or "0") == "1",
+        "refund_status": str(raw.get("refundStatus") or "") or None,
+        "last_sync_at": now_beijing(),
+    }
+    stmt = pg_insert(OrderHeader).values(**header_values).returning(OrderHeader.id)
+    update_set = {k: v for k, v in header_values.items() if k not in ("shop_id", "amazon_order_id")}
+    stmt = stmt.on_conflict_do_update(
+        constraint="uq_order_header_key",
+        set_=update_set,
+    )
+    order_id = (await db.execute(stmt)).scalar_one()
+
+    # 删除旧 items 后重插
+    await db.execute(delete(OrderItem).where(OrderItem.order_id == order_id))
+
+    items_to_insert: list[dict[str, Any]] = []
+    for raw_item in raw.get("orderItemVoList") or []:
+        order_item_id = raw_item.get("orderItemId")
+        commodity_sku = raw_item.get("commoditySku")
+        if not order_item_id or not commodity_sku:
+            continue
+        items_to_insert.append(
+            {
+                "order_id": order_id,
+                "order_item_id": str(order_item_id),
+                "commodity_sku": commodity_sku,
+                "seller_sku": raw_item.get("sellerSku"),
+                "quantity_ordered": _to_int(raw_item.get("quantityOrdered")),
+                "quantity_shipped": _to_int(raw_item.get("quantityShipped")),
+                "quantity_unfulfillable": _to_int(raw_item.get("quantityUnfulfillable")),
+                "refund_num": _to_int(raw_item.get("refundNum")),
+                "item_price_currency": raw_item.get("itemPriceCurrency"),
+                "item_price_amount": _to_decimal(raw_item.get("itemPriceAmount")),
+            }
+        )
+    if items_to_insert:
+        await db.execute(pg_insert(OrderItem).values(items_to_insert))
+    return len(items_to_insert)
+
+
+def _to_int(v: Any, default: int = 0) -> int:
+    if v is None or v == "":
+        return default
+    try:
+        return int(float(v))
+    except (TypeError, ValueError):
+        return default
+
+
+def _to_decimal(v: Any) -> Any:
+    if v is None or v == "":
+        return None
+    from decimal import Decimal, InvalidOperation
+
+    try:
+        return Decimal(str(v))
+    except (InvalidOperation, TypeError, ValueError):
+        return None

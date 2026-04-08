@@ -144,15 +144,15 @@ description: "Task list for 赛狐补货计算工具 implementation"
 
 ### Sync implementations (feed the engine)
 
-- [ ] T070 [P] [US1] Create `backend/app/sync/product_listing.py` job: paginate listing endpoint → UPSERT `product_listing`, update `sync_state.sync_product_listing`
-- [ ] T071 [P] [US1] Create `backend/app/sync/warehouse.py` job: full sync warehouse list → UPSERT `warehouse` (new records flagged "待指定国家")
-- [ ] T072 [P] [US1] Create `backend/app/sync/inventory.py` job: paginate inventory endpoint → UPSERT `inventory_snapshot_latest` (null→0 handling); **仅写入 `available` + `reserved` 字段，跳过 `stockWait`（在途口径由 T073 "其他出库列表" 独立管理，见 FR-017/FR-017a~d）**
-- [ ] T073 [US1] Create `backend/app/sync/out_records.py` job implementing FR-017a/b/c: `sync_start_time` snapshot → paginate with `searchField=remark, searchValue=在途中` → UPSERT `in_transit_record` + `in_transit_item` → post-sync aging `UPDATE in_transit_record SET is_in_transit=false WHERE last_seen_at < sync_start_time`
-- [ ] T074 [US1] Create `backend/app/sync/order_list.py` job per FR-021: `dateType=updateDateTime` + `dateStart=sync_state.last_success_at-5min` + paginate → UPSERT `order_header` by `(shop_id, amazon_order_id)` + `order_item` by `(order_id, order_item_id)` with time conversion via `core/timezone.py`
-- [ ] T075 [US1] Create `backend/app/sync/order_detail.py` job per FR-022/023: query orders whose `seller_sku IN (SELECT seller_sku FROM product_listing)` AND `(shop_id, amazon_order_id) NOT IN order_detail_fetch_log` → call detail endpoint one-by-one (rate-limited) → UPSERT `order_detail` + `order_detail_fetch_log`
-- [ ] T076 [P] [US1] Create `backend/app/sync/shop.py` job for manual shop-list refresh (filters `status='0'`)
-- [ ] T077 [US1] Wire all sync jobs into `backend/app/tasks/jobs/` registry with progress reporting (`current_step`, `step_detail`, `total_steps`)
-- [ ] T078 [US1] Register sync job handlers in `backend/app/tasks/jobs/` registry so that the scheduler triggers defined in T056 resolve to real executors: every-hour group = {product_listing, inventory, out_records, order_list, order_detail} chained in order; daily group = {warehouse}
+- [X] T070 [P] [US1] Create `backend/app/sync/product_listing.py` job: paginate listing endpoint → UPSERT `product_listing`, update `sync_state.sync_product_listing`
+- [X] T071 [P] [US1] Create `backend/app/sync/warehouse.py` job: full sync warehouse list → UPSERT `warehouse` (new records flagged "待指定国家"); 不覆盖 country
+- [X] T072 [P] [US1] Create `backend/app/sync/inventory.py` job: paginate inventory endpoint → UPSERT `inventory_snapshot_latest` (null→0 handling); **仅写入 `available` + `reserved` 字段，跳过 `stockWait`（在途口径由 T073 "其他出库列表" 独立管理，见 FR-017/FR-017a~d）**
+- [X] T073 [US1] Create `backend/app/sync/out_records.py` job implementing FR-017a/b/c: `sync_start_time` snapshot → paginate with `searchField=remark, searchValue=在途中` → UPSERT `in_transit_record` + `in_transit_item` → post-sync aging `UPDATE in_transit_record SET is_in_transit=false WHERE last_seen_at < sync_start_time`
+- [X] T074 [US1] Create `backend/app/sync/order_list.py` job per FR-021: `dateType=updateDateTime` + `dateStart=sync_state.last_success_at-5min` + paginate → UPSERT `order_header` by `(shop_id, amazon_order_id)` + `order_item` by `(order_id, order_item_id)` with time conversion via `core/timezone.py`; 支持 specific 店铺模式过滤
+- [X] T075 [US1] Create `backend/app/sync/order_detail.py` job per FR-022/023: query orders whose `seller_sku IN (SELECT seller_sku FROM product_listing)` AND `(shop_id, amazon_order_id) NOT IN order_detail_fetch_log` → call detail endpoint one-by-one (rate-limited) → UPSERT `order_detail` + `order_detail_fetch_log`; 单次最多 500 条
+- [X] T076 [P] [US1] Create `backend/app/sync/shop.py` job for manual shop-list refresh; 不覆盖 sync_enabled
+- [X] T077 [US1] Wire all sync jobs into `backend/app/tasks/jobs/` registry with progress reporting (`current_step`, `step_detail`, `total_steps`)（在 main.py 顶部 import 触发 @register）
+- [X] T078 [US1] Register sync job handlers in `backend/app/tasks/jobs/` registry so that the scheduler triggers defined in T056 resolve to real executors（已通过 Batch 4 T056 + T077 import 完成）
 
 ### Rule engine (Step 1–6)
 

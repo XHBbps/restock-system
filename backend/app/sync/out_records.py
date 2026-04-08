@@ -1,0 +1,163 @@
+"""其他出库列表（在途数据）同步。
+
+实现 spec FR-017a~d：
+- 记录 sync_start_time
+- 拉所有备注含'在途中'的出库单 → UPSERT in_transit_record (is_in_transit=true, last_seen_at=sync_start_time)
+- 同步结束后：UPDATE in_transit_record SET is_in_transit=false WHERE last_seen_at < sync_start_time
+  → 表示这些单据的'在途中'标签已消失，自动归零
+"""
+
+from typing import Any
+
+from sqlalchemy import delete, select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.logging import get_logger
+from app.db.session import async_session_factory
+from app.models.in_transit import InTransitItem, InTransitRecord
+from app.models.warehouse import Warehouse
+from app.saihu.endpoints.out_records import list_in_transit_records
+from app.sync.common import mark_sync_failed, mark_sync_running, mark_sync_success
+from app.tasks.jobs import JobContext, register
+
+logger = get_logger(__name__)
+JOB_NAME = "sync_out_records"
+
+
+@register(JOB_NAME)
+async def sync_out_records_job(ctx: JobContext) -> None:
+    await ctx.progress(current_step="同步在途出库单", total_steps=2)
+    async with async_session_factory() as db:
+        sync_start_time = await mark_sync_running(db, JOB_NAME)
+
+    record_count = 0
+    item_count = 0
+    try:
+        async with async_session_factory() as db:
+            warehouse_country_map = await _load_warehouse_countries(db)
+            async for raw in list_in_transit_records():
+                ic = await _upsert_out_record(db, raw, warehouse_country_map, sync_start_time)
+                record_count += 1
+                item_count += ic
+                if record_count % 50 == 0:
+                    await db.commit()
+                    await ctx.progress(step_detail=f"已处理 {record_count} 单 / {item_count} 行")
+            await db.commit()
+
+        # 老化处理：last_seen_at < sync_start_time 且 is_in_transit=true → 标记 false
+        await ctx.progress(current_step="老化标签消失的记录")
+        aged = await _age_out_records(sync_start_time)
+
+        async with async_session_factory() as db:
+            await mark_sync_success(db, JOB_NAME, sync_start_time)
+        logger.info(
+            "sync_out_records_done",
+            records=record_count,
+            items=item_count,
+            aged_out=aged,
+        )
+        await ctx.progress(
+            current_step="完成",
+            step_detail=f"在途单 {record_count} / 明细 {item_count} / 标签消失 {aged}",
+        )
+    except Exception as exc:
+        async with async_session_factory() as db:
+            await mark_sync_failed(db, JOB_NAME, str(exc))
+        raise
+
+
+async def _load_warehouse_countries(db: AsyncSession) -> dict[str, str | None]:
+    rows = (await db.execute(select(Warehouse.id, Warehouse.country))).all()
+    return {wid: country for wid, country in rows}
+
+
+async def _upsert_out_record(
+    db: AsyncSession,
+    raw: dict[str, Any],
+    warehouse_country_map: dict[str, str | None],
+    sync_start_time,
+) -> int:
+    record_id = str(raw.get("id") or "")
+    if not record_id:
+        return 0
+
+    target_warehouse_id = str(raw.get("targetFbaWarehouseId") or "") or None
+    target_country = warehouse_country_map.get(target_warehouse_id) if target_warehouse_id else None
+
+    rec_values = {
+        "saihu_out_record_id": record_id,
+        "out_warehouse_no": raw.get("outWarehouseNo"),
+        "target_warehouse_id": target_warehouse_id if target_warehouse_id in warehouse_country_map else None,
+        "target_country": target_country,
+        "remark": raw.get("remark"),
+        "status": str(raw.get("status") or "") or None,
+        "is_in_transit": True,
+        "last_seen_at": sync_start_time,
+    }
+    stmt = pg_insert(InTransitRecord).values(**rec_values)
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["saihu_out_record_id"],
+        set_={
+            "out_warehouse_no": rec_values["out_warehouse_no"],
+            "target_warehouse_id": rec_values["target_warehouse_id"],
+            "target_country": rec_values["target_country"],
+            "remark": rec_values["remark"],
+            "status": rec_values["status"],
+            "is_in_transit": True,
+            "last_seen_at": sync_start_time,
+        },
+    )
+    await db.execute(stmt)
+
+    # 重写 items：先删后插（每次同步全量覆盖该出库单的明细）
+    await db.execute(delete(InTransitItem).where(InTransitItem.saihu_out_record_id == record_id))
+
+    items: list[dict[str, Any]] = []
+    for raw_item in raw.get("items") or []:
+        commodity_sku = raw_item.get("commoditySku")
+        if not commodity_sku:
+            continue
+        goods = _to_int(raw_item.get("goods"), 0)
+        if goods <= 0:
+            continue
+        items.append(
+            {
+                "saihu_out_record_id": record_id,
+                "commodity_sku": commodity_sku,
+                "goods": goods,
+            }
+        )
+    if items:
+        await db.execute(pg_insert(InTransitItem).values(items))
+    return len(items)
+
+
+async def _age_out_records(sync_start_time) -> int:
+    """将本次未见到的活跃记录标记为非在途。"""
+    async with async_session_factory() as db:
+        result = await db.execute(
+            text(
+                """
+                UPDATE in_transit_record
+                SET is_in_transit = false,
+                    updated_at = now()
+                WHERE is_in_transit = true
+                  AND last_seen_at < :sync_start
+                RETURNING saihu_out_record_id
+                """
+            ),
+            {"sync_start": sync_start_time},
+        )
+        ids = [row[0] for row in result.all()]
+        await db.commit()
+        return len(ids)
+
+
+def _to_int(v: Any, default: int = 0) -> int:
+    if v is None or v == "":
+        return default
+    try:
+        return int(float(v))
+    except (TypeError, ValueError):
+        return default
