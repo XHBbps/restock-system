@@ -48,33 +48,33 @@ description: "Task list for 赛狐补货计算工具 implementation"
 
 ### Backend core (config, logging, DB session)
 
-- [ ] T012 Create `backend/app/config.py` with `pydantic-settings` Settings class (DB URL, Saihu keys, JWT secret, timezone, task poll interval, etc.)
-- [ ] T013 Create `backend/app/core/logging.py` configuring `structlog` JSON output + context binding
-- [ ] T014 Create `backend/app/core/exceptions.py` defining `SaihuAPIError`, `SaihuRateLimited`, `SaihuAuthExpired`, `SaihuBizError`, `BusinessError`, `NotFound`
-- [ ] T015 Create `backend/app/core/timezone.py` with `to_beijing(raw_str, marketplace_id)` helper and `MARKETPLACE_TO_TIMEZONE` mapping
-- [ ] T016 Create `backend/app/db/base.py` with SQLAlchemy 2.0 `DeclarativeBase` and naming convention
-- [ ] T017 Create `backend/app/db/session.py` with async engine + `async_sessionmaker` + `get_db()` dependency
-- [ ] T018 Initialize Alembic in `backend/alembic/` with async template; configure `backend/alembic.ini` to read DB URL from env
+- [X] T012 Create `backend/app/config.py` with `pydantic-settings` Settings class (DB URL, Saihu keys, JWT secret, timezone, task poll interval, etc.)
+- [X] T013 Create `backend/app/core/logging.py` configuring `structlog` JSON output + context binding
+- [X] T014 Create `backend/app/core/exceptions.py` defining `SaihuAPIError`, `SaihuRateLimited`, `SaihuAuthExpired`, `SaihuBizError`, `BusinessError`, `NotFound`
+- [X] T015 Create `backend/app/core/timezone.py` with `to_beijing(raw_str, marketplace_id)` helper and `MARKETPLACE_TO_TIMEZONE` mapping
+- [X] T016 Create `backend/app/db/base.py` with SQLAlchemy 2.0 `DeclarativeBase` and naming convention
+- [X] T017 Create `backend/app/db/session.py` with async engine + `async_sessionmaker` + `get_db()` dependency
+- [X] T018 Initialize Alembic in `backend/alembic/` with async template; configure `backend/alembic.ini` to read DB URL from env
 
 ### Database models (all 20 tables)
 
-- [ ] T019 [P] Create `backend/app/models/global_config.py` with `GlobalConfig` ORM matching data-model.md §1.1
-- [ ] T020 [P] Create `backend/app/models/access_token.py` with `AccessTokenCache` matching §1.2
-- [ ] T021 [P] Create `backend/app/models/warehouse.py` with `Warehouse` matching §2.1 (fields + indexes)
-- [ ] T022 [P] Create `backend/app/models/shop.py` with `Shop` matching §2.2
-- [ ] T023 [P] Create `backend/app/models/sku.py` with `SkuConfig` matching §2.3
-- [ ] T024 [P] Create `backend/app/models/product_listing.py` with `ProductListing` matching §2.4 (unique + lookup indexes)
-- [ ] T025 [P] Create `backend/app/models/inventory.py` with `InventorySnapshotLatest` and `InventorySnapshotHistory` matching §3
-- [ ] T026 [P] Create `backend/app/models/in_transit.py` with `InTransitRecord` and `InTransitItem` matching §4
-- [ ] T027 [P] Create `backend/app/models/order.py` with `OrderHeader`, `OrderItem`, `OrderDetail`, `OrderDetailFetchLog` matching §5
-- [ ] T028 [P] Create `backend/app/models/zipcode_rule.py` with `ZipcodeRule` matching §6.1
-- [ ] T029 [P] Create `backend/app/models/suggestion.py` with `Suggestion`, `SuggestionItem` matching §6.2–6.3
-- [ ] T030 [P] Create `backend/app/models/overstock.py` with `OverstockSkuMark` matching §6.4
-- [ ] T031 [P] Create `backend/app/models/task_run.py` with `TaskRun` matching §7.1 (including partial unique index declaration)
-- [ ] T032 [P] Create `backend/app/models/sync_state.py` with `SyncState` matching §7.2
-- [ ] T033 [P] Create `backend/app/models/api_call_log.py` with `ApiCallLog` matching §8.1
-- [ ] T034 Aggregate imports in `backend/app/models/__init__.py` for Alembic autogenerate
-- [ ] T035 Generate initial Alembic migration `backend/alembic/versions/0001_initial.py` containing all 20 tables + indexes + partial unique index on `task_run.dedupe_key WHERE status IN ('pending','running')` + seed `global_config` and `sync_state` rows per data-model.md §10
+- [X] T019 [P] Create `backend/app/models/global_config.py` with `GlobalConfig` ORM matching data-model.md §1.1
+- [X] T020 [P] Create `backend/app/models/access_token.py` with `AccessTokenCache` matching §1.2
+- [X] T021 [P] Create `backend/app/models/warehouse.py` with `Warehouse` matching §2.1 (fields + indexes)
+- [X] T022 [P] Create `backend/app/models/shop.py` with `Shop` matching §2.2
+- [X] T023 [P] Create `backend/app/models/sku.py` with `SkuConfig` matching §2.3
+- [X] T024 [P] Create `backend/app/models/product_listing.py` with `ProductListing` matching §2.4 (unique + lookup indexes)
+- [X] T025 [P] Create `backend/app/models/inventory.py` with `InventorySnapshotLatest` and `InventorySnapshotHistory` matching §3
+- [X] T026 [P] Create `backend/app/models/in_transit.py` with `InTransitRecord` and `InTransitItem` matching §4
+- [X] T027 [P] Create `backend/app/models/order.py` with `OrderHeader`, `OrderItem`, `OrderDetail`, `OrderDetailFetchLog` matching §5
+- [X] T028 [P] Create `backend/app/models/zipcode_rule.py` with `ZipcodeRule` matching §6.1
+- [X] T029 [P] Create `backend/app/models/suggestion.py` with `Suggestion`, `SuggestionItem` matching §6.2–6.3
+- [X] T030 [P] Create `backend/app/models/overstock.py` with `OverstockSkuMark` matching §6.4
+- [X] T031 [P] Create `backend/app/models/task_run.py` with `TaskRun` matching §7.1 (including partial unique index declaration)
+- [X] T032 [P] Create `backend/app/models/sync_state.py` with `SyncState` matching §7.2
+- [X] T033 [P] Create `backend/app/models/api_call_log.py` with `ApiCallLog` matching §8.1
+- [X] T034 Aggregate imports in `backend/app/models/__init__.py` for Alembic autogenerate
+- [X] T035 Generate initial Alembic migration `backend/alembic/versions/0001_initial.py` containing all 20 tables + indexes + partial unique index on `task_run.dedupe_key WHERE status IN ('pending','running')` + seed `global_config` and `sync_state` rows per data-model.md §10（hand-crafted SQL; global_config 种子延迟到首次启动时由应用插入以便计算 bcrypt hash）
 
 ### Authentication
 
