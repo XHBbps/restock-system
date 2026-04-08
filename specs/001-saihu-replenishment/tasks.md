@@ -78,30 +78,30 @@ description: "Task list for 赛狐补货计算工具 implementation"
 
 ### Authentication
 
-- [ ] T036 Create `backend/app/core/security.py` with bcrypt helpers (`hash_password`, `verify_password`) and JWT helpers (`create_access_token`, `decode_token`)
-- [ ] T037 Create `backend/app/api/auth.py` routes: `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`。登录锁定语义：
+- [X] T036 Create `backend/app/core/security.py` with bcrypt helpers (`hash_password`, `verify_password`) and JWT helpers (`create_access_token`, `decode_token`)
+- [X] T037 Create `backend/app/api/auth.py` routes: `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`。登录锁定语义：
   - 登录前检查 `global_config.login_locked_until > now()` → 返回 423 + `locked_until`
   - 密码错误 → `login_failed_count += 1`；若达到 5 → 设置 `login_locked_until = now() + 10min` 并 `login_failed_count = 0`
   - 密码正确且未锁定 → `login_failed_count = 0`、`login_locked_until = NULL`、签发 JWT
   - 所有计数修改走单条 `UPDATE ... WHERE id=1` SQL 避免并发竞态
-- [ ] T038 Create `backend/app/api/deps.py` with `get_current_session` dependency extracting + validating JWT from Authorization header
+- [X] T038 Create `backend/app/api/deps.py` with `get_current_session` dependency extracting + validating JWT from Authorization header
 
 ### Saihu API client
 
-- [ ] T039 Create `backend/app/saihu/sign.py` implementing HmacSHA256 signature per research.md R3 and `docs/saihu_api/开发指南/生产sign.md`
-- [ ] T040 Create `backend/app/saihu/rate_limit.py` with per-endpoint `AsyncLimiter(1, 1)` lazy cache
-- [ ] T041 Create `backend/app/saihu/marketplace.py` with full `MARKETPLACE_TO_COUNTRY` + `COUNTRY_TO_TIMEZONE` tables (21 sites from 站点对应关系.md)
-- [ ] T042 Create `backend/app/saihu/client.py` with `SaihuClient` (async httpx client, auto-sign, per-endpoint rate limit, tenacity retry with 40001 token-refresh + 40019 backoff, writes every call to `api_call_log`)
-- [ ] T043 [P] Create `backend/app/saihu/token.py` for token acquisition via GET `/api/oauth/v2/token.json` + cache via `AccessTokenCache` table + proactive refresh 5min before expiry
-- [ ] T044 [P] Create `backend/app/saihu/endpoints/shop.py` wrapping `/api/shop/pageList.json`
-- [ ] T045 [P] Create `backend/app/saihu/endpoints/product_listing.py` wrapping `/api/order/api/product/pageList.json` with `match=true` + `onlineStatus=active` filtering + pagination iterator
-- [ ] T046 [P] Create `backend/app/saihu/endpoints/warehouse.py` wrapping `/api/warehouseManage/warehouseList.json` with pagination
-- [ ] T047 [P] Create `backend/app/saihu/endpoints/inventory.py` wrapping `/api/warehouseManage/warehouseItemList.json` with pagination
-- [ ] T048 [P] Create `backend/app/saihu/endpoints/out_records.py` wrapping `/api/warehouseInOut/outRecords.json` with `searchField=remark, searchValue=在途中` filter
-- [ ] T049 [P] Create `backend/app/saihu/endpoints/order_list.py` wrapping `/api/order/pageList.json` with `dateType=updateDateTime` support
-- [ ] T050 [P] Create `backend/app/saihu/endpoints/order_detail.py` wrapping `/api/order/detailByOrderId.json`
-- [ ] T051 [P] Create `backend/app/saihu/endpoints/purchase_create.py` wrapping `/api/purchase/create.json` (num as string, includeTax "0"/"1")
-- [ ] T052 Add Saihu client unit tests in `backend/tests/unit/test_sign.py` covering sign generation fixture from `docs/saihu_api/开发指南/生产sign.md`
+- [X] T039 Create `backend/app/saihu/sign.py` implementing HmacSHA256 signature per research.md R3 and `docs/saihu_api/开发指南/生产sign.md`
+- [X] T040 Create `backend/app/saihu/rate_limit.py` with per-endpoint `AsyncLimiter(1, 1)` lazy cache
+- [X] T041 Create `backend/app/saihu/marketplace.py` with full `MARKETPLACE_TO_COUNTRY` + `COUNTRY_TO_TIMEZONE` tables (21 sites from 站点对应关系.md)（实际数据在 `app/core/timezone.py`，本模块 re-export）
+- [X] T042 Create `backend/app/saihu/client.py` with `SaihuClient` (async httpx client, auto-sign, per-endpoint rate limit, tenacity retry with 40001 token-refresh + 40019 backoff, writes every call to `api_call_log`)
+- [X] T043 [P] Create `backend/app/saihu/token.py` for token acquisition via GET `/api/oauth/v2/token.json` + cache via `AccessTokenCache` table + proactive refresh 5min before expiry
+- [X] T044 [P] Create `backend/app/saihu/endpoints/shop.py` wrapping `/api/shop/pageList.json`
+- [X] T045 [P] Create `backend/app/saihu/endpoints/product_listing.py` wrapping `/api/order/api/product/pageList.json` with `match=true` + `onlineStatus=active` filtering + pagination iterator
+- [X] T046 [P] Create `backend/app/saihu/endpoints/warehouse.py` wrapping `/api/warehouseManage/warehouseList.json` with pagination
+- [X] T047 [P] Create `backend/app/saihu/endpoints/inventory.py` wrapping `/api/warehouseManage/warehouseItemList.json` with pagination
+- [X] T048 [P] Create `backend/app/saihu/endpoints/out_records.py` wrapping `/api/warehouseInOut/outRecords.json` with `searchField=remark, searchValue=在途中` filter
+- [X] T049 [P] Create `backend/app/saihu/endpoints/order_list.py` wrapping `/api/order/pageList.json` with `dateType=updateDateTime` support
+- [X] T050 [P] Create `backend/app/saihu/endpoints/order_detail.py` wrapping `/api/order/detailByOrderId.json`
+- [X] T051 [P] Create `backend/app/saihu/endpoints/purchase_create.py` wrapping `/api/purchase/create.json` (num as string, includeTax "0"/"1")
+- [X] T052 Add Saihu client unit tests in `backend/tests/unit/test_sign.py` covering sign generation fixture from `docs/saihu_api/开发指南/生产sign.md`
 
 ### Task system (Scheduler + Queue + Worker)
 
