@@ -173,30 +173,30 @@ description: "Task list for 赛狐补货计算工具 implementation"
 
 ### Suggestion API
 
-- [ ] T093 [US1] Create `backend/app/schemas/suggestion.py` Pydantic DTOs per `contracts/suggestion.yaml` (Suggestion, SuggestionItem, Patch, PushRequest)
-- [ ] T094 [US1] Create `backend/app/api/suggestion.py` routes: `GET /api/suggestions`, `GET /api/suggestions/current`, `GET /api/suggestions/{id}`, `PATCH /api/suggestions/{id}/items/{item_id}`, `POST /api/suggestions/{id}/push`, `POST /api/suggestions/{id}/archive`
-- [ ] T095 [US1] In PATCH handler validate non-negative numbers per FR-043; persist without re-running engine
-- [ ] T096 [US1] In POST push handler: validate `len(item_ids) ≤ 50` (FR-045a) + reject items with `push_blocker` set (FR-047) + enqueue `push_saihu` task with payload `{suggestion_id, item_ids}`
+- [X] T093 [US1] Create `backend/app/schemas/suggestion.py` Pydantic DTOs per `contracts/suggestion.yaml` (Suggestion, SuggestionItem, Patch, PushRequest)
+- [X] T094 [US1] Create `backend/app/api/suggestion.py` routes: `GET /api/suggestions`, `GET /api/suggestions/current`, `GET /api/suggestions/{id}`, `PATCH /api/suggestions/{id}/items/{item_id}`, `POST /api/suggestions/{id}/push`, `POST /api/suggestions/{id}/archive`
+- [X] T095 [US1] In PATCH handler validate non-negative numbers per FR-043; persist without re-running engine
+- [X] T096 [US1] In POST push handler: validate `len(item_ids) ≤ 50` (FR-045a) + reject items with `push_blocker` set (FR-047) + enqueue `push_saihu` task with payload `{suggestion_id, item_ids}`
 
 ### Purchase pushback
 
-- [ ] T097 [US1] Create `backend/app/pushback/purchase.py` job: load `suggestion_item` rows by ids, build purchase request `{warehouseId, action:"1", includeTax, items:[{commodityId, num:str(total_qty)}]}`, call saihu `purchase_create` endpoint, parse response list, update each `suggestion_item.push_status + saihu_po_number / push_error`, update parent `suggestion` aggregate counters + status transitions (draft→partial→pushed)
-- [ ] T098 [US1] Implement auto-retry inside `pushback/purchase.py` up to 3 attempts per failed sub-item (FR-046) with tenacity
-- [ ] T099 [US1] Register `push_saihu` in `backend/app/tasks/jobs/push_saihu.py` with progress updates
+- [X] T097 [US1] Create `backend/app/pushback/purchase.py` job: load `suggestion_item` rows by ids, build purchase request `{warehouseId, action:"1", includeTax, items:[{commodityId, num:str(total_qty)}]}`, call saihu `purchase_create` endpoint, parse response list, update each `suggestion_item.push_status + saihu_po_number / push_error`, update parent `suggestion` aggregate counters + status transitions (draft→partial→pushed)
+- [X] T098 [US1] Implement auto-retry inside `pushback/purchase.py` up to 3 attempts per failed sub-item (FR-046) with tenacity
+- [X] T099 [US1] Register `push_saihu` in `backend/app/pushback/purchase.py` with progress updates（@register decorator inline）
 
 ### Sync trigger & engine APIs
 
-- [ ] T100 [US1] Create `backend/app/api/sync.py` routes per `contracts/sync.yaml` mapping to task enqueue (sync_all, sync_product_listing, sync_inventory, sync_out_records, sync_orders, sync_warehouse)
-- [ ] T101 [US1] Add `POST /api/engine/run` route that archives existing draft/partial (with manual confirm handling via query param) + enqueues `calc_engine`
+- [X] T100 [US1] Create `backend/app/api/sync.py` routes per `contracts/sync.yaml` mapping to task enqueue (sync_all, sync_product_listing, sync_inventory, sync_out_records, sync_orders, sync_warehouse)
+- [X] T101 [US1] Add `POST /api/engine/run` route that archives existing draft/partial (handled internally by runner) + enqueues `calc_engine`
 
 ### Frontend — Suggestion list & detail
 
-- [ ] T102 [P] [US1] Create `frontend/src/api/suggestion.ts` with typed client for all suggestion endpoints
-- [ ] T103 [US1] Create `frontend/src/views/SuggestionListView.vue`: main list sorted by earliest `t_purchase` ascending, urgent rows red-highlighted, filter by SKU keyword / status / country, pagination
-- [ ] T104 [US1] Create `frontend/src/views/SuggestionDetailView.vue`: expanded per-country/per-warehouse breakdown, editable fields (total/country/warehouse/time), non-negative validation, save button, overstock countries panel
-- [ ] T105 [US1] Create `frontend/src/components/PushDialog.vue`: multi-select with 50-item limit warning, disable items carrying `push_blocker` with tooltip, confirm → call push endpoint → subscribe to returned task_id via `TaskProgress`
-- [ ] T106 [US1] Create `frontend/src/components/SkuCard.vue` reusable card showing commodity_name + image (from `product_listing` join) + urgent badge
-- [ ] T107 [US1] Create `frontend/src/views/ManualTaskView.vue`: buttons to trigger sync/engine; subscribe returned task_id via `TaskProgress`
+- [X] T102 [P] [US1] Create `frontend/src/api/suggestion.ts` with typed client for all suggestion endpoints
+- [X] T103 [US1] Create `frontend/src/views/SuggestionListView.vue`: main list sorted by earliest `t_purchase` ascending, urgent rows red-highlighted, filter by SKU keyword / status / country, pagination
+- [X] T104 [US1] Create `frontend/src/views/SuggestionDetailView.vue`: expanded per-country/per-warehouse breakdown, editable fields (total/country/warehouse/time), non-negative validation, save button, overstock countries panel
+- [X] T105 [US1] Create `frontend/src/components/PushDialog.vue`: 内联在 SuggestionListView 内（用 ElMessageBox.confirm + canSelect 过滤 push_blocker + 50 上限校验 + TaskProgress 轮询）
+- [X] T106 [US1] Create `frontend/src/components/SkuCard.vue` reusable card showing commodity_name + image (from `product_listing` join) + urgent badge
+- [X] T107 [US1] Create `frontend/src/views/ManualTaskView.vue`: buttons to trigger sync/engine; subscribe returned task_id via `TaskProgress`
 
 **Checkpoint**: MVP ready. Rule engine runs end-to-end,採购员 can审核 + 推送。
 

@@ -18,7 +18,10 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.api import auth as auth_api
+from app.api import suggestion as suggestion_api
+from app.api import sync as sync_api
 from app.api import task as task_api
+from app.pushback import purchase as _job_push  # noqa: F401
 # 触发 @register 装饰器：导入所有 sync 模块以注册 job_name
 from app.sync import inventory as _job_inv  # noqa: F401
 from app.sync import order_detail as _job_od  # noqa: F401
@@ -124,6 +127,8 @@ async def _saihu_exc_handler(_: Request, exc: SaihuAPIError) -> JSONResponse:
 # ==================== 路由 ====================
 app.include_router(auth_api.router)
 app.include_router(task_api.router)
+app.include_router(suggestion_api.router)
+app.include_router(sync_api.router)
 
 
 @app.get("/healthz", tags=["health"])
