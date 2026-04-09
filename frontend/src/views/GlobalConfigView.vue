@@ -7,26 +7,21 @@
     <el-form :model="form" label-width="200px" style="max-width: 640px">
       <el-form-item label="国内中心仓周转天数">
         <el-input-number v-model="form.buffer_days" :min="1" :max="365" />
-        <span class="hint">BUFFER_DAYS — Step 4 公式</span>
       </el-form-item>
       <el-form-item label="海外仓目标库存天数">
         <el-input-number v-model="form.target_days" :min="1" :max="365" />
-        <span class="hint">TARGET_DAYS — Step 3 / Step 6 公式</span>
       </el-form-item>
       <el-form-item label="默认采购提前期(天)">
         <el-input-number v-model="form.lead_time_days" :min="0" :max="365" />
-        <span class="hint">LEAD_TIME_DAYS — SKU 级 lead_time 缺省时使用</span>
       </el-form-item>
       <el-form-item label="同步间隔(分钟)">
         <el-input-number v-model="form.sync_interval_minutes" :min="5" :max="1440" />
       </el-form-item>
       <el-form-item label="规则引擎 cron">
         <el-input v-model="form.calc_cron" placeholder="0 8 * * *" />
-        <span class="hint">默认每天 08:00 北京时间</span>
       </el-form-item>
       <el-form-item label="默认采购主仓 ID">
         <el-input v-model="form.default_purchase_warehouse_id" placeholder="赛狐 warehouse.id" />
-        <span class="hint">推送采购单时使用</span>
       </el-form-item>
       <el-form-item label="是否含税">
         <el-radio-group v-model="form.include_tax">
@@ -77,10 +72,5 @@ async function save(): Promise<void> {
 .card-title {
   font-size: $font-size-lg;
   font-weight: $font-weight-semibold;
-}
-.hint {
-  margin-left: $space-3;
-  color: $color-text-secondary;
-  font-size: $font-size-xs;
 }
 </style>

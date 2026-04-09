@@ -3,9 +3,6 @@
     <section class="intro-card">
       <div>
         <h1 class="page-title">手动同步</h1>
-        <p class="page-desc">
-          手动同步页只负责触发外部数据拉取，不包含规则引擎执行。全量同步会按既定顺序触发全部同步任务。
-        </p>
       </div>
       <el-button @click="reload">刷新状态</el-button>
     </section>
@@ -21,7 +18,6 @@
           <div class="sync-card__top">
             <div>
               <div class="sync-card__title">{{ action.label }}</div>
-              <div class="sync-card__desc">{{ action.description }}</div>
             </div>
             <el-tag :type="getActionMeta(action).status.tagType">
               {{ getActionMeta(action).status.label }}
@@ -134,11 +130,6 @@ onMounted(reload)
   font-size: 24px;
 }
 
-.page-desc {
-  margin: $space-2 0 0;
-  color: $color-text-secondary;
-}
-
 .card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
@@ -166,7 +157,6 @@ onMounted(reload)
   font-weight: $font-weight-semibold;
 }
 
-.sync-card__desc,
 .sync-card__meta {
   color: $color-text-secondary;
   font-size: $font-size-sm;

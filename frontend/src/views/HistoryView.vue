@@ -4,7 +4,6 @@
       <div class="card-header">
         <div>
           <div class="card-title">历史记录</div>
-          <div class="card-meta">按时间、状态和 SKU 过滤历史建议单。</div>
         </div>
         <div class="filters">
           <el-date-picker

@@ -4,7 +4,6 @@
       <div class="card-header">
         <div class="title-block">
           <span class="card-title">库存明细</span>
-          <span class="card-meta">inventory_snapshot_latest，来自 /api/warehouseManage/warehouseItemList.json</span>
         </div>
         <div class="actions">
           <el-input

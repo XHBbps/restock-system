@@ -5,7 +5,6 @@
         <div class="card-header">
           <div>
             <div class="card-title">店铺管理</div>
-            <div class="card-meta">店铺状态统一显示为业务含义，不再直接暴露状态码。</div>
           </div>
           <el-button :loading="refreshing" @click="refresh">手动刷新（拉取赛狐）</el-button>
         </div>

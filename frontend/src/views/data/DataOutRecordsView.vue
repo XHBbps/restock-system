@@ -4,7 +4,6 @@
       <div class="card-header">
         <div class="title-block">
           <span class="card-title">其他出库（在途观测）</span>
-          <span class="card-meta">in_transit_record，来自 /api/warehouseInOut/outRecords.json，当前补货统一按 0 处理。</span>
         </div>
         <div class="actions">
           <el-input

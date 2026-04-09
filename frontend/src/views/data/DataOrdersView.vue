@@ -4,7 +4,6 @@
       <div class="card-header">
         <div class="title-block">
           <span class="card-title">订单列表</span>
-          <span class="card-meta">order_header，来自 /api/order/pageList.json，支持查看同步后的订单详情。</span>
         </div>
         <div class="actions">
           <el-date-picker

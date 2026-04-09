@@ -4,7 +4,6 @@
       <div class="card-header">
         <div>
           <div class="card-title">积压提示</div>
-          <div class="card-meta">支持分页查看积压 SKU，并记录是否已人工处理。</div>
         </div>
         <div class="actions">
           <el-switch v-model="showProcessed" active-text="显示已处理" inactive-text="仅未处理" @change="reload" />

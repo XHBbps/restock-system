@@ -83,7 +83,6 @@
           v-for="job in autoJobCards"
           :key="job.jobName"
           :title="job.label"
-          :description="job.description"
           :status-meta="job.statusMeta"
           :last-run-at="job.lastRunAt"
           :last-success-at="job.lastSuccessAt"
@@ -101,7 +100,6 @@
       <div class="manual-section">
         <SyncTaskHeroCard
           :title="heroAction.action.label"
-          :description="heroAction.action.description"
           :status-meta="heroAction.statusMeta"
           :last-run-at="heroAction.lastRunAt"
           :last-success-at="heroAction.lastSuccessAt"
@@ -115,7 +113,6 @@
             v-for="action in normalManualActions"
             :key="action.action.key"
             :title="action.action.label"
-            :description="action.action.description"
             :status-meta="action.statusMeta"
             :last-run-at="action.lastRunAt"
             :last-success-at="action.lastSuccessAt"

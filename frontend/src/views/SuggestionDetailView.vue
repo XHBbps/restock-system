@@ -4,9 +4,9 @@
       <template #header>
         <div class="header-row">
           <div class="header-main">
-            <div>
+            <div class="title-row">
               <span class="title">建议单 #{{ suggestion.id }}</span>
-              <el-tag style="margin-left: 12px" :type="suggestionStatusMeta.tagType">
+              <el-tag :type="suggestionStatusMeta.tagType">
                 {{ suggestionStatusMeta.label }}
               </el-tag>
             </div>
@@ -47,98 +47,137 @@
           </template>
 
           <div class="item-body">
-            <div class="section">
-              <div class="section-title">总采购量</div>
-              <el-input-number v-model="editing[item.id].total_qty" :min="0" size="small" />
-            </div>
-
-            <div class="section">
-              <div class="section-title">各国分量 / 各仓分量</div>
-              <el-table :data="countryRows(item)" size="small">
-                <el-table-column prop="country" label="国家" width="80" sortable show-overflow-tooltip />
-                <el-table-column prop="qty" label="国家总量" width="100" sortable show-overflow-tooltip />
-                <el-table-column label="各仓明细" show-overflow-tooltip>
-                  <template #default="{ row }">
-                    <template v-if="Object.keys(row.warehouses).length">
-                      <span v-for="(wq, w) in row.warehouses" :key="w" class="warehouse-chip">
-                        {{ w }}: {{ wq }}
-                      </span>
-                    </template>
-                    <span v-else class="allocation-text">未拆分</span>
-                  </template>
-                </el-table-column>
-                <el-table-column label="拆分依据" min-width="220" show-overflow-tooltip>
-                  <template #default="{ row }">
-                    <div v-if="row.allocation" class="allocation-meta">
-                      <el-tag
-                        :type="allocationModeTagType(row.allocation.allocation_mode)"
-                        size="small"
-                      >
-                        {{ allocationModeLabel(row.allocation.allocation_mode) }}
-                      </el-tag>
-                      <span class="allocation-text">{{ allocationSummary(row.allocation) }}</span>
-                      <span class="allocation-text">
-                        可用仓：{{ row.allocation.eligible_warehouses.join(', ') || '-' }}
-                      </span>
+            <div class="item-grid">
+              <div class="item-main">
+                <section class="panel panel-compact">
+                  <div class="panel-header">
+                    <div>
+                      <div class="section-title">采购调整</div>
+                      <div class="section-desc">当前只支持修改总采购量，保存后会按服务端最新结果刷新。</div>
                     </div>
-                    <span v-else class="allocation-text">-</span>
-                  </template>
-                </el-table-column>
-                <el-table-column prop="t_purchase" label="采购时间" width="120" sortable show-overflow-tooltip />
-                <el-table-column prop="t_ship" label="发货时间" width="120" sortable show-overflow-tooltip />
-              </el-table>
-            </div>
+                  </div>
+                  <div class="editor-row">
+                    <div class="editor-field">
+                      <span class="editor-label">总采购量</span>
+                      <el-input-number v-model="editing[item.id].total_qty" :min="0" size="small" />
+                    </div>
+                    <div class="editor-hint">国家分量、仓库分量、采购时间、发货时间当前为只读。</div>
+                  </div>
+                </section>
 
-            <div v-if="item.overstock_countries?.length" class="section">
-              <div class="section-title">积压国家（只读）</div>
-              <el-tag
-                v-for="country in item.overstock_countries"
-                :key="country"
-                type="warning"
-                size="small"
-                style="margin-right: 8px"
-              >
-                {{ country }}
-              </el-tag>
-            </div>
-
-            <div class="section">
-              <div class="section-title">状态信息</div>
-              <div class="status-grid">
-                <div class="status-row">
-                  <span class="status-label">推送状态</span>
-                  <el-tag :type="getSuggestionPushStatusMeta(item.push_status).tagType" size="small">
-                    {{ getSuggestionPushStatusMeta(item.push_status).label }}
-                  </el-tag>
-                </div>
-                <div class="status-row">
-                  <span class="status-label">推送阻塞</span>
-                  <span class="status-value">{{ item.push_blocker || '-' }}</span>
-                </div>
-                <div class="status-row">
-                  <span class="status-label">采购单号</span>
-                  <span class="status-value">{{ item.saihu_po_number || '-' }}</span>
-                </div>
-                <div class="status-row">
-                  <span class="status-label">失败原因</span>
-                  <span class="status-value">{{ item.push_error || '-' }}</span>
-                </div>
+                <section class="panel">
+                  <div class="panel-header">
+                    <div>
+                      <div class="section-title">国家分量与仓内拆分</div>
+                      <div class="section-desc">统一查看国家总量、仓内分配、拆分依据及采购/发货时间。</div>
+                    </div>
+                  </div>
+                  <el-table :data="countryRows(item)" size="small" class="detail-table">
+                    <el-table-column prop="country" label="国家" width="88" sortable show-overflow-tooltip />
+                    <el-table-column prop="qty" label="国家总量" width="108" sortable show-overflow-tooltip />
+                    <el-table-column label="各仓明细" min-width="180" show-overflow-tooltip>
+                      <template #default="{ row }">
+                        <div v-if="Object.keys(row.warehouses).length" class="warehouse-list">
+                          <span v-for="(wq, w) in row.warehouses" :key="w" class="warehouse-chip">
+                            {{ w }}: {{ wq }}
+                          </span>
+                        </div>
+                        <span v-else class="allocation-text">未拆分</span>
+                      </template>
+                    </el-table-column>
+                    <el-table-column label="拆分依据" min-width="260" show-overflow-tooltip>
+                      <template #default="{ row }">
+                        <div v-if="row.allocation" class="allocation-meta">
+                          <div class="allocation-top">
+                            <el-tag
+                              :type="allocationModeTagType(row.allocation.allocation_mode)"
+                              size="small"
+                            >
+                              {{ allocationModeLabel(row.allocation.allocation_mode) }}
+                            </el-tag>
+                            <span class="allocation-text">{{ allocationSummary(row.allocation) }}</span>
+                          </div>
+                          <span class="allocation-text">
+                            可用仓：{{ row.allocation.eligible_warehouses.join(', ') || '-' }}
+                          </span>
+                        </div>
+                        <span v-else class="allocation-text">-</span>
+                      </template>
+                    </el-table-column>
+                    <el-table-column prop="t_purchase" label="采购时间" width="124" sortable show-overflow-tooltip />
+                    <el-table-column prop="t_ship" label="发货时间" width="124" sortable show-overflow-tooltip />
+                  </el-table>
+                </section>
               </div>
-            </div>
 
-            <div class="section action-row">
-              <el-button
-                type="primary"
-                size="small"
-                :loading="savingState[item.id] || false"
-                :disabled="!isEditable(item) || !hasChanges(item)"
-                @click="save(item)"
-              >
-                保存修改
-              </el-button>
-              <el-tag v-if="!isEditable(item)" type="info" style="margin-left: 12px">
-                {{ item.push_status === 'pushed' ? '已推送条目不可编辑' : '已归档建议单不可编辑' }}
-              </el-tag>
+              <aside class="item-side">
+                <section class="panel panel-side">
+                  <div class="panel-header">
+                    <div>
+                      <div class="section-title">状态信息</div>
+                      <div class="section-desc">用于快速判断当前条目的推送状态和异常信息。</div>
+                    </div>
+                  </div>
+                  <div class="status-grid">
+                    <div class="status-row">
+                      <span class="status-label">推送状态</span>
+                      <el-tag :type="getSuggestionPushStatusMeta(item.push_status).tagType" size="small">
+                        {{ getSuggestionPushStatusMeta(item.push_status).label }}
+                      </el-tag>
+                    </div>
+                    <div class="status-row">
+                      <span class="status-label">推送阻塞</span>
+                      <span class="status-value">{{ item.push_blocker || '-' }}</span>
+                    </div>
+                    <div class="status-row">
+                      <span class="status-label">采购单号</span>
+                      <span class="status-value">{{ item.saihu_po_number || '-' }}</span>
+                    </div>
+                    <div class="status-row">
+                      <span class="status-label">失败原因</span>
+                      <span class="status-value">{{ item.push_error || '-' }}</span>
+                    </div>
+                    <div class="status-row">
+                      <span class="status-label">积压国家</span>
+                      <div v-if="item.overstock_countries?.length" class="status-tag-list">
+                        <el-tag
+                          v-for="country in item.overstock_countries"
+                          :key="country"
+                          type="warning"
+                          size="small"
+                        >
+                          {{ country }}
+                        </el-tag>
+                      </div>
+                      <span v-else class="status-value">-</span>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="panel panel-side panel-action">
+                  <div class="panel-header">
+                    <div>
+                      <div class="section-title">操作</div>
+                      <div class="section-desc">保存本次总采购量调整。</div>
+                    </div>
+                  </div>
+                  <div class="action-stack">
+                    <el-button
+                      type="primary"
+                      size="small"
+                      :loading="savingState[item.id] || false"
+                      :disabled="!isEditable(item) || !hasChanges(item)"
+                      @click="save(item)"
+                    >
+                      保存修改
+                    </el-button>
+                    <el-tag v-if="!isEditable(item)" type="info">
+                      {{ item.push_status === 'pushed' ? '已推送条目不可编辑' : '已归档建议单不可编辑' }}
+                    </el-tag>
+                    <span v-else-if="!hasChanges(item)" class="action-hint">修改总采购量后可保存</span>
+                  </div>
+                </section>
+              </aside>
             </div>
           </div>
         </el-collapse-item>
@@ -280,6 +319,7 @@ function parsePositiveInt(value: unknown): number | null {
 
 function syncEditingState(data: SuggestionDetail): void {
   const activeIds = new Set(data.items.map((item) => item.id))
+  expanded.value = expanded.value.filter((itemId) => activeIds.has(itemId))
   for (const key of Object.keys(editing)) {
     const id = Number(key)
     if (!activeIds.has(id)) {
@@ -296,14 +336,14 @@ async function syncRouteItemFocus(data: SuggestionDetail): Promise<void> {
   const itemId = parsePositiveInt(route.query.item)
   if (!itemId || !data.items.some((item) => item.id === itemId)) return
 
-  if (!expanded.value.includes(itemId)) {
-    expanded.value = [...expanded.value, itemId]
+  if (expanded.value.length !== 1 || expanded.value[0] !== itemId) {
+    expanded.value = [itemId]
   }
 
   await nextTick()
   document.getElementById(`suggestion-item-${itemId}`)?.scrollIntoView({
     behavior: 'smooth',
-    block: 'center',
+    block: 'start',
   })
 }
 
@@ -338,7 +378,7 @@ watch(
 .header-main {
   display: flex;
   flex-direction: column;
-  gap: $space-2;
+  gap: $space-3;
 }
 
 .header-row {
@@ -346,6 +386,13 @@ watch(
   justify-content: space-between;
   align-items: center;
   gap: $space-4;
+}
+
+.title-row {
+  display: flex;
+  align-items: center;
+  gap: $space-3;
+  flex-wrap: wrap;
 }
 
 .summary-meta {
@@ -373,15 +420,23 @@ watch(
 .item-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
+  gap: $space-4;
   width: 100%;
-  padding-right: 24px;
+  min-width: 0;
+  padding-right: $space-3;
+  scroll-margin-top: calc($layout-topbar-height + $space-6);
 }
 
 .item-stats {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
+  flex-shrink: 0;
+  min-width: 88px;
+  padding: $space-2 $space-3;
+  border-radius: $radius-lg;
+  background: $color-bg-subtle;
 
   .stat-label {
     color: $color-text-secondary;
@@ -389,40 +444,110 @@ watch(
   }
 
   strong {
-    color: $color-brand-primary;
+    color: $color-text-primary;
     font-size: $font-size-xl;
+    line-height: 1.1;
   }
 }
 
 .item-body {
-  padding: $space-4 $space-2;
+  padding: $space-4 0 $space-2;
 }
 
-.section {
-  margin-bottom: $space-5;
+.item-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: $space-4;
+  align-items: start;
 }
 
-.action-row {
+.item-main,
+.item-side {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: $space-3;
+}
+
+.panel {
+  border: 1px solid $color-border-default;
+  border-radius: $radius-lg;
+  background: $color-bg-card;
+  padding: $space-4;
+}
+
+.panel-compact {
+  padding-bottom: $space-3;
+}
+
+.panel-side {
+  background: $color-bg-subtle;
+}
+
+.panel-action {
+  position: sticky;
+  top: calc($layout-topbar-height + $space-4);
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: $space-3;
+  margin-bottom: $space-3;
 }
 
 .section-title {
   font-weight: $font-weight-medium;
+  color: $color-text-primary;
+}
+
+.section-desc {
+  margin-top: 4px;
   color: $color-text-secondary;
-  margin-bottom: $space-2;
+  font-size: $font-size-xs;
+  line-height: 1.5;
+}
+
+.editor-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: $space-4;
+  flex-wrap: wrap;
+}
+
+.editor-field {
+  display: flex;
+  align-items: center;
+  gap: $space-3;
+}
+
+.editor-label {
+  color: $color-text-secondary;
+  font-size: $font-size-sm;
+}
+
+.editor-hint {
+  color: $color-text-secondary;
+  font-size: $font-size-xs;
+  line-height: 1.5;
+  text-align: right;
 }
 
 .warehouse-chip {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
   padding: 2px 8px;
-  margin-right: 8px;
   background: $color-brand-primary-soft;
   color: $color-brand-primary;
   border-radius: $radius-pill;
   font-size: $font-size-xs;
+}
+
+.warehouse-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .allocation-meta {
@@ -432,14 +557,22 @@ watch(
   padding: 4px 0;
 }
 
+.allocation-top {
+  display: flex;
+  align-items: center;
+  gap: $space-2;
+  flex-wrap: wrap;
+}
+
 .allocation-text {
   color: $color-text-secondary;
   font-size: $font-size-xs;
+  line-height: 1.5;
 }
 
 .status-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: $space-3;
 }
 
@@ -448,26 +581,126 @@ watch(
   align-items: flex-start;
   gap: $space-3;
   min-width: 0;
+  padding-bottom: $space-3;
+  border-bottom: 1px solid $color-border-default;
+}
+
+.status-row:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
 }
 
 .status-label {
-  width: 72px;
+  width: 76px;
   flex-shrink: 0;
   color: $color-text-secondary;
   font-size: $font-size-xs;
+  line-height: 1.6;
 }
 
 .status-value {
   min-width: 0;
+  flex: 1;
   color: $color-text-primary;
   font-size: $font-size-sm;
+  line-height: 1.6;
   word-break: break-word;
+}
+
+.status-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.action-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: $space-3;
+}
+
+.action-hint {
+  color: $color-text-secondary;
+  font-size: $font-size-xs;
 }
 
 .loading {
   text-align: center;
   padding: $space-12;
   color: $color-text-secondary;
+}
+
+:deep(.el-alert) {
+  margin-bottom: $space-4;
+}
+
+:deep(.el-collapse) {
+  border-top: none;
+  border-bottom: none;
+}
+
+:deep(.el-collapse-item) {
+  margin-bottom: $space-3;
+  border: 1px solid $color-border-default;
+  border-radius: $radius-lg;
+  overflow: hidden;
+  background: $color-bg-card;
+}
+
+:deep(.el-collapse-item__wrap) {
+  border-bottom: none;
+}
+
+:deep(.el-collapse-item__header) {
+  align-items: center;
+  min-height: 84px;
+  padding-top: $space-3;
+  padding-bottom: $space-3;
+  padding-left: $space-4;
+  padding-right: $space-4;
+  background: $color-bg-card;
+  border-bottom: 1px solid $color-border-default;
+}
+
+:deep(.el-collapse-item__content) {
+  padding-bottom: 0;
+  background: $color-bg-card;
+}
+
+:deep(.detail-table th.el-table__cell) {
+  background: $color-bg-subtle;
+}
+
+:deep(.detail-table .cell) {
+  line-height: 1.5;
+}
+
+:deep(.sku-card) {
+  flex: 1;
+  min-width: 0;
+  align-items: flex-start;
+}
+
+:deep(.sku-card .sku-meta) {
+  min-width: 0;
+}
+
+:deep(.sku-card .sku-name) {
+  display: -webkit-box;
+  white-space: normal;
+  word-break: break-word;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+:deep(.sku-card .sku-code) {
+  word-break: break-all;
+}
+
+:deep(.sku-card .el-tag) {
+  flex-shrink: 0;
 }
 
 @media (max-width: 900px) {
@@ -478,8 +711,22 @@ watch(
     gap: $space-3;
   }
 
-  .status-grid {
+  .item-grid {
     grid-template-columns: 1fr;
+  }
+
+  .panel-action {
+    position: static;
+  }
+
+  .editor-row,
+  .status-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .editor-hint {
+    text-align: left;
   }
 }
 </style>

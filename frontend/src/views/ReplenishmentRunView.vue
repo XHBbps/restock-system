@@ -3,7 +3,6 @@
     <DashboardPageHeader
       eyebrow="Engine"
       title="补货触发"
-      description="补货触发页只负责执行规则引擎，不再承载同步操作。建议先在数据同步中心确认关键同步完成，再执行补货建议生成。"
     >
       <template #actions>
         <el-button @click="load">刷新摘要</el-button>
@@ -12,25 +11,23 @@
     </DashboardPageHeader>
 
     <section class="stats-grid">
-      <DashboardStatCard title="当前建议单" :value="suggestion ? `#${suggestion.id}` : '-'" hint="当前活动建议单编号" />
-      <DashboardStatCard title="建议状态" :value="statusMeta.label" hint="当前建议单状态" />
-      <DashboardStatCard title="建议条目数" :value="suggestion?.total_items ?? 0" hint="当前活动建议条目总数" />
+      <DashboardStatCard title="当前建议单" :value="suggestion ? `#${suggestion.id}` : '-'" />
+      <DashboardStatCard title="建议状态" :value="statusMeta.label" />
+      <DashboardStatCard title="建议条目数" :value="suggestion?.total_items ?? 0" />
       <DashboardStatCard
         title="已推送条目"
         :value="suggestion?.pushed_items ?? 0"
-        hint="当前建议单中已经推送到赛狐的条目"
       />
     </section>
 
     <section class="content-grid">
       <DashboardChartCard
         title="国家采购分布"
-        description="按当前活动建议单聚合国家维度采购量。"
         :option="countryChartOption"
         :empty="countryRows.length === 0"
         empty-text="当前没有可展示的国家分布"
       />
-      <DataTableCard title="当前建议摘要" description="执行引擎前可先确认当前建议单的基本情况。">
+      <DataTableCard title="当前建议摘要">
         <div v-if="suggestion" class="summary-list">
           <div class="summary-row">
             <span>建议单编号</span>

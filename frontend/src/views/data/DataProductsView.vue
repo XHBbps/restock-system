@@ -4,7 +4,6 @@
       <div class="card-header">
         <div class="title-block">
           <span class="card-title">在线商品信息</span>
-          <span class="card-meta">product_listing，来自 /api/order/api/product/pageList.json</span>
         </div>
         <div class="actions">
           <el-input

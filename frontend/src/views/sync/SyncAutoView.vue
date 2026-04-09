@@ -1,17 +1,8 @@
 <template>
   <div class="sync-auto-view">
-    <el-alert
-      type="info"
-      :closable="false"
-      title="当前阶段先提供自动同步看板，展示建议频率和最近执行状态；若后端补齐调度控制接口，可在此页继续接入开关与计划编辑。"
-    />
-
     <section class="intro-card">
       <div>
         <h1 class="page-title">自动同步</h1>
-        <p class="page-desc">
-          自动同步页负责说明建议执行频率和最近运行结果，帮助判断哪些任务应纳入调度器统一托管。
-        </p>
       </div>
       <el-button @click="reload">刷新看板</el-button>
     </section>
@@ -23,7 +14,6 @@
             <div class="job-card__title">{{ job.label }}</div>
             <el-tag :type="job.status.tagType">{{ job.status.label }}</el-tag>
           </div>
-          <div class="job-card__desc">{{ job.description }}</div>
           <div class="job-card__cadence">{{ job.cadence }}</div>
           <div class="job-card__meta">
             <div>最近运行：{{ job.lastRunAt }}</div>
@@ -92,11 +82,6 @@ onMounted(reload)
   font-size: 24px;
 }
 
-.page-desc {
-  margin: $space-2 0 0;
-  color: $color-text-secondary;
-}
-
 .card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
@@ -120,7 +105,6 @@ onMounted(reload)
   font-size: $font-size-lg;
 }
 
-.job-card__desc,
 .job-card__meta {
   color: $color-text-secondary;
   font-size: $font-size-sm;

@@ -5,7 +5,6 @@
         <div class="card-header">
           <div>
             <div class="card-title">当前建议</div>
-            <div class="card-meta">当前活动建议单条目列表，支持筛选、分页和批量推送。</div>
           </div>
           <div class="header-actions">
             <el-input v-model="searchSku" placeholder="搜索 SKU" clearable style="width: 220px" />

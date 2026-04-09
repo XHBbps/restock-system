@@ -1,8 +1,5 @@
 <template>
-  <PageSectionCard
-    title="仓库配置"
-    description="维护仓库与国家映射。页面级表格统一支持分页。"
-  >
+  <PageSectionCard title="仓库配置">
     <template #actions>
       <el-tag type="info" size="small">类型 1 表示国内仓</el-tag>
     </template>

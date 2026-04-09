@@ -27,7 +27,6 @@
           <div v-for="job in keyJobs" :key="job.jobName" class="job-item">
             <div>
               <div class="job-title">{{ job.label }}</div>
-              <div class="job-meta">{{ job.description }}</div>
             </div>
             <div class="job-right">
               <el-tag :type="job.status.tagType">{{ job.status.label }}</el-tag>
@@ -88,7 +87,6 @@ import { computed, onMounted, ref } from 'vue'
 interface JobViewModel {
   jobName: string
   label: string
-  description: string
   cadence?: string
   status: ReturnType<typeof getSyncStatusMeta>
   lastRunAt: string
@@ -103,22 +101,18 @@ const keyJobDefinitions = [
   {
     jobName: 'sync_all',
     label: '全量同步',
-    description: '串行协调各个同步任务，用于人工完整校准。',
   },
   {
     jobName: 'sync_inventory',
     label: '库存同步',
-    description: '补货建议的核心输入之一，优先关注最近执行状态。',
   },
   {
     jobName: 'sync_order_list',
     label: '订单列表同步',
-    description: '订单详情同步依赖该任务先成功。',
   },
   {
     jobName: 'sync_product_listing',
     label: '商品同步',
-    description: '负责 seller SKU 匹配基础数据。',
   },
 ]
 

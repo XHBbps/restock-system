@@ -1,5 +1,5 @@
 <template>
-  <PageSectionCard title="邮编规则" description="按国家筛选和维护邮编分仓规则。">
+  <PageSectionCard title="邮编规则">
     <template #actions>
       <el-input
         v-model="filterCountry"
@@ -77,7 +77,6 @@
         </el-form-item>
         <el-form-item label="优先级">
           <el-input-number v-model="form.priority" :min="1" />
-          <span class="hint">数字越小越先匹配</span>
         </el-form-item>
       </el-form>
       <template #footer>
