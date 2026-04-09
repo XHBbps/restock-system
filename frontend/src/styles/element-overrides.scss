@@ -318,13 +318,19 @@ body {
     line-height: 1.2;
 
     .cell {
+      display: flex !important;
+      align-items: center;
+      gap: 2px;
       padding: 0 !important;
-      line-height: inherit;
+      white-space: nowrap;
     }
 
-    .caret-wrapper {
-      display: inline-flex;
-      vertical-align: middle;
+    // 对齐：跟随 Element Plus 的 align 属性
+    &.is-right .cell {
+      justify-content: flex-end;
+    }
+    &.is-center .cell {
+      justify-content: center;
     }
   }
 
@@ -337,7 +343,13 @@ body {
 
     .cell {
       padding: 0 !important;
-      line-height: inherit;
+    }
+
+    &.is-right .cell {
+      text-align: right;
+    }
+    &.is-center .cell {
+      text-align: center;
     }
   }
 
