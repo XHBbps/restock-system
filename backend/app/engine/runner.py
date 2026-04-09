@@ -48,7 +48,7 @@ from app.tasks.jobs import JobContext
 logger = get_logger(__name__)
 
 
-async def run_engine(ctx: JobContext, *, triggered_by: str = "scheduler") -> int:
+async def run_engine(ctx: JobContext, *, triggered_by: str = "scheduler") -> int | None:
     """执行一次完整的规则引擎，返回新建 suggestion id。"""
     today = now_beijing().date()
 
@@ -74,8 +74,15 @@ async def run_engine(ctx: JobContext, *, triggered_by: str = "scheduler") -> int
         sku_lead_time: dict[str, int | None] = {r[0]: r[1] for r in enabled_skus}
 
         if not sku_list:
-            logger.warning("engine_no_enabled_sku")
-            return await _persist_empty_suggestion(db, global_snapshot, triggered_by)
+            logger.warning(
+                "engine_no_enabled_sku",
+                extra={"triggered_by": triggered_by},
+            )
+            await ctx.progress(
+                current_step="完成",
+                step_detail="无启用 SKU，跳过本次计算",
+            )
+            return None
 
         await ctx.progress(
             current_step="Step 1: 计算 velocity",
@@ -210,9 +217,10 @@ async def _load_commodity_id_map(
     """每个 commodity_sku 取任意一个 commodity_id。"""
     rows = (
         await db.execute(
-            select(ProductListing.commodity_sku, ProductListing.commodity_id).where(
-                ProductListing.commodity_sku.in_(skus)
-            )
+            select(ProductListing.commodity_sku, ProductListing.commodity_id)
+            .where(ProductListing.commodity_sku.in_(skus))
+            .where(ProductListing.commodity_id.is_not(None))
+            .order_by(ProductListing.commodity_sku, ProductListing.commodity_id)
         )
     ).all()
     result: dict[str, str | None] = dict.fromkeys(skus)
@@ -220,27 +228,6 @@ async def _load_commodity_id_map(
         if result.get(sku) is None and cid:
             result[sku] = cid
     return result
-
-
-async def _persist_empty_suggestion(
-    db: AsyncSession,
-    global_snapshot: dict[str, Any],
-    triggered_by: str,
-) -> int:
-    await _archive_active(db)
-    sug = await db.execute(
-        insert(Suggestion)
-        .values(
-            status="draft",
-            global_config_snapshot=global_snapshot,
-            triggered_by=triggered_by,
-            total_items=0,
-        )
-        .returning(Suggestion.id)
-    )
-    sid = sug.scalar_one()
-    await db.commit()
-    return sid
 
 
 async def _persist_suggestion(

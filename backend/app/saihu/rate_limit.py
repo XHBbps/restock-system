@@ -21,8 +21,3 @@ def get_limiter(endpoint: str) -> AsyncLimiter:
         limiter = AsyncLimiter(_DEFAULT_RATE, _DEFAULT_PERIOD)
         _LIMITERS[endpoint] = limiter
     return limiter
-
-
-def reset_for_tests() -> None:
-    """测试用：清空 limiter 缓存。"""
-    _LIMITERS.clear()

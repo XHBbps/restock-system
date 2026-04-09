@@ -9,7 +9,6 @@
 
 from collections import defaultdict
 from datetime import date, datetime, timedelta
-from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -57,40 +56,6 @@ async def load_zipcode_rules(db: AsyncSession) -> list[ZipcodeRule]:
         )
         for r in rows
     ]
-
-
-async def load_sku_country_orders(
-    db: AsyncSession,
-    sku: str,
-    country: str,
-    today: date,
-) -> list[tuple[str | None, int]]:
-    """加载单个 SKU 在某国近 30 天的订单（postal_code, qty_shipped）。
-
-    仅返回有 order_detail 的订单。单次查询适用于 PATCH 等单条场景；
-    批量场景请用 `load_all_sku_country_orders`。
-    """
-    earliest_dt = datetime.combine(
-        today - timedelta(days=WINDOW_DAYS), datetime.min.time(), tzinfo=BEIJING
-    )
-    end_dt = datetime.combine(today, datetime.min.time(), tzinfo=BEIJING)
-
-    stmt = (
-        select(OrderDetail.postal_code, OrderItem.quantity_shipped)
-        .join(OrderHeader, OrderHeader.id == OrderItem.order_id)
-        .join(
-            OrderDetail,
-            (OrderDetail.shop_id == OrderHeader.shop_id)
-            & (OrderDetail.amazon_order_id == OrderHeader.amazon_order_id),
-        )
-        .where(OrderItem.commodity_sku == sku)
-        .where(OrderHeader.country_code == country)
-        .where(OrderHeader.purchase_date >= earliest_dt)
-        .where(OrderHeader.purchase_date < end_dt)
-        .where(OrderHeader.order_status.in_(("Shipped", "PartiallyShipped")))
-    )
-    rows = (await db.execute(stmt)).all()
-    return [(r[0], int(r[1] or 0)) for r in rows]
 
 
 async def load_all_sku_country_orders(
