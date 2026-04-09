@@ -1,6 +1,7 @@
 """建议单 REST API（对应 contracts/suggestion.yaml）。"""
 
-from datetime import date as date_type, datetime
+from datetime import date as date_type
+from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, Path, Query
@@ -9,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import db_session, get_current_session
 from app.core.exceptions import ConflictError, NotFound, PushBlockedError, ValidationFailed
-from app.core.timezone import now_beijing
+from app.core.timezone import BEIJING, now_beijing
 from app.models.product_listing import ProductListing
 from app.models.suggestion import Suggestion, SuggestionItem
 from app.schemas.suggestion import (
@@ -40,9 +41,15 @@ async def list_suggestions(
     if status:
         base = base.where(Suggestion.status == status)
     if date_from:
-        base = base.where(Suggestion.created_at >= datetime.combine(date_from, datetime.min.time()))
+        base = base.where(
+            Suggestion.created_at
+            >= datetime.combine(date_from, datetime.min.time(), tzinfo=BEIJING)
+        )
     if date_to:
-        base = base.where(Suggestion.created_at <= datetime.combine(date_to, datetime.max.time()))
+        base = base.where(
+            Suggestion.created_at
+            < datetime.combine(date_to + timedelta(days=1), datetime.min.time(), tzinfo=BEIJING)
+        )
     if sku:
         # 用 EXISTS 子查询匹配 sku
         subq = (
@@ -124,6 +131,13 @@ async def patch_item(
                 if v < 0:
                     raise ValidationFailed("warehouse_breakdown 包含负数")
 
+    # H4：total_qty 与 country_breakdown 一致性
+    if patch.total_qty is not None and patch.country_breakdown is not None:
+        if sum(patch.country_breakdown.values()) != patch.total_qty:
+            raise ValidationFailed(
+                "country_breakdown 之和与 total_qty 不一致"
+            )
+
     updates: dict[str, Any] = {}
     if patch.total_qty is not None:
         updates["total_qty"] = patch.total_qty
@@ -135,6 +149,23 @@ async def patch_item(
         updates["t_purchase"] = patch.t_purchase
     if patch.t_ship is not None:
         updates["t_ship"] = patch.t_ship
+
+    # H3：重新计算 urgent（与 engine/step6_timing 同规则：任一国 T_采购 <= today）
+    if patch.t_purchase is not None or patch.total_qty is not None:
+        effective_t_purchase = (
+            patch.t_purchase if patch.t_purchase is not None else (item.t_purchase or {})
+        )
+        today = now_beijing().date()
+        urgent = False
+        for _c, d_str in effective_t_purchase.items():
+            try:
+                d = date_type.fromisoformat(d_str) if isinstance(d_str, str) else d_str
+            except ValueError:
+                continue
+            if d is not None and d <= today:
+                urgent = True
+                break
+        updates["urgent"] = urgent
 
     if updates:
         await db.execute(

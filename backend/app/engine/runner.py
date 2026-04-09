@@ -86,9 +86,6 @@ async def run_engine(ctx: JobContext, *, triggered_by: str = "scheduler") -> int
         await ctx.progress(current_step="Step 2: 计算 sale_days")
         sale_days, inventory = await run_step2(db, velocity, sku_list)
 
-        # FR-032 / US5：刷新积压 SKU 提示表
-        await _refresh_overstock_marks(db, velocity, inventory, today)
-
         await ctx.progress(current_step="Step 3: 各国补货量")
         country_qty, overstock_countries = compute_country_qty(
             velocity, inventory, config.target_days
@@ -181,6 +178,8 @@ async def run_engine(ctx: JobContext, *, triggered_by: str = "scheduler") -> int
                 await ctx.progress(step_detail=f"已处理 {processed} 条建议")
 
         await ctx.progress(current_step="Step 6: 持久化建议单")
+        # FR-032 / US5：刷新积压 SKU 提示表（与 suggestion 持久化同事务）
+        await _refresh_overstock_marks(db, velocity, inventory, today)
         suggestion_id = await _persist_suggestion(
             db, global_snapshot, triggered_by, items_to_insert
         )
@@ -215,7 +214,7 @@ async def _load_commodity_id_map(
             )
         )
     ).all()
-    result: dict[str, str | None] = {sku: None for sku in skus}
+    result: dict[str, str | None] = dict.fromkeys(skus)
     for sku, cid in rows:
         if result.get(sku) is None and cid:
             result[sku] = cid
@@ -327,26 +326,29 @@ async def _refresh_overstock_marks(
         sku: last_dt.date() for sku, last_dt in last_sale_rows if last_dt
     }
 
-    # 4. UPSERT
-    for sku, country, warehouse_id, available in rows:
-        values = {
+    # 4. 批量 UPSERT（一条语句完成，避免 N+1；不覆盖 processed_at）
+    rows_as_dicts = [
+        {
             "commodity_sku": sku,
             "country": country,
             "warehouse_id": warehouse_id,
             "current_stock": int(available or 0),
             "last_sale_date": last_sale_map.get(sku),
         }
-        stmt = pg_insert(OverstockSkuMark).values(**values)
-        # 不覆盖 processed_at（用户手动状态）
-        stmt = stmt.on_conflict_do_update(
-            constraint="uq_overstock_sku_mark_key",
-            set_={
-                "current_stock": values["current_stock"],
-                "last_sale_date": values["last_sale_date"],
-            },
-        )
-        await db.execute(stmt)
-    await db.commit()
+        for sku, country, warehouse_id, available in rows
+    ]
+    if not rows_as_dicts:
+        return
+    stmt = pg_insert(OverstockSkuMark).values(rows_as_dicts)
+    stmt = stmt.on_conflict_do_update(
+        constraint="uq_overstock_sku_mark_key",
+        set_={
+            "current_stock": stmt.excluded.current_stock,
+            "last_sale_date": stmt.excluded.last_sale_date,
+        },
+    )
+    await db.execute(stmt)
+    # 提交由调用方（_persist_suggestion）一并处理，保证单事务
 
 
 async def _archive_active(db: AsyncSession) -> None:
