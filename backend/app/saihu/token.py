@@ -33,12 +33,14 @@ class TokenManager:
         self._token: str | None = None
         self._expires_at: datetime | None = None
         self._lock = asyncio.Lock()
+        self._refresh_future: asyncio.Future[str] | None = None
+        self._refresh_task: asyncio.Task[None] | None = None
 
     async def get_token(self) -> str:
         """获取有效 token，必要时刷新。"""
         settings = get_settings()
+        # 单飞（single-flight）：快速路径先检查内存，未命中再走共享刷新
         async with self._lock:
-            # 命中内存
             if (
                 self._token
                 and self._expires_at
@@ -57,13 +59,39 @@ class TokenManager:
             ):
                 return self._token
 
-            # 仍未命中或快过期，刷新
-            return await self._refresh()
+            future = self._get_or_start_refresh_locked()
+        return await future
 
     async def force_refresh(self) -> str:
-        """收到 40001 时强制刷新。"""
+        """收到 40001 时强制刷新（single-flight：多个并发调用共享同一次 HTTP 刷新）。"""
         async with self._lock:
-            return await self._refresh()
+            future = self._get_or_start_refresh_locked()
+        return await future
+
+    def _get_or_start_refresh_locked(self) -> "asyncio.Future[str]":
+        """必须在持有 self._lock 时调用。返回当前进行中的刷新 future，或新建一个。"""
+        if self._refresh_future is not None and not self._refresh_future.done():
+            return self._refresh_future
+        loop = asyncio.get_running_loop()
+        fut: asyncio.Future[str] = loop.create_future()
+        self._refresh_future = fut
+        # 后台任务在锁外执行真正的 HTTP 刷新
+        self._refresh_task = asyncio.create_task(self._run_refresh(fut))
+        return fut
+
+    async def _run_refresh(self, fut: "asyncio.Future[str]") -> None:
+        try:
+            token = await self._refresh()
+        except BaseException as exc:
+            if not fut.done():
+                fut.set_exception(exc)
+        else:
+            if not fut.done():
+                fut.set_result(token)
+        finally:
+            async with self._lock:
+                if self._refresh_future is fut:
+                    self._refresh_future = None
 
     async def _load_from_db(self) -> None:
         async with async_session_factory() as db:

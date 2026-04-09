@@ -6,6 +6,7 @@
     raw < 0 的国家记入 overstock_countries（只读提示）
 """
 
+import math
 from collections import defaultdict
 
 
@@ -35,5 +36,5 @@ def compute_country_qty(
                     overstock[sku].append(country)
                 continue
             # 向上取整到件
-            country_qty[sku][country] = int(round(raw))
+            country_qty[sku][country] = math.ceil(raw)
     return dict(country_qty), dict(overstock)

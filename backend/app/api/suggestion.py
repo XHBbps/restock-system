@@ -59,7 +59,8 @@ async def list_suggestions(
         )
         base = base.where(Suggestion.id.in_(select(subq.c.suggestion_id)))
 
-    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
+    count_stmt = base.with_only_columns(func.count()).order_by(None)
+    total = (await db.execute(count_stmt)).scalar_one()
     rows = (
         (await db.execute(base.offset((page - 1) * page_size).limit(page_size))).scalars().all()
     )

@@ -62,23 +62,38 @@ class SaihuClient:
         endpoint_path: str,
         body: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """发起一次 POST 业务请求并返回 data 字段。"""
+        """发起一次 POST 业务请求并返回 data 字段。
+
+        40001（token 失效）不占用正常的 tenacity 重试预算：在外层
+        捕获一次，force_refresh 后重试一次；若再次 40001 或其他可重试
+        错误则交给 tenacity 处理。
+        """
         settings = get_settings()
         body = body or {}
 
-        async for attempt in AsyncRetrying(
-            stop=stop_after_attempt(settings.saihu_max_retries),
-            wait=wait_exponential(multiplier=1, min=1, max=10),
-            retry=retry_if_exception_type(
-                (SaihuRateLimited, SaihuNetworkError, SaihuAuthExpired)
-            ),
-            reraise=True,
-        ):
-            with attempt:
-                return await self._do_request(endpoint_path, body, attempt.retry_state.attempt_number)
+        async def _retrying_call() -> dict[str, Any]:
+            async for attempt in AsyncRetrying(
+                stop=stop_after_attempt(settings.saihu_max_retries),
+                wait=wait_exponential(multiplier=1, min=1, max=10),
+                retry=retry_if_exception_type(
+                    (SaihuRateLimited, SaihuNetworkError)
+                ),
+                reraise=True,
+            ):
+                with attempt:
+                    return await self._do_request(
+                        endpoint_path, body, attempt.retry_state.attempt_number
+                    )
+            # AsyncRetrying 总会抛或返回，这里不可达
+            raise SaihuAPIError("unreachable", endpoint=endpoint_path)
 
-        # AsyncRetrying 总会抛或返回，这里不可达
-        raise SaihuAPIError("unreachable", endpoint=endpoint_path)
+        try:
+            return await _retrying_call()
+        except SaihuAuthExpired:
+            # token 失效：force_refresh 已在 _do_request 里触发过；
+            # 这里在 tenacity 预算之外再给一次完整的重试机会。
+            logger.info("saihu_auth_expired_retry_outside_budget", endpoint=endpoint_path)
+            return await _retrying_call()
 
     async def _do_request(
         self,
@@ -203,7 +218,7 @@ class SaihuClient:
                     )
                 )
                 await db.commit()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             # 日志写入失败不应阻断业务
             logger.warning("api_call_log_write_failed", error=str(exc))
 

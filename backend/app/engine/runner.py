@@ -42,6 +42,7 @@ from app.models.overstock import OverstockSkuMark
 from app.models.product_listing import ProductListing
 from app.models.sku import SkuConfig
 from app.models.suggestion import Suggestion, SuggestionItem
+from app.models.warehouse import Warehouse
 from app.tasks.jobs import JobContext
 
 logger = get_logger(__name__)
@@ -291,7 +292,9 @@ async def _refresh_overstock_marks(
     if not overstock_skus:
         return
 
-    # 2. 对这些 sku 查 inventory_snapshot_latest 找 available > 0 的仓
+    # 2. 对这些 sku 查 inventory_snapshot_latest 找 available > 0 的海外仓
+    #    与 Step 2/5 保持一致：仅统计非国内仓（warehouse.type != 1），
+    #    避免只在国内仓有货的 SKU 被误标为海外积压。
     rows = (
         await db.execute(
             select(
@@ -300,6 +303,8 @@ async def _refresh_overstock_marks(
                 InventorySnapshotLatest.warehouse_id,
                 InventorySnapshotLatest.available,
             )
+            .join(Warehouse, Warehouse.id == InventorySnapshotLatest.warehouse_id)
+            .where(Warehouse.type != 1)
             .where(InventorySnapshotLatest.commodity_sku.in_(overstock_skus))
             .where(InventorySnapshotLatest.available > 0)
             .where(InventorySnapshotLatest.country.is_not(None))
