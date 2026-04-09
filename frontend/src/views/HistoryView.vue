@@ -37,7 +37,7 @@
 
     <el-table v-loading="loading" :data="rows">
       <el-table-column label="建议单 ID" prop="id" width="100" sortable show-overflow-tooltip />
-      <el-table-column label="生成时间" width="180" sortable show-overflow-tooltip>
+      <el-table-column label="生成时间" min-width="180" sortable show-overflow-tooltip>
         <template #default="{ row }">
           {{ formatTime(row.created_at) }}
         </template>
