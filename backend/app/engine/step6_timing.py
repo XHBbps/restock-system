@@ -11,6 +11,10 @@
 from dataclasses import dataclass
 from datetime import date, timedelta
 
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
+
 
 @dataclass
 class TimingResult:
@@ -37,6 +41,20 @@ def compute_timing_for_sku(
             continue
         sd = sale_days_for_sku.get(country)
         if sd is None:
+            # Missing sale_days (edge case: velocity=0 but country_qty>0).
+            # Fall back to today + lead_time so t_purchase/t_ship stay complete.
+            logger.warning(
+                "step6_sale_days_missing_fallback",
+                country=country,
+                qty=qty,
+                lead_time_days=lead_time_days,
+            )
+            ship_date = today + timedelta(days=lead_time_days)
+            purchase_date = ship_date - timedelta(days=lead_time_days)
+            t_ship[country] = ship_date
+            t_purchase[country] = purchase_date
+            if purchase_date <= today:
+                urgent = True
             continue
         ship_offset = round(sd - target_days)
         ship_date = today + timedelta(days=ship_offset)

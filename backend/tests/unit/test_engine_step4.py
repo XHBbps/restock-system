@@ -34,7 +34,11 @@ def test_excludes_zero_country_velocity() -> None:
 
 
 def test_max_zero() -> None:
-    """巨大本地仓应让 total clamp 为 0。"""
+    """Huge local stock case: previously clamped to 0, but MEDIUM-N1
+    invariant requires total_qty >= sum(country_breakdown), so the
+    minimum is sum_qty. Only empty country_qty yields 0 (see
+    test_empty_country_qty).
+    """
     total = compute_total(
         sku="sku-A",
         country_qty_for_sku={"US": 100},
@@ -42,7 +46,7 @@ def test_max_zero() -> None:
         local_stock_for_sku={"available": 10000, "reserved": 0},
         buffer_days=30,
     )
-    assert total == 0
+    assert total == 100
 
 
 def test_no_local_stock() -> None:
@@ -55,6 +59,22 @@ def test_no_local_stock() -> None:
     )
     # 100 + 300 - 0 = 400
     assert total == 400
+
+
+def test_step4_total_respects_sum_invariant() -> None:
+    """MEDIUM-N1: total_qty must be >= sum(country_breakdown) even at low v.
+
+    Single country v=0.1, buffer_days=0, local=1, qty=3 -> sum_qty=3.
+    raw = 3 + 0 - 1 = 2 < sum_qty(3), must clamp up to 3.
+    """
+    total = compute_total(
+        sku="sku-A",
+        country_qty_for_sku={"US": 3},
+        velocity_for_sku={"US": 0.1},
+        local_stock_for_sku={"available": 1, "reserved": 0},
+        buffer_days=0,
+    )
+    assert total >= 3
 
 
 def test_empty_country_qty() -> None:

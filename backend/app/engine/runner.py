@@ -18,7 +18,7 @@
 from datetime import date
 from typing import Any
 
-from sqlalchemy import func, insert, select, update
+from sqlalchemy import func, insert, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
@@ -47,12 +47,23 @@ from app.tasks.jobs import JobContext
 
 logger = get_logger(__name__)
 
+# PostgreSQL transaction-level advisory lock key: prevents concurrent engine
+# runs from overwriting each other. Any stable int32 unique vs other locks.
+ENGINE_RUN_ADVISORY_LOCK_KEY = 7429001
+
 
 async def run_engine(ctx: JobContext, *, triggered_by: str = "scheduler") -> int | None:
     """执行一次完整的规则引擎，返回新建 suggestion id。"""
     today = now_beijing().date()
 
     async with async_session_factory() as db:
+        # M-N5: transaction-level advisory lock blocks concurrent engine runs
+        # to prevent them from overwriting each other's suggestion. Released
+        # automatically when the transaction ends.
+        await db.execute(
+            text("SELECT pg_advisory_xact_lock(:key)"),
+            {"key": ENGINE_RUN_ADVISORY_LOCK_KEY},
+        )
         # 加载全局配置
         config = (
             await db.execute(select(GlobalConfig).where(GlobalConfig.id == 1))

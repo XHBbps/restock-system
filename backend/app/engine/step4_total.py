@@ -67,4 +67,8 @@ def compute_total(
         )
 
     raw = sum_qty + buffer_qty - local_total
+    # Invariant: total_qty must be >= sum(country_breakdown) so that edited
+    # breakdowns do not exceed the total (keeps H4 PATCH check consistent).
+    if raw < sum_qty:
+        raw = sum_qty
     return max(int(round(raw)), 0)

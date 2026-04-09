@@ -8,6 +8,7 @@
 - 每次调用结束写 api_call_log
 """
 
+import asyncio
 import time
 from typing import Any
 
@@ -93,6 +94,8 @@ class SaihuClient:
             # token 失效：force_refresh 已在 _do_request 里触发过；
             # 这里在 tenacity 预算之外再给一次完整的重试机会。
             logger.info("saihu_auth_expired_retry_outside_budget", endpoint=endpoint_path)
+            # Small backoff to avoid hammering the token endpoint.
+            await asyncio.sleep(0.5)
             return await _retrying_call()
 
     async def _do_request(

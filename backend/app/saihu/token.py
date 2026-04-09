@@ -49,8 +49,10 @@ class TokenManager:
             ):
                 return self._token
 
-            # 尝试加载数据库缓存
-            await self._load_from_db()
+            # Load DB cache only when in-memory token is absent, so stale DB
+            # state cannot clobber a freshly refreshed in-memory token.
+            if self._token is None:
+                await self._load_from_db()
             if (
                 self._token
                 and self._expires_at

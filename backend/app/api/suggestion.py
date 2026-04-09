@@ -110,6 +110,15 @@ async def patch_item(
     db: AsyncSession = Depends(db_session),
     _: dict = Depends(get_current_session),
 ) -> SuggestionItemOut:
+    # N1: load parent suggestion first to enforce editable state
+    parent = (
+        await db.execute(select(Suggestion).where(Suggestion.id == suggestion_id))
+    ).scalar_one_or_none()
+    if parent is None:
+        raise NotFound(f"建议单 {suggestion_id} 不存在")
+    if parent.status == "archived":
+        raise ValidationFailed("已归档的建议单不可编辑")
+
     item = (
         await db.execute(
             select(SuggestionItem).where(
@@ -120,6 +129,8 @@ async def patch_item(
     ).scalar_one_or_none()
     if item is None:
         raise NotFound(f"建议条目 {item_id} 不存在")
+    if item.push_status == "pushed":
+        raise ValidationFailed("已推送的明细不可编辑")
 
     # 非负校验
     if patch.country_breakdown is not None:
@@ -161,8 +172,10 @@ async def patch_item(
         for _c, d_str in effective_t_purchase.items():
             try:
                 d = date_type.fromisoformat(d_str) if isinstance(d_str, str) else d_str
-            except ValueError:
-                continue
+            except (ValueError, TypeError) as exc:
+                raise ValidationFailed(
+                    f"t_purchase 包含无效日期: {_c}={d_str}"
+                ) from exc
             if d is not None and d <= today:
                 urgent = True
                 break
