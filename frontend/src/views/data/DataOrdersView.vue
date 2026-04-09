@@ -4,13 +4,13 @@
       <div class="card-header">
         <div class="title-block">
           <span class="card-title">订单列表</span>
-          <span class="card-meta">order_header · 来自 /api/order/pageList.json（点"查看详情"加载 postalCode 等）</span>
+          <span class="card-meta">order_header，来自 /api/order/pageList.json，支持查看同步后的订单详情。</span>
         </div>
         <div class="actions">
           <el-date-picker
             v-model="dateRange"
             type="daterange"
-            range-separator="—"
+            range-separator="至"
             start-placeholder="开始"
             end-placeholder="结束"
             value-format="YYYY-MM-DD"
@@ -45,71 +45,64 @@
       </div>
     </template>
 
-    <el-table :data="rows" v-loading="loading">
-      <el-table-column label="amazonOrderId" prop="amazonOrderId" width="220">
+    <el-table v-loading="loading" :data="rows">
+      <el-table-column label="订单号" prop="amazonOrderId" width="220" show-overflow-tooltip>
         <template #default="{ row }">
           <span class="mono">{{ row.amazonOrderId }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="店铺" prop="shopId" width="100">
+      <el-table-column label="店铺" prop="shopId" width="100" show-overflow-tooltip>
         <template #default="{ row }">
           <span class="mono muted">{{ row.shopId }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="国家" width="80" align="center">
+      <el-table-column label="国家" width="80" align="center" show-overflow-tooltip>
         <template #default="{ row }">
           <el-tag size="small">{{ row.countryCode }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="状态" width="140">
+      <el-table-column label="状态" width="140" show-overflow-tooltip>
         <template #default="{ row }">
           <el-tag :type="statusType(row.orderStatus)" size="small">{{ row.orderStatus }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="金额" width="120" align="right">
+      <el-table-column label="金额" width="120" align="right" show-overflow-tooltip>
         <template #default="{ row }">
           <span v-if="row.orderTotalAmount">{{ row.orderTotalAmount }} {{ row.orderTotalCurrency }}</span>
           <span v-else class="muted">-</span>
         </template>
       </el-table-column>
-      <el-table-column label="明细" width="70" align="right">
+      <el-table-column label="明细数" width="80" align="right" show-overflow-tooltip>
         <template #default="{ row }">{{ row.itemCount }}</template>
       </el-table-column>
-      <el-table-column label="邮编" width="80" align="center">
+      <el-table-column label="详情状态" width="100" align="center" show-overflow-tooltip>
         <template #default="{ row }">
-          <el-tag v-if="row.hasDetail" type="success" size="small">已拉</el-tag>
-          <el-tag v-else type="info" size="small">未拉</el-tag>
+          <el-tag v-if="row.hasDetail" type="success" size="small">已拉取</el-tag>
+          <el-tag v-else type="info" size="small">未拉取</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="下单时间" width="160">
+      <el-table-column label="下单时间" width="160" show-overflow-tooltip>
         <template #default="{ row }">
           <span class="muted mono">{{ formatTime(row.purchaseDate) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="100" align="center">
+      <el-table-column label="操作" width="100" align="center" show-overflow-tooltip>
         <template #default="{ row }">
           <el-button link type="primary" @click="openDetail(row)">详情</el-button>
         </template>
       </el-table-column>
     </el-table>
 
-    <el-pagination
+    <TablePaginationBar
       v-model:current-page="page"
       v-model:page-size="pageSize"
       :total="total"
       :page-sizes="[20, 50, 100, 200]"
-      layout="total, sizes, prev, pager, next"
-      style="margin-top: 16px; justify-content: flex-end"
       @current-change="reload"
       @size-change="reload"
     />
 
-    <!-- 订单详情 Dialog -->
-    <el-dialog
-      v-model="dialogVisible"
-      :title="detail ? `订单 ${detail.amazonOrderId}` : '加载中...'"
-      width="800px"
-    >
+    <el-dialog v-model="dialogVisible" :title="detail ? `订单 ${detail.amazonOrderId}` : '加载中...'" width="800px">
       <div v-if="detail" class="detail-body">
         <div class="detail-section">
           <div class="section-title">基本信息</div>
@@ -127,30 +120,33 @@
         </div>
 
         <div class="detail-section">
-          <div class="section-title">订单明细 ({{ detail.items.length }})</div>
+          <div class="section-title">订单明细（{{ detail.items.length }}）</div>
           <el-table :data="detail.items" size="small">
-            <el-table-column label="orderItemId" prop="orderItemId" width="160">
+            <el-table-column label="orderItemId" prop="orderItemId" width="160" show-overflow-tooltip>
               <template #default="{ row }"><span class="mono">{{ row.orderItemId }}</span></template>
             </el-table-column>
-            <el-table-column label="commoditySku" prop="commoditySku" min-width="160" />
-            <el-table-column label="sellerSku" prop="sellerSku" width="140" />
-            <el-table-column label="ordered" prop="quantityOrdered" width="80" align="right" />
-            <el-table-column label="shipped" prop="quantityShipped" width="80" align="right" />
-            <el-table-column label="refund" prop="refundNum" width="80" align="right" />
+            <el-table-column label="commoditySku" prop="commoditySku" min-width="160" show-overflow-tooltip />
+            <el-table-column label="sellerSku" prop="sellerSku" width="140" show-overflow-tooltip />
+            <el-table-column label="ordered" prop="quantityOrdered" width="80" align="right" show-overflow-tooltip />
+            <el-table-column label="shipped" prop="quantityShipped" width="80" align="right" show-overflow-tooltip />
+            <el-table-column label="refund" prop="refundNum" width="80" align="right" show-overflow-tooltip />
           </el-table>
         </div>
 
         <div class="detail-section">
-          <div class="section-title">订单详情（邮编 / 地址）</div>
+          <div class="section-title">订单详情</div>
           <div v-if="detail.detailFetchedAt" class="kv-grid">
-            <div><span class="label">postalCode</span><strong class="mono">{{ detail.postalCode || '-' }}</strong></div>
-            <div><span class="label">stateOrRegion</span><span>{{ detail.stateOrRegion || '-' }}</span></div>
-            <div><span class="label">city</span><span>{{ detail.city || '-' }}</span></div>
-            <div><span class="label">receiverName</span><span>{{ detail.receiverName || '-' }}</span></div>
+            <div><span class="label">postalCode</span><span class="mono">{{ detail.postalCode || '-' }}</span></div>
+            <div><span class="label">stateOrRegion</span><span class="mono">{{ detail.stateOrRegion || '-' }}</span></div>
+            <div><span class="label">city</span><span class="mono">{{ detail.city || '-' }}</span></div>
+            <div><span class="label">receiverName</span><span class="mono">{{ detail.receiverName || '-' }}</span></div>
             <div class="full-row"><span class="label">detailAddress</span><span>{{ detail.detailAddress || '-' }}</span></div>
-            <div class="full-row"><span class="label">fetchedAt</span><span class="mono muted">{{ formatTime(detail.detailFetchedAt) }}</span></div>
+            <div class="full-row">
+              <span class="label">fetchedAt</span>
+              <span class="mono muted">{{ formatTime(detail.detailFetchedAt) }}</span>
+            </div>
           </div>
-          <el-empty v-else description="尚未拉取订单详情（邮编）" :image-size="60" />
+          <el-empty v-else description="尚未拉取订单详情" :image-size="60" />
         </div>
       </div>
     </el-dialog>
@@ -159,6 +155,8 @@
 
 <script setup lang="ts">
 import { getOrderDetail, listOrders, type DataOrderDetail, type DataOrderSummary } from '@/api/data'
+import TablePaginationBar from '@/components/TablePaginationBar.vue'
+import type { TagType } from '@/utils/element'
 import dayjs from 'dayjs'
 import { onMounted, reactive, ref } from 'vue'
 
@@ -171,12 +169,11 @@ const dateRange = ref<[string, string] | null>(null)
 const filters = reactive({
   country: '',
   status: '',
-  sku: ''
+  sku: '',
 })
 
 const dialogVisible = ref(false)
 const detail = ref<DataOrderDetail | null>(null)
-// 连续点击不同订单时防止后发先返回的竞态
 let detailReqId = 0
 
 async function reload(): Promise<void> {
@@ -189,7 +186,7 @@ async function reload(): Promise<void> {
       status: filters.status || undefined,
       sku: filters.sku || undefined,
       page: page.value,
-      page_size: pageSize.value
+      page_size: pageSize.value,
     })
     rows.value = resp.items
     total.value = resp.total
@@ -203,26 +200,25 @@ async function openDetail(row: DataOrderSummary): Promise<void> {
   dialogVisible.value = true
   detail.value = null
   const data = await getOrderDetail(row.shopId, row.amazonOrderId)
-  // 如果期间用户又点了别的订单 / 关了 dialog，丢弃本次结果
   if (myReqId === detailReqId && dialogVisible.value) {
     detail.value = data
   }
 }
 
-function statusType(s: string): string {
+function statusType(status: string): TagType {
   return (
     {
       Shipped: 'success',
       PartiallyShipped: 'success',
       Unshipped: 'warning',
       Pending: 'info',
-      Canceled: 'danger'
-    } as Record<string, string>
-  )[s] || 'info'
+      Canceled: 'danger',
+    } as Record<string, TagType>
+  )[status] || 'info'
 }
 
-function formatTime(t: string): string {
-  return dayjs(t).format('YYYY-MM-DD HH:mm')
+function formatTime(value: string): string {
+  return dayjs(value).format('YYYY-MM-DD HH:mm')
 }
 
 onMounted(reload)
@@ -236,29 +232,35 @@ onMounted(reload)
   gap: $space-4;
   flex-wrap: wrap;
 }
+
 .title-block {
   display: flex;
   flex-direction: column;
 }
+
 .card-title {
   font-size: $font-size-lg;
   font-weight: $font-weight-semibold;
   letter-spacing: $tracking-tight;
 }
+
 .card-meta {
   font-size: $font-size-xs;
   color: $color-text-secondary;
   font-family: $font-family-mono;
   margin-top: 2px;
 }
+
 .actions {
   display: flex;
   gap: $space-3;
   flex-wrap: wrap;
 }
+
 .muted {
   color: $color-text-secondary;
 }
+
 .mono {
   font-family: $font-family-mono;
   font-size: $font-size-xs;
@@ -269,37 +271,40 @@ onMounted(reload)
   flex-direction: column;
   gap: $space-5;
 }
-.detail-section {
-  .section-title {
-    font-size: $font-size-xs;
-    color: $color-text-secondary;
-    font-weight: $font-weight-semibold;
-    text-transform: uppercase;
-    letter-spacing: $tracking-wider;
-    margin-bottom: $space-3;
-  }
+
+.section-title {
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  font-weight: $font-weight-semibold;
+  text-transform: uppercase;
+  letter-spacing: $tracking-wider;
+  margin-bottom: $space-3;
 }
+
 .kv-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: $space-3;
-  & > div {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    padding: $space-2 $space-3;
-    background: $color-bg-subtle;
-    border-radius: $radius-md;
-  }
-  .label {
-    font-size: 11px;
-    color: $color-text-secondary;
-    text-transform: uppercase;
-    letter-spacing: $tracking-wider;
-    font-weight: $font-weight-semibold;
-  }
-  .full-row {
-    grid-column: 1 / -1;
-  }
+}
+
+.kv-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: $space-2 $space-3;
+  background: $color-bg-subtle;
+  border-radius: $radius-md;
+}
+
+.label {
+  font-size: 11px;
+  color: $color-text-secondary;
+  text-transform: uppercase;
+  letter-spacing: $tracking-wider;
+  font-weight: $font-weight-semibold;
+}
+
+.full-row {
+  grid-column: 1 / -1;
 }
 </style>

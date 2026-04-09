@@ -3,8 +3,8 @@
     <template #header>
       <div class="card-header">
         <div class="title-block">
-          <span class="card-title">其他出库（在途数据）</span>
-          <span class="card-meta">in_transit_record · 来自 /api/warehouseInOut/outRecords.json (searchField=remark, searchValue=在途中)</span>
+          <span class="card-title">其他出库（在途观测）</span>
+          <span class="card-meta">in_transit_record，来自 /api/warehouseInOut/outRecords.json，当前补货统一按 0 处理。</span>
         </div>
         <div class="actions">
           <el-input
@@ -32,24 +32,24 @@
       </div>
     </template>
 
-    <el-table :data="rows" v-loading="loading" row-key="saihuOutRecordId">
+    <el-table v-loading="loading" :data="rows" row-key="saihuOutRecordId">
       <el-table-column type="expand">
         <template #default="{ row }">
           <div class="expand-panel">
-            <div class="expand-title">出库单明细 ({{ row.items.length }} 项)</div>
+            <div class="expand-title">出库单明细（{{ row.items.length }} 项）</div>
             <el-table :data="row.items" size="small">
-              <el-table-column label="commoditySku" prop="commoditySku" />
-              <el-table-column label="goods (在途数)" prop="goods" width="160" align="right" />
+              <el-table-column label="commoditySku" prop="commoditySku" show-overflow-tooltip />
+              <el-table-column label="goods（观测值）" prop="goods" width="160" align="right" show-overflow-tooltip />
             </el-table>
             <div class="expand-meta">
-              备注: <code>{{ row.remark || '-' }}</code>
+              备注：<code>{{ row.remark || '-' }}</code>
             </div>
           </div>
         </template>
       </el-table-column>
-      <el-table-column label="出库单号" prop="outWarehouseNo" min-width="160" />
-      <el-table-column label="saihuOutRecordId" prop="saihuOutRecordId" width="160" />
-      <el-table-column label="目标仓" min-width="200">
+      <el-table-column label="出库单号" prop="outWarehouseNo" min-width="160" show-overflow-tooltip />
+      <el-table-column label="赛狐出库 ID" prop="saihuOutRecordId" width="160" show-overflow-tooltip />
+      <el-table-column label="目标仓" min-width="200" show-overflow-tooltip>
         <template #default="{ row }">
           <div class="meta-stack">
             <span>{{ row.targetWarehouseName || '-' }}</span>
@@ -57,40 +57,38 @@
           </div>
         </template>
       </el-table-column>
-      <el-table-column label="目的国" width="90" align="center">
+      <el-table-column label="目标国家" width="90" align="center" show-overflow-tooltip>
         <template #default="{ row }">
           <el-tag v-if="row.targetCountry" size="small">{{ row.targetCountry }}</el-tag>
           <span v-else class="muted">-</span>
         </template>
       </el-table-column>
-      <el-table-column label="明细数" width="90" align="right">
+      <el-table-column label="明细数" width="90" align="right" show-overflow-tooltip>
         <template #default="{ row }">{{ row.items.length }}</template>
       </el-table-column>
-      <el-table-column label="总在途" width="100" align="right">
+      <el-table-column label="观测总数" width="100" align="right" show-overflow-tooltip>
         <template #default="{ row }">
           <strong>{{ sumGoods(row) }}</strong>
         </template>
       </el-table-column>
-      <el-table-column label="状态" width="100">
+      <el-table-column label="状态" width="100" show-overflow-tooltip>
         <template #default="{ row }">
           <el-tag v-if="row.isInTransit" type="success" size="small">在途中</el-tag>
           <el-tag v-else type="info" size="small">已消失</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="最后同步" width="160">
+      <el-table-column label="最后同步" width="160" show-overflow-tooltip>
         <template #default="{ row }">
           <span class="muted mono">{{ formatTime(row.lastSeenAt) }}</span>
         </template>
       </el-table-column>
     </el-table>
 
-    <el-pagination
+    <TablePaginationBar
       v-model:current-page="page"
       v-model:page-size="pageSize"
       :total="total"
       :page-sizes="[20, 50, 100]"
-      layout="total, sizes, prev, pager, next"
-      style="margin-top: 16px; justify-content: flex-end"
       @current-change="reload"
       @size-change="reload"
     />
@@ -99,6 +97,7 @@
 
 <script setup lang="ts">
 import { listOutRecords, type DataOutRecord } from '@/api/data'
+import TablePaginationBar from '@/components/TablePaginationBar.vue'
 import dayjs from 'dayjs'
 import { onMounted, reactive, ref } from 'vue'
 
@@ -110,7 +109,7 @@ const loading = ref(false)
 const filters = reactive({
   sku: '',
   country: '',
-  is_in_transit: true as boolean | undefined
+  is_in_transit: true as boolean | undefined,
 })
 
 async function reload(): Promise<void> {
@@ -121,7 +120,7 @@ async function reload(): Promise<void> {
       country: filters.country || undefined,
       is_in_transit: filters.is_in_transit,
       page: page.value,
-      page_size: pageSize.value
+      page_size: pageSize.value,
     })
     rows.value = resp.items
     total.value = resp.total
@@ -134,8 +133,8 @@ function sumGoods(row: DataOutRecord): number {
   return row.items.reduce((sum, it) => sum + it.goods, 0)
 }
 
-function formatTime(t: string): string {
-  return dayjs(t).format('MM-DD HH:mm')
+function formatTime(value: string): string {
+  return dayjs(value).format('MM-DD HH:mm')
 }
 
 onMounted(reload)
@@ -148,30 +147,36 @@ onMounted(reload)
   align-items: center;
   gap: $space-4;
 }
+
 .title-block {
   display: flex;
   flex-direction: column;
 }
+
 .card-title {
   font-size: $font-size-lg;
   font-weight: $font-weight-semibold;
   letter-spacing: $tracking-tight;
 }
+
 .card-meta {
   font-size: $font-size-xs;
   color: $color-text-secondary;
   font-family: $font-family-mono;
   margin-top: 2px;
 }
+
 .actions {
   display: flex;
   gap: $space-3;
 }
+
 .expand-panel {
   padding: $space-3 $space-4;
   background: $color-bg-subtle;
   border-radius: $radius-md;
 }
+
 .expand-title {
   font-size: $font-size-xs;
   color: $color-text-secondary;
@@ -180,30 +185,36 @@ onMounted(reload)
   letter-spacing: $tracking-wider;
   margin-bottom: $space-2;
 }
+
 .expand-meta {
   margin-top: $space-2;
   font-size: $font-size-xs;
   color: $color-text-secondary;
-  code {
-    font-family: $font-family-mono;
-    background: $color-bg-card;
-    padding: 2px 6px;
-    border-radius: $radius-sm;
-    border: 1px solid $color-border-default;
-  }
 }
+
+.expand-meta code {
+  font-family: $font-family-mono;
+  background: $color-bg-card;
+  padding: 2px 6px;
+  border-radius: $radius-sm;
+  border: 1px solid $color-border-default;
+}
+
 .meta-stack {
   display: flex;
   flex-direction: column;
 }
+
 .meta-sub {
   font-size: $font-size-xs;
   color: $color-text-secondary;
   font-family: $font-family-mono;
 }
+
 .muted {
   color: $color-text-secondary;
 }
+
 .mono {
   font-family: $font-family-mono;
   font-size: $font-size-xs;

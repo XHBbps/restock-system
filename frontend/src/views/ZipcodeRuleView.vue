@@ -1,46 +1,47 @@
 <template>
-  <el-card shadow="never">
-    <template #header>
-      <div class="card-header">
-        <span class="card-title">邮编规则</span>
-        <div class="actions">
-          <el-input
-            v-model="filterCountry"
-            placeholder="按国家筛选"
-            clearable
-            style="width: 160px"
-            maxlength="2"
-            @clear="reload"
-            @keyup.enter="reload"
-          />
-          <el-button type="primary" @click="openCreate">新增规则</el-button>
-        </div>
-      </div>
+  <PageSectionCard title="邮编规则" description="按国家筛选和维护邮编分仓规则。">
+    <template #actions>
+      <el-input
+        v-model="filterCountry"
+        placeholder="按国家筛选"
+        clearable
+        style="width: 160px"
+        maxlength="2"
+        @clear="reload"
+        @keyup.enter="reload"
+      />
+      <el-button type="primary" @click="openCreate">新增规则</el-button>
     </template>
 
-    <el-table :data="rows" v-loading="loading">
-      <el-table-column label="优先级" prop="priority" width="80" sortable />
-      <el-table-column label="国家" prop="country" width="80" />
-      <el-table-column label="截取前 N 位" prop="prefix_length" width="120" />
-      <el-table-column label="值类型" prop="value_type" width="100" />
-      <el-table-column label="比较" width="80">
+    <el-table v-loading="loading" :data="pagedRows">
+      <el-table-column label="优先级" prop="priority" width="80" sortable show-overflow-tooltip />
+      <el-table-column label="国家" prop="country" width="80" show-overflow-tooltip />
+      <el-table-column label="截取前 N 位" prop="prefix_length" width="120" show-overflow-tooltip />
+      <el-table-column label="值类型" prop="value_type" width="100" show-overflow-tooltip />
+      <el-table-column label="比较符" width="80" show-overflow-tooltip>
         <template #default="{ row }">
           <code>{{ row.operator }}</code>
         </template>
       </el-table-column>
-      <el-table-column label="比较值" prop="compare_value" width="120" />
-      <el-table-column label="目标仓库" prop="warehouse_id" min-width="160">
+      <el-table-column label="比较值" prop="compare_value" width="120" show-overflow-tooltip />
+      <el-table-column label="目标仓库" prop="warehouse_id" min-width="160" show-overflow-tooltip>
         <template #default="{ row }">
           {{ warehouseName(row.warehouse_id) }}
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="160" align="center">
+      <el-table-column label="操作" width="160" align="center" show-overflow-tooltip>
         <template #default="{ row }">
           <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
           <el-button link type="danger" @click="remove(row)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
+
+    <TablePaginationBar
+      v-model:current-page="page"
+      v-model:page-size="pageSize"
+      :total="rows.length"
+    />
 
     <el-dialog v-model="dialogVisible" :title="editingId ? '编辑规则' : '新增规则'" width="540px">
       <el-form :model="form" label-width="120px">
@@ -52,7 +53,7 @@
         </el-form-item>
         <el-form-item label="值类型">
           <el-radio-group v-model="form.value_type">
-            <el-radio-button value="number">数值</el-radio-button>
+            <el-radio-button value="number">数字</el-radio-button>
             <el-radio-button value="string">字符串</el-radio-button>
           </el-radio-group>
         </el-form-item>
@@ -67,10 +68,10 @@
         <el-form-item label="目标仓库">
           <el-select v-model="form.warehouse_id" filterable style="width: 280px">
             <el-option
-              v-for="w in warehouses"
-              :key="w.id"
-              :label="`${w.name} (${w.country || '?'})`"
-              :value="w.id"
+              v-for="warehouse in warehouses"
+              :key="warehouse.id"
+              :label="`${warehouse.name} (${warehouse.country || '?'})`"
+              :value="warehouse.id"
             />
           </el-select>
         </el-form-item>
@@ -84,7 +85,7 @@
         <el-button type="primary" :loading="saving" @click="save">保存</el-button>
       </template>
     </el-dialog>
-  </el-card>
+  </PageSectionCard>
 </template>
 
 <script setup lang="ts">
@@ -96,10 +97,12 @@ import {
   updateZipcodeRule,
   type Warehouse,
   type ZipcodeRule,
-  type ZipcodeRuleInput
+  type ZipcodeRuleInput,
 } from '@/api/config'
+import PageSectionCard from '@/components/PageSectionCard.vue'
+import TablePaginationBar from '@/components/TablePaginationBar.vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 
 const OPERATORS = ['=', '!=', '>', '>=', '<', '<='] as const
 
@@ -108,6 +111,8 @@ const warehouses = ref<Warehouse[]>([])
 const loading = ref(false)
 const saving = ref(false)
 const filterCountry = ref('')
+const page = ref(1)
+const pageSize = ref(10)
 
 const dialogVisible = ref(false)
 const editingId = ref<number | null>(null)
@@ -119,7 +124,12 @@ const form = reactive<ZipcodeRuleInput>({
   operator: '>=',
   compare_value: '',
   warehouse_id: '',
-  priority: 100
+  priority: 100,
+})
+
+const pagedRows = computed(() => {
+  const start = (page.value - 1) * pageSize.value
+  return rows.value.slice(start, start + pageSize.value)
 })
 
 async function reload(): Promise<void> {
@@ -132,12 +142,11 @@ async function reload(): Promise<void> {
 }
 
 function warehouseName(id: string): string {
-  const w = warehouses.value.find((x) => x.id === id)
-  return w ? `${w.name} (${w.country || '?'})` : id
+  const warehouse = warehouses.value.find((item) => item.id === id)
+  return warehouse ? `${warehouse.name} (${warehouse.country || '?'})` : id
 }
 
-function openCreate(): void {
-  editingId.value = null
+function resetForm(): void {
   Object.assign(form, {
     country: '',
     prefix_length: 2,
@@ -145,8 +154,13 @@ function openCreate(): void {
     operator: '>=',
     compare_value: '',
     warehouse_id: '',
-    priority: 100
+    priority: 100,
   })
+}
+
+function openCreate(): void {
+  editingId.value = null
+  resetForm()
   dialogVisible.value = true
 }
 
@@ -165,23 +179,23 @@ async function save(): Promise<void> {
       await createZipcodeRule({ ...form })
     }
     dialogVisible.value = false
-    ElMessage.success('已保存')
+    ElMessage.success('已保存。')
     await reload()
   } catch {
-    ElMessage.error('保存失败')
+    ElMessage.error('保存失败。')
   } finally {
     saving.value = false
   }
 }
 
 async function remove(row: ZipcodeRule): Promise<void> {
-  await ElMessageBox.confirm(`确认删除规则 #${row.id}?`, '删除', { type: 'warning' })
+  await ElMessageBox.confirm(`确认删除规则 #${row.id} 吗？`, '删除规则', { type: 'warning' })
   try {
     await deleteZipcodeRule(row.id)
-    ElMessage.success('已删除')
+    ElMessage.success('已删除。')
     await reload()
   } catch {
-    ElMessage.error('删除失败')
+    ElMessage.error('删除失败。')
   }
 }
 
@@ -192,19 +206,6 @@ onMounted(async () => {
 </script>
 
 <style lang="scss" scoped>
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.card-title {
-  font-size: $font-size-lg;
-  font-weight: $font-weight-semibold;
-}
-.actions {
-  display: flex;
-  gap: $space-3;
-}
 .hint {
   margin-left: $space-3;
   color: $color-text-secondary;

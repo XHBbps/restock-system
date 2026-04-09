@@ -1,16 +1,14 @@
 <template>
-  <el-card shadow="never">
-    <template #header>
-      <div class="card-header">
-        <span class="card-title">仓库与国家映射</span>
-        <div class="legend">
-          <el-tag type="info" size="small">类型 1 = 国内仓 (本地仓)</el-tag>
-        </div>
-      </div>
+  <PageSectionCard
+    title="仓库配置"
+    description="维护仓库与国家映射。页面级表格统一支持分页。"
+  >
+    <template #actions>
+      <el-tag type="info" size="small">类型 1 表示国内仓</el-tag>
     </template>
 
-    <el-table :data="rows" v-loading="loading">
-      <el-table-column label="名称" prop="name" min-width="200">
+    <el-table v-loading="loading" :data="pagedRows">
+      <el-table-column label="仓库名称" prop="name" min-width="220" show-overflow-tooltip>
         <template #default="{ row }">
           {{ row.name }}
           <el-tag v-if="!row.country" type="warning" size="small" style="margin-left: 8px">
@@ -18,18 +16,18 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="ID" prop="id" width="120" />
-      <el-table-column label="类型" prop="type" width="100" />
-      <el-table-column label="赛狐 replenishSite" width="160">
+      <el-table-column label="仓库 ID" prop="id" width="140" show-overflow-tooltip />
+      <el-table-column label="类型" prop="type" width="100" align="center" show-overflow-tooltip />
+      <el-table-column label="赛狐 replenishSite" width="180" show-overflow-tooltip>
         <template #default="{ row }">
           <span class="hint">{{ row.replenish_site_raw || '-' }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="所属国家" width="200">
+      <el-table-column label="所属国家" width="220" show-overflow-tooltip>
         <template #default="{ row }">
           <el-input
             v-model="row.country"
-            placeholder="ISO 二字码 (JP/US/...)"
+            placeholder="ISO 两位码"
             maxlength="2"
             style="width: 140px"
             @blur="(e: Event) => save(row, (e.target as HTMLInputElement).value)"
@@ -38,16 +36,31 @@
         </template>
       </el-table-column>
     </el-table>
-  </el-card>
+
+    <TablePaginationBar
+      v-model:current-page="page"
+      v-model:page-size="pageSize"
+      :total="rows.length"
+    />
+  </PageSectionCard>
 </template>
 
 <script setup lang="ts">
 import { listWarehouses, patchWarehouseCountry, type Warehouse } from '@/api/config'
+import PageSectionCard from '@/components/PageSectionCard.vue'
+import TablePaginationBar from '@/components/TablePaginationBar.vue'
 import { ElMessage } from 'element-plus'
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 
 const rows = ref<Warehouse[]>([])
 const loading = ref(false)
+const page = ref(1)
+const pageSize = ref(10)
+
+const pagedRows = computed(() => {
+  const start = (page.value - 1) * pageSize.value
+  return rows.value.slice(start, start + pageSize.value)
+})
 
 async function reload(): Promise<void> {
   loading.value = true
@@ -59,18 +72,18 @@ async function reload(): Promise<void> {
 }
 
 async function save(row: Warehouse, value: string): Promise<void> {
-  const v = value.trim().toUpperCase()
-  if (!v || v.length !== 2) {
-    ElMessage.warning('请输入 2 位国家代码')
+  const nextCountry = value.trim().toUpperCase()
+  if (!nextCountry || nextCountry.length !== 2) {
+    ElMessage.warning('请输入 2 位国家代码。')
     return
   }
-  if (v === row.country) return
+  if (nextCountry === row.country) return
   try {
-    await patchWarehouseCountry(row.id, v)
-    row.country = v
-    ElMessage.success(`${row.name} → ${v}`)
+    await patchWarehouseCountry(row.id, nextCountry)
+    row.country = nextCountry
+    ElMessage.success(`${row.name} 已更新为 ${nextCountry}。`)
   } catch {
-    ElMessage.error('更新失败')
+    ElMessage.error('更新失败。')
   }
 }
 
@@ -78,15 +91,6 @@ onMounted(reload)
 </script>
 
 <style lang="scss" scoped>
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.card-title {
-  font-size: $font-size-lg;
-  font-weight: $font-weight-semibold;
-}
 .hint {
   color: $color-text-secondary;
   font-size: $font-size-xs;

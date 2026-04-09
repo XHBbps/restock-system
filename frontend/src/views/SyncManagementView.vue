@@ -52,23 +52,23 @@
           <span class="card-meta">sync_state 表 · 记录每个 job 的最近一次成功时间与错误</span>
         </div>
       </template>
-      <el-table :data="syncState" v-loading="loadingSyncState">
-        <el-table-column label="job_name" prop="job_name" min-width="200">
+      <el-table v-loading="loadingSyncState" :data="syncState">
+        <el-table-column label="job_name" prop="job_name" min-width="200" show-overflow-tooltip>
           <template #default="{ row }">
             <span class="mono">{{ row.job_name }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="最近运行" width="180">
+        <el-table-column label="最近运行" width="180" show-overflow-tooltip>
           <template #default="{ row }">
             <span class="muted mono">{{ row.last_run_at ? formatTime(row.last_run_at) : '—' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="最近成功" width="180">
+        <el-table-column label="最近成功" width="180" show-overflow-tooltip>
           <template #default="{ row }">
             <span class="muted mono">{{ row.last_success_at ? formatTime(row.last_success_at) : '—' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="120">
+        <el-table-column label="状态" width="120" show-overflow-tooltip>
           <template #default="{ row }">
             <el-tag v-if="row.last_status === 'success'" type="success" size="small">success</el-tag>
             <el-tag v-else-if="row.last_status === 'failed'" type="danger" size="small">failed</el-tag>
@@ -76,7 +76,7 @@
             <el-tag v-else type="info" size="small">{{ row.last_status || '从未运行' }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="错误信息" min-width="240">
+        <el-table-column label="错误信息" min-width="240" show-overflow-tooltip>
           <template #default="{ row }">
             <span v-if="row.last_error" class="error-text">{{ row.last_error }}</span>
             <span v-else class="muted">-</span>
@@ -93,7 +93,7 @@
           <span class="card-meta">api_call_log · 每次赛狐调用的结果聚合</span>
         </div>
       </template>
-      <div class="endpoint-grid" v-loading="loadingOverview">
+      <div v-loading="loadingOverview" class="endpoint-grid">
         <div v-for="ep in overview?.endpoints || []" :key="ep.endpoint" class="endpoint-card">
           <div class="endpoint-header">
             <div class="endpoint-name" :title="ep.endpoint">{{ shortName(ep.endpoint) }}</div>
@@ -126,22 +126,22 @@
           <el-switch v-model="onlyFailed" active-text="仅失败" @change="loadRecent" />
         </div>
       </template>
-      <el-table :data="recentCalls" v-loading="loadingRecent">
-        <el-table-column label="时间" width="170">
+      <el-table v-loading="loadingRecent" :data="recentCalls">
+        <el-table-column label="时间" width="170" show-overflow-tooltip>
           <template #default="{ row }"><span class="mono muted">{{ formatTime(row.called_at) }}</span></template>
         </el-table-column>
-        <el-table-column label="接口" min-width="320">
+        <el-table-column label="接口" min-width="320" show-overflow-tooltip>
           <template #default="{ row }"><code class="mono">{{ row.endpoint }}</code></template>
         </el-table-column>
-        <el-table-column label="耗时(ms)" prop="duration_ms" width="100" align="right" />
-        <el-table-column label="HTTP" prop="http_status" width="80" align="center" />
-        <el-table-column label="saihu code" prop="saihu_code" width="110" align="center" />
-        <el-table-column label="错误信息" min-width="180">
+        <el-table-column label="耗时(ms)" prop="duration_ms" width="100" align="right" show-overflow-tooltip />
+        <el-table-column label="HTTP" prop="http_status" width="80" align="center" show-overflow-tooltip />
+        <el-table-column label="saihu code" prop="saihu_code" width="110" align="center" show-overflow-tooltip />
+        <el-table-column label="错误信息" min-width="180" show-overflow-tooltip>
           <template #default="{ row }">
             <span v-if="row.saihu_msg" class="error-text">{{ row.saihu_msg }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="90" align="center">
+        <el-table-column label="操作" width="90" align="center" show-overflow-tooltip>
           <template #default="{ row }">
             <el-button v-if="row.saihu_code !== 0" link type="primary" @click="retry(row)">重试</el-button>
           </template>
@@ -162,6 +162,7 @@ import {
   type RecentCall
 } from '@/api/monitor'
 import TaskProgress from '@/components/TaskProgress.vue'
+import type { TagType } from '@/utils/element'
 import dayjs from 'dayjs'
 import { ElMessage } from 'element-plus'
 import { onMounted, reactive, ref } from 'vue'
@@ -260,7 +261,7 @@ async function retry(row: RecentCall): Promise<void> {
   }
 }
 
-function rateTag(rate: number): string {
+function rateTag(rate: number): TagType {
   if (rate >= 0.99) return 'success'
   if (rate >= 0.9) return 'warning'
   return 'danger'
