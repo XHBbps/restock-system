@@ -312,12 +312,19 @@ body {
     font-size: $font-size-xs;
     text-transform: uppercase;
     letter-spacing: $tracking-wider;
+    white-space: nowrap;                        // 表头+排序图标不换行
     height: 40px;                               // h-10
     padding: 0 $space-4;                        // px-4
     line-height: 1.2;
 
     .cell {
-      padding: 0;
+      padding: 0 !important;
+      line-height: inherit;
+    }
+
+    .caret-wrapper {
+      display: inline-flex;
+      vertical-align: middle;
     }
   }
 
@@ -329,7 +336,8 @@ body {
     font-size: $font-size-sm;
 
     .cell {
-      padding: 0;
+      padding: 0 !important;
+      line-height: inherit;
     }
   }
 
