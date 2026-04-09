@@ -5,13 +5,13 @@
 Asia/Shanghai 后存储，避免跨站点订单的窗口边界错位。
 """
 
-import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+import structlog
 from dateutil import parser as date_parser
 
-_logger = logging.getLogger(__name__)
+_logger = structlog.get_logger(__name__)
 
 BEIJING = ZoneInfo("Asia/Shanghai")
 
@@ -102,9 +102,12 @@ def parse_saihu_time(raw: str | None, marketplace_id: str | None = None) -> date
     try:
         naive = date_parser.parse(raw)
     except (ValueError, TypeError) as exc:
-        # 失败快速（宪法原则 III）：时间解析失败应暴露，上游可据此决策
+        # 失败快速（宪法原则 III）：时间解析失败应作为结构化事件暴露
         _logger.warning(
-            "parse_saihu_time_failed", extra={"raw": raw, "marketplace_id": marketplace_id, "error": str(exc)}
+            "parse_saihu_time_failed",
+            raw=raw,
+            marketplace_id=marketplace_id,
+            error=str(exc),
         )
         return None
     if naive.tzinfo is not None:

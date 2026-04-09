@@ -242,7 +242,8 @@ async function loadSyncState(): Promise<void> {
 }
 
 async function reloadAll(): Promise<void> {
-  await Promise.all([loadOverview(), loadRecent(), loadSyncState()])
+  // allSettled 保证一个 loader 失败不会让其余已完成结果被丢弃
+  await Promise.allSettled([loadOverview(), loadRecent(), loadSyncState()])
 }
 
 async function retry(row: RecentCall): Promise<void> {

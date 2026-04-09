@@ -176,6 +176,8 @@ const filters = reactive({
 
 const dialogVisible = ref(false)
 const detail = ref<DataOrderDetail | null>(null)
+// 连续点击不同订单时防止后发先返回的竞态
+let detailReqId = 0
 
 async function reload(): Promise<void> {
   loading.value = true
@@ -197,9 +199,14 @@ async function reload(): Promise<void> {
 }
 
 async function openDetail(row: DataOrderSummary): Promise<void> {
+  const myReqId = ++detailReqId
   dialogVisible.value = true
   detail.value = null
-  detail.value = await getOrderDetail(row.shopId, row.amazonOrderId)
+  const data = await getOrderDetail(row.shopId, row.amazonOrderId)
+  // 如果期间用户又点了别的订单 / 关了 dialog，丢弃本次结果
+  if (myReqId === detailReqId && dialogVisible.value) {
+    detail.value = data
+  }
 }
 
 function statusType(s: string): string {

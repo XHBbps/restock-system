@@ -1,132 +1,138 @@
 """外部数据源观测 DTO。
 
-字段命名与赛狐接口返回结构基本一致（camelCase 别名），
-让采购员能直接对照"赛狐原始返回 ↔ 本系统入库后的数据"。
+设计要点：
+- 字段内部使用 snake_case（与 ORM 一致），自动通过 alias_generator 输出 camelCase
+- `from_attributes=True` + `populate_by_name=True`：既支持 `Model.model_validate(orm_obj)`,
+  也允许外部构造时使用 snake_case 或 camelCase 字段名
+- 输出 JSON 遵循 `by_alias=True` 语义（FastAPI 默认会使用 alias 序列化）
+
+字段命名保持与赛狐接口返回结构一致，便于操作员对照核查。
 """
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict
-
-
-# ==================== 公用分页包装 ====================
-class PaginatedOut(BaseModel):
-    items: list[Any]
-    total: int
-    page: int
-    pageSize: int
+from pydantic.alias_generators import to_camel
 
 
 class SaihuLikeModel(BaseModel):
-    """所有 data DTO 基类，使用 camelCase 字段别名对外输出。"""
+    """所有 data DTO 基类。
 
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+    使用 `alias_generator=to_camel` 自动把 snake_case 字段名转为 camelCase 别名。
+    FastAPI 序列化时会优先使用 alias，因此输出 JSON 字段是 camelCase。
+    """
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        populate_by_name=True,
+        alias_generator=to_camel,
+    )
 
 
 # ==================== 订单列表 ====================
 class DataOrderItem(SaihuLikeModel):
-    orderItemId: str
-    commoditySku: str
-    sellerSku: str | None = None
-    quantityOrdered: int
-    quantityShipped: int
-    quantityUnfulfillable: int
-    refundNum: int
-    itemPriceCurrency: str | None = None
-    itemPriceAmount: Decimal | None = None
+    order_item_id: str
+    commodity_sku: str
+    seller_sku: str | None = None
+    quantity_ordered: int
+    quantity_shipped: int
+    quantity_unfulfillable: int
+    refund_num: int
+    item_price_currency: str | None = None
+    item_price_amount: Decimal | None = None
 
 
 class DataOrderSummary(SaihuLikeModel):
-    shopId: str
-    amazonOrderId: str
-    marketplaceId: str
-    countryCode: str
-    orderStatus: str
-    orderTotalCurrency: str | None = None
-    orderTotalAmount: Decimal | None = None
-    fulfillmentChannel: str | None = None
-    purchaseDate: datetime
-    lastUpdateDate: datetime
-    refundStatus: str | None = None
-    lastSyncAt: datetime
-    hasDetail: bool = False
-    itemCount: int = 0
+    shop_id: str
+    amazon_order_id: str
+    marketplace_id: str
+    country_code: str
+    order_status: str
+    order_total_currency: str | None = None
+    order_total_amount: Decimal | None = None
+    fulfillment_channel: str | None = None
+    purchase_date: datetime
+    last_update_date: datetime
+    refund_status: str | None = None
+    last_sync_at: datetime
+    has_detail: bool = False
+    item_count: int = 0
 
 
 class DataOrderListOut(BaseModel):
     items: list[DataOrderSummary]
     total: int
     page: int
-    pageSize: int
+    page_size: int
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
 
 class DataOrderDetail(SaihuLikeModel):
     """订单完整信息（header + items + postcode detail）。"""
 
-    # header
-    shopId: str
-    amazonOrderId: str
-    marketplaceId: str
-    countryCode: str
-    orderStatus: str
-    orderTotalCurrency: str | None = None
-    orderTotalAmount: Decimal | None = None
-    fulfillmentChannel: str | None = None
-    purchaseDate: datetime
-    lastUpdateDate: datetime
-    refundStatus: str | None = None
-    isBuyerRequestedCancel: bool
-    lastSyncAt: datetime
-    # items
+    shop_id: str
+    amazon_order_id: str
+    marketplace_id: str
+    country_code: str
+    order_status: str
+    order_total_currency: str | None = None
+    order_total_amount: Decimal | None = None
+    fulfillment_channel: str | None = None
+    purchase_date: datetime
+    last_update_date: datetime
+    refund_status: str | None = None
+    is_buyer_requested_cancel: bool
+    last_sync_at: datetime
     items: list[DataOrderItem]
-    # order_detail (可能为 None，表示尚未拉详情)
-    postalCode: str | None = None
-    stateOrRegion: str | None = None
+    postal_code: str | None = None
+    state_or_region: str | None = None
     city: str | None = None
-    detailAddress: str | None = None
-    receiverName: str | None = None
-    detailFetchedAt: datetime | None = None
+    detail_address: str | None = None
+    receiver_name: str | None = None
+    detail_fetched_at: datetime | None = None
 
 
 # ==================== 库存明细 ====================
 class DataInventoryItem(SaihuLikeModel):
-    commoditySku: str
-    commodityName: str | None = None
-    mainImage: str | None = None
-    warehouseId: str
-    warehouseName: str
-    warehouseType: int
+    commodity_sku: str
+    commodity_name: str | None = None
+    main_image: str | None = None
+    warehouse_id: str
+    warehouse_name: str
+    warehouse_type: int
     country: str | None = None
-    stockAvailable: int
-    stockOccupy: int
-    updatedAt: datetime
+    stock_available: int
+    stock_occupy: int
+    updated_at: datetime
 
 
 class DataInventoryListOut(BaseModel):
     items: list[DataInventoryItem]
     total: int
     page: int
-    pageSize: int
+    page_size: int
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
 
 # ==================== 其他出库列表 ====================
 class DataOutRecordItem(SaihuLikeModel):
-    commoditySku: str
+    commodity_sku: str
     goods: int  # 在途数
 
 
 class DataOutRecord(SaihuLikeModel):
-    saihuOutRecordId: str
-    outWarehouseNo: str | None = None
-    targetWarehouseId: str | None = None
-    targetWarehouseName: str | None = None
-    targetCountry: str | None = None
+    saihu_out_record_id: str
+    out_warehouse_no: str | None = None
+    target_warehouse_id: str | None = None
+    target_warehouse_name: str | None = None
+    target_country: str | None = None
     remark: str | None = None
     status: str | None = None
-    isInTransit: bool
-    lastSeenAt: datetime
+    is_in_transit: bool
+    last_seen_at: datetime
     items: list[DataOutRecordItem]
 
 
@@ -134,7 +140,9 @@ class DataOutRecordListOut(BaseModel):
     items: list[DataOutRecord]
     total: int
     page: int
-    pageSize: int
+    page_size: int
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
 
 # ==================== 仓库列表 ====================
@@ -143,8 +151,8 @@ class DataWarehouse(SaihuLikeModel):
     name: str
     type: int
     country: str | None = None
-    replenishSite: str | None = None
-    lastSyncAt: datetime
+    replenish_site: str | None = None
+    last_sync_at: datetime
 
 
 class DataWarehouseListOut(BaseModel):
@@ -156,13 +164,13 @@ class DataWarehouseListOut(BaseModel):
 class DataShop(SaihuLikeModel):
     id: str
     name: str
-    sellerId: str | None = None
+    seller_id: str | None = None
     region: str | None = None
-    marketplaceId: str | None = None
+    marketplace_id: str | None = None
     status: str
-    adStatus: str | None = None
-    syncEnabled: bool
-    lastSyncAt: datetime | None = None
+    ad_status: str | None = None
+    sync_enabled: bool
+    last_sync_at: datetime | None = None
 
 
 class DataShopListOut(BaseModel):
@@ -173,24 +181,35 @@ class DataShopListOut(BaseModel):
 # ==================== 在线产品信息 ====================
 class DataProductListing(SaihuLikeModel):
     id: int
-    commoditySku: str
-    commodityId: str
-    commodityName: str | None = None
-    mainImage: str | None = None
-    shopId: str
-    marketplaceId: str
-    sellerSku: str | None = None
-    parentSku: str | None = None
-    day7SaleNum: int | None = None
-    day14SaleNum: int | None = None
-    day30SaleNum: int | None = None
-    isMatched: bool
-    onlineStatus: str
-    lastSyncAt: datetime
+    commodity_sku: str
+    commodity_id: str
+    commodity_name: str | None = None
+    main_image: str | None = None
+    shop_id: str
+    marketplace_id: str
+    seller_sku: str | None = None
+    parent_sku: str | None = None
+    day7_sale_num: int | None = None
+    day14_sale_num: int | None = None
+    day30_sale_num: int | None = None
+    is_matched: bool
+    online_status: str
+    last_sync_at: datetime
 
 
 class DataProductListingListOut(BaseModel):
     items: list[DataProductListing]
     total: int
     page: int
-    pageSize: int
+    page_size: int
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+
+# ==================== sync_state ====================
+class DataSyncStateRow(BaseModel):
+    job_name: str
+    last_run_at: datetime | None = None
+    last_success_at: datetime | None = None
+    last_status: str | None = None
+    last_error: str | None = None

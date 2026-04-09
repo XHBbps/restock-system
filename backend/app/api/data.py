@@ -15,7 +15,7 @@ READ-ONLY。所有端点从本地同步落库的表查询，返回与赛狐接�
 from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Path, Query
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import db_session, get_current_session
@@ -41,6 +41,7 @@ from app.schemas.data import (
     DataProductListingListOut,
     DataShop,
     DataShopListOut,
+    DataSyncStateRow,
     DataWarehouse,
     DataWarehouseListOut,
 )
@@ -110,35 +111,33 @@ async def list_orders(
     detail_set: set[tuple[str, str]] = set()
     if rows:
         keys = [(r.shop_id, r.amazon_order_id) for r in rows]
+        # ★ 必须用复合键过滤。只按 shop_id IN(...) 会拉回该 shop 的全部历史 detail，
+        # 在数据量大时造成内存爆炸（review H-N1）。
         det_rows = (
             await db.execute(
                 select(OrderDetail.shop_id, OrderDetail.amazon_order_id).where(
-                    OrderDetail.shop_id.in_([k[0] for k in keys])
+                    tuple_(OrderDetail.shop_id, OrderDetail.amazon_order_id).in_(keys)
                 )
             )
         ).all()
         detail_set = {(s, a) for s, a in det_rows}
 
     items = [
-        DataOrderSummary(
-            shopId=r.shop_id,
-            amazonOrderId=r.amazon_order_id,
-            marketplaceId=r.marketplace_id,
-            countryCode=r.country_code,
-            orderStatus=r.order_status,
-            orderTotalCurrency=r.order_total_currency,
-            orderTotalAmount=r.order_total_amount,
-            fulfillmentChannel=r.fulfillment_channel,
-            purchaseDate=r.purchase_date,
-            lastUpdateDate=r.last_update_date,
-            refundStatus=r.refund_status,
-            lastSyncAt=r.last_sync_at,
-            hasDetail=(r.shop_id, r.amazon_order_id) in detail_set,
-            itemCount=item_count_map.get(r.id, 0),
+        DataOrderSummary.model_validate(
+            {
+                **{k: getattr(r, k) for k in (
+                    "shop_id", "amazon_order_id", "marketplace_id", "country_code",
+                    "order_status", "order_total_currency", "order_total_amount",
+                    "fulfillment_channel", "purchase_date", "last_update_date",
+                    "refund_status", "last_sync_at",
+                )},
+                "has_detail": (r.shop_id, r.amazon_order_id) in detail_set,
+                "item_count": item_count_map.get(r.id, 0),
+            }
         )
         for r in rows
     ]
-    return DataOrderListOut(items=items, total=int(total or 0), page=page, pageSize=page_size)
+    return DataOrderListOut(items=items, total=int(total or 0), page=page, page_size=page_size)
 
 
 @router.get("/orders/{shop_id}/{amazon_order_id}", response_model=DataOrderDetail)
@@ -173,40 +172,26 @@ async def get_order_detail(
         )
     ).scalar_one_or_none()
 
-    return DataOrderDetail(
-        shopId=header.shop_id,
-        amazonOrderId=header.amazon_order_id,
-        marketplaceId=header.marketplace_id,
-        countryCode=header.country_code,
-        orderStatus=header.order_status,
-        orderTotalCurrency=header.order_total_currency,
-        orderTotalAmount=header.order_total_amount,
-        fulfillmentChannel=header.fulfillment_channel,
-        purchaseDate=header.purchase_date,
-        lastUpdateDate=header.last_update_date,
-        refundStatus=header.refund_status,
-        isBuyerRequestedCancel=header.is_buyer_requested_cancel,
-        lastSyncAt=header.last_sync_at,
-        items=[
-            DataOrderItem(
-                orderItemId=it.order_item_id,
-                commoditySku=it.commodity_sku,
-                sellerSku=it.seller_sku,
-                quantityOrdered=it.quantity_ordered,
-                quantityShipped=it.quantity_shipped,
-                quantityUnfulfillable=it.quantity_unfulfillable,
-                refundNum=it.refund_num,
-                itemPriceCurrency=it.item_price_currency,
-                itemPriceAmount=it.item_price_amount,
-            )
-            for it in item_rows
-        ],
-        postalCode=detail.postal_code if detail else None,
-        stateOrRegion=detail.state_or_region if detail else None,
-        city=detail.city if detail else None,
-        detailAddress=detail.detail_address if detail else None,
-        receiverName=detail.receiver_name if detail else None,
-        detailFetchedAt=detail.fetched_at if detail else None,
+    # 用 from_attributes 把 ORM header 直接映射到 DTO，detail 字段手动补
+    return DataOrderDetail.model_validate(
+        {
+            **{
+                k: getattr(header, k)
+                for k in (
+                    "shop_id", "amazon_order_id", "marketplace_id", "country_code",
+                    "order_status", "order_total_currency", "order_total_amount",
+                    "fulfillment_channel", "purchase_date", "last_update_date",
+                    "refund_status", "is_buyer_requested_cancel", "last_sync_at",
+                )
+            },
+            "items": [DataOrderItem.model_validate(it) for it in item_rows],
+            "postal_code": detail.postal_code if detail else None,
+            "state_or_region": detail.state_or_region if detail else None,
+            "city": detail.city if detail else None,
+            "detail_address": detail.detail_address if detail else None,
+            "receiver_name": detail.receiver_name if detail else None,
+            "detail_fetched_at": detail.fetched_at if detail else None,
+        }
     )
 
 
@@ -267,20 +252,22 @@ async def list_inventory(
     for inv, wh_name, wh_type in rows:
         name, image = name_map.get(inv.commodity_sku, (None, None))
         items.append(
-            DataInventoryItem(
-                commoditySku=inv.commodity_sku,
-                commodityName=name,
-                mainImage=image,
-                warehouseId=inv.warehouse_id,
-                warehouseName=wh_name,
-                warehouseType=wh_type,
-                country=inv.country,
-                stockAvailable=inv.available,
-                stockOccupy=inv.reserved,
-                updatedAt=inv.updated_at,
+            DataInventoryItem.model_validate(
+                {
+                    "commodity_sku": inv.commodity_sku,
+                    "commodity_name": name,
+                    "main_image": image,
+                    "warehouse_id": inv.warehouse_id,
+                    "warehouse_name": wh_name,
+                    "warehouse_type": wh_type,
+                    "country": inv.country,
+                    "stock_available": inv.available,
+                    "stock_occupy": inv.reserved,
+                    "updated_at": inv.updated_at,
+                }
             )
         )
-    return DataInventoryListOut(items=items, total=int(total or 0), page=page, pageSize=page_size)
+    return DataInventoryListOut(items=items, total=int(total or 0), page=page, page_size=page_size)
 
 
 # ============================================================
@@ -345,23 +332,22 @@ async def list_out_records(
     for r in rows:
         sub_items = item_map.get(r.saihu_out_record_id, [])
         items.append(
-            DataOutRecord(
-                saihuOutRecordId=r.saihu_out_record_id,
-                outWarehouseNo=r.out_warehouse_no,
-                targetWarehouseId=r.target_warehouse_id,
-                targetWarehouseName=wh_name_map.get(r.target_warehouse_id or "", None),
-                targetCountry=r.target_country,
-                remark=r.remark,
-                status=r.status,
-                isInTransit=r.is_in_transit,
-                lastSeenAt=r.last_seen_at,
-                items=[
-                    DataOutRecordItem(commoditySku=it.commodity_sku, goods=it.goods)
-                    for it in sub_items
-                ],
+            DataOutRecord.model_validate(
+                {
+                    "saihu_out_record_id": r.saihu_out_record_id,
+                    "out_warehouse_no": r.out_warehouse_no,
+                    "target_warehouse_id": r.target_warehouse_id,
+                    "target_warehouse_name": wh_name_map.get(r.target_warehouse_id or "", None),
+                    "target_country": r.target_country,
+                    "remark": r.remark,
+                    "status": r.status,
+                    "is_in_transit": r.is_in_transit,
+                    "last_seen_at": r.last_seen_at,
+                    "items": [DataOutRecordItem.model_validate(it) for it in sub_items],
+                }
             )
         )
-    return DataOutRecordListOut(items=items, total=int(total or 0), page=page, pageSize=page_size)
+    return DataOutRecordListOut(items=items, total=int(total or 0), page=page, page_size=page_size)
 
 
 # ============================================================
@@ -378,13 +364,15 @@ async def list_data_warehouses(
         .all()
     )
     items = [
-        DataWarehouse(
-            id=r.id,
-            name=r.name,
-            type=r.type,
-            country=r.country,
-            replenishSite=r.replenish_site_raw,
-            lastSyncAt=r.last_sync_at,
+        DataWarehouse.model_validate(
+            {
+                "id": r.id,
+                "name": r.name,
+                "type": r.type,
+                "country": r.country,
+                "replenish_site": r.replenish_site_raw,
+                "last_sync_at": r.last_sync_at,
+            }
         )
         for r in rows
     ]
@@ -402,20 +390,7 @@ async def list_data_shops(
     rows = (
         (await db.execute(select(Shop).order_by(Shop.marketplace_id, Shop.id))).scalars().all()
     )
-    items = [
-        DataShop(
-            id=r.id,
-            name=r.name,
-            sellerId=r.seller_id,
-            region=r.region,
-            marketplaceId=r.marketplace_id,
-            status=r.status,
-            adStatus=r.ad_status,
-            syncEnabled=r.sync_enabled,
-            lastSyncAt=r.last_sync_at,
-        )
-        for r in rows
-    ]
+    items = [DataShop.model_validate(r) for r in rows]
     return DataShopListOut(items=items, total=len(items))
 
 
@@ -455,49 +430,30 @@ async def list_product_listings_data(
     rows = (
         (await db.execute(base.offset((page - 1) * page_size).limit(page_size))).scalars().all()
     )
-    items = [
-        DataProductListing(
-            id=r.id,
-            commoditySku=r.commodity_sku,
-            commodityId=r.commodity_id,
-            commodityName=r.commodity_name,
-            mainImage=r.main_image,
-            shopId=r.shop_id,
-            marketplaceId=r.marketplace_id,
-            sellerSku=r.seller_sku,
-            parentSku=r.parent_sku,
-            day7SaleNum=r.day7_sale_num,
-            day14SaleNum=r.day14_sale_num,
-            day30SaleNum=r.day30_sale_num,
-            isMatched=r.is_matched,
-            onlineStatus=r.online_status,
-            lastSyncAt=r.last_sync_at,
-        )
-        for r in rows
-    ]
+    items = [DataProductListing.model_validate(r) for r in rows]
     return DataProductListingListOut(
-        items=items, total=int(total or 0), page=page, pageSize=page_size
+        items=items, total=int(total or 0), page=page, page_size=page_size
     )
 
 
 # ============================================================
 # 7. sync_state 汇总（同步管理页用）
 # ============================================================
-@router.get("/sync-state")
+@router.get("/sync-state", response_model=list[DataSyncStateRow])
 async def list_sync_state(
     db: AsyncSession = Depends(db_session),
     _: dict = Depends(get_current_session),
-) -> list[dict]:
+) -> list[DataSyncStateRow]:
     from app.models.sync_state import SyncState
 
     rows = (await db.execute(select(SyncState).order_by(SyncState.job_name))).scalars().all()
     return [
-        {
-            "job_name": r.job_name,
-            "last_run_at": r.last_run_at.isoformat() if r.last_run_at else None,
-            "last_success_at": r.last_success_at.isoformat() if r.last_success_at else None,
-            "last_status": r.last_status,
-            "last_error": r.last_error,
-        }
+        DataSyncStateRow(
+            job_name=r.job_name,
+            last_run_at=r.last_run_at,
+            last_success_at=r.last_success_at,
+            last_status=r.last_status,
+            last_error=r.last_error,
+        )
         for r in rows
     ]

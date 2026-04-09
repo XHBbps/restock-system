@@ -32,7 +32,7 @@
       </div>
     </template>
 
-    <el-table :data="rows" v-loading="loading" :expand-row-keys="expandedKeys" row-key="saihuOutRecordId">
+    <el-table :data="rows" v-loading="loading" row-key="saihuOutRecordId">
       <el-table-column type="expand">
         <template #default="{ row }">
           <div class="expand-panel">
@@ -107,7 +107,6 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = ref(50)
 const loading = ref(false)
-const expandedKeys = ref<string[]>([])
 const filters = reactive({
   sku: '',
   country: '',
