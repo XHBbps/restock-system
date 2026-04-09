@@ -25,14 +25,20 @@
       </el-table-column>
       <el-table-column label="所属国家" width="220" show-overflow-tooltip>
         <template #default="{ row }">
-          <el-input
+          <el-select
             v-model="row.country"
-            placeholder="ISO 两位码"
-            maxlength="2"
-            style="width: 140px"
-            @blur="(e: Event) => save(row, (e.target as HTMLInputElement).value)"
-            @keyup.enter="(e: Event) => save(row, (e.target as HTMLInputElement).value)"
-          />
+            filterable
+            placeholder="选择国家"
+            style="width: 180px"
+            @change="(val: string) => save(row, val)"
+          >
+            <el-option
+              v-for="opt in countryOptions"
+              :key="opt.code"
+              :label="opt.label"
+              :value="opt.code"
+            />
+          </el-select>
         </template>
       </el-table-column>
     </el-table>
@@ -57,6 +63,30 @@ const loading = ref(false)
 const page = ref(1)
 const pageSize = ref(10)
 
+const countryOptions = [
+  { code: 'US', label: 'US - 美国' },
+  { code: 'CA', label: 'CA - 加拿大' },
+  { code: 'MX', label: 'MX - 墨西哥' },
+  { code: 'GB', label: 'GB - 英国' },
+  { code: 'DE', label: 'DE - 德国' },
+  { code: 'FR', label: 'FR - 法国' },
+  { code: 'IT', label: 'IT - 意大利' },
+  { code: 'ES', label: 'ES - 西班牙' },
+  { code: 'IN', label: 'IN - 印度' },
+  { code: 'JP', label: 'JP - 日本' },
+  { code: 'AU', label: 'AU - 澳大利亚' },
+  { code: 'AE', label: 'AE - 阿联酋' },
+  { code: 'TR', label: 'TR - 土耳其' },
+  { code: 'SG', label: 'SG - 新加坡' },
+  { code: 'BR', label: 'BR - 巴西' },
+  { code: 'NL', label: 'NL - 荷兰' },
+  { code: 'SA', label: 'SA - 沙特阿拉伯' },
+  { code: 'SE', label: 'SE - 瑞典' },
+  { code: 'PL', label: 'PL - 波兰' },
+  { code: 'BE', label: 'BE - 比利时' },
+  { code: 'IE', label: 'IE - 爱尔兰' },
+]
+
 const pagedRows = computed(() => {
   const start = (page.value - 1) * pageSize.value
   return rows.value.slice(start, start + pageSize.value)
@@ -72,16 +102,11 @@ async function reload(): Promise<void> {
 }
 
 async function save(row: Warehouse, value: string): Promise<void> {
-  const nextCountry = value.trim().toUpperCase()
-  if (!nextCountry || nextCountry.length !== 2) {
-    ElMessage.warning('请输入 2 位国家代码。')
-    return
-  }
-  if (nextCountry === row.country) return
+  if (!value || value === row.country) return
   try {
-    await patchWarehouseCountry(row.id, nextCountry)
-    row.country = nextCountry
-    ElMessage.success(`${row.name} 已更新为 ${nextCountry}。`)
+    await patchWarehouseCountry(row.id, value)
+    row.country = value
+    ElMessage.success(`${row.name} 已更新为 ${value}。`)
   } catch {
     ElMessage.error('更新失败。')
   }
