@@ -19,19 +19,19 @@
           <div class="meta">{{ row.commodity_name || '-' }}</div>
         </template>
       </el-table-column>
-      <el-table-column label="国家" prop="country" width="100" show-overflow-tooltip />
-      <el-table-column label="仓库" min-width="180" show-overflow-tooltip>
+      <el-table-column label="国家" prop="country" width="100" sortable show-overflow-tooltip />
+      <el-table-column label="仓库" min-width="180" sortable show-overflow-tooltip>
         <template #default="{ row }">
           {{ row.warehouse_name || row.warehouse_id }}
         </template>
       </el-table-column>
-      <el-table-column label="当前库存" prop="current_stock" width="120" align="right" show-overflow-tooltip />
-      <el-table-column label="最近销售日期" width="160" show-overflow-tooltip>
+      <el-table-column label="当前库存" prop="current_stock" width="120" align="right" sortable show-overflow-tooltip />
+      <el-table-column label="最近销售日期" width="160" sortable show-overflow-tooltip>
         <template #default="{ row }">
           {{ formatDate(row.last_sale_date) }}
         </template>
       </el-table-column>
-      <el-table-column label="处理状态" width="160" show-overflow-tooltip>
+      <el-table-column label="处理状态" width="160" sortable show-overflow-tooltip>
         <template #default="{ row }">
           <el-tag v-if="row.processed_at" type="success">已处理</el-tag>
           <el-tag v-else type="warning">待处理</el-tag>

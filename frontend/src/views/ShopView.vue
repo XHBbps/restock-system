@@ -12,15 +12,15 @@
       </template>
 
       <el-table v-loading="loading" :data="pagedRows">
-        <el-table-column label="店铺" min-width="220" show-overflow-tooltip>
+        <el-table-column label="店铺" min-width="220" sortable show-overflow-tooltip>
           <template #default="{ row }">
             <strong>{{ row.name }}</strong>
             <div class="meta">{{ row.id }}</div>
           </template>
         </el-table-column>
-        <el-table-column label="站点" prop="marketplace_id" width="160" show-overflow-tooltip />
-        <el-table-column label="区域" prop="region" width="120" show-overflow-tooltip />
-        <el-table-column label="授权状态" width="140" show-overflow-tooltip>
+        <el-table-column label="站点" prop="marketplace_id" width="160" sortable show-overflow-tooltip />
+        <el-table-column label="区域" prop="region" width="120" sortable show-overflow-tooltip />
+        <el-table-column label="授权状态" width="140" sortable show-overflow-tooltip>
           <template #default="{ row }">
             <el-tag :type="getShopStatusMeta(row.status).tagType">
               {{ getShopStatusMeta(row.status).label }}

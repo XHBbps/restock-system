@@ -15,16 +15,16 @@
 
     <el-table v-loading="loading" :data="pagedRows">
       <el-table-column label="优先级" prop="priority" width="80" sortable show-overflow-tooltip />
-      <el-table-column label="国家" prop="country" width="80" show-overflow-tooltip />
-      <el-table-column label="截取前 N 位" prop="prefix_length" width="120" show-overflow-tooltip />
-      <el-table-column label="值类型" prop="value_type" width="100" show-overflow-tooltip />
-      <el-table-column label="比较符" width="80" show-overflow-tooltip>
+      <el-table-column label="国家" prop="country" width="80" sortable show-overflow-tooltip />
+      <el-table-column label="截取前 N 位" prop="prefix_length" width="120" sortable show-overflow-tooltip />
+      <el-table-column label="值类型" prop="value_type" width="100" sortable show-overflow-tooltip />
+      <el-table-column label="比较符" width="80" sortable show-overflow-tooltip>
         <template #default="{ row }">
           <code>{{ row.operator }}</code>
         </template>
       </el-table-column>
-      <el-table-column label="比较值" prop="compare_value" width="120" show-overflow-tooltip />
-      <el-table-column label="目标仓库" prop="warehouse_id" min-width="160" show-overflow-tooltip>
+      <el-table-column label="比较值" prop="compare_value" width="120" sortable show-overflow-tooltip />
+      <el-table-column label="目标仓库" prop="warehouse_id" min-width="160" sortable show-overflow-tooltip>
         <template #default="{ row }">
           {{ warehouseName(row.warehouse_id) }}
         </template>

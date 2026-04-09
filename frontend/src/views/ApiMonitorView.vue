@@ -44,18 +44,18 @@
     <section class="table-grid">
       <DataTableCard title="接口聚合" description="按接口维度查看调用规模和最新状态。">
         <el-table :data="endpointRows" v-loading="loadingOverview">
-          <el-table-column label="接口名称" min-width="220" show-overflow-tooltip>
+          <el-table-column label="接口名称" min-width="220" sortable show-overflow-tooltip>
             <template #default="{ row }">
               <span>{{ row.endpoint }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="总调用数" prop="total_calls" width="110" align="right" show-overflow-tooltip />
-          <el-table-column label="成功数" prop="success_count" width="100" align="right" show-overflow-tooltip />
-          <el-table-column label="失败数" prop="failed_count" width="100" align="right" show-overflow-tooltip />
-          <el-table-column label="成功率" width="120" align="right" show-overflow-tooltip>
+          <el-table-column label="总调用数" prop="total_calls" width="110" align="right" sortable show-overflow-tooltip />
+          <el-table-column label="成功数" prop="success_count" width="100" align="right" sortable show-overflow-tooltip />
+          <el-table-column label="失败数" prop="failed_count" width="100" align="right" sortable show-overflow-tooltip />
+          <el-table-column label="成功率" width="120" align="right" sortable show-overflow-tooltip>
             <template #default="{ row }">{{ `${(row.success_rate * 100).toFixed(1)}%` }}</template>
           </el-table-column>
-          <el-table-column label="最近调用时间" min-width="160" show-overflow-tooltip>
+          <el-table-column label="最近调用时间" min-width="160" sortable show-overflow-tooltip>
             <template #default="{ row }">{{ formatTime(row.last_called_at) }}</template>
           </el-table-column>
           <el-table-column label="最近错误" min-width="260" show-overflow-tooltip>
@@ -66,15 +66,15 @@
 
       <DataTableCard :title="onlyFailed ? '失败调用明细' : '最近调用明细'" description="支持从失败明细直接发起重试。">
         <el-table :data="pagedRecentCalls" v-loading="loadingRecent">
-          <el-table-column label="调用时间" min-width="160" show-overflow-tooltip>
+          <el-table-column label="调用时间" min-width="160" sortable show-overflow-tooltip>
             <template #default="{ row }">{{ formatTime(row.called_at) }}</template>
           </el-table-column>
-          <el-table-column label="接口名称" min-width="220" show-overflow-tooltip>
+          <el-table-column label="接口名称" min-width="220" sortable show-overflow-tooltip>
             <template #default="{ row }">{{ row.endpoint }}</template>
           </el-table-column>
-          <el-table-column label="耗时(ms)" prop="duration_ms" width="100" align="right" show-overflow-tooltip />
-          <el-table-column label="HTTP 状态" prop="http_status" width="100" align="center" show-overflow-tooltip />
-          <el-table-column label="赛狐返回码" prop="saihu_code" width="120" align="center" show-overflow-tooltip />
+          <el-table-column label="耗时(ms)" prop="duration_ms" width="100" align="right" sortable show-overflow-tooltip />
+          <el-table-column label="HTTP 状态" prop="http_status" width="100" align="center" sortable show-overflow-tooltip />
+          <el-table-column label="赛狐返回码" prop="saihu_code" width="120" align="center" sortable show-overflow-tooltip />
           <el-table-column label="错误信息" min-width="260" show-overflow-tooltip>
             <template #default="{ row }">{{ row.saihu_msg || row.error_type || '-' }}</template>
           </el-table-column>

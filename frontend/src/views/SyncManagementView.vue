@@ -53,22 +53,22 @@
         </div>
       </template>
       <el-table v-loading="loadingSyncState" :data="syncState">
-        <el-table-column label="job_name" prop="job_name" min-width="200" show-overflow-tooltip>
+        <el-table-column label="job_name" prop="job_name" min-width="200" sortable show-overflow-tooltip>
           <template #default="{ row }">
             <span class="mono">{{ row.job_name }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="最近运行" width="180" show-overflow-tooltip>
+        <el-table-column label="最近运行" width="180" sortable show-overflow-tooltip>
           <template #default="{ row }">
             <span class="muted mono">{{ row.last_run_at ? formatTime(row.last_run_at) : '—' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="最近成功" width="180" show-overflow-tooltip>
+        <el-table-column label="最近成功" width="180" sortable show-overflow-tooltip>
           <template #default="{ row }">
             <span class="muted mono">{{ row.last_success_at ? formatTime(row.last_success_at) : '—' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="120" show-overflow-tooltip>
+        <el-table-column label="状态" width="120" sortable show-overflow-tooltip>
           <template #default="{ row }">
             <el-tag v-if="row.last_status === 'success'" type="success" size="small">success</el-tag>
             <el-tag v-else-if="row.last_status === 'failed'" type="danger" size="small">failed</el-tag>
@@ -127,15 +127,15 @@
         </div>
       </template>
       <el-table v-loading="loadingRecent" :data="recentCalls">
-        <el-table-column label="时间" width="170" show-overflow-tooltip>
+        <el-table-column label="时间" width="170" sortable show-overflow-tooltip>
           <template #default="{ row }"><span class="mono muted">{{ formatTime(row.called_at) }}</span></template>
         </el-table-column>
         <el-table-column label="接口" min-width="320" show-overflow-tooltip>
           <template #default="{ row }"><code class="mono">{{ row.endpoint }}</code></template>
         </el-table-column>
-        <el-table-column label="耗时(ms)" prop="duration_ms" width="100" align="right" show-overflow-tooltip />
-        <el-table-column label="HTTP" prop="http_status" width="80" align="center" show-overflow-tooltip />
-        <el-table-column label="saihu code" prop="saihu_code" width="110" align="center" show-overflow-tooltip />
+        <el-table-column label="耗时(ms)" prop="duration_ms" width="100" align="right" sortable show-overflow-tooltip />
+        <el-table-column label="HTTP" prop="http_status" width="80" align="center" sortable show-overflow-tooltip />
+        <el-table-column label="saihu code" prop="saihu_code" width="110" align="center" sortable show-overflow-tooltip />
         <el-table-column label="错误信息" min-width="180" show-overflow-tooltip>
           <template #default="{ row }">
             <span v-if="row.saihu_msg" class="error-text">{{ row.saihu_msg }}</span>

@@ -1,6 +1,6 @@
 <template>
   <div class="suggestion-list">
-    <el-card shadow="never">
+    <el-card v-loading="loading" shadow="never">
       <template #header>
         <div class="card-header">
           <div>
@@ -22,7 +22,7 @@
       </template>
 
       <el-empty
-        v-if="!suggestion"
+        v-if="!loading && !suggestion"
         description="当前没有活动建议单，请先在补货触发页执行规则引擎。"
         :image-size="80"
       >
@@ -48,7 +48,7 @@
               />
             </template>
           </el-table-column>
-          <el-table-column label="总采购量" prop="total_qty" width="120" align="right" show-overflow-tooltip />
+          <el-table-column label="总采购量" prop="total_qty" width="120" align="right" sortable show-overflow-tooltip />
           <el-table-column label="国家分布" min-width="220" show-overflow-tooltip>
             <template #default="{ row }">
               <span v-for="(qty, country) in row.country_breakdown" :key="country" class="country-chip">
@@ -56,12 +56,12 @@
               </span>
             </template>
           </el-table-column>
-          <el-table-column label="最早采购日" width="140" show-overflow-tooltip>
+          <el-table-column label="最早采购日" width="140" sortable show-overflow-tooltip>
             <template #default="{ row }">
               {{ earliestPurchase(row) }}
             </template>
           </el-table-column>
-          <el-table-column label="推送状态" width="120" show-overflow-tooltip>
+          <el-table-column label="推送状态" width="120" sortable show-overflow-tooltip>
             <template #default="{ row }">
               <el-tag :type="getSuggestionPushStatusMeta(row.push_status).tagType">
                 {{ getSuggestionPushStatusMeta(row.push_status).label }}
@@ -88,10 +88,12 @@
 </template>
 
 <script setup lang="ts">
+import type { TaskRun } from '@/api/task'
 import { getCurrentSuggestion, pushItems, type SuggestionDetail, type SuggestionItem } from '@/api/suggestion'
 import SkuCard from '@/components/SkuCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
 import TaskProgress from '@/components/TaskProgress.vue'
+import { getActionErrorMessage } from '@/utils/apiError'
 import { getSuggestionPushStatusMeta } from '@/utils/status'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, onMounted, ref, watch } from 'vue'
@@ -105,17 +107,23 @@ const pushing = ref(false)
 const pushTaskId = ref<number | null>(null)
 const page = ref(1)
 const pageSize = ref(20)
+const loading = ref(false)
 
 async function loadCurrent(): Promise<void> {
+  loading.value = true
   try {
     suggestion.value = await getCurrentSuggestion()
+    selected.value = []
   } catch (err: unknown) {
     const e = err as { response?: { status?: number } }
     if (e.response?.status === 404) {
       suggestion.value = null
+      selected.value = []
     } else {
-      ElMessage.error('加载当前建议失败。')
+      ElMessage.error(getActionErrorMessage(err, '加载当前建议失败。'))
     }
+  } finally {
+    loading.value = false
   }
 }
 
@@ -141,6 +149,7 @@ const pagedItems = computed(() => {
 
 watch([searchSku, pageSize], () => {
   page.value = 1
+  selected.value = []
 })
 
 function earliestPurchase(it: SuggestionItem): string {
@@ -182,21 +191,31 @@ async function handlePush(): Promise<void> {
       selected.value.map((it) => it.id),
     )
     pushTaskId.value = resp.task_id
-  } catch {
-    ElMessage.error('推送任务入队失败。')
+    if (resp.existing) {
+      ElMessage.warning('已有推送任务在执行，当前复用已有任务进度。')
+    } else {
+      ElMessage.success('推送任务已入队。')
+    }
+  } catch (error) {
+    ElMessage.error(getActionErrorMessage(error, '推送任务入队失败。'))
   } finally {
     pushing.value = false
   }
 }
 
-async function onPushDone(): Promise<void> {
-  ElMessage.success('推送任务已结束，正在刷新当前建议。')
+async function onPushDone(task: TaskRun): Promise<void> {
   pushTaskId.value = null
   await loadCurrent()
+  if (task.status === 'success') {
+    ElMessage.success('推送任务已完成，当前建议已刷新。')
+    return
+  }
+  ElMessage.error(task.error_msg || '推送任务执行失败，请查看任务详情。')
 }
 
 function goDetail(id: number): void {
-  router.push(`/replenishment/suggestions/${id}`)
+  if (!suggestion.value) return
+  router.push(`/replenishment/suggestions/${suggestion.value.id}?item=${id}`)
 }
 
 function goRun(): void {

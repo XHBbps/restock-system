@@ -37,24 +37,24 @@
     </template>
 
     <el-table v-loading="loading" :data="rows">
-      <el-table-column label="建议单 ID" prop="id" width="100" show-overflow-tooltip />
-      <el-table-column label="生成时间" width="180" show-overflow-tooltip>
+      <el-table-column label="建议单 ID" prop="id" width="100" sortable show-overflow-tooltip />
+      <el-table-column label="生成时间" width="180" sortable show-overflow-tooltip>
         <template #default="{ row }">
           {{ formatTime(row.created_at) }}
         </template>
       </el-table-column>
-      <el-table-column label="触发方式" prop="triggered_by" width="140" show-overflow-tooltip />
-      <el-table-column label="状态" width="120" show-overflow-tooltip>
+      <el-table-column label="触发方式" prop="triggered_by" width="140" sortable show-overflow-tooltip />
+      <el-table-column label="状态" width="120" sortable show-overflow-tooltip>
         <template #default="{ row }">
           <el-tag :type="getSuggestionStatusMeta(row.status).tagType">
             {{ getSuggestionStatusMeta(row.status).label }}
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="条目数" prop="total_items" width="100" align="right" show-overflow-tooltip />
-      <el-table-column label="已推送" prop="pushed_items" width="100" align="right" show-overflow-tooltip />
-      <el-table-column label="失败数" prop="failed_items" width="100" align="right" show-overflow-tooltip />
-      <el-table-column label="推送成功率" width="120" align="right" show-overflow-tooltip>
+      <el-table-column label="条目数" prop="total_items" width="100" align="right" sortable show-overflow-tooltip />
+      <el-table-column label="已推送" prop="pushed_items" width="100" align="right" sortable show-overflow-tooltip />
+      <el-table-column label="失败数" prop="failed_items" width="100" align="right" sortable show-overflow-tooltip />
+      <el-table-column label="推送成功率" width="120" align="right" sortable show-overflow-tooltip>
         <template #default="{ row }">
           {{ successRate(row) }}
         </template>

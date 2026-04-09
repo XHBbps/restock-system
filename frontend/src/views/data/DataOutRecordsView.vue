@@ -38,8 +38,8 @@
           <div class="expand-panel">
             <div class="expand-title">出库单明细（{{ row.items.length }} 项）</div>
             <el-table :data="row.items" size="small">
-              <el-table-column label="commoditySku" prop="commoditySku" show-overflow-tooltip />
-              <el-table-column label="goods（观测值）" prop="goods" width="160" align="right" show-overflow-tooltip />
+              <el-table-column label="commoditySku" prop="commoditySku" sortable show-overflow-tooltip />
+              <el-table-column label="goods（观测值）" prop="goods" width="160" align="right" sortable show-overflow-tooltip />
             </el-table>
             <div class="expand-meta">
               备注：<code>{{ row.remark || '-' }}</code>
@@ -47,9 +47,9 @@
           </div>
         </template>
       </el-table-column>
-      <el-table-column label="出库单号" prop="outWarehouseNo" min-width="160" show-overflow-tooltip />
-      <el-table-column label="赛狐出库 ID" prop="saihuOutRecordId" width="160" show-overflow-tooltip />
-      <el-table-column label="目标仓" min-width="200" show-overflow-tooltip>
+      <el-table-column label="出库单号" prop="outWarehouseNo" min-width="160" sortable show-overflow-tooltip />
+      <el-table-column label="赛狐出库 ID" prop="saihuOutRecordId" width="160" sortable show-overflow-tooltip />
+      <el-table-column label="目标仓" min-width="200" sortable show-overflow-tooltip>
         <template #default="{ row }">
           <div class="meta-stack">
             <span>{{ row.targetWarehouseName || '-' }}</span>
@@ -57,27 +57,27 @@
           </div>
         </template>
       </el-table-column>
-      <el-table-column label="目标国家" width="90" align="center" show-overflow-tooltip>
+      <el-table-column label="目标国家" width="90" align="center" sortable show-overflow-tooltip>
         <template #default="{ row }">
           <el-tag v-if="row.targetCountry" size="small">{{ row.targetCountry }}</el-tag>
           <span v-else class="muted">-</span>
         </template>
       </el-table-column>
-      <el-table-column label="明细数" width="90" align="right" show-overflow-tooltip>
+      <el-table-column label="明细数" width="90" align="right" sortable show-overflow-tooltip>
         <template #default="{ row }">{{ row.items.length }}</template>
       </el-table-column>
-      <el-table-column label="观测总数" width="100" align="right" show-overflow-tooltip>
+      <el-table-column label="观测总数" width="100" align="right" sortable show-overflow-tooltip>
         <template #default="{ row }">
           <strong>{{ sumGoods(row) }}</strong>
         </template>
       </el-table-column>
-      <el-table-column label="状态" width="100" show-overflow-tooltip>
+      <el-table-column label="状态" width="100" sortable show-overflow-tooltip>
         <template #default="{ row }">
           <el-tag v-if="row.isInTransit" type="success" size="small">在途中</el-tag>
           <el-tag v-else type="info" size="small">已消失</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="最后同步" width="160" show-overflow-tooltip>
+      <el-table-column label="最后同步" width="160" sortable show-overflow-tooltip>
         <template #default="{ row }">
           <span class="muted mono">{{ formatTime(row.lastSeenAt) }}</span>
         </template>

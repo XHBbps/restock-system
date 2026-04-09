@@ -8,7 +8,7 @@
     </template>
 
     <el-table v-loading="loading" :data="pagedRows">
-      <el-table-column label="仓库名称" prop="name" min-width="220" show-overflow-tooltip>
+      <el-table-column label="仓库名称" prop="name" min-width="220" sortable show-overflow-tooltip>
         <template #default="{ row }">
           {{ row.name }}
           <el-tag v-if="!row.country" type="warning" size="small" style="margin-left: 8px">
@@ -16,9 +16,9 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="仓库 ID" prop="id" width="140" show-overflow-tooltip />
-      <el-table-column label="类型" prop="type" width="100" align="center" show-overflow-tooltip />
-      <el-table-column label="赛狐 replenishSite" width="180" show-overflow-tooltip>
+      <el-table-column label="仓库 ID" prop="id" width="140" sortable show-overflow-tooltip />
+      <el-table-column label="类型" prop="type" width="100" align="center" sortable show-overflow-tooltip />
+      <el-table-column label="赛狐 replenishSite" width="180" sortable show-overflow-tooltip>
         <template #default="{ row }">
           <span class="hint">{{ row.replenish_site_raw || '-' }}</span>
         </template>

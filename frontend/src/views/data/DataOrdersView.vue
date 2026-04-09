@@ -46,42 +46,42 @@
     </template>
 
     <el-table v-loading="loading" :data="rows">
-      <el-table-column label="订单号" prop="amazonOrderId" width="220" show-overflow-tooltip>
+      <el-table-column label="订单号" prop="amazonOrderId" width="220" sortable show-overflow-tooltip>
         <template #default="{ row }">
           <span class="mono">{{ row.amazonOrderId }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="店铺" prop="shopId" width="100" show-overflow-tooltip>
+      <el-table-column label="店铺" prop="shopId" width="100" sortable show-overflow-tooltip>
         <template #default="{ row }">
           <span class="mono muted">{{ row.shopId }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="国家" width="80" align="center" show-overflow-tooltip>
+      <el-table-column label="国家" width="80" align="center" sortable show-overflow-tooltip>
         <template #default="{ row }">
           <el-tag size="small">{{ row.countryCode }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="状态" width="140" show-overflow-tooltip>
+      <el-table-column label="状态" width="140" sortable show-overflow-tooltip>
         <template #default="{ row }">
           <el-tag :type="statusType(row.orderStatus)" size="small">{{ row.orderStatus }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="金额" width="120" align="right" show-overflow-tooltip>
+      <el-table-column label="金额" width="120" align="right" sortable show-overflow-tooltip>
         <template #default="{ row }">
           <span v-if="row.orderTotalAmount">{{ row.orderTotalAmount }} {{ row.orderTotalCurrency }}</span>
           <span v-else class="muted">-</span>
         </template>
       </el-table-column>
-      <el-table-column label="明细数" width="80" align="right" show-overflow-tooltip>
+      <el-table-column label="明细数" width="80" align="right" sortable show-overflow-tooltip>
         <template #default="{ row }">{{ row.itemCount }}</template>
       </el-table-column>
-      <el-table-column label="详情状态" width="100" align="center" show-overflow-tooltip>
+      <el-table-column label="详情状态" width="100" align="center" sortable show-overflow-tooltip>
         <template #default="{ row }">
           <el-tag v-if="row.hasDetail" type="success" size="small">已拉取</el-tag>
           <el-tag v-else type="info" size="small">未拉取</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="下单时间" width="160" show-overflow-tooltip>
+      <el-table-column label="下单时间" width="160" sortable show-overflow-tooltip>
         <template #default="{ row }">
           <span class="muted mono">{{ formatTime(row.purchaseDate) }}</span>
         </template>
@@ -125,11 +125,11 @@
             <el-table-column label="orderItemId" prop="orderItemId" width="160" show-overflow-tooltip>
               <template #default="{ row }"><span class="mono">{{ row.orderItemId }}</span></template>
             </el-table-column>
-            <el-table-column label="commoditySku" prop="commoditySku" min-width="160" show-overflow-tooltip />
-            <el-table-column label="sellerSku" prop="sellerSku" width="140" show-overflow-tooltip />
-            <el-table-column label="ordered" prop="quantityOrdered" width="80" align="right" show-overflow-tooltip />
-            <el-table-column label="shipped" prop="quantityShipped" width="80" align="right" show-overflow-tooltip />
-            <el-table-column label="refund" prop="refundNum" width="80" align="right" show-overflow-tooltip />
+            <el-table-column label="commoditySku" prop="commoditySku" min-width="160" sortable show-overflow-tooltip />
+            <el-table-column label="sellerSku" prop="sellerSku" width="140" sortable show-overflow-tooltip />
+            <el-table-column label="ordered" prop="quantityOrdered" width="80" align="right" sortable show-overflow-tooltip />
+            <el-table-column label="shipped" prop="quantityShipped" width="80" align="right" sortable show-overflow-tooltip />
+            <el-table-column label="refund" prop="refundNum" width="80" align="right" sortable show-overflow-tooltip />
           </el-table>
         </div>
 

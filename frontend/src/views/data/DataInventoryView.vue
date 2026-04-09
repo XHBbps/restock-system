@@ -30,13 +30,13 @@
     </template>
 
     <el-table v-loading="loading" :data="rows">
-      <el-table-column label="SKU" prop="commoditySku" min-width="180" show-overflow-tooltip />
+      <el-table-column label="SKU" prop="commoditySku" min-width="180" sortable show-overflow-tooltip />
       <el-table-column label="商品名称" min-width="200" show-overflow-tooltip>
         <template #default="{ row }">
           <span class="ellipsis">{{ row.commodityName || '-' }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="仓库" min-width="180" show-overflow-tooltip>
+      <el-table-column label="仓库" min-width="180" sortable show-overflow-tooltip>
         <template #default="{ row }">
           <div class="meta-stack">
             <span>{{ row.warehouseName }}</span>
@@ -44,19 +44,19 @@
           </div>
         </template>
       </el-table-column>
-      <el-table-column label="国家" prop="country" width="80" align="center" show-overflow-tooltip>
+      <el-table-column label="国家" prop="country" width="80" align="center" sortable show-overflow-tooltip>
         <template #default="{ row }">
           <el-tag v-if="row.country" size="small">{{ row.country }}</el-tag>
           <span v-else class="muted">-</span>
         </template>
       </el-table-column>
-      <el-table-column label="可用库存" prop="stockAvailable" width="140" align="right" show-overflow-tooltip>
+      <el-table-column label="可用库存" prop="stockAvailable" width="140" align="right" sortable show-overflow-tooltip>
         <template #default="{ row }">
           <strong>{{ row.stockAvailable }}</strong>
         </template>
       </el-table-column>
-      <el-table-column label="占用库存" prop="stockOccupy" width="120" align="right" show-overflow-tooltip />
-      <el-table-column label="更新时间" width="160" show-overflow-tooltip>
+      <el-table-column label="占用库存" prop="stockOccupy" width="120" align="right" sortable show-overflow-tooltip />
+      <el-table-column label="更新时间" width="160" sortable show-overflow-tooltip>
         <template #default="{ row }">
           <span class="muted mono">{{ formatTime(row.updatedAt) }}</span>
         </template>
