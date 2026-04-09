@@ -18,7 +18,21 @@
         <el-input-number v-model="form.sync_interval_minutes" :min="5" :max="1440" />
       </el-form-item>
       <el-form-item label="规则引擎 cron">
-        <el-input v-model="form.calc_cron" placeholder="0 8 * * *" />
+        <el-select v-model="selectedCronPreset" style="width: 200px" @change="onCronPresetChange">
+          <el-option
+            v-for="preset in cronPresets"
+            :key="preset.value"
+            :label="preset.label"
+            :value="preset.value"
+          />
+        </el-select>
+        <el-input
+          v-if="selectedCronPreset === '__custom__'"
+          v-model="customCron"
+          placeholder="0 8 * * *"
+          style="width: 200px; margin-left: 12px"
+          @input="onCustomCronInput"
+        />
       </el-form-item>
       <el-form-item label="默认采购主仓 ID">
         <el-input v-model="form.default_purchase_warehouse_id" placeholder="赛狐 warehouse.id" />
@@ -50,8 +64,48 @@ import { onMounted, ref } from 'vue'
 const form = ref<GlobalConfig | null>(null)
 const saving = ref(false)
 
+const cronPresets = [
+  { label: '每天 06:00', value: '0 6 * * *' },
+  { label: '每天 08:00', value: '0 8 * * *' },
+  { label: '每天 12:00', value: '0 12 * * *' },
+  { label: '每天 20:00', value: '0 20 * * *' },
+  { label: '每 12 小时', value: '0 */12 * * *' },
+  { label: '每 6 小时', value: '0 */6 * * *' },
+  { label: '自定义', value: '__custom__' },
+]
+
+const selectedCronPreset = ref('__custom__')
+const customCron = ref('')
+
+function initCronState(): void {
+  if (!form.value) return
+  const match = cronPresets.find((p) => p.value === form.value!.calc_cron)
+  if (match && match.value !== '__custom__') {
+    selectedCronPreset.value = match.value
+  } else {
+    selectedCronPreset.value = '__custom__'
+    customCron.value = form.value.calc_cron || ''
+  }
+}
+
+function onCronPresetChange(val: string): void {
+  if (!form.value) return
+  if (val === '__custom__') {
+    customCron.value = form.value.calc_cron || ''
+  } else {
+    form.value.calc_cron = val
+  }
+}
+
+function onCustomCronInput(val: string): void {
+  if (form.value) {
+    form.value.calc_cron = val
+  }
+}
+
 onMounted(async () => {
   form.value = await getGlobalConfig()
+  initCronState()
 })
 
 async function save(): Promise<void> {
