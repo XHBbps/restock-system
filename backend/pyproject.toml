@@ -58,6 +58,7 @@ dev = [
 
     # 提交钩子
     "pre-commit>=4.0.0",
+    "pip-audit>=2.7.0",
 ]
 
 [build-system]
