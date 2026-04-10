@@ -3,7 +3,7 @@
     <el-table v-loading="loading" :data="pagedRows" style="width: 100%" :scrollbar-always-on="true">
       <el-table-column label="仓库名称" prop="name" min-width="200" sortable show-overflow-tooltip />
       <el-table-column label="仓库 ID" prop="id" width="140" sortable show-overflow-tooltip />
-      <el-table-column label="类型" width="120" align="center" sortable>
+      <el-table-column label="类型" prop="type" width="120" align="center" sortable :sort-method="(a: Warehouse, b: Warehouse) => (TYPE_SORT_ORDER[a.type] ?? 9) - (TYPE_SORT_ORDER[b.type] ?? 9)">
         <template #default="{ row }">
           <el-tag :type="warehouseTypeTag(row.type)" size="small">
             {{ warehouseTypeLabel(row.type) }}
@@ -76,6 +76,13 @@ const WAREHOUSE_TYPE_MAP: Record<number, string> = {
   3: '海外仓',
 }
 
+// 默认排序优先级: 默认仓 → 国内仓 → 海外仓 → FBA仓 → 虚拟仓
+const TYPE_SORT_ORDER: Record<number, number> = { 0: 0, 1: 1, 3: 2, 2: 3, [-1]: 4 }
+
+function sortByType(list: Warehouse[]): Warehouse[] {
+  return [...list].sort((a, b) => (TYPE_SORT_ORDER[a.type] ?? 9) - (TYPE_SORT_ORDER[b.type] ?? 9))
+}
+
 function warehouseTypeLabel(type: number): string {
   return WAREHOUSE_TYPE_MAP[type] ?? `未知(${type})`
 }
@@ -102,7 +109,7 @@ const pagedRows = computed(() => {
 async function reload(): Promise<void> {
   loading.value = true
   try {
-    rows.value = await listWarehouses()
+    rows.value = sortByType(await listWarehouses())
   } finally {
     loading.value = false
   }
