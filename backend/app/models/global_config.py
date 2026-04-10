@@ -1,4 +1,4 @@
-"""全局配置（单行表）。"""
+"""全局配置(单行表)。"""
 
 from datetime import datetime
 
@@ -10,7 +10,7 @@ from app.db.base import Base
 
 
 class GlobalConfig(Base):
-    """单行全局参数表，`id` 永远为 1。"""
+    """单行全局参数表,`id` 永远为 1。"""
 
     __tablename__ = "global_config"
     __table_args__ = (
@@ -30,6 +30,7 @@ class GlobalConfig(Base):
 
     # 调度
     sync_interval_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
+    scheduler_enabled: Mapped[bool] = mapped_column(nullable=False, default=True)
     calc_cron: Mapped[str] = mapped_column(String(50), nullable=False, default="0 8 * * *")
 
     # 推送
@@ -41,10 +42,6 @@ class GlobalConfig(Base):
 
     # 登录
     login_password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
-    login_failed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    login_locked_until: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
 
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(
