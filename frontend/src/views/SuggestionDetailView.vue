@@ -32,13 +32,15 @@
         <el-collapse-item v-for="item in suggestion.items" :key="item.id" :name="item.id">
           <template #title>
             <div :id="`suggestion-item-${item.id}`" class="item-header">
-              <SkuCard
-                :sku="item.commodity_sku"
-                :name="item.commodity_name"
-                :image="item.main_image"
-                :urgent="item.urgent"
-                :blocker="item.push_blocker"
-              />
+              <div class="item-main-header">
+                <SkuCard
+                  :sku="item.commodity_sku"
+                  :name="item.commodity_name"
+                  :image="item.main_image"
+                  :urgent="item.urgent"
+                  :blocker="item.push_blocker"
+                />
+              </div>
               <div class="item-stats">
                 <span class="stat-label">总采购量</span>
                 <strong>{{ item.total_qty }}</strong>
@@ -75,7 +77,7 @@
                   <el-table :data="countryRows(item)" size="small" class="detail-table">
                     <el-table-column prop="country" label="国家" width="88" sortable show-overflow-tooltip />
                     <el-table-column prop="qty" label="国家总量" width="108" sortable show-overflow-tooltip />
-                    <el-table-column label="各仓明细" min-width="180" show-overflow-tooltip>
+                    <el-table-column label="各仓明细" min-width="180">
                       <template #default="{ row }">
                         <div v-if="Object.keys(row.warehouses).length" class="warehouse-list">
                           <span v-for="(wq, w) in row.warehouses" :key="w" class="warehouse-chip">
@@ -85,7 +87,7 @@
                         <span v-else class="allocation-text">未拆分</span>
                       </template>
                     </el-table-column>
-                    <el-table-column label="拆分依据" min-width="260" show-overflow-tooltip>
+                    <el-table-column label="拆分依据" min-width="260">
                       <template #default="{ row }">
                         <div v-if="row.allocation" class="allocation-meta">
                           <div class="allocation-top">
@@ -352,11 +354,11 @@ function goBack(): void {
     router.back()
     return
   }
-  router.push('/replenishment/current')
+  router.push('/restock/current')
 }
 
 function goCurrent(): void {
-  router.push('/replenishment/current')
+  router.push('/restock/current')
 }
 
 watch(
@@ -420,7 +422,7 @@ watch(
 .item-header {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: $space-4;
   width: 100%;
   min-width: 0;
@@ -428,24 +430,33 @@ watch(
   scroll-margin-top: calc($layout-topbar-height + $space-6);
 }
 
+.item-main-header {
+  flex: 1;
+  min-width: 0;
+}
+
 .item-stats {
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
-  min-width: 88px;
-  padding: $space-2 $space-3;
+  width: 96px;
+  min-height: 64px;
+  padding: $space-2 $space-2;
   border-radius: $radius-lg;
   background: $color-bg-subtle;
+  border: 1px solid $color-border-default;
 
   .stat-label {
     color: $color-text-secondary;
     font-size: $font-size-xs;
+    line-height: 1.2;
   }
 
   strong {
     color: $color-text-primary;
-    font-size: $font-size-xl;
+    font-size: 22px;
     line-height: 1.1;
   }
 }
@@ -653,19 +664,27 @@ watch(
 }
 
 :deep(.el-collapse-item__header) {
-  align-items: center;
-  min-height: 84px;
+  align-items: stretch;
+  height: auto;
+  min-height: 92px;
+  line-height: normal;
   padding-top: $space-3;
   padding-bottom: $space-3;
   padding-left: $space-4;
   padding-right: $space-4;
   background: $color-bg-card;
   border-bottom: 1px solid $color-border-default;
+  overflow: visible;
 }
 
 :deep(.el-collapse-item__content) {
   padding-bottom: 0;
   background: $color-bg-card;
+}
+
+:deep(.el-collapse-item__arrow) {
+  align-self: center;
+  margin-left: $space-3;
 }
 
 :deep(.detail-table th.el-table__cell) {
@@ -717,6 +736,11 @@ watch(
 
   .panel-action {
     position: static;
+  }
+
+  .item-stats {
+    width: auto;
+    min-width: 96px;
   }
 
   .editor-row,

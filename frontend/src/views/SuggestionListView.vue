@@ -221,11 +221,11 @@ async function onPushDone(task: TaskRun): Promise<void> {
 
 function goDetail(id: number): void {
   if (!suggestion.value) return
-  router.push(`/replenishment/suggestions/${suggestion.value.id}?item=${id}`)
+  router.push(`/restock/suggestions/${suggestion.value.id}?item=${id}`)
 }
 
 function goRun(): void {
-  router.push('/replenishment/run')
+  router.push('/restock/run')
 }
 
 onMounted(loadCurrent)

@@ -43,7 +43,7 @@
         </template>
       </el-table-column>
       <el-table-column label="触发方式" prop="triggered_by" width="140" sortable show-overflow-tooltip />
-      <el-table-column label="状态" width="120" sortable show-overflow-tooltip>
+      <el-table-column label="状态" width="120" sortable>
         <template #default="{ row }">
           <el-tag :type="getSuggestionStatusMeta(row.status).tagType">
             {{ getSuggestionStatusMeta(row.status).label }}
@@ -53,12 +53,12 @@
       <el-table-column label="条目数" prop="total_items" width="100" align="right" sortable show-overflow-tooltip />
       <el-table-column label="已推送" prop="pushed_items" width="100" align="right" sortable show-overflow-tooltip />
       <el-table-column label="失败数" prop="failed_items" width="100" align="right" sortable show-overflow-tooltip />
-      <el-table-column label="推送成功率" width="120" align="right" sortable show-overflow-tooltip>
+      <el-table-column label="推送成功率" width="120" align="right" sortable>
         <template #default="{ row }">
           {{ successRate(row) }}
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="100" align="center" show-overflow-tooltip>
+      <el-table-column label="操作" width="100" align="center">
         <template #default="{ row }">
           <el-button link type="primary" @click="goDetail(row.id)">详情</el-button>
         </template>
@@ -124,7 +124,7 @@ function successRate(row: Suggestion): string {
 }
 
 function goDetail(id: number): void {
-  router.push(`/replenishment/suggestions/${id}`)
+  router.push(`/restock/suggestions/${id}`)
 }
 
 onMounted(reload)
