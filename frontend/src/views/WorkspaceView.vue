@@ -230,9 +230,9 @@ onMounted(load)
 .urgent-list {
   display: flex;
   flex-direction: column;
-  gap: $space-3;
   max-height: 400px;
   overflow-y: auto;
+  padding-right: $space-1;
 }
 
 .urgent-item {
@@ -253,7 +253,7 @@ onMounted(load)
   margin-bottom: $space-2;
   font-size: $font-size-xs;
   color: $color-text-secondary;
-  font-weight: $font-weight-semibold;
+  font-weight: $font-weight-medium;
 }
 
 .urgent-item {
@@ -288,9 +288,10 @@ onMounted(load)
   width: 70px;
   flex-shrink: 0;
   text-align: right;
-  font-size: $font-size-lg;
-  font-weight: $font-weight-semibold;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
   color: $color-text-primary;
+  padding-right: $space-3;
 }
 
 .right-card-content {
