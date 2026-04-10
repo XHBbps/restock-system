@@ -1,7 +1,34 @@
 name: restock
 
-# 赛狐补货计算工具 - 单机 Docker Compose 部署
-# 服务：caddy (HTTPS 反代) + frontend (nginx 静态) + backend (FastAPI) + db (PostgreSQL 16)
+x-backend-env: &backend-env
+  DATABASE_URL: postgresql+asyncpg://postgres:${DB_PASSWORD}@db:5432/replenish
+  APP_ENV: production
+  APP_TIMEZONE: Asia/Shanghai
+  APP_LOG_LEVEL: INFO
+  SAIHU_BASE_URL: https://openapi.sellfox.com
+  SAIHU_CLIENT_ID: ${SAIHU_CLIENT_ID}
+  SAIHU_CLIENT_SECRET: ${SAIHU_CLIENT_SECRET}
+  LOGIN_PASSWORD: ${LOGIN_PASSWORD}
+  JWT_SECRET: ${JWT_SECRET}
+  JWT_EXPIRES_HOURS: 24
+  TZ: Asia/Shanghai
+
+x-backend-build: &backend-build
+  context: ../backend
+  dockerfile: Dockerfile
+
+x-backend-healthcheck: &backend-healthcheck
+  test:
+    [
+      "CMD",
+      "python",
+      "-c",
+      "import urllib.request; urllib.request.urlopen('http://localhost:8000/readyz', timeout=2)",
+    ]
+  interval: 30s
+  timeout: 5s
+  retries: 5
+  start_period: 20s
 
 services:
   db:
@@ -12,7 +39,6 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       TZ: Asia/Shanghai
-      # 性能调优：2C4G 单机合理配置
       POSTGRES_INITDB_ARGS: "--data-checksums"
     volumes:
       - ./data/pg:/var/lib/postgresql/data
@@ -21,43 +47,91 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    # 注意：不暴露 5432 端口到宿主机，避免公网爆破
     networks:
       - internal
+    deploy:
+      resources:
+        limits:
+          memory: 1g
 
   backend:
-    build:
-      context: ../backend
-      dockerfile: Dockerfile
+    build: *backend-build
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:${DB_PASSWORD}@db:5432/replenish
-      APP_TIMEZONE: Asia/Shanghai
-      APP_ENV: production
-      APP_LOG_LEVEL: INFO
-
-      SAIHU_BASE_URL: https://openapi.sellfox.com
-      SAIHU_CLIENT_ID: ${SAIHU_CLIENT_ID}
-      SAIHU_CLIENT_SECRET: ${SAIHU_CLIENT_SECRET}
-
-      LOGIN_PASSWORD: ${LOGIN_PASSWORD}
-      JWT_SECRET: ${JWT_SECRET}
-      JWT_EXPIRES_HOURS: 24
-
-      TZ: Asia/Shanghai
+      <<: *backend-env
+      APP_DOCS_ENABLED: ${APP_DOCS_ENABLED:-false}
+      PROCESS_ENABLE_WORKER: false
+      PROCESS_ENABLE_REAPER: false
+      PROCESS_ENABLE_SCHEDULER: false
     depends_on:
       db:
         condition: service_healthy
+    healthcheck: *backend-healthcheck
     networks:
       - internal
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  worker:
+    build: *backend-build
+    restart: unless-stopped
+    environment:
+      <<: *backend-env
+      APP_DOCS_ENABLED: false
+      PROCESS_ENABLE_WORKER: true
+      PROCESS_ENABLE_REAPER: true
+      PROCESS_ENABLE_SCHEDULER: false
+      DB_POOL_SIZE: 3
+      DB_MAX_OVERFLOW: 2
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck: *backend-healthcheck
+    networks:
+      - internal
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  scheduler:
+    build: *backend-build
+    restart: unless-stopped
+    environment:
+      <<: *backend-env
+      APP_DOCS_ENABLED: false
+      PROCESS_ENABLE_WORKER: false
+      PROCESS_ENABLE_REAPER: false
+      PROCESS_ENABLE_SCHEDULER: true
+      DB_POOL_SIZE: 3
+      DB_MAX_OVERFLOW: 2
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck: *backend-healthcheck
+    networks:
+      - internal
+    deploy:
+      resources:
+        limits:
+          memory: 512m
 
   frontend:
     build:
       context: ../frontend
       dockerfile: Dockerfile
     restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
     networks:
       - internal
+    deploy:
+      resources:
+        limits:
+          memory: 256m
 
   caddy:
     image: caddy:2-alpine
@@ -72,10 +146,16 @@ services:
       - ./data/caddy:/data
       - ./data/caddy-config:/config
     depends_on:
-      - frontend
-      - backend
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
     networks:
       - internal
+    deploy:
+      resources:
+        limits:
+          memory: 128m
 
 networks:
   internal:
