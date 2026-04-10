@@ -18,8 +18,6 @@
       <DashboardStatCard
         title="紧急补货"
         :value="data?.urgent_count ?? 0"
-        :trend="(data?.urgent_count ?? 0) > 0 ? `${data!.urgent_count} 个 SKU 需紧急补货` : undefined"
-        :trend-type="(data?.urgent_count ?? 0) > 0 ? 'negative' : undefined"
       />
     </section>
 
