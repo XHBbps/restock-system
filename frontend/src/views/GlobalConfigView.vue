@@ -35,7 +35,7 @@
         />
       </el-form-item>
       <el-form-item label="默认采购主仓 ID">
-        <el-input v-model="form.default_purchase_warehouse_id" placeholder="赛狐 warehouse.id" />
+        <el-input v-model="form.default_purchase_warehouse_id" placeholder="外部仓库 ID" />
       </el-form-item>
       <el-form-item label="是否含税">
         <el-radio-group v-model="form.include_tax">
@@ -113,6 +113,7 @@ async function save(): Promise<void> {
   saving.value = true
   try {
     form.value = await patchGlobalConfig(form.value)
+    initCronState()
     ElMessage.success('已保存')
   } catch {
     ElMessage.error('保存失败')

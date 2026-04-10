@@ -136,7 +136,7 @@
         </template>
       </DataTableCard>
 
-      <DataTableCard title="最近失败调用" description="用于排查赛狐接口失败并直接重试。">
+      <DataTableCard title="最近失败调用" description="用于排查外部接口失败并直接重试。">
         <template #toolbar>
           <el-switch v-model="onlyFailed" active-text="仅失败" @change="loadRecentCalls" />
         </template>
@@ -297,7 +297,7 @@ const syncStatusChartOption = computed<EChartsCoreOption>(() => {
         itemStyle: { borderColor: '#ffffff', borderWidth: 4 },
         label: { formatter: '{b}\n{c}', color: '#09090b', fontSize: 12 },
         data: [
-          { name: '成功', value: counts.success || counts.completed || 0, itemStyle: { color: '#16a34a' } },
+          { name: '成功', value: (counts.success || 0) + (counts.completed || 0), itemStyle: { color: '#16a34a' } },
           { name: '失败', value: counts.failed || 0, itemStyle: { color: '#dc2626' } },
           { name: '执行中', value: counts.running || 0, itemStyle: { color: '#d97706' } },
           { name: '未执行', value: counts.idle || 0, itemStyle: { color: '#a1a1aa' } },
