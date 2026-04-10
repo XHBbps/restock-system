@@ -1,8 +1,8 @@
 """订单列表同步。
 
-策略（spec FR-021）：
-- dateType=updateDateTime 捕获状态变化（发货/取消/退款）
-- dateStart = sync_state.last_success_at - 5min（首次回填使用 30 天窗口）
+策略(spec FR-021):
+- dateType=updateDateTime 捕获状态变化(发货/取消/退款)
+- dateStart = sync_state.last_success_at - 5min(首次回填使用 30 天窗口)
 - order_header 按 (shop_id, amazon_order_id) UPSERT
 - order_item 按 (order_id, order_item_id) UPSERT
 - 时间字段经站点时区转 Asia/Shanghai
@@ -98,7 +98,7 @@ async def _resolve_shop_ids(db: AsyncSession) -> list[str] | None:
             select(Shop.id).where(Shop.sync_enabled.is_(True)).where(Shop.status == "0")
         )
     ).scalars().all()
-    return list(rows) if rows else None
+    return list(rows) if rows else []
 
 
 async def _upsert_order(db: AsyncSession, raw: dict[str, Any]) -> int:
