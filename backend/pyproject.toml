@@ -89,8 +89,11 @@ select = [
     "RUF", # ruff-specific
 ]
 ignore = [
-    "E501",  # 行长由 black 管
-    "B008",  # FastAPI Depends() 用法
+    "E501",    # 行长由 black 管
+    "B008",    # FastAPI Depends() 用法
+    "RUF001",  # 中文字符串中的全角标点
+    "RUF002",  # 中文 docstring 中的全角标点
+    "RUF003",  # 中文注释中的全角标点
 ]
 
 [tool.ruff.lint.per-file-ignores]
