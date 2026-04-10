@@ -28,6 +28,7 @@ from app.models.inventory import InventorySnapshotLatest
 from app.models.order import OrderDetail, OrderHeader, OrderItem
 from app.models.product_listing import ProductListing
 from app.models.shop import Shop
+from app.models.sku import SkuConfig
 from app.models.warehouse import Warehouse
 from app.schemas.data import (
     DataInventoryItem,
@@ -46,6 +47,7 @@ from app.schemas.data import (
     DataSyncStateRow,
     DataWarehouse,
     DataWarehouseListOut,
+    SkuOverviewListOut,
 )
 
 router = APIRouter(prefix="/api/data", tags=["data"])
@@ -467,7 +469,89 @@ async def list_product_listings_data(
 
 
 # ============================================================
-# 7. sync_state 汇总(同步管理页用)
+# 7. SKU Overview (grouped by SKU config)
+# ============================================================
+@router.get("/sku-overview", response_model=SkuOverviewListOut)
+async def list_sku_overview(
+    keyword: str | None = Query(default=None, description="按 commodity_sku 模糊搜索"),
+    enabled: bool | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=200),
+    db: AsyncSession = Depends(db_session),
+    _: dict = Depends(get_current_session),
+) -> SkuOverviewListOut:
+    """Return SKU-level overview: config + aggregated listings, paginated by SKU."""
+    from app.schemas.data import SkuListingItem, SkuOverviewItem, SkuOverviewListOut as _Out
+
+    base = select(SkuConfig).order_by(SkuConfig.commodity_sku)
+    if enabled is not None:
+        base = base.where(SkuConfig.enabled.is_(enabled))
+    if keyword:
+        base = base.where(
+            SkuConfig.commodity_sku.ilike(f"%{escape_like(keyword)}%", escape="\\")
+        )
+
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
+    sku_rows = (
+        await db.execute(base.offset((page - 1) * page_size).limit(page_size))
+    ).scalars().all()
+
+    if not sku_rows:
+        return _Out(items=[], total=int(total or 0), page=page, page_size=page_size)
+
+    sku_codes = [r.commodity_sku for r in sku_rows]
+
+    listing_rows = (
+        await db.execute(
+            select(ProductListing)
+            .where(ProductListing.commodity_sku.in_(sku_codes))
+            .order_by(ProductListing.commodity_sku, ProductListing.marketplace_id)
+        )
+    ).scalars().all()
+
+    listings_by_sku: dict[str, list] = {}
+    for pl in listing_rows:
+        listings_by_sku.setdefault(pl.commodity_sku, []).append(pl)
+
+    items: list[SkuOverviewItem] = []
+    for sku_cfg in sku_rows:
+        sku = sku_cfg.commodity_sku
+        sku_listings = listings_by_sku.get(sku, [])
+        name = sku_listings[0].commodity_name if sku_listings else None
+        image = sku_listings[0].main_image if sku_listings else None
+        total_day30 = sum((pl.day30_sale_num or 0) for pl in sku_listings)
+
+        items.append(
+            SkuOverviewItem(
+                commodity_sku=sku,
+                commodity_name=name,
+                main_image=image,
+                enabled=sku_cfg.enabled,
+                lead_time_days=sku_cfg.lead_time_days,
+                listing_count=len(sku_listings),
+                total_day30_sales=total_day30,
+                listings=[
+                    SkuListingItem(
+                        id=pl.id,
+                        shop_id=pl.shop_id,
+                        marketplace_id=pl.marketplace_id,
+                        seller_sku=pl.seller_sku,
+                        day7_sale_num=pl.day7_sale_num,
+                        day14_sale_num=pl.day14_sale_num,
+                        day30_sale_num=pl.day30_sale_num,
+                        online_status=pl.online_status or "",
+                        last_sync_at=pl.last_sync_at.isoformat() if pl.last_sync_at else None,
+                    )
+                    for pl in sku_listings
+                ],
+            )
+        )
+
+    return _Out(items=items, total=int(total or 0), page=page, page_size=page_size)
+
+
+# ============================================================
+# 8. sync_state 汇总(同步管理页用)
 # ============================================================
 @router.get("/sync-state", response_model=list[DataSyncStateRow])
 async def list_sync_state(
