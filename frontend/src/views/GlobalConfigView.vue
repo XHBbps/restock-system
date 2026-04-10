@@ -49,7 +49,7 @@
       <el-form :model="form" label-width="180px" style="max-width: 560px">
         <el-form-item label="规则引擎 cron">
           <div class="cron-inline">
-            <el-select v-model="selectedCronPreset" style="width: 120px" @change="onCronPresetChange">
+            <el-select v-model="selectedCronPreset" class="cron-select" @change="onCronPresetChange">
               <el-option
                 v-for="preset in cronPresets"
                 :key="preset.value"
@@ -60,8 +60,8 @@
             <el-input
               v-if="selectedCronPreset === '__custom__'"
               v-model="customCron"
-              placeholder="0 8 * * *"
-              style="flex: 1"
+              class="cron-input"
+              placeholder="分 时 日 月 周 (如: 0 8 * * *)"
               @input="onCustomCronInput"
             />
           </div>
@@ -180,7 +180,17 @@ async function save(): Promise<void> {
 
 .cron-inline {
   display: flex;
+  align-items: center;
   gap: $space-2;
   width: 100%;
+}
+
+.cron-select {
+  width: 120px;
+  flex-shrink: 0;
+}
+
+.cron-input {
+  flex: 1;
 }
 </style>
