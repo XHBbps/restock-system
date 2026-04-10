@@ -35,17 +35,22 @@
     <section class="bottom-grid">
       <DataTableCard title="急需补货 SKU">
         <template v-if="data && data.top_urgent_skus.length > 0">
+          <div class="urgent-header">
+            <span class="urgent-col-product">商品信息</span>
+            <span class="urgent-col-countries">国家分布</span>
+            <span class="urgent-col-qty">补货量</span>
+          </div>
           <div class="urgent-list">
             <div v-for="item in data.top_urgent_skus" :key="item.commodity_sku" class="urgent-item">
-              <div class="urgent-item-main">
+              <div class="urgent-col-product">
                 <SkuCard :sku="item.commodity_sku" :name="item.commodity_name" :image="item.main_image" />
-                <span class="urgent-qty">{{ item.total_qty }}</span>
               </div>
-              <div class="urgent-countries">
+              <div class="urgent-col-countries">
                 <el-tag v-for="(qty, country) in item.country_breakdown" :key="country" size="small">
                   {{ country }}:{{ qty }}
                 </el-tag>
               </div>
+              <div class="urgent-col-qty">{{ item.total_qty }}</div>
             </div>
           </div>
         </template>
@@ -240,31 +245,52 @@ onMounted(load)
   }
 }
 
-.urgent-item-main {
+.urgent-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  gap: $space-3;
+  padding: 0 0 $space-2;
+  border-bottom: 1px solid $color-border-default;
+  margin-bottom: $space-2;
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  font-weight: $font-weight-semibold;
+}
+
+.urgent-item {
+  display: flex;
+  align-items: center;
+  padding: $space-3 0;
+  border-bottom: 1px solid $color-border-default;
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.urgent-col-product {
+  flex: 1;
   min-width: 0;
 
   :deep(.sku-card) {
-    flex: 1;
     min-width: 0;
   }
 }
 
-.urgent-qty {
-  font-size: $font-size-lg;
-  font-weight: $font-weight-semibold;
-  color: $color-text-primary;
+.urgent-col-countries {
+  width: 200px;
   flex-shrink: 0;
-}
-
-.urgent-countries {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  margin-top: $space-2;
+}
+
+.urgent-col-qty {
+  width: 70px;
+  flex-shrink: 0;
+  text-align: right;
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
 }
 
 .right-card-content {
