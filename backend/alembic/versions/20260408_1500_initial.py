@@ -10,8 +10,9 @@ Create Date: 2026-04-08 15:00:00+08:00
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from alembic import op
 from sqlalchemy.dialects import postgresql
+
+from alembic import op
 
 revision: str = "0001_initial"
 down_revision: str | None = None
@@ -395,12 +396,6 @@ def upgrade() -> None:
         sa.Column("warehouse_breakdown", postgresql.JSONB(), nullable=False),
         sa.Column("t_purchase", postgresql.JSONB(), nullable=False),
         sa.Column("t_ship", postgresql.JSONB(), nullable=False),
-        sa.Column(
-            "overstock_countries",
-            postgresql.JSONB(),
-            nullable=False,
-            server_default=sa.text("'[]'::jsonb"),
-        ),
         sa.Column("velocity_snapshot", postgresql.JSONB(), nullable=True),
         sa.Column("sale_days_snapshot", postgresql.JSONB(), nullable=True),
         sa.Column("urgent", sa.Boolean(), nullable=False, server_default=sa.false()),
@@ -431,28 +426,6 @@ def upgrade() -> None:
         "suggestion_item",
         ["urgent"],
         postgresql_where=sa.text("urgent = true"),
-    )
-
-    # ==================== overstock_sku_mark ====================
-    op.create_table(
-        "overstock_sku_mark",
-        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
-        sa.Column("commodity_sku", sa.String(length=100), nullable=False),
-        sa.Column("country", sa.String(length=2), nullable=False),
-        sa.Column("warehouse_id", sa.String(length=50), nullable=False),
-        sa.Column("current_stock", sa.Integer(), nullable=False),
-        sa.Column("last_sale_date", sa.Date(), nullable=True),
-        sa.Column("processed_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("note", sa.Text(), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.PrimaryKeyConstraint("id", name="pk_overstock_sku_mark"),
-        sa.UniqueConstraint(
-            "commodity_sku", "country", "warehouse_id", name="uq_overstock_sku_mark_key"
-        ),
-    )
-    op.create_index(
-        "ix_overstock_sku_mark_processed", "overstock_sku_mark", ["processed_at"]
     )
 
     # ==================== task_run ====================
@@ -490,7 +463,7 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("id", name="pk_task_run"),
     )
-    # ★ 核心部分唯一索引
+    # * 核心部分唯一索引
     op.create_index(
         "uq_task_run_active_dedupe",
         "task_run",
@@ -568,7 +541,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # 反向删除（按依赖顺序）
+    # 反向删除(按依赖顺序)
     op.drop_index("ix_api_call_log_failed", table_name="api_call_log")
     op.drop_index("ix_api_call_log_endpoint_time", table_name="api_call_log")
     op.drop_table("api_call_log")
@@ -580,9 +553,6 @@ def downgrade() -> None:
     op.drop_index("ix_task_run_pending_priority", table_name="task_run")
     op.drop_index("uq_task_run_active_dedupe", table_name="task_run")
     op.drop_table("task_run")
-
-    op.drop_index("ix_overstock_sku_mark_processed", table_name="overstock_sku_mark")
-    op.drop_table("overstock_sku_mark")
 
     op.drop_index("ix_suggestion_item_urgent", table_name="suggestion_item")
     op.drop_index("ix_suggestion_item_sku", table_name="suggestion_item")
