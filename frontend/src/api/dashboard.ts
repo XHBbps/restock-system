@@ -8,6 +8,8 @@ export interface CountryStockDays {
 
 export interface UrgentSkuItem {
   commodity_sku: string
+  commodity_name: string | null
+  main_image: string | null
   total_qty: number
   country_breakdown: Record<string, number>
 }
