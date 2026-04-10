@@ -6,7 +6,7 @@
     </div>
 
     <div v-if="task.current_step" class="task-step">
-      {{ task.current_step }}<span v-if="task.step_detail"> — {{ task.step_detail }}</span>
+      {{ task.current_step }}<span v-if="task.step_detail"> - {{ task.step_detail }}</span>
     </div>
 
     <el-progress
@@ -17,7 +17,6 @@
     />
 
     <div v-if="task.error_msg" class="task-error">{{ task.error_msg }}</div>
-
     <div v-if="task.result_summary" class="task-result">{{ task.result_summary }}</div>
   </el-card>
 </template>
@@ -32,10 +31,7 @@ const emit = defineEmits<{ terminal: [task: import('@/api/task').TaskRun] }>()
 const taskStore = useTaskStore()
 
 const task = computed(() => (props.taskId ? taskStore.tasksById[props.taskId] : null))
-
-const isTerminal = computed(() =>
-  task.value ? taskStore.isTerminal(task.value) : false
-)
+const isTerminal = computed(() => (task.value ? taskStore.isTerminal(task.value) : false))
 
 const indeterminatePercent = computed(() => {
   if (!task.value?.total_steps || !task.value.current_step) return 50
@@ -66,19 +62,20 @@ const statusLabel = computed(() => {
       success: '成功',
       failed: '失败',
       skipped: '已跳过',
-      cancelled: '已取消'
+      cancelled: '已取消',
     } as Record<string, string>
   )[s]
 })
 
 watch(
   () => props.taskId,
-  (id) => {
+  (id, oldId) => {
+    if (oldId) taskStore.stopPolling(oldId)
     if (id) {
       taskStore.startPolling(id, (t) => emit('terminal', t))
     }
   },
-  { immediate: true }
+  { immediate: true },
 )
 
 onBeforeUnmount(() => {
@@ -90,27 +87,31 @@ onBeforeUnmount(() => {
 .task-progress {
   margin-top: $space-4;
 }
+
 .task-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: $space-3;
-
-  .task-title {
-    font-weight: $font-weight-medium;
-    color: $color-text-primary;
-  }
 }
+
+.task-title {
+  font-weight: $font-weight-medium;
+  color: $color-text-primary;
+}
+
 .task-step {
   font-size: $font-size-sm;
   color: $color-text-secondary;
   margin-bottom: $space-3;
 }
+
 .task-error {
   margin-top: $space-3;
   color: $color-danger;
   font-size: $font-size-sm;
 }
+
 .task-result {
   margin-top: $space-3;
   color: $color-success;
