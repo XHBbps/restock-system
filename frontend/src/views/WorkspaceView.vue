@@ -35,12 +35,12 @@
     <section class="bottom-grid">
       <DataTableCard title="急需补货 SKU">
         <template v-if="data && data.top_urgent_skus.length > 0">
-          <div class="urgent-header">
-            <span class="urgent-col-product">商品信息</span>
-            <span class="urgent-col-countries">国家分布</span>
-            <span class="urgent-col-qty">可售天数</span>
-          </div>
           <div class="urgent-list">
+            <div class="urgent-header">
+              <span class="urgent-col-product">商品信息</span>
+              <span class="urgent-col-countries">国家分布</span>
+              <span class="urgent-col-qty">可售天数</span>
+            </div>
             <div v-for="item in data.top_urgent_skus" :key="item.commodity_sku" class="urgent-item">
               <div class="urgent-col-product">
                 <SkuCard :sku="item.commodity_sku" :name="item.commodity_name" :image="item.main_image" />
@@ -268,10 +268,13 @@ onMounted(load)
   align-items: center;
   padding: 0 0 $space-2;
   border-bottom: 1px solid $color-border-default;
-  margin-bottom: $space-2;
   font-size: $font-size-xs;
   color: $color-text-secondary;
   font-weight: $font-weight-medium;
+  position: sticky;
+  top: 0;
+  background: $color-bg-card;
+  z-index: 1;
 }
 
 .urgent-item {
