@@ -97,7 +97,6 @@ export const navigationGroups: NavGroup[] = [
           { to: '/settings/sku', label: 'SKU 配置', icon: PackageSearch },
           { to: '/settings/warehouse', label: '仓库配置', icon: Warehouse },
           { to: '/settings/zipcode', label: '邮编规则', icon: Truck },
-          { to: '/settings/shop', label: '店铺管理', icon: Store },
         ],
       },
       {

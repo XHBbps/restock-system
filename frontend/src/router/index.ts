@@ -123,12 +123,7 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/ZipcodeRuleView.vue'),
         meta: { title: '邮编规则', section: 'SETTINGS' },
       },
-      {
-        path: 'settings/shop',
-        name: 'shop',
-        component: () => import('@/views/ShopView.vue'),
-        meta: { title: '店铺管理', section: 'SETTINGS' },
-      },
+      { path: 'settings/shop', redirect: '/data/shops' },
       {
         path: 'settings/api-monitor',
         name: 'api-monitor',
