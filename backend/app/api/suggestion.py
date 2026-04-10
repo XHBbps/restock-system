@@ -5,8 +5,9 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, Path, Query
-from sqlalchemy import func, select, update
+from sqlalchemy import Float, case, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.api.deps import db_session, get_current_session
 from app.core.exceptions import ConflictError, NotFound, PushBlockedError, ValidationFailed
@@ -31,6 +32,48 @@ from app.tasks.queue import enqueue_task
 
 router = APIRouter(prefix="/api/suggestions", tags=["suggestion"])
 
+SUGGESTION_STATUS_SORT_ORDER: dict[str, int] = {
+    "draft": 0,
+    "partial": 1,
+    "pushed": 2,
+    "archived": 3,
+    "error": 4,
+}
+
+
+def _suggestion_status_sort_expr() -> ColumnElement[int]:
+    return case(
+        *[(Suggestion.status == status, order) for status, order in SUGGESTION_STATUS_SORT_ORDER.items()],
+        else_=len(SUGGESTION_STATUS_SORT_ORDER),
+    )
+
+
+def _success_rate_sort_expr() -> ColumnElement[float]:
+    return func.coalesce(
+        Suggestion.pushed_items.cast(Float) / func.nullif(Suggestion.total_items, 0),
+        -1.0,
+    )
+
+
+def _apply_suggestion_sort(stmt, sort_by: str | None, sort_order: str):
+    success_rate_expr = _success_rate_sort_expr()
+    sort_map: dict[str, tuple[ColumnElement[object], ...]] = {
+        "id": (Suggestion.id,),
+        "created_at": (Suggestion.created_at,),
+        "triggered_by": (Suggestion.triggered_by,),
+        "status": (_suggestion_status_sort_expr(),),
+        "total_items": (Suggestion.total_items,),
+        "pushed_items": (Suggestion.pushed_items,),
+        "failed_items": (Suggestion.failed_items,),
+        "success_rate": (
+            case((Suggestion.total_items == 0, 1), else_=0),
+            success_rate_expr,
+        ),
+    }
+    columns = sort_map.get(sort_by or "", (Suggestion.created_at,))
+    ordered_columns = [column.asc() if sort_order == "asc" else column.desc() for column in columns]
+    return stmt.order_by(*ordered_columns, Suggestion.created_at.desc(), Suggestion.id.desc())
+
 
 @router.get("", response_model=SuggestionListOut)
 async def list_suggestions(
@@ -40,10 +83,12 @@ async def list_suggestions(
     sku: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
+    sort_by: str | None = Query(default=None),
+    sort_order: str = Query(default="desc", pattern="^(asc|desc)$"),
     db: AsyncSession = Depends(db_session),
     _: dict = Depends(get_current_session),
 ) -> SuggestionListOut:
-    base = select(Suggestion).order_by(Suggestion.created_at.desc())
+    base = select(Suggestion)
     if status:
         base = base.where(Suggestion.status == status)
     if date_from:
@@ -65,6 +110,7 @@ async def list_suggestions(
         )
         base = base.where(Suggestion.id.in_(select(subq.c.suggestion_id)))
 
+    base = _apply_suggestion_sort(base, sort_by, sort_order)
     count_stmt = base.with_only_columns(func.count()).order_by(None)
     total = (await db.execute(count_stmt)).scalar_one()
     rows = (
