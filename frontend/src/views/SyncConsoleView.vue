@@ -1,9 +1,7 @@
 <template>
   <div class="sync-console-view">
     <DashboardPageHeader
-      eyebrow="Operations"
       title="数据同步"
-      description="自动同步与手动同步统一在本页管理。顶部控制调度器，中部查看任务卡片，底部查看状态与失败调用。"
     >
       <template #meta>
         <el-tag :type="schedulerStatus?.enabled ? 'success' : 'warning'">
@@ -30,13 +28,12 @@
 
     <DashboardChartCard
       title="自动同步下次执行"
-      description="展示调度器当前登记的自动任务，按下次执行时间排序。"
       :option="nextRunChartOption"
       :empty="autoScheduleRows.length === 0"
       empty-text="暂无自动调度任务"
     />
 
-    <DataTableCard title="调度器控制" description="控制自动同步总开关，并查看当前计划参数。">
+    <DataTableCard title="调度器控制">
       <template #toolbar>
         <el-button :loading="schedulerLoading" @click="loadScheduler">刷新状态</el-button>
       </template>
@@ -49,7 +46,7 @@
       />
     </DataTableCard>
 
-    <DashboardSection title="自动同步任务" description="自动同步任务由调度器统一托管，桌面端最多每行展示 3 张卡片。">
+    <DashboardSection title="自动同步任务">
       <div class="task-grid">
         <SyncTaskCard
           v-for="job in autoJobCards"
@@ -68,7 +65,7 @@
       </div>
     </DashboardSection>
 
-    <DashboardSection title="手动同步任务" description="全量同步单独一行，其余任务按 3 列卡片展示。">
+    <DashboardSection title="手动同步任务">
       <div class="manual-section">
         <SyncTaskHeroCard
           :title="heroAction.action.label"
