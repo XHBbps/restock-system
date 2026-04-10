@@ -9,14 +9,15 @@ Auto-generated from all feature plans. Last updated: 2026-04-08
 ## Project Structure
 
 ```text
-backend/
-frontend/
-tests/
+backend/        # Python 后端 (FastAPI)
+frontend/       # Vue 3 前端
+deploy/         # Docker / 部署脚本
+docs/           # 文档与计划
 ```
 
 ## Commands
 
-cd src; pytest; ruff check .
+cd backend && pytest && ruff check .
 
 ## Code Style
 
