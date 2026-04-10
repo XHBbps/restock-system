@@ -315,4 +315,10 @@ onMounted(loadCurrent)
     align-items: flex-start;
   }
 }
+
+:deep(.el-checkbox__inner) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 </style>
