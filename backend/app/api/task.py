@@ -1,11 +1,11 @@
-"""任务系统 REST API（对应 contracts/task.yaml）。"""
+"""任务系统 REST API(对应 contracts/task.yaml)。"""
 
 from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Path, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import db_session, get_current_session
@@ -59,7 +59,7 @@ class TaskListOut(BaseModel):
 class EnqueueRequest(BaseModel):
     job_name: str
     payload: dict[str, Any] | None = None
-    dedupe_key: str | None = Field(default=None, description="可选，默认 = job_name")
+    dedupe_key: str | None = Field(default=None, description="可选,默认 = job_name")
 
 
 class EnqueueResponse(BaseModel):
@@ -75,13 +75,16 @@ async def list_tasks(
     db: AsyncSession = Depends(db_session),
     _: dict = Depends(get_current_session),
 ) -> TaskListOut:
-    stmt = select(TaskRun).order_by(TaskRun.created_at.desc()).limit(limit)
+    base = select(TaskRun)
     if job_name:
-        stmt = stmt.where(TaskRun.job_name == job_name)
+        base = base.where(TaskRun.job_name == job_name)
     if status:
-        stmt = stmt.where(TaskRun.status == status)
-    rows = (await db.execute(stmt)).scalars().all()
-    return TaskListOut(items=[TaskRunOut.model_validate(r) for r in rows], total=len(rows))
+        base = base.where(TaskRun.status == status)
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
+    rows = (
+        await db.execute(base.order_by(TaskRun.created_at.desc()).limit(limit))
+    ).scalars().all()
+    return TaskListOut(items=[TaskRunOut.model_validate(r) for r in rows], total=total)
 
 
 @router.post("", response_model=EnqueueResponse)
@@ -124,6 +127,6 @@ async def cancel_task(
     if row is None:
         raise NotFound(f"task {task_id} 不存在")
     if row.status not in ("pending",):
-        raise ConflictError(f"任务状态为 {row.status}，无法取消")
+        raise ConflictError(f"任务状态为 {row.status},无法取消")
     await db.execute(update(TaskRun).where(TaskRun.id == task_id).values(status="cancelled"))
     return {"status": "cancelled"}
