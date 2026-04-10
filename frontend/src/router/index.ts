@@ -105,12 +105,7 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/GlobalConfigView.vue'),
         meta: { title: '全局参数', section: 'SETTINGS' },
       },
-      {
-        path: 'settings/sku',
-        name: 'sku-config',
-        component: () => import('@/views/SkuConfigView.vue'),
-        meta: { title: 'SKU 配置', section: 'SETTINGS' },
-      },
+      { path: 'settings/sku', redirect: '/data/products' },
       { path: 'settings/warehouse', redirect: '/data/warehouses' },
       {
         path: 'settings/zipcode',

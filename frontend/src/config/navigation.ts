@@ -94,7 +94,6 @@ export const navigationGroups: NavGroup[] = [
         icon: Settings,
         items: [
           { to: '/settings/global', label: '全局参数', icon: Settings },
-          { to: '/settings/sku', label: 'SKU 配置', icon: PackageSearch },
           { to: '/settings/zipcode', label: '邮编规则', icon: Truck },
         ],
       },
