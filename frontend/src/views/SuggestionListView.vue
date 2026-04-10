@@ -46,21 +46,34 @@
           <el-table-column type="selection" width="48" :selectable="canSelect" />
           <el-table-column label="商品信息" min-width="320">
             <template #default="{ row }">
-              <SkuCard
-                :sku="row.commodity_sku"
-                :name="row.commodity_name"
-                :image="row.main_image"
-                :urgent="row.urgent"
-                :blocker="row.push_blocker"
-              />
+              <el-tooltip
+                placement="top-start"
+                :content="row.commodity_name || row.commodity_sku"
+                :show-after="300"
+              >
+                <SkuCard
+                  :sku="row.commodity_sku"
+                  :name="row.commodity_name"
+                  :image="row.main_image"
+                  :urgent="row.urgent"
+                  :blocker="row.push_blocker"
+                />
+              </el-tooltip>
             </template>
           </el-table-column>
           <el-table-column label="总采购量" prop="total_qty" width="120" align="right" sortable show-overflow-tooltip />
-          <el-table-column label="国家分布" min-width="220">
+          <el-table-column label="需求分布" min-width="220">
             <template #default="{ row }">
-              <span v-for="(qty, country) in row.country_breakdown" :key="country" class="country-chip">
-                {{ country }}: {{ qty }}
-              </span>
+              <el-tooltip
+                placement="top"
+                :content="Object.entries(row.country_breakdown || {}).map(([c, q]) => `${c}:${q}`).join('  ')"
+              >
+                <div class="country-chips">
+                  <el-tag v-for="(qty, country) in row.country_breakdown" :key="country" size="small">
+                    {{ country }}: {{ qty }}
+                  </el-tag>
+                </div>
+              </el-tooltip>
             </template>
           </el-table-column>
           <el-table-column label="最早采购日" width="140" sortable show-overflow-tooltip>
@@ -285,14 +298,11 @@ onMounted(loadCurrent)
   margin-bottom: $space-4;
 }
 
-.country-chip {
-  display: inline-block;
-  padding: 2px 8px;
-  margin-right: $space-2;
-  background: $color-brand-primary-soft;
-  color: $color-brand-primary;
-  border-radius: $radius-pill;
-  font-size: $font-size-xs;
+.country-chips {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 4px;
+  overflow: hidden;
 }
 
 :deep(.row-urgent) {
