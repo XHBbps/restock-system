@@ -233,6 +233,24 @@ onMounted(load)
   max-height: 400px;
   overflow-y: auto;
   padding-right: $space-1;
+  scrollbar-width: none;
+
+  &:hover {
+    scrollbar-width: thin;
+  }
+
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 3px;
+  }
+
+  &:hover::-webkit-scrollbar-thumb {
+    background: $color-border-default;
+  }
 }
 
 .urgent-item {
