@@ -1,0 +1,15 @@
+[run]
+source = app
+omit =
+    app/db/session.py
+    app/main.py
+    alembic/*
+
+[report]
+fail_under = 50
+show_missing = true
+skip_covered = true
+exclude_lines =
+    pragma: no cover
+    if TYPE_CHECKING:
+    if __name__ == .__main__.:
