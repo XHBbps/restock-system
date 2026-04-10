@@ -43,10 +43,10 @@ class DashboardOverview(BaseModel):
     country_stock_days: list[CountryStockDays]
     top_urgent_skus: list[UrgentSkuItem]
 
-router = APIRouter(tags=["metrics"])
+router = APIRouter(prefix="/api/metrics", tags=["metrics"])
 
 
-@router.get("/metrics", response_class=PlainTextResponse)
+@router.get("", response_class=PlainTextResponse)
 async def metrics(
     db: AsyncSession = Depends(db_session),
     _: dict = Depends(get_current_session),
