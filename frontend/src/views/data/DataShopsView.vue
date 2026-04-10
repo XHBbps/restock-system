@@ -20,13 +20,11 @@
           <span v-else class="muted">-</span>
         </template>
       </el-table-column>
-      <el-table-column label="站点" width="160">
+      <el-table-column label="站点" min-width="170">
         <template #default="{ row }">
-          <template v-if="row.marketplaceId">
-            <el-tag size="small" style="max-width: 140px" :title="row.marketplaceId" class="site-tag">
-              {{ row.marketplaceId }}
-            </el-tag>
-          </template>
+          <el-tag v-if="row.marketplaceId" size="small">
+            {{ row.marketplaceId }}
+          </el-tag>
           <span v-else class="muted">-</span>
         </template>
       </el-table-column>
@@ -177,9 +175,4 @@ onMounted(reload)
   font-size: $font-size-xs;
 }
 
-.site-tag {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 </style>
