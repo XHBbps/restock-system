@@ -48,21 +48,23 @@
       </template>
       <el-form :model="form" label-width="180px" style="max-width: 560px">
         <el-form-item label="规则引擎 cron">
-          <el-select v-model="selectedCronPreset" style="width: 200px" @change="onCronPresetChange">
-            <el-option
-              v-for="preset in cronPresets"
-              :key="preset.value"
-              :label="preset.label"
-              :value="preset.value"
+          <div class="cron-inline">
+            <el-select v-model="selectedCronPreset" style="width: 120px" @change="onCronPresetChange">
+              <el-option
+                v-for="preset in cronPresets"
+                :key="preset.value"
+                :label="preset.label"
+                :value="preset.value"
+              />
+            </el-select>
+            <el-input
+              v-if="selectedCronPreset === '__custom__'"
+              v-model="customCron"
+              placeholder="0 8 * * *"
+              style="flex: 1"
+              @input="onCustomCronInput"
             />
-          </el-select>
-          <el-input
-            v-if="selectedCronPreset === '__custom__'"
-            v-model="customCron"
-            placeholder="0 8 * * *"
-            style="width: 200px; margin-left: 12px"
-            @input="onCustomCronInput"
-          />
+          </div>
         </el-form-item>
       </el-form>
     </el-card>
@@ -174,5 +176,11 @@ async function save(): Promise<void> {
 
 :deep(.el-form-item__content) {
   line-height: 32px;
+}
+
+.cron-inline {
+  display: flex;
+  gap: $space-2;
+  width: 100%;
 }
 </style>
