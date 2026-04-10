@@ -157,8 +157,6 @@ onMounted(reload)
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  max-height: 56px;
-  overflow: hidden;
 }
 
 .site-tag {
