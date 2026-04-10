@@ -170,7 +170,7 @@ async def scheduler_status() -> SchedulerStatusOut:
         jobs.append(
             SchedulerJobOut(
                 job_name=job_name,
-                next_run_time=job.next_run_time.isoformat() if job.next_run_time else None,
+                next_run_time=getattr(job, 'next_run_time', None).isoformat() if getattr(job, 'next_run_time', None) else None,
             )
         )
 
