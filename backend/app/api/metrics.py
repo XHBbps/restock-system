@@ -28,6 +28,8 @@ class CountryStockDays(BaseModel):
 
 class UrgentSkuItem(BaseModel):
     commodity_sku: str
+    commodity_name: str | None = None
+    main_image: str | None = None
     total_qty: int
     country_breakdown: dict[str, int]
 
@@ -163,15 +165,36 @@ async def get_dashboard_overview(
     )
 
     # 6. Top 10 urgent SKUs by total_qty
+    from app.models.product_listing import ProductListing
+
     urgent_items = sorted(
         [it for it in items if it.urgent],
         key=lambda it: it.total_qty,
         reverse=True,
     )[:10]
 
+    # Batch-load product names and images for urgent SKUs
+    urgent_sku_codes = [it.commodity_sku for it in urgent_items]
+    name_map: dict[str, tuple[str | None, str | None]] = {}
+    if urgent_sku_codes:
+        listing_rows = (
+            await db.execute(
+                select(
+                    ProductListing.commodity_sku,
+                    ProductListing.commodity_name,
+                    ProductListing.main_image,
+                ).where(ProductListing.commodity_sku.in_(urgent_sku_codes))
+            )
+        ).all()
+        for sku, name, img in listing_rows:
+            if sku not in name_map:
+                name_map[sku] = (name, img)
+
     top_urgent_skus = [
         UrgentSkuItem(
             commodity_sku=it.commodity_sku,
+            commodity_name=(name_map.get(it.commodity_sku) or (None, None))[0],
+            main_image=(name_map.get(it.commodity_sku) or (None, None))[1],
             total_qty=it.total_qty,
             country_breakdown={
                 k: int(v) for k, v in (it.country_breakdown or {}).items()
