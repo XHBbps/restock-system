@@ -1,30 +1,49 @@
 <template>
-  <PageSectionCard title="仓库数据" description="展示外部仓库基础数据和手工维护的国家映射。">
-    <el-table v-loading="loading" :data="pagedRows">
-      <el-table-column label="仓库 ID" prop="id" width="120" />
-      <el-table-column label="仓库名称" prop="name" min-width="240" />
-      <el-table-column label="仓库类型" width="120" align="center">
+  <PageSectionCard title="仓库">
+    <el-table v-loading="loading" :data="pagedRows" style="width: 100%" :scrollbar-always-on="true">
+      <el-table-column label="仓库名称" prop="name" min-width="200" sortable show-overflow-tooltip />
+      <el-table-column label="仓库 ID" prop="id" width="120" sortable show-overflow-tooltip />
+      <el-table-column label="类型" prop="type" width="120" align="center" sortable :sort-method="sortByTypeMethod">
         <template #default="{ row }">
-          <el-tag v-if="row.type === 1" type="success" size="small">国内仓</el-tag>
-          <el-tag v-else-if="row.type === 0" size="small">默认仓</el-tag>
-          <el-tag v-else-if="row.type === 2" size="small">FBA 仓</el-tag>
-          <el-tag v-else-if="row.type === 3" size="small">海外仓</el-tag>
-          <el-tag v-else-if="row.type === -1" type="info" size="small">虚拟仓</el-tag>
-          <el-tag v-else type="info" size="small">{{ row.type }}</el-tag>
+          <el-tag :type="warehouseTypeTag(row.type)" size="small">
+            {{ warehouseTypeLabel(row.type) }}
+          </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="所属国家" width="160">
+      <el-table-column label="补货站点" min-width="200">
         <template #default="{ row }">
-          <el-tag v-if="row.country" size="small">{{ row.country }}</el-tag>
-          <el-tag v-else type="warning" size="small">待指定</el-tag>
+          <template v-if="parseSites(row.replenishSite).length">
+            <el-tag
+              v-for="site in parseSites(row.replenishSite)"
+              :key="site"
+              size="small"
+              style="margin-right: 4px; margin-bottom: 2px"
+            >
+              {{ site }}
+            </el-tag>
+          </template>
+          <span v-else class="muted">-</span>
         </template>
       </el-table-column>
-      <el-table-column label="补货站点" prop="replenishSite" width="180">
+      <el-table-column label="所属国家" width="200">
         <template #default="{ row }">
-          <span class="muted mono">{{ row.replenishSite || '-' }}</span>
+          <el-select
+            v-model="row.country"
+            filterable
+            placeholder="选择国家"
+            style="width: 170px"
+            @change="(val: string) => saveCountry(row, val)"
+          >
+            <el-option
+              v-for="opt in COUNTRY_OPTIONS"
+              :key="opt.code"
+              :label="opt.label"
+              :value="opt.code"
+            />
+          </el-select>
         </template>
       </el-table-column>
-      <el-table-column label="最近同步时间" width="160">
+      <el-table-column label="最近同步" width="140">
         <template #default="{ row }">
           <span class="muted mono">{{ formatTime(row.lastSyncAt) }}</span>
         </template>
@@ -41,15 +60,55 @@
 
 <script setup lang="ts">
 import { listDataWarehouses, type DataWarehouse } from '@/api/data'
+import { patchWarehouseCountry } from '@/api/config'
 import PageSectionCard from '@/components/PageSectionCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
+import { COUNTRY_OPTIONS } from '@/utils/countries'
 import dayjs from 'dayjs'
+import { ElMessage } from 'element-plus'
 import { computed, onMounted, ref } from 'vue'
 
 const rows = ref<DataWarehouse[]>([])
 const loading = ref(false)
 const page = ref(1)
 const pageSize = ref(10)
+
+const WAREHOUSE_TYPE_MAP: Record<number, string> = {
+  [-1]: '虚拟仓',
+  0: '默认仓',
+  1: '国内仓库',
+  2: 'FBA仓',
+  3: '海外仓',
+}
+
+const TYPE_SORT_ORDER: Record<number, number> = { 0: 0, 1: 1, 3: 2, 2: 3, [-1]: 4 }
+
+function warehouseTypeLabel(type: number): string {
+  return WAREHOUSE_TYPE_MAP[type] ?? `未知(${type})`
+}
+
+function warehouseTypeTag(type: number): 'primary' | 'success' | 'warning' | 'info' | 'danger' | undefined {
+  switch (type) {
+    case 1: return 'success'
+    case 2: return 'primary'
+    case 3: return 'warning'
+    case -1: return 'info'
+    default: return 'info'
+  }
+}
+
+function sortByTypeMethod(a: DataWarehouse, b: DataWarehouse): number {
+  return (TYPE_SORT_ORDER[a.type] ?? 9) - (TYPE_SORT_ORDER[b.type] ?? 9)
+}
+
+function parseSites(raw: string | null): string[] {
+  if (!raw) return []
+  return raw.split(/[,;，；\s]+/).filter((s) => s && s !== '-')
+}
+
+function sortByType(list: DataWarehouse[]): DataWarehouse[] {
+  return [...list].sort((a, b) => (TYPE_SORT_ORDER[a.type] ?? 9) - (TYPE_SORT_ORDER[b.type] ?? 9))
+}
 
 const pagedRows = computed(() => {
   const start = (page.value - 1) * pageSize.value
@@ -60,7 +119,7 @@ async function reload(): Promise<void> {
   loading.value = true
   try {
     const resp = await listDataWarehouses()
-    rows.value = resp.items
+    rows.value = sortByType(resp.items)
   } finally {
     loading.value = false
   }
@@ -68,6 +127,17 @@ async function reload(): Promise<void> {
 
 function formatTime(value: string): string {
   return dayjs(value).format('MM-DD HH:mm')
+}
+
+async function saveCountry(row: DataWarehouse, value: string): Promise<void> {
+  if (!value) return
+  try {
+    await patchWarehouseCountry(row.id, value)
+    ElMessage.success(`${row.name} 已更新为 ${value}。`)
+  } catch {
+    ElMessage.error('更新失败。')
+    await reload()
+  }
 }
 
 onMounted(reload)

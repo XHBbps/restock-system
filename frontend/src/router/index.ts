@@ -111,12 +111,7 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/SkuConfigView.vue'),
         meta: { title: 'SKU 配置', section: 'SETTINGS' },
       },
-      {
-        path: 'settings/warehouse',
-        name: 'warehouse',
-        component: () => import('@/views/WarehouseView.vue'),
-        meta: { title: '仓库配置', section: 'SETTINGS' },
-      },
+      { path: 'settings/warehouse', redirect: '/data/warehouses' },
       {
         path: 'settings/zipcode',
         name: 'zipcode-rule',
