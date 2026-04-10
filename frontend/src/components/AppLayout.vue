@@ -50,21 +50,14 @@
               </template>
 
               <!-- COLLAPSED: icon with hover popover -->
-              <div v-else class="nav-popover-wrapper">
+              <div
+                v-else
+                class="nav-popover-wrapper"
+                @mouseenter="showPopover($event, child.label)"
+                @mouseleave="hidePopover"
+              >
                 <div class="nav-item nav-item-collapsed" :title="child.label">
                   <component :is="child.icon" class="nav-item-icon" :size="18" />
-                </div>
-                <div class="nav-popover">
-                  <div class="nav-popover-title">{{ child.label }}</div>
-                  <RouterLink
-                    v-for="item in child.items"
-                    :key="item.to"
-                    :to="item.to"
-                    class="nav-popover-item"
-                    active-class="nav-popover-item-active"
-                  >
-                    {{ item.label }}
-                  </RouterLink>
                 </div>
               </div>
             </template>
@@ -97,6 +90,35 @@
         </button>
       </div>
     </aside>
+
+    <!-- Fixed popover for collapsed sub-category hover -->
+    <Teleport to="body">
+      <div
+        v-if="popover.visible"
+        class="nav-popover"
+        :style="{ top: popover.top + 'px', left: popover.left + 'px' }"
+        @mouseenter="cancelHidePopover"
+        @mouseleave="hidePopover"
+      >
+        <div class="nav-popover-title">{{ popover.label }}</div>
+        <template v-for="group in navigationGroups" :key="group.title">
+          <template v-for="child in group.children" :key="'items' in child ? child.label : child.to">
+            <template v-if="isSubCategory(child) && child.label === popover.label">
+              <RouterLink
+                v-for="item in child.items"
+                :key="item.to"
+                :to="item.to"
+                class="nav-popover-item"
+                active-class="nav-popover-item-active"
+                @click="hidePopover"
+              >
+                {{ item.label }}
+              </RouterLink>
+            </template>
+          </template>
+        </template>
+      </div>
+    </Teleport>
 
     <main class="main">
       <header class="topbar">
@@ -134,7 +156,7 @@ import { isSubCategory, navigationGroups } from '@/config/navigation'
 import { useAuthStore } from '@/stores/auth'
 import { useSidebarStore } from '@/stores/sidebar'
 import { ChevronRight, LogOut, PanelLeftClose, PanelLeftOpen } from 'lucide-vue-next'
-import { computed, onMounted, watch } from 'vue'
+import { computed, onMounted, reactive, watch } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 
 const route = useRoute()
@@ -144,6 +166,28 @@ const sidebar = useSidebarStore()
 
 const currentTitle = computed(() => (route.meta.title as string) || '总览')
 const currentSection = computed(() => (route.meta.section as string) || '工作台')
+
+// Popover state for collapsed sub-category hover
+const popover = reactive({ visible: false, label: '', top: 0, left: 0 })
+let hideTimer: ReturnType<typeof setTimeout> | null = null
+
+function showPopover(event: MouseEvent, label: string) {
+  if (hideTimer) { clearTimeout(hideTimer); hideTimer = null }
+  const el = event.currentTarget as HTMLElement
+  const rect = el.getBoundingClientRect()
+  popover.top = rect.top
+  popover.left = rect.right + 6
+  popover.label = label
+  popover.visible = true
+}
+
+function hidePopover() {
+  hideTimer = setTimeout(() => { popover.visible = false }, 100)
+}
+
+function cancelHidePopover() {
+  if (hideTimer) { clearTimeout(hideTimer); hideTimer = null }
+}
 
 function autoExpandActiveCategory() {
   for (const group of navigationGroups) {
@@ -251,6 +295,7 @@ async function handleLogout(): Promise<void> {
   scrollbar-color: $color-border-default transparent;
 }
 
+
 .nav::-webkit-scrollbar {
   width: 8px;
 }
@@ -330,58 +375,8 @@ async function handleLogout(): Promise<void> {
 
 .nav-popover-wrapper {
   position: relative;
-
-  &:hover .nav-popover {
-    opacity: 1;
-    visibility: visible;
-    transform: translateX(0);
-  }
 }
 
-.nav-popover {
-  position: absolute;
-  left: calc(100% + 6px);
-  top: 0;
-  z-index: 100;
-  min-width: 160px;
-  padding: $space-2;
-  background: $color-bg-card;
-  border: 1px solid $color-border-default;
-  border-radius: $radius-lg;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
-  opacity: 0;
-  visibility: hidden;
-  transform: translateX(-4px);
-  transition: opacity 150ms ease, transform 150ms ease, visibility 150ms;
-}
-
-.nav-popover-title {
-  padding: $space-1 $space-3;
-  font-size: 11px;
-  font-weight: $font-weight-semibold;
-  color: $color-text-secondary;
-  text-transform: uppercase;
-  letter-spacing: $tracking-wider;
-}
-
-.nav-popover-item {
-  display: block;
-  padding: 8px $space-3;
-  border-radius: $radius-md;
-  color: $color-text-primary;
-  text-decoration: none;
-  font-size: $font-size-sm;
-  transition: $transition-fast;
-
-  &:hover {
-    background: $color-bg-subtle;
-  }
-}
-
-.nav-popover-item-active {
-  font-weight: $font-weight-semibold;
-  background: $color-bg-subtle;
-}
 
 .sidebar-collapsed .nav-item-icon {
   color: $color-text-primary;
@@ -578,5 +573,47 @@ async function handleLogout(): Promise<void> {
   .content {
     padding: $space-4;
   }
+}
+</style>
+
+<style lang="scss">
+/* Non-scoped: popover is teleported to body */
+.nav-popover {
+  position: fixed;
+  z-index: 2000;
+  min-width: 160px;
+  padding: $space-2;
+  background: $color-bg-card;
+  border: 1px solid $color-border-default;
+  border-radius: $radius-lg;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
+}
+
+.nav-popover-title {
+  padding: $space-1 $space-3;
+  font-size: 11px;
+  font-weight: $font-weight-semibold;
+  color: $color-text-secondary;
+  text-transform: uppercase;
+  letter-spacing: $tracking-wider;
+}
+
+.nav-popover-item {
+  display: block;
+  padding: 8px $space-3;
+  border-radius: $radius-md;
+  color: $color-text-primary;
+  text-decoration: none;
+  font-size: $font-size-sm;
+  transition: background 150ms ease;
+
+  &:hover {
+    background: $color-bg-subtle;
+  }
+}
+
+.nav-popover-item-active {
+  font-weight: $font-weight-semibold;
+  background: $color-bg-subtle;
 }
 </style>
