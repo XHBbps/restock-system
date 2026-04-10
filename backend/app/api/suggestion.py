@@ -43,7 +43,10 @@ SUGGESTION_STATUS_SORT_ORDER: dict[str, int] = {
 
 def _suggestion_status_sort_expr() -> ColumnElement[int]:
     return case(
-        *[(Suggestion.status == status, order) for status, order in SUGGESTION_STATUS_SORT_ORDER.items()],
+        *[
+            (Suggestion.status == status, order)
+            for status, order in SUGGESTION_STATUS_SORT_ORDER.items()
+        ],
         else_=len(SUGGESTION_STATUS_SORT_ORDER),
     )
 
@@ -82,7 +85,7 @@ async def list_suggestions(
     date_to: date_type | None = Query(default=None),
     sku: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=100),
+    page_size: int = Query(default=20, ge=1, le=5000),
     sort_by: str | None = Query(default=None),
     sort_order: str = Query(default="desc", pattern="^(asc|desc)$"),
     db: AsyncSession = Depends(db_session),
@@ -113,9 +116,7 @@ async def list_suggestions(
     base = _apply_suggestion_sort(base, sort_by, sort_order)
     count_stmt = base.with_only_columns(func.count()).order_by(None)
     total = (await db.execute(count_stmt)).scalar_one()
-    rows = (
-        (await db.execute(base.offset((page - 1) * page_size).limit(page_size))).scalars().all()
-    )
+    rows = (await db.execute(base.offset((page - 1) * page_size).limit(page_size))).scalars().all()
     return SuggestionListOut(
         items=[SuggestionOut.model_validate(r) for r in rows],
         total=int(total or 0),
@@ -195,14 +196,13 @@ async def patch_item(
                 if v < 0:
                     raise ValidationFailed("warehouse_breakdown 包含负数")
 
-    # H4:total_qty 与 country_breakdown 一致性(使用生效值)
-    effective_total = patch.total_qty if patch.total_qty is not None else item.total_qty
-    effective_breakdown = patch.country_breakdown if patch.country_breakdown is not None else item.country_breakdown
-    if effective_breakdown is not None and effective_total is not None:
-        if sum(effective_breakdown.values()) != effective_total:
-            raise ValidationFailed(
-                "country_breakdown 之和与 total_qty 不一致"
-            )
+    # H4:total_qty 与 country_breakdown 一致性(仅当两者同时提交时校验)
+    if (
+        patch.total_qty is not None
+        and patch.country_breakdown is not None
+        and sum(patch.country_breakdown.values()) != patch.total_qty
+    ):
+        raise ValidationFailed("country_breakdown 之和与 total_qty 不一致")
 
     updates: dict[str, Any] = {}
     if patch.total_qty is not None:
@@ -219,7 +219,9 @@ async def patch_item(
         updates["t_ship"] = patch.t_ship
 
     effective_country_breakdown = (
-        patch.country_breakdown if patch.country_breakdown is not None else (item.country_breakdown or {})
+        patch.country_breakdown
+        if patch.country_breakdown is not None
+        else (item.country_breakdown or {})
     )
     effective_t_purchase = (
         patch.t_purchase if patch.t_purchase is not None else (item.t_purchase or {})
@@ -228,18 +230,18 @@ async def patch_item(
 
     missing_purchase = missing_timing_countries(effective_country_breakdown, effective_t_purchase)
     if missing_purchase:
-        raise ValidationFailed(
-            f"以下采购国家缺少 t_purchase: {', '.join(missing_purchase)}"
-        )
+        raise ValidationFailed(f"以下采购国家缺少 t_purchase: {', '.join(missing_purchase)}")
 
     missing_ship = missing_timing_countries(effective_country_breakdown, effective_t_ship)
     if missing_ship:
-        raise ValidationFailed(
-            f"以下采购国家缺少 t_ship: {', '.join(missing_ship)}"
-        )
+        raise ValidationFailed(f"以下采购国家缺少 t_ship: {', '.join(missing_ship)}")
 
     # H3:重新计算 urgent(与 engine/step6_timing 共享同一规则)
-    if patch.t_purchase is not None or patch.total_qty is not None or patch.country_breakdown is not None:
+    if (
+        patch.t_purchase is not None
+        or patch.total_qty is not None
+        or patch.country_breakdown is not None
+    ):
         try:
             updates["urgent"] = has_urgent_purchase(
                 effective_t_purchase,

@@ -1,5 +1,6 @@
 """APScheduler 配置：定时入队任务，不直接执行具体业务。"""
 
+import contextlib
 from dataclasses import dataclass
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -125,21 +126,15 @@ def _register_jobs(
             replace_existing=True,
         )
     else:
-        try:
+        with contextlib.suppress(Exception):
             scheduler.remove_job("trigger_calc_engine")
-        except Exception:
-            pass
 
 
 async def setup_scheduler(force_reload: bool = False) -> AsyncIOScheduler:
     global _scheduler, _scheduler_signature
     config = await _load_scheduler_config()
     signature = (config.sync_interval_minutes, config.calc_cron, config.calc_enabled)
-    if (
-        _scheduler is not None
-        and not force_reload
-        and _scheduler_signature == signature
-    ):
+    if _scheduler is not None and not force_reload and _scheduler_signature == signature:
         return _scheduler
 
     if _scheduler is not None:
@@ -157,10 +152,6 @@ async def setup_scheduler(force_reload: bool = False) -> AsyncIOScheduler:
     return scheduler
 
 
-async def get_scheduler() -> AsyncIOScheduler:
-    return await setup_scheduler()
-
-
 async def scheduler_status() -> SchedulerStatusOut:
     scheduler = await setup_scheduler()
     config = await _load_scheduler_config()
@@ -170,7 +161,9 @@ async def scheduler_status() -> SchedulerStatusOut:
         jobs.append(
             SchedulerJobOut(
                 job_name=job_name,
-                next_run_time=getattr(job, 'next_run_time', None).isoformat() if getattr(job, 'next_run_time', None) else None,
+                next_run_time=getattr(job, "next_run_time", None).isoformat()
+                if getattr(job, "next_run_time", None)
+                else None,
             )
         )
 
@@ -191,16 +184,6 @@ async def reload_scheduler() -> SchedulerStatusOut:
         scheduler.start()
         logger.info("scheduler_started", jobs=len(scheduler.get_jobs()))
     return await scheduler_status()
-
-
-async def start_scheduler() -> None:
-    config = await _load_scheduler_config()
-    if not config.enabled:
-        return
-    scheduler = await setup_scheduler()
-    if not scheduler.running:
-        scheduler.start()
-        logger.info("scheduler_started", jobs=len(scheduler.get_jobs()))
 
 
 def shutdown_scheduler(*, clear: bool = False) -> None:
