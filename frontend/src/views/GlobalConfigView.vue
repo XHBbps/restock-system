@@ -44,10 +44,10 @@
 
     <el-card shadow="never">
       <template #header>
-        <span class="card-title">引擎调度</span>
+        <span class="card-title">补货计算</span>
       </template>
       <el-form :model="form" label-width="180px" style="max-width: 560px">
-        <el-form-item label="规则引擎 cron">
+        <el-form-item label="自动计算时间">
           <div class="cron-inline">
             <el-select v-model="selectedCronPreset" class="cron-select" @change="onCronPresetChange">
               <el-option
@@ -61,7 +61,7 @@
               v-if="selectedCronPreset === '__custom__'"
               v-model="customCron"
               class="cron-input"
-              placeholder="分 时 日 月 周 (如: 0 8 * * *)"
+              placeholder="如: 30 6 1,15 (分 时 日 月 周)"
               @input="onCustomCronInput"
             />
           </div>
