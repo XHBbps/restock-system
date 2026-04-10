@@ -1,59 +1,71 @@
 <template>
-  <el-card v-if="form" shadow="never">
-    <template #header>
-      <span class="card-title">全局参数</span>
-    </template>
+  <div v-if="form" class="global-config-view">
+    <el-card shadow="never">
+      <template #header>
+        <span class="card-title">补货参数</span>
+      </template>
+      <el-form :model="form" label-width="180px" style="max-width: 560px">
+        <el-form-item label="国内中心仓周转天数">
+          <el-input-number v-model="form.buffer_days" :min="1" :max="365" />
+        </el-form-item>
+        <el-form-item label="海外仓目标库存天数">
+          <el-input-number v-model="form.target_days" :min="1" :max="365" />
+        </el-form-item>
+        <el-form-item label="默认采购提前期(天)">
+          <el-input-number v-model="form.lead_time_days" :min="0" :max="365" />
+        </el-form-item>
+        <el-form-item label="默认采购主仓 ID">
+          <el-input v-model="form.default_purchase_warehouse_id" placeholder="外部仓库 ID" />
+        </el-form-item>
+      </el-form>
+    </el-card>
 
-    <el-form :model="form" label-width="200px" style="max-width: 640px">
-      <el-form-item label="国内中心仓周转天数">
-        <el-input-number v-model="form.buffer_days" :min="1" :max="365" />
-      </el-form-item>
-      <el-form-item label="海外仓目标库存天数">
-        <el-input-number v-model="form.target_days" :min="1" :max="365" />
-      </el-form-item>
-      <el-form-item label="默认采购提前期(天)">
-        <el-input-number v-model="form.lead_time_days" :min="0" :max="365" />
-      </el-form-item>
-      <el-form-item label="同步间隔(分钟)">
-        <el-input-number v-model="form.sync_interval_minutes" :min="5" :max="1440" />
-      </el-form-item>
-      <el-form-item label="规则引擎 cron">
-        <el-select v-model="selectedCronPreset" style="width: 200px" @change="onCronPresetChange">
-          <el-option
-            v-for="preset in cronPresets"
-            :key="preset.value"
-            :label="preset.label"
-            :value="preset.value"
+    <el-card shadow="never">
+      <template #header>
+        <span class="card-title">同步设置</span>
+      </template>
+      <el-form :model="form" label-width="180px" style="max-width: 560px">
+        <el-form-item label="同步间隔(分钟)">
+          <el-input-number v-model="form.sync_interval_minutes" :min="5" :max="1440" />
+        </el-form-item>
+        <el-form-item label="店铺同步模式">
+          <el-radio-group v-model="form.shop_sync_mode">
+            <el-radio-button value="all">全量</el-radio-button>
+            <el-radio-button value="specific">指定店铺</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+      </el-form>
+    </el-card>
+
+    <el-card shadow="never">
+      <template #header>
+        <span class="card-title">引擎调度</span>
+      </template>
+      <el-form :model="form" label-width="180px" style="max-width: 560px">
+        <el-form-item label="规则引擎 cron">
+          <el-select v-model="selectedCronPreset" style="width: 200px" @change="onCronPresetChange">
+            <el-option
+              v-for="preset in cronPresets"
+              :key="preset.value"
+              :label="preset.label"
+              :value="preset.value"
+            />
+          </el-select>
+          <el-input
+            v-if="selectedCronPreset === '__custom__'"
+            v-model="customCron"
+            placeholder="0 8 * * *"
+            style="width: 200px; margin-left: 12px"
+            @input="onCustomCronInput"
           />
-        </el-select>
-        <el-input
-          v-if="selectedCronPreset === '__custom__'"
-          v-model="customCron"
-          placeholder="0 8 * * *"
-          style="width: 200px; margin-left: 12px"
-          @input="onCustomCronInput"
-        />
-      </el-form-item>
-      <el-form-item label="默认采购主仓 ID">
-        <el-input v-model="form.default_purchase_warehouse_id" placeholder="外部仓库 ID" />
-      </el-form-item>
-      <el-form-item label="是否含税">
-        <el-radio-group v-model="form.include_tax">
-          <el-radio-button value="0">不含税</el-radio-button>
-          <el-radio-button value="1">含税</el-radio-button>
-        </el-radio-group>
-      </el-form-item>
-      <el-form-item label="店铺同步模式">
-        <el-radio-group v-model="form.shop_sync_mode">
-          <el-radio-button value="all">全量</el-radio-button>
-          <el-radio-button value="specific">指定店铺</el-radio-button>
-        </el-radio-group>
-      </el-form-item>
-      <el-form-item>
-        <el-button type="primary" :loading="saving" @click="save">保存</el-button>
-      </el-form-item>
-    </el-form>
-  </el-card>
+        </el-form-item>
+      </el-form>
+    </el-card>
+
+    <div class="save-bar">
+      <el-button type="primary" :loading="saving" @click="save">保存</el-button>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -124,8 +136,19 @@ async function save(): Promise<void> {
 </script>
 
 <style lang="scss" scoped>
+.global-config-view {
+  display: flex;
+  flex-direction: column;
+  gap: $space-5;
+}
+
 .card-title {
-  font-size: $font-size-lg;
+  font-size: $font-size-base;
   font-weight: $font-weight-semibold;
+}
+
+.save-bar {
+  display: flex;
+  justify-content: flex-end;
 }
 </style>
