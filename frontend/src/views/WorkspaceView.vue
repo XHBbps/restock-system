@@ -244,6 +244,13 @@ onMounted(load)
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: $space-3;
+  min-width: 0;
+
+  :deep(.sku-card) {
+    flex: 1;
+    min-width: 0;
+  }
 }
 
 .urgent-qty {
