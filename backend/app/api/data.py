@@ -1,25 +1,27 @@
 """外部数据源观测 API。
 
-READ-ONLY。所有端点从本地同步落库的表查询，返回与赛狐接口
-基本一致的 camelCase 结构，供采购员排查"同步进来的数据是否正确"。
+READ-ONLY。所有端点从本地同步落库的表查询,返回与赛狐接口
+基本一致的 camelCase 结构,供采购员排查"同步进来的数据是否正确"。
 
-覆盖的 7 个资源：
-- 订单列表 + 订单详情（order_header / order_item / order_detail）
-- 库存明细（inventory_snapshot_latest JOIN warehouse）
-- 其他出库（in_transit_record + in_transit_item）
-- 仓库列表（warehouse）
-- 店铺列表（shop）
-- 在线产品信息（product_listing）
+覆盖的 7 个资源:
+- 订单列表 + 订单详情(order_header / order_item / order_detail)
+- 库存明细(inventory_snapshot_latest JOIN warehouse)
+- 其他出库(in_transit_record + in_transit_item)
+- 仓库列表(warehouse)
+- 店铺列表(shop)
+- 在线产品信息(product_listing)
 """
 
 from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Path, Query
-from sqlalchemy import and_, func, or_, select, tuple_
+from sqlalchemy import func, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.api.deps import db_session, get_current_session
 from app.core.exceptions import NotFound
+from app.core.query import escape_like
 from app.core.timezone import BEIJING
 from app.models.in_transit import InTransitItem, InTransitRecord
 from app.models.inventory import InventorySnapshotLatest
@@ -47,6 +49,37 @@ from app.schemas.data import (
 )
 
 router = APIRouter(prefix="/api/data", tags=["data"])
+
+
+def _disabled_order_detail_fields(detail: OrderDetail | None) -> dict[str, object | None]:
+    return {
+        "postal_code": detail.postal_code if detail else None,
+        "state_or_region": None,
+        "city": None,
+        "detail_address": None,
+        "receiver_name": None,
+        "detail_fetched_at": detail.fetched_at if detail else None,
+    }
+
+
+def _has_visible_order_detail(detail: OrderDetail | None) -> bool:
+    if detail is None:
+        return False
+    return any(
+        bool(value and str(value).strip())
+        for value in (
+            detail.postal_code,
+            detail.state_or_region,
+            detail.city,
+            detail.detail_address,
+            detail.receiver_name,
+        )
+    )
+
+
+def _product_listing_active_predicate(only_active: bool) -> ColumnElement[bool]:
+    normalized = func.lower(ProductListing.online_status)
+    return normalized == "active" if only_active else normalized != "active"
 
 
 # ============================================================
@@ -83,11 +116,11 @@ async def list_orders(
         # 在 amazon_order_id 或通过 order_item JOIN 匹配 commodity_sku
         subq = (
             select(OrderItem.order_id)
-            .where(OrderItem.commodity_sku.ilike(f"%{sku}%"))
+            .where(OrderItem.commodity_sku.ilike(f"%{escape_like(sku)}%", escape="\\"))
             .subquery()
         )
         base = base.where(
-            (OrderHeader.amazon_order_id.ilike(f"%{sku}%")) | (OrderHeader.id.in_(select(subq.c.order_id)))
+            (OrderHeader.amazon_order_id.ilike(f"%{escape_like(sku)}%", escape="\\")) | (OrderHeader.id.in_(select(subq.c.order_id)))
         )
 
     total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
@@ -111,16 +144,20 @@ async def list_orders(
     detail_set: set[tuple[str, str]] = set()
     if rows:
         keys = [(r.shop_id, r.amazon_order_id) for r in rows]
-        # ★ 必须用复合键过滤。只按 shop_id IN(...) 会拉回该 shop 的全部历史 detail，
-        # 在数据量大时造成内存爆炸（review H-N1）。
+        # * 必须用复合键过滤。只按 shop_id IN(...) 会拉回该 shop 的全部历史 detail,
+        # 在数据量大时造成内存爆炸(review H-N1)。
         det_rows = (
             await db.execute(
-                select(OrderDetail.shop_id, OrderDetail.amazon_order_id).where(
+                select(OrderDetail).where(
                     tuple_(OrderDetail.shop_id, OrderDetail.amazon_order_id).in_(keys)
                 )
             )
-        ).all()
-        detail_set = {(s, a) for s, a in det_rows}
+        ).scalars().all()
+        detail_set = {
+            (detail.shop_id, detail.amazon_order_id)
+            for detail in det_rows
+            if _has_visible_order_detail(detail)
+        }
 
     items = [
         DataOrderSummary.model_validate(
@@ -172,7 +209,7 @@ async def get_order_detail(
         )
     ).scalar_one_or_none()
 
-    # 用 from_attributes 把 ORM header 直接映射到 DTO，detail 字段手动补
+    # 用 from_attributes 把 ORM header 直接映射到 DTO,detail 字段手动补
     return DataOrderDetail.model_validate(
         {
             **{
@@ -185,12 +222,7 @@ async def get_order_detail(
                 )
             },
             "items": [DataOrderItem.model_validate(it) for it in item_rows],
-            "postal_code": detail.postal_code if detail else None,
-            "state_or_region": detail.state_or_region if detail else None,
-            "city": detail.city if detail else None,
-            "detail_address": detail.detail_address if detail else None,
-            "receiver_name": detail.receiver_name if detail else None,
-            "detail_fetched_at": detail.fetched_at if detail else None,
+            **_disabled_order_detail_fields(detail),
         }
     )
 
@@ -223,7 +255,7 @@ async def list_inventory(
     if warehouse_id:
         base = base.where(InventorySnapshotLatest.warehouse_id == warehouse_id)
     if sku:
-        base = base.where(InventorySnapshotLatest.commodity_sku.ilike(f"%{sku}%"))
+        base = base.where(InventorySnapshotLatest.commodity_sku.ilike(f"%{escape_like(sku)}%", escape="\\"))
     if only_nonzero:
         base = base.where(
             (InventorySnapshotLatest.available > 0) | (InventorySnapshotLatest.reserved > 0)
@@ -271,7 +303,7 @@ async def list_inventory(
 
 
 # ============================================================
-# 3. 其他出库列表（在途数据）
+# 3. 其他出库列表(在途数据)
 # ============================================================
 @router.get("/out-records", response_model=DataOutRecordListOut)
 async def list_out_records(
@@ -291,7 +323,7 @@ async def list_out_records(
     if sku:
         sub = (
             select(InTransitItem.saihu_out_record_id)
-            .where(InTransitItem.commodity_sku.ilike(f"%{sku}%"))
+            .where(InTransitItem.commodity_sku.ilike(f"%{escape_like(sku)}%", escape="\\"))
             .subquery()
         )
         base = base.where(InTransitRecord.saihu_out_record_id.in_(select(sub.c.saihu_out_record_id)))
@@ -326,7 +358,7 @@ async def list_out_records(
                 select(Warehouse.id, Warehouse.name).where(Warehouse.id.in_(wh_ids))
             )
         ).all()
-        wh_name_map = {wid: name for wid, name in wh_rows}
+        wh_name_map = dict(wh_rows)
 
     items: list[DataOutRecord] = []
     for r in rows:
@@ -337,7 +369,7 @@ async def list_out_records(
                     "saihu_out_record_id": r.saihu_out_record_id,
                     "out_warehouse_no": r.out_warehouse_no,
                     "target_warehouse_id": r.target_warehouse_id,
-                    "target_warehouse_name": wh_name_map.get(r.target_warehouse_id or "", None),
+                    "target_warehouse_name": wh_name_map.get(r.target_warehouse_id or ""),
                     "target_country": r.target_country,
                     "remark": r.remark,
                     "status": r.status,
@@ -416,15 +448,13 @@ async def list_product_listings_data(
         base = base.where(ProductListing.marketplace_id == marketplace_id.upper())
     if sku:
         base = base.where(
-            (ProductListing.commodity_sku.ilike(f"%{sku}%"))
-            | (ProductListing.seller_sku.ilike(f"%{sku}%"))
+            (ProductListing.commodity_sku.ilike(f"%{escape_like(sku)}%", escape="\\"))
+            | (ProductListing.seller_sku.ilike(f"%{escape_like(sku)}%", escape="\\"))
         )
     if only_matched is not None:
         base = base.where(ProductListing.is_matched.is_(only_matched))
     if only_active is not None:
-        base = base.where(
-            ProductListing.online_status == ("active" if only_active else "inactive")
-        )
+        base = base.where(_product_listing_active_predicate(only_active))
 
     total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
     rows = (
@@ -437,7 +467,7 @@ async def list_product_listings_data(
 
 
 # ============================================================
-# 7. sync_state 汇总（同步管理页用）
+# 7. sync_state 汇总(同步管理页用)
 # ============================================================
 @router.get("/sync-state", response_model=list[DataSyncStateRow])
 async def list_sync_state(

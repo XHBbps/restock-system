@@ -1,4 +1,4 @@
-"""建议单 REST API（对应 contracts/suggestion.yaml）。"""
+"""建议单 REST API(对应 contracts/suggestion.yaml)。"""
 
 from datetime import date as date_type
 from datetime import datetime, timedelta
@@ -10,7 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import db_session, get_current_session
 from app.core.exceptions import ConflictError, NotFound, PushBlockedError, ValidationFailed
+from app.core.query import escape_like
 from app.core.timezone import BEIJING, now_beijing
+from app.engine.step6_timing import (
+    has_urgent_purchase,
+    missing_timing_countries,
+    positive_qty_countries,
+)
 from app.models.product_listing import ProductListing
 from app.models.suggestion import Suggestion, SuggestionItem
 from app.schemas.suggestion import (
@@ -54,7 +60,7 @@ async def list_suggestions(
         # 用 EXISTS 子查询匹配 sku
         subq = (
             select(SuggestionItem.suggestion_id)
-            .where(SuggestionItem.commodity_sku.ilike(f"%{sku}%"))
+            .where(SuggestionItem.commodity_sku.ilike(f"%{escape_like(sku)}%", escape="\\"))
             .subquery()
         )
         base = base.where(Suggestion.id.in_(select(subq.c.suggestion_id)))
@@ -143,12 +149,15 @@ async def patch_item(
                 if v < 0:
                     raise ValidationFailed("warehouse_breakdown 包含负数")
 
-    # H4：total_qty 与 country_breakdown 一致性
-    if patch.total_qty is not None and patch.country_breakdown is not None:
-        if sum(patch.country_breakdown.values()) != patch.total_qty:
-            raise ValidationFailed(
-                "country_breakdown 之和与 total_qty 不一致"
-            )
+    # H4:total_qty 与 country_breakdown 一致性
+    if (
+        patch.total_qty is not None
+        and patch.country_breakdown is not None
+        and sum(patch.country_breakdown.values()) != patch.total_qty
+    ):
+        raise ValidationFailed(
+            "country_breakdown 之和与 total_qty 不一致"
+        )
 
     updates: dict[str, Any] = {}
     if patch.total_qty is not None:
@@ -157,29 +166,43 @@ async def patch_item(
         updates["country_breakdown"] = patch.country_breakdown
     if patch.warehouse_breakdown is not None:
         updates["warehouse_breakdown"] = patch.warehouse_breakdown
+    if patch.country_breakdown is not None or patch.warehouse_breakdown is not None:
+        updates["allocation_snapshot"] = None
     if patch.t_purchase is not None:
         updates["t_purchase"] = patch.t_purchase
     if patch.t_ship is not None:
         updates["t_ship"] = patch.t_ship
 
-    # H3：重新计算 urgent（与 engine/step6_timing 同规则：任一国 T_采购 <= today）
-    if patch.t_purchase is not None or patch.total_qty is not None:
-        effective_t_purchase = (
-            patch.t_purchase if patch.t_purchase is not None else (item.t_purchase or {})
+    effective_country_breakdown = (
+        patch.country_breakdown if patch.country_breakdown is not None else (item.country_breakdown or {})
+    )
+    effective_t_purchase = (
+        patch.t_purchase if patch.t_purchase is not None else (item.t_purchase or {})
+    )
+    effective_t_ship = patch.t_ship if patch.t_ship is not None else (item.t_ship or {})
+
+    missing_purchase = missing_timing_countries(effective_country_breakdown, effective_t_purchase)
+    if missing_purchase:
+        raise ValidationFailed(
+            f"以下采购国家缺少 t_purchase: {', '.join(missing_purchase)}"
         )
-        today = now_beijing().date()
-        urgent = False
-        for _c, d_str in effective_t_purchase.items():
-            try:
-                d = date_type.fromisoformat(d_str) if isinstance(d_str, str) else d_str
-            except (ValueError, TypeError) as exc:
-                raise ValidationFailed(
-                    f"t_purchase 包含无效日期: {_c}={d_str}"
-                ) from exc
-            if d is not None and d <= today:
-                urgent = True
-                break
-        updates["urgent"] = urgent
+
+    missing_ship = missing_timing_countries(effective_country_breakdown, effective_t_ship)
+    if missing_ship:
+        raise ValidationFailed(
+            f"以下采购国家缺少 t_ship: {', '.join(missing_ship)}"
+        )
+
+    # H3:重新计算 urgent(与 engine/step6_timing 共享同一规则)
+    if patch.t_purchase is not None or patch.total_qty is not None or patch.country_breakdown is not None:
+        try:
+            updates["urgent"] = has_urgent_purchase(
+                effective_t_purchase,
+                today=now_beijing().date(),
+                countries=positive_qty_countries(effective_country_breakdown),
+            )
+        except (ValueError, TypeError) as exc:
+            raise ValidationFailed(f"t_purchase 包含无效日期: {exc}") from exc
 
     if updates:
         await db.execute(
@@ -221,7 +244,7 @@ async def push_items(
     blocked = [it.id for it in items if it.push_blocker]
     if blocked:
         raise PushBlockedError(
-            f"以下条目带有 push_blocker，无法推送: {blocked}",
+            f"以下条目带有 push_blocker,无法推送: {blocked}",
             detail={"blocked_item_ids": blocked},
         )
 
@@ -261,8 +284,8 @@ async def archive_suggestion(
 async def _build_detail(db: AsyncSession, sug: Suggestion) -> SuggestionDetailOut:
     """加载建议单详情。
 
-    一次性批量 JOIN `product_listing` 拉取 commodity_name / main_image，
-    避免按条目逐个查询（N+1）。同时不使用进程级缓存——确保同步后
+    一次性批量 JOIN `product_listing` 拉取 commodity_name / main_image,
+    避免按条目逐个查询(N+1)。同时不使用进程级缓存--确保同步后
     的 listing 更新能立即在 UI 反映。
     """
     items = (
@@ -291,7 +314,7 @@ async def _build_detail(db: AsyncSession, sug: Suggestion) -> SuggestionDetailOu
             )
         ).all()
         for sku, name, image in rows:
-            # 同一 sku 可能有多条 listing（不同店铺/站点），取第一个命中
+            # 同一 sku 可能有多条 listing(不同店铺/站点),取第一个命中
             if sku not in name_map:
                 name_map[sku] = (name, image)
 
@@ -312,7 +335,7 @@ async def _build_detail(db: AsyncSession, sug: Suggestion) -> SuggestionDetailOu
 
 
 async def _enrich_item(db: AsyncSession, item: SuggestionItem) -> SuggestionItemOut:
-    """单条目 enrich（用于 PATCH 返回值）。"""
+    """单条目 enrich(用于 PATCH 返回值)。"""
     row = (
         await db.execute(
             select(ProductListing.commodity_name, ProductListing.main_image)

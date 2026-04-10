@@ -1,11 +1,13 @@
-"""配置管理 API（covers global / sku / warehouse / zipcode / shop）。"""
+"""配置管理 API(covers global / sku / warehouse / zipcode / shop)。"""
 
 from fastapi import APIRouter, Depends, Path, Query
 from sqlalchemy import delete, func, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import db_session, get_current_session
 from app.core.exceptions import ConflictError, NotFound
+from app.core.query import escape_like
 from app.models.global_config import GlobalConfig
 from app.models.product_listing import ProductListing
 from app.models.shop import Shop
@@ -26,8 +28,47 @@ from app.schemas.config import (
     ZipcodeRuleOut,
 )
 from app.tasks.queue import enqueue_task
+from app.tasks.scheduler import reload_scheduler
 
 router = APIRouter(prefix="/api/config", tags=["config"])
+
+
+async def init_sku_configs_from_listings(db: AsyncSession) -> int:
+    sku_codes = (
+        (
+            await db.execute(
+                select(ProductListing.commodity_sku)
+                .distinct()
+                .where(ProductListing.commodity_sku.is_not(None))
+                .order_by(ProductListing.commodity_sku)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not sku_codes:
+        return 0
+
+    existing_codes = set(
+        (
+            await db.execute(
+                select(SkuConfig.commodity_sku).where(SkuConfig.commodity_sku.in_(sku_codes))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    missing_codes = [code for code in sku_codes if code not in existing_codes]
+    if not missing_codes:
+        return 0
+
+    await db.execute(
+        pg_insert(SkuConfig).values(
+            [{"commodity_sku": code, "enabled": True} for code in missing_codes]
+        )
+    )
+    await db.commit()
+    return len(missing_codes)
 
 
 # ============================================================
@@ -51,6 +92,9 @@ async def patch_global(
     updates = patch.model_dump(exclude_none=True)
     if updates:
         await db.execute(update(GlobalConfig).where(GlobalConfig.id == 1).values(**updates))
+        await db.commit()
+        if {"sync_interval_minutes", "calc_cron", "scheduler_enabled"} & updates.keys():
+            await reload_scheduler()
     row = (await db.execute(select(GlobalConfig).where(GlobalConfig.id == 1))).scalar_one()
     return GlobalConfigOut.model_validate(row)
 
@@ -71,7 +115,7 @@ async def list_sku_configs(
     if enabled is not None:
         base = base.where(SkuConfig.enabled.is_(enabled))
     if keyword:
-        base = base.where(SkuConfig.commodity_sku.ilike(f"%{keyword}%"))
+        base = base.where(SkuConfig.commodity_sku.ilike(f"%{escape_like(keyword)}%", escape="\\"))
 
     total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
     rows = (
@@ -108,6 +152,18 @@ async def list_sku_configs(
             )
         )
     return SkuConfigListOut(items=items, total=int(total or 0))
+
+
+@router.post("/sku/init")
+async def init_sku_configs(
+    db: AsyncSession = Depends(db_session),
+    _: dict = Depends(get_current_session),
+) -> dict[str, int]:
+    created = await init_sku_configs_from_listings(db)
+    total = (
+        await db.execute(select(func.count()).select_from(SkuConfig))
+    ).scalar_one()
+    return {"created": created, "total": int(total or 0)}
 
 
 @router.patch("/sku/{commodity_sku}", response_model=SkuConfigOut)
