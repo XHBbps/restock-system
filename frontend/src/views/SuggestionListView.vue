@@ -181,11 +181,15 @@ async function handlePush(): Promise<void> {
     ElMessage.error('单次最多推送 50 条。')
     return
   }
-  await ElMessageBox.confirm(
-    `确认推送 ${selected.value.length} 条建议生成采购单吗？`,
-    '确认推送',
-    { type: 'warning' },
-  )
+  try {
+    await ElMessageBox.confirm(
+      `确认推送 ${selected.value.length} 条建议生成采购单吗？`,
+      '确认推送',
+      { type: 'warning' },
+    )
+  } catch {
+    return
+  }
   pushing.value = true
   try {
     const resp = await pushItems(

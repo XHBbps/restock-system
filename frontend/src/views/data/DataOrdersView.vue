@@ -44,48 +44,48 @@
       </div>
     </template>
 
-    <el-table v-loading="loading" :data="rows">
-      <el-table-column label="订单号" prop="amazonOrderId" width="220" sortable show-overflow-tooltip>
+    <el-table v-loading="loading" :data="rows" table-layout="auto">
+      <el-table-column label="订单号" prop="amazonOrderId" min-width="240" sortable>
         <template #default="{ row }">
-          <span class="mono">{{ row.amazonOrderId }}</span>
+          <span class="mono nowrap">{{ row.amazonOrderId }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="店铺" prop="shopId" width="100" sortable show-overflow-tooltip>
+      <el-table-column label="店铺" prop="shopId" width="96" sortable>
         <template #default="{ row }">
-          <span class="mono muted">{{ row.shopId }}</span>
+          <span class="mono muted nowrap">{{ row.shopId }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="国家" width="80" align="center" sortable show-overflow-tooltip>
+      <el-table-column label="国家" width="72" align="center" sortable>
         <template #default="{ row }">
           <el-tag size="small">{{ row.countryCode }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="状态" width="140" sortable show-overflow-tooltip>
+      <el-table-column label="状态" width="128" sortable>
         <template #default="{ row }">
           <el-tag :type="statusType(row.orderStatus)" size="small">{{ row.orderStatus }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="金额" width="120" align="right" sortable show-overflow-tooltip>
+      <el-table-column label="金额" min-width="136" align="right" sortable>
         <template #default="{ row }">
-          <span v-if="row.orderTotalAmount">{{ row.orderTotalAmount }} {{ row.orderTotalCurrency }}</span>
+          <span v-if="row.orderTotalAmount" class="mono nowrap">{{ row.orderTotalAmount }} {{ row.orderTotalCurrency }}</span>
           <span v-else class="muted">-</span>
         </template>
       </el-table-column>
       <el-table-column label="明细数" width="80" align="right" sortable show-overflow-tooltip>
         <template #default="{ row }">{{ row.itemCount }}</template>
       </el-table-column>
-      <el-table-column label="详情状态" width="100" align="center" sortable show-overflow-tooltip>
+      <el-table-column label="详情状态" width="120" align="center" sortable>
         <template #default="{ row }">
           <el-tag v-if="row.hasDetail" type="success" size="small">已拉取</el-tag>
-          <el-tag v-else type="info" size="small">未拉取</el-tag>
+          <el-tag v-else type="info" size="small">无详情</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="下单时间" width="160" sortable show-overflow-tooltip>
+      <el-table-column label="下单时间" min-width="168" sortable>
         <template #default="{ row }">
-          <span class="muted mono">{{ formatTime(row.purchaseDate) }}</span>
+          <span class="muted mono nowrap">{{ formatTime(row.purchaseDate) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="100" align="center" show-overflow-tooltip>
+      <el-table-column label="操作" width="84" align="center">
         <template #default="{ row }">
           <el-button link type="primary" @click="openDetail(row)">详情</el-button>
         </template>
@@ -101,50 +101,56 @@
       @size-change="reload"
     />
 
-    <el-dialog v-model="dialogVisible" :title="detail ? `订单 ${detail.amazonOrderId}` : '加载中...'" width="800px">
+    <el-dialog v-model="dialogVisible" :title="detail ? `订单详情｜${detail.amazonOrderId}` : '加载中...'" width="800px">
       <div v-if="detail" class="detail-body">
         <div class="detail-section">
           <div class="section-title">基本信息</div>
           <div class="kv-grid">
-            <div><span class="label">shopId</span><span class="mono">{{ detail.shopId }}</span></div>
-            <div><span class="label">marketplaceId</span><span class="mono">{{ detail.marketplaceId }}</span></div>
-            <div><span class="label">countryCode</span><span class="mono">{{ detail.countryCode }}</span></div>
-            <div><span class="label">orderStatus</span><span class="mono">{{ detail.orderStatus }}</span></div>
-            <div><span class="label">fulfillmentChannel</span><span class="mono">{{ detail.fulfillmentChannel || '-' }}</span></div>
-            <div><span class="label">refundStatus</span><span class="mono">{{ detail.refundStatus || '-' }}</span></div>
-            <div><span class="label">purchaseDate</span><span class="mono">{{ formatTime(detail.purchaseDate) }}</span></div>
-            <div><span class="label">lastUpdateDate</span><span class="mono">{{ formatTime(detail.lastUpdateDate) }}</span></div>
-            <div><span class="label">总金额</span><span class="mono">{{ detail.orderTotalAmount }} {{ detail.orderTotalCurrency }}</span></div>
+            <div><span class="label">店铺 ID（shopId）</span><span class="mono">{{ detail.shopId }}</span></div>
+            <div><span class="label">站点 ID（marketplaceId）</span><span class="mono">{{ detail.marketplaceId }}</span></div>
+            <div><span class="label">国家代码（countryCode）</span><span class="mono">{{ detail.countryCode }}</span></div>
+            <div><span class="label">订单状态（orderStatus）</span><span class="mono">{{ detail.orderStatus }}</span></div>
+            <div><span class="label">履约渠道（fulfillmentChannel）</span><span class="mono">{{ detail.fulfillmentChannel || '-' }}</span></div>
+            <div><span class="label">退款状态（refundStatus）</span><span class="mono">{{ detail.refundStatus || '-' }}</span></div>
+            <div><span class="label">下单时间（purchaseDate）</span><span class="mono">{{ formatTime(detail.purchaseDate) }}</span></div>
+            <div><span class="label">最后更新时间（lastUpdateDate）</span><span class="mono">{{ formatTime(detail.lastUpdateDate) }}</span></div>
+            <div><span class="label">订单金额</span><span class="mono">{{ detail.orderTotalAmount }} {{ detail.orderTotalCurrency }}</span></div>
           </div>
         </div>
 
         <div class="detail-section">
           <div class="section-title">订单明细（{{ detail.items.length }}）</div>
           <el-table :data="detail.items" size="small">
-            <el-table-column label="orderItemId" prop="orderItemId" width="160" show-overflow-tooltip>
+            <el-table-column label="明细 ID（orderItemId）" prop="orderItemId" width="160" show-overflow-tooltip>
               <template #default="{ row }"><span class="mono">{{ row.orderItemId }}</span></template>
             </el-table-column>
-            <el-table-column label="commoditySku" prop="commoditySku" min-width="160" sortable show-overflow-tooltip />
-            <el-table-column label="sellerSku" prop="sellerSku" width="140" sortable show-overflow-tooltip />
-            <el-table-column label="ordered" prop="quantityOrdered" width="80" align="right" sortable show-overflow-tooltip />
-            <el-table-column label="shipped" prop="quantityShipped" width="80" align="right" sortable show-overflow-tooltip />
-            <el-table-column label="refund" prop="refundNum" width="80" align="right" sortable show-overflow-tooltip />
+            <el-table-column label="商品 SKU（commoditySku）" prop="commoditySku" min-width="160" sortable show-overflow-tooltip />
+            <el-table-column label="卖家 SKU（sellerSku）" prop="sellerSku" width="140" sortable show-overflow-tooltip />
+            <el-table-column label="下单数" prop="quantityOrdered" width="88" align="right" sortable show-overflow-tooltip />
+            <el-table-column label="发货数" prop="quantityShipped" width="88" align="right" sortable show-overflow-tooltip />
+            <el-table-column label="退款数" prop="refundNum" width="88" align="right" sortable show-overflow-tooltip />
           </el-table>
         </div>
 
         <div class="detail-section">
           <div class="section-title">订单详情</div>
-          <div v-if="detail.detailFetchedAt" class="kv-grid">
-            <div><span class="label">postalCode</span><span class="mono">{{ detail.postalCode || '-' }}</span></div>
-            <div><span class="label">stateOrRegion</span><span class="mono">{{ detail.stateOrRegion || '-' }}</span></div>
-            <div><span class="label">city</span><span class="mono">{{ detail.city || '-' }}</span></div>
-            <div><span class="label">receiverName</span><span class="mono">{{ detail.receiverName || '-' }}</span></div>
-            <div class="full-row"><span class="label">detailAddress</span><span>{{ detail.detailAddress || '-' }}</span></div>
+          <div v-if="hasVisibleDetail(detail)" class="kv-grid">
+            <div><span class="label">邮编（postalCode）</span><span class="mono">{{ detail.postalCode || '-' }}</span></div>
+            <div><span class="label">州 / 省（stateOrRegion）</span><span class="mono">{{ detail.stateOrRegion || '-' }}</span></div>
+            <div><span class="label">城市（city）</span><span class="mono">{{ detail.city || '-' }}</span></div>
+            <div><span class="label">收件人（receiverName）</span><span class="mono">{{ detail.receiverName || '-' }}</span></div>
+            <div class="full-row"><span class="label">详细地址（detailAddress）</span><span>{{ detail.detailAddress || '-' }}</span></div>
             <div class="full-row">
-              <span class="label">fetchedAt</span>
-              <span class="mono muted">{{ formatTime(detail.detailFetchedAt) }}</span>
+              <span class="label">拉取时间（fetchedAt）</span>
+              <span class="mono muted">{{ detail.detailFetchedAt ? formatTime(detail.detailFetchedAt) : '-' }}</span>
             </div>
           </div>
+          <el-alert
+            v-else-if="detail.detailFetchedAt"
+            type="info"
+            :closable="false"
+            title="已拉取订单详情，但当前没有可展示的地址信息。"
+          />
           <el-empty v-else description="尚未拉取订单详情" :image-size="60" />
         </div>
       </div>
@@ -198,9 +204,16 @@ async function openDetail(row: DataOrderSummary): Promise<void> {
   const myReqId = ++detailReqId
   dialogVisible.value = true
   detail.value = null
-  const data = await getOrderDetail(row.shopId, row.amazonOrderId)
-  if (myReqId === detailReqId && dialogVisible.value) {
-    detail.value = data
+  try {
+    const data = await getOrderDetail(row.shopId, row.amazonOrderId)
+    if (myReqId === detailReqId && dialogVisible.value) {
+      detail.value = data
+    }
+  } catch {
+    if (myReqId === detailReqId) {
+      dialogVisible.value = false
+      ElMessage.error('获取订单详情失败')
+    }
   }
 }
 
@@ -218,6 +231,16 @@ function statusType(status: string): TagType {
 
 function formatTime(value: string): string {
   return dayjs(value).format('YYYY-MM-DD HH:mm')
+}
+
+function hasVisibleDetail(detail: DataOrderDetail): boolean {
+  return Boolean(
+    detail.postalCode ||
+      detail.stateOrRegion ||
+      detail.city ||
+      detail.receiverName ||
+      detail.detailAddress
+  )
 }
 
 onMounted(reload)
@@ -263,6 +286,10 @@ onMounted(reload)
 .mono {
   font-family: $font-family-mono;
   font-size: $font-size-xs;
+}
+
+.nowrap {
+  white-space: nowrap;
 }
 
 .detail-body {
