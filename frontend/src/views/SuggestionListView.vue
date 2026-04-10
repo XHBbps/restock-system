@@ -76,12 +76,7 @@
               </el-tooltip>
             </template>
           </el-table-column>
-          <el-table-column label="最早采购日" width="140" sortable show-overflow-tooltip>
-            <template #default="{ row }">
-              {{ earliestPurchase(row) }}
-            </template>
-          </el-table-column>
-          <el-table-column label="推送状态" width="120" sortable>
+<el-table-column label="推送状态" width="120" sortable>
             <template #default="{ row }">
               <el-tag :type="getSuggestionPushStatusMeta(row.push_status).tagType">
                 {{ getSuggestionPushStatusMeta(row.push_status).label }}
@@ -208,11 +203,6 @@ watch(page, () => {
   selected.value = []
 })
 
-function earliestPurchase(it: SuggestionItem): string {
-  const dates = Object.values(it.t_purchase || {})
-  if (!dates.length) return '-'
-  return [...dates].sort()[0]
-}
 
 function rowClass({ row }: { row: SuggestionItem }): string {
   return row.urgent ? 'row-urgent' : ''
