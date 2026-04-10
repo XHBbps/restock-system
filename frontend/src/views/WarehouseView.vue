@@ -5,7 +5,7 @@
     </template>
 
     <el-table v-loading="loading" :data="pagedRows">
-      <el-table-column label="仓库名称" prop="name" min-width="220" sortable show-overflow-tooltip>
+      <el-table-column label="仓库名称" prop="name" min-width="220" sortable>
         <template #default="{ row }">
           {{ row.name }}
           <el-tag v-if="!row.country" type="warning" size="small" style="margin-left: 8px">
@@ -15,12 +15,12 @@
       </el-table-column>
       <el-table-column label="仓库 ID" prop="id" width="140" sortable show-overflow-tooltip />
       <el-table-column label="类型" prop="type" width="100" align="center" sortable show-overflow-tooltip />
-      <el-table-column label="赛狐 replenishSite" width="180" sortable show-overflow-tooltip>
+      <el-table-column label="replenishSite" width="180" sortable>
         <template #default="{ row }">
           <span class="hint">{{ row.replenish_site_raw || '-' }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="所属国家" width="220" show-overflow-tooltip>
+      <el-table-column label="所属国家" width="220">
         <template #default="{ row }">
           <el-select
             v-model="row.country"
@@ -99,13 +99,13 @@ async function reload(): Promise<void> {
 }
 
 async function save(row: Warehouse, value: string): Promise<void> {
-  if (!value || value === row.country) return
+  if (!value) return
   try {
     await patchWarehouseCountry(row.id, value)
-    row.country = value
     ElMessage.success(`${row.name} 已更新为 ${value}。`)
   } catch {
     ElMessage.error('更新失败。')
+    await reload()
   }
 }
 
