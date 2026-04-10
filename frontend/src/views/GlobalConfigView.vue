@@ -1,5 +1,10 @@
 <template>
   <div v-if="form" class="global-config-view">
+    <div class="page-header">
+      <h2 class="page-title">全局参数</h2>
+      <el-button type="primary" :loading="saving" @click="save">保存</el-button>
+    </div>
+
     <el-card shadow="never">
       <template #header>
         <span class="card-title">补货参数</span>
@@ -62,9 +67,6 @@
       </el-form>
     </el-card>
 
-    <div class="save-bar">
-      <el-button type="primary" :loading="saving" @click="save">保存</el-button>
-    </div>
   </div>
 </template>
 
@@ -142,13 +144,35 @@ async function save(): Promise<void> {
   gap: $space-5;
 }
 
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.page-title {
+  font-size: $font-size-xl;
+  font-weight: $font-weight-semibold;
+  margin: 0;
+}
+
 .card-title {
   font-size: $font-size-sm;
   font-weight: $font-weight-semibold;
 }
 
-.save-bar {
-  display: flex;
-  justify-content: flex-end;
+// Force label and input on same horizontal line
+:deep(.el-form-item) {
+  align-items: center;
+  margin-bottom: $space-4;
+}
+
+:deep(.el-form-item__label) {
+  line-height: 32px;
+  padding-bottom: 0;
+}
+
+:deep(.el-form-item__content) {
+  line-height: 32px;
 }
 </style>
