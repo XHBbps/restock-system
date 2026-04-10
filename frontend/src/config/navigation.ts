@@ -7,7 +7,6 @@ import {
   Gauge,
   History,
   LayoutDashboard,
-  ListChecks,
   MapPin,
   Monitor,
   PackageOpen,
@@ -55,8 +54,7 @@ export const navigationGroups: NavGroup[] = [
   {
     title: 'RESTOCK',
     children: [
-      { to: '/restock/current', label: '当前建议', icon: ListChecks },
-      { to: '/restock/run', label: '发起补货', icon: Rocket },
+      { to: '/restock/current', label: '补货发起', icon: Rocket },
       { to: '/restock/history', label: '历史记录', icon: History },
     ],
   },

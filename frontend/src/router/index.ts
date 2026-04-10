@@ -27,14 +27,9 @@ const routes: RouteRecordRaw[] = [
         path: 'restock/current',
         name: 'suggestion-list',
         component: () => import('@/views/SuggestionListView.vue'),
-        meta: { title: '当前建议', section: 'RESTOCK' },
+        meta: { title: '补货发起', section: 'RESTOCK' },
       },
-      {
-        path: 'restock/run',
-        name: 'replenishment-run',
-        component: () => import('@/views/ReplenishmentRunView.vue'),
-        meta: { title: '发起补货', section: 'RESTOCK' },
-      },
+      { path: 'restock/run', redirect: '/restock/current' },
       {
         path: 'restock/history',
         name: 'history',
