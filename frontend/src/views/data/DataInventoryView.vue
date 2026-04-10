@@ -30,12 +30,12 @@
 
     <el-table v-loading="loading" :data="rows">
       <el-table-column label="SKU" prop="commoditySku" min-width="180" sortable show-overflow-tooltip />
-      <el-table-column label="商品名称" min-width="200" show-overflow-tooltip>
+      <el-table-column label="商品名称" min-width="200">
         <template #default="{ row }">
           <span class="ellipsis">{{ row.commodityName || '-' }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="仓库" min-width="180" sortable show-overflow-tooltip>
+      <el-table-column label="仓库" min-width="180" sortable>
         <template #default="{ row }">
           <div class="meta-stack">
             <span>{{ row.warehouseName }}</span>
@@ -43,19 +43,19 @@
           </div>
         </template>
       </el-table-column>
-      <el-table-column label="国家" prop="country" width="80" align="center" sortable show-overflow-tooltip>
+      <el-table-column label="国家" prop="country" width="80" align="center" sortable>
         <template #default="{ row }">
           <el-tag v-if="row.country" size="small">{{ row.country }}</el-tag>
           <span v-else class="muted">-</span>
         </template>
       </el-table-column>
-      <el-table-column label="可用库存" prop="stockAvailable" width="140" align="right" sortable show-overflow-tooltip>
+      <el-table-column label="可用库存" prop="stockAvailable" width="140" align="right" sortable>
         <template #default="{ row }">
           <strong>{{ row.stockAvailable }}</strong>
         </template>
       </el-table-column>
       <el-table-column label="占用库存" prop="stockOccupy" width="120" align="right" sortable show-overflow-tooltip />
-      <el-table-column label="更新时间" width="160" sortable show-overflow-tooltip>
+      <el-table-column label="更新时间" width="160" sortable>
         <template #default="{ row }">
           <span class="muted mono">{{ formatTime(row.updatedAt) }}</span>
         </template>
@@ -77,7 +77,7 @@
 import { listInventory, type DataInventoryItem } from '@/api/data'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
 import dayjs from 'dayjs'
-import { onMounted, reactive, ref } from 'vue'
+import { onMounted, reactive, ref, watch } from 'vue'
 
 const rows = ref<DataInventoryItem[]>([])
 const total = ref(0)
@@ -110,6 +110,11 @@ async function reload(): Promise<void> {
 function formatTime(value: string): string {
   return dayjs(value).format('MM-DD HH:mm')
 }
+
+watch(
+  () => [filters.sku, filters.country, filters.only_nonzero],
+  () => { page.value = 1 },
+)
 
 onMounted(reload)
 </script>

@@ -47,8 +47,8 @@
         </template>
       </el-table-column>
       <el-table-column label="出库单号" prop="outWarehouseNo" min-width="160" sortable show-overflow-tooltip />
-      <el-table-column label="赛狐出库 ID" prop="saihuOutRecordId" width="160" sortable show-overflow-tooltip />
-      <el-table-column label="目标仓" min-width="200" sortable show-overflow-tooltip>
+      <el-table-column label="外部出库 ID" prop="saihuOutRecordId" width="160" sortable show-overflow-tooltip />
+      <el-table-column label="目标仓" min-width="200" sortable>
         <template #default="{ row }">
           <div class="meta-stack">
             <span>{{ row.targetWarehouseName || '-' }}</span>
@@ -56,7 +56,7 @@
           </div>
         </template>
       </el-table-column>
-      <el-table-column label="目标国家" width="90" align="center" sortable show-overflow-tooltip>
+      <el-table-column label="目标国家" width="90" align="center" sortable>
         <template #default="{ row }">
           <el-tag v-if="row.targetCountry" size="small">{{ row.targetCountry }}</el-tag>
           <span v-else class="muted">-</span>
@@ -70,7 +70,7 @@
           <strong>{{ sumGoods(row) }}</strong>
         </template>
       </el-table-column>
-      <el-table-column label="状态" width="100" sortable show-overflow-tooltip>
+      <el-table-column label="状态" width="100" sortable>
         <template #default="{ row }">
           <el-tag v-if="row.isInTransit" type="success" size="small">在途中</el-tag>
           <el-tag v-else type="info" size="small">已消失</el-tag>
@@ -98,7 +98,7 @@
 import { listOutRecords, type DataOutRecord } from '@/api/data'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
 import dayjs from 'dayjs'
-import { onMounted, reactive, ref } from 'vue'
+import { onMounted, reactive, ref, watch } from 'vue'
 
 const rows = ref<DataOutRecord[]>([])
 const total = ref(0)
@@ -135,6 +135,11 @@ function sumGoods(row: DataOutRecord): number {
 function formatTime(value: string): string {
   return dayjs(value).format('MM-DD HH:mm')
 }
+
+watch(
+  () => [filters.sku, filters.country, filters.is_in_transit],
+  () => { page.value = 1 },
+)
 
 onMounted(reload)
 </script>

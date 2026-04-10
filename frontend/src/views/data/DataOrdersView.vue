@@ -163,7 +163,7 @@ import { getOrderDetail, listOrders, type DataOrderDetail, type DataOrderSummary
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
 import type { TagType } from '@/utils/element'
 import dayjs from 'dayjs'
-import { onMounted, reactive, ref } from 'vue'
+import { onMounted, reactive, ref, watch } from 'vue'
 
 const rows = ref<DataOrderSummary[]>([])
 const total = ref(0)
@@ -242,6 +242,11 @@ function hasVisibleDetail(detail: DataOrderDetail): boolean {
       detail.detailAddress
   )
 }
+
+watch(
+  () => [filters.sku, filters.country, filters.status],
+  () => { page.value = 1 },
+)
 
 onMounted(reload)
 </script>
