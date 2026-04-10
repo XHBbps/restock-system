@@ -1,19 +1,19 @@
-"""赛狐 API 签名算法（HmacSHA256）。
+"""赛狐 API 签名算法(HmacSHA256)。
 
-来源：docs/saihu_api/开发指南/生产sign.md
+来源:docs/saihu_api/开发指南/生产sign.md
 
-签名字段（按键名排序）：
+签名字段(按键名排序):
     access_token, client_id, method, nonce, timestamp, url
-拼接为 `key=value&key=value...` 后用 client_secret 做 HmacSHA256，
+拼接为 `key=value&key=value...` 后用 client_secret 做 HmacSHA256,
 结果以 hex 形式作为 sign 参数。
 """
 
 import hashlib
 import hmac
-import random
+import secrets
 import time
 
-# 参与签名的固定字段顺序（已排序）
+# 参与签名的固定字段顺序(已排序)
 _SIGN_KEYS = ("access_token", "client_id", "method", "nonce", "timestamp", "url")
 
 
@@ -47,7 +47,7 @@ def generate_sign(
 
 def make_nonce() -> str:
     """每次请求生成的随机 nonce。"""
-    return str(random.randint(1, 999999))
+    return secrets.token_hex(8)
 
 
 def make_timestamp_ms() -> str:
