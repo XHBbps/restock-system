@@ -31,6 +31,7 @@ class UrgentSkuItem(BaseModel):
     commodity_name: str | None = None
     main_image: str | None = None
     total_qty: int
+    min_sale_days: float
     country_breakdown: dict[str, int]
 
 
@@ -164,13 +165,18 @@ async def get_dashboard_overview(
         key=lambda x: x.avg_sale_days,
     )
 
-    # 6. Top 10 urgent SKUs by total_qty
+    # 6. Top 10 urgent SKUs by lowest sale_days (most urgent first)
     from app.models.product_listing import ProductListing
+
+    def _min_sale_days(it: SuggestionItem) -> float:
+        if not it.sale_days_snapshot:
+            return 0.0
+        vals = [float(v) for v in it.sale_days_snapshot.values() if isinstance(v, (int, float))]
+        return min(vals) if vals else 0.0
 
     urgent_items = sorted(
         [it for it in items if it.urgent],
-        key=lambda it: it.total_qty,
-        reverse=True,
+        key=_min_sale_days,
     )[:10]
 
     # Batch-load product names and images for urgent SKUs
@@ -196,6 +202,7 @@ async def get_dashboard_overview(
             commodity_name=(name_map.get(it.commodity_sku) or (None, None))[0],
             main_image=(name_map.get(it.commodity_sku) or (None, None))[1],
             total_qty=it.total_qty,
+            min_sale_days=round(_min_sale_days(it), 1),
             country_breakdown={
                 k: int(v) for k, v in (it.country_breakdown or {}).items()
             },

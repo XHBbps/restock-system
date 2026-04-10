@@ -11,6 +11,7 @@ export interface UrgentSkuItem {
   commodity_name: string | null
   main_image: string | null
   total_qty: number
+  min_sale_days: number
   country_breakdown: Record<string, number>
 }
 

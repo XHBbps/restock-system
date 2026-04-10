@@ -38,7 +38,7 @@
           <div class="urgent-header">
             <span class="urgent-col-product">商品信息</span>
             <span class="urgent-col-countries">国家分布</span>
-            <span class="urgent-col-qty">补货量</span>
+            <span class="urgent-col-qty">可售天数</span>
           </div>
           <div class="urgent-list">
             <div v-for="item in data.top_urgent_skus" :key="item.commodity_sku" class="urgent-item">
@@ -50,7 +50,7 @@
                   {{ country }}:{{ qty }}
                 </el-tag>
               </div>
-              <div class="urgent-col-qty">{{ item.total_qty }}</div>
+              <div class="urgent-col-qty">{{ item.min_sale_days }}天</div>
             </div>
           </div>
         </template>
