@@ -554,7 +554,7 @@ async function handleLogout(): Promise<void> {
 }
 
 .content-shell {
-  max-width: 1480px;
+  max-width: 100%;
   margin: 0 auto;
 }
 
