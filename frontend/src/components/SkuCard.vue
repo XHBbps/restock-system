@@ -6,7 +6,6 @@
       <div class="sku-name">{{ name || sku }}</div>
       <div class="sku-code">{{ sku }}</div>
     </div>
-    <el-tag v-if="urgent" type="danger" size="small">立即采购</el-tag>
     <el-tag v-if="blocker" type="info" size="small">无法推送</el-tag>
   </div>
 </template>
