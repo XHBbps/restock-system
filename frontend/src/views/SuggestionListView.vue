@@ -1,35 +1,43 @@
 <template>
   <div class="suggestion-list">
-    <el-card v-loading="loading" shadow="never">
-      <template #header>
-        <div class="card-header">
-          <div>
-            <div class="card-title">当前建议</div>
-          </div>
-          <div class="header-actions">
-            <el-input v-model="searchSku" placeholder="搜索 SKU" clearable style="width: 220px" />
-            <el-button
-              type="primary"
-              :loading="pushing"
-              :disabled="selected.length === 0 || selected.length > 50"
-              @click="handlePush"
-            >
-              推送（{{ selected.length }}）
-            </el-button>
-          </div>
-        </div>
+    <PageSectionCard title="补货发起">
+      <template #actions>
+        <el-tag v-if="suggestion" :type="statusMeta.tagType" size="small">
+          {{ statusMeta.label }} · {{ suggestion.total_items }} 条
+        </el-tag>
+        <el-button @click="loadCurrent">刷新</el-button>
+        <el-button type="primary" :loading="generating" @click="triggerEngine">生成补货建议</el-button>
       </template>
+
+      <!-- TaskProgress for engine task -->
+      <TaskProgress v-if="genTaskId" :task-id="genTaskId" @terminal="onGenDone" />
+
+      <!-- TaskProgress for push task -->
+      <TaskProgress v-if="pushTaskId" :task-id="pushTaskId" @terminal="onPushDone" />
 
       <el-empty
         v-if="!loading && !suggestion"
-        description="当前没有活动建议单，请先在补货触发页执行规则引擎。"
+        description="当前没有活动建议单，点击上方按钮生成补货建议。"
         :image-size="80"
       >
-        <el-button type="primary" @click="goRun">前往补货触发</el-button>
+        <el-button type="primary" @click="triggerEngine">生成补货建议</el-button>
       </el-empty>
 
       <template v-else>
+        <div class="table-toolbar">
+          <el-input v-model="searchSku" placeholder="搜索 SKU" clearable style="width: 220px" />
+          <el-button
+            type="primary"
+            :loading="pushing"
+            :disabled="selected.length === 0 || selected.length > 50"
+            @click="handlePush"
+          >
+            推送（{{ selected.length }}）
+          </el-button>
+        </div>
+
         <el-table
+          v-loading="loading"
           :data="pagedItems"
           row-key="id"
           :row-class-name="rowClass"
@@ -80,20 +88,20 @@
           :total="filteredItems.length"
         />
       </template>
-    </el-card>
-
-    <TaskProgress v-if="pushTaskId" :task-id="pushTaskId" @terminal="onPushDone" />
+    </PageSectionCard>
   </div>
 </template>
 
 <script setup lang="ts">
+import client from '@/api/client'
 import type { TaskRun } from '@/api/task'
 import { getCurrentSuggestion, pushItems, type SuggestionDetail, type SuggestionItem } from '@/api/suggestion'
+import PageSectionCard from '@/components/PageSectionCard.vue'
 import SkuCard from '@/components/SkuCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
 import TaskProgress from '@/components/TaskProgress.vue'
 import { getActionErrorMessage } from '@/utils/apiError'
-import { getSuggestionPushStatusMeta } from '@/utils/status'
+import { getSuggestionPushStatusMeta, getSuggestionStatusMeta } from '@/utils/status'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
@@ -103,10 +111,16 @@ const suggestion = ref<SuggestionDetail | null>(null)
 const selected = ref<SuggestionItem[]>([])
 const searchSku = ref('')
 const pushing = ref(false)
+const generating = ref(false)
 const pushTaskId = ref<number | null>(null)
+const genTaskId = ref<number | null>(null)
 const page = ref(1)
 const pageSize = ref(20)
 const loading = ref(false)
+
+const statusMeta = computed(() =>
+  suggestion.value ? getSuggestionStatusMeta(suggestion.value.status) : { label: '暂无', tagType: 'info' as const },
+)
 
 async function loadCurrent(): Promise<void> {
   loading.value = true
@@ -124,6 +138,33 @@ async function loadCurrent(): Promise<void> {
   } finally {
     loading.value = false
   }
+}
+
+async function triggerEngine(): Promise<void> {
+  generating.value = true
+  try {
+    const { data } = await client.post<{ task_id: number; existing?: boolean }>('/api/engine/run')
+    genTaskId.value = data.task_id
+    if (data.existing) {
+      ElMessage.warning('已有规则引擎任务在运行，当前复用现有任务进度。')
+    } else {
+      ElMessage.success('规则引擎任务已入队。')
+    }
+  } catch (error) {
+    ElMessage.error(getActionErrorMessage(error, '补货任务触发失败。'))
+  } finally {
+    generating.value = false
+  }
+}
+
+async function onGenDone(task: TaskRun): Promise<void> {
+  genTaskId.value = null
+  await loadCurrent()
+  if (task.status === 'success') {
+    ElMessage.success('补货任务已完成，当前建议已刷新。')
+    return
+  }
+  ElMessage.error(task.error_msg || '补货任务执行失败，请查看任务详情。')
 }
 
 const filteredItems = computed(() => {
@@ -224,10 +265,6 @@ function goDetail(id: number): void {
   router.push(`/restock/suggestions/${suggestion.value.id}?item=${id}`)
 }
 
-function goRun(): void {
-  router.push('/restock/run')
-}
-
 onMounted(loadCurrent)
 </script>
 
@@ -240,28 +277,12 @@ onMounted(loadCurrent)
   gap: $space-4;
 }
 
-.card-header {
+.table-toolbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: $space-4;
-}
-
-.card-title {
-  font-size: $font-size-lg;
-  font-weight: $font-weight-semibold;
-}
-
-.card-meta {
-  margin-top: 4px;
-  color: $color-text-secondary;
-  font-size: $font-size-sm;
-}
-
-.header-actions {
-  display: flex;
   gap: $space-3;
-  flex-wrap: wrap;
+  margin-bottom: $space-4;
 }
 
 .country-chip {
@@ -289,7 +310,7 @@ onMounted(loadCurrent)
 }
 
 @media (max-width: 900px) {
-  .card-header {
+  .table-toolbar {
     flex-direction: column;
     align-items: flex-start;
   }
