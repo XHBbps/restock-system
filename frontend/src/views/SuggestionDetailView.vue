@@ -25,7 +25,7 @@
       <el-alert
         type="info"
         :closable="false"
-        title="当前仅支持修改总采购量；国家分量、仓库分量、采购时间和发货时间为只读，保存后将按服务端最新结果刷新。"
+        title="当前仅支持修改总采购量；国家分量、仓库分量为只读，保存后将按服务端最新结果刷新。"
       />
 
       <el-collapse v-model="expanded">
@@ -63,7 +63,7 @@
                       <span class="editor-label">总采购量</span>
                       <el-input-number v-model="editing[item.id].total_qty" :min="0" size="small" />
                     </div>
-                    <div class="editor-hint">国家分量、仓库分量、采购时间、发货时间当前为只读。</div>
+                    <div class="editor-hint">国家分量、仓库分量当前为只读。</div>
                   </div>
                 </section>
 
@@ -71,7 +71,7 @@
                   <div class="panel-header">
                     <div>
                       <div class="section-title">国家分量与仓内拆分</div>
-                      <div class="section-desc">统一查看国家总量、仓内分配、拆分依据及采购/发货时间。</div>
+                      <div class="section-desc">统一查看国家总量、仓内分配、拆分依据。</div>
                     </div>
                   </div>
                   <el-table :data="countryRows(item)" size="small" class="detail-table">
@@ -106,8 +106,6 @@
                         <span v-else class="allocation-text">-</span>
                       </template>
                     </el-table-column>
-                    <el-table-column prop="t_purchase" label="采购时间" width="124" sortable show-overflow-tooltip />
-                    <el-table-column prop="t_ship" label="发货时间" width="124" sortable show-overflow-tooltip />
                   </el-table>
                 </section>
               </div>
@@ -270,8 +268,6 @@ interface CountryRow {
   qty: number
   warehouses: Record<string, number>
   allocation: AllocationExplanation | null
-  t_purchase: string
-  t_ship: string
 }
 
 function countryRows(item: SuggestionItem): CountryRow[] {
@@ -280,8 +276,6 @@ function countryRows(item: SuggestionItem): CountryRow[] {
     qty,
     warehouses: item.warehouse_breakdown[country] || {},
     allocation: item.allocation_snapshot?.[country] || null,
-    t_purchase: item.t_purchase[country] || '-',
-    t_ship: item.t_ship[country] || '-',
   }))
 }
 
