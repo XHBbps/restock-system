@@ -74,7 +74,8 @@ async function handleLogin(): Promise<void> {
     const resp = await login(password.value)
     auth.setToken(resp.access_token)
     ElMessage.success('登录成功')
-    const redirect = (route.query.redirect as string) || '/'
+    const raw = (route.query.redirect as string) || '/'
+    const redirect = raw.startsWith('/') && !raw.startsWith('//') ? raw : '/'
     router.replace(redirect)
   } catch (err: unknown) {
     const e = err as { response?: { status?: number; data?: { message?: string } } }
