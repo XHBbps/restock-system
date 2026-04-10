@@ -4,22 +4,38 @@
       <el-button :loading="refreshing" @click="refresh">刷新店铺</el-button>
     </template>
 
-    <el-table v-loading="loading" :data="pagedRows">
-      <el-table-column label="店铺 ID" prop="id" width="110" />
-      <el-table-column label="店铺名称" prop="name" min-width="220" />
-      <el-table-column label="卖家ID" prop="sellerId" width="180">
+    <el-table v-loading="loading" :data="pagedRows" style="width: 100%" :scrollbar-always-on="true">
+      <el-table-column label="店铺 ID" prop="id" width="100" show-overflow-tooltip />
+      <el-table-column label="店铺名称" prop="name" min-width="180" show-overflow-tooltip />
+      <el-table-column label="卖家ID" width="150">
         <template #default="{ row }">
           <span class="mono muted">{{ row.sellerId || '-' }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="区域" prop="region" width="100" align="center" />
-      <el-table-column label="站点" prop="marketplaceId" width="120" />
-      <el-table-column label="授权状态" width="140">
+      <el-table-column label="区域" width="80" align="center">
+        <template #default="{ row }">
+          <el-tag v-if="row.region" :type="regionTagType(row.region)" size="small">
+            {{ row.region.toUpperCase() }}
+          </el-tag>
+          <span v-else class="muted">-</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="站点" width="160">
+        <template #default="{ row }">
+          <template v-if="row.marketplaceId">
+            <el-tag size="small" style="max-width: 140px" :title="row.marketplaceId" class="site-tag">
+              {{ row.marketplaceId }}
+            </el-tag>
+          </template>
+          <span v-else class="muted">-</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="授权状态" width="100">
         <template #default="{ row }">
           <StatusTag :meta="getShopStatusMeta(row.status)" size="small" />
         </template>
       </el-table-column>
-      <el-table-column label="参与同步" width="120" align="center">
+      <el-table-column label="订单同步" width="90" align="center">
         <template #default="{ row }">
           <el-switch
             :model-value="row.syncEnabled"
@@ -28,8 +44,15 @@
           />
         </template>
       </el-table-column>
-      <el-table-column label="广告状态" prop="adStatus" width="120" />
-      <el-table-column label="最近同步" width="140">
+      <el-table-column label="广告状态" width="90" align="center">
+        <template #default="{ row }">
+          <el-tag v-if="row.adStatus" :type="adStatusTagType(row.adStatus)" size="small">
+            {{ adStatusLabel(row.adStatus) }}
+          </el-tag>
+          <span v-else class="muted">-</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="最近同步" width="120">
         <template #default="{ row }">
           <span class="muted mono">{{ row.lastSyncAt ? formatTime(row.lastSyncAt) : '-' }}</span>
         </template>
@@ -65,6 +88,34 @@ const refreshing = ref(false)
 const refreshTaskId = ref<number | null>(null)
 const page = ref(1)
 const pageSize = ref(10)
+
+const REGION_COLORS: Record<string, 'primary' | 'success' | 'warning' | 'danger' | 'info'> = {
+  na: 'primary',
+  eu: 'success',
+  fe: 'warning',
+  in: 'danger',
+}
+
+function regionTagType(region: string): 'primary' | 'success' | 'warning' | 'danger' | 'info' {
+  return REGION_COLORS[region.toLowerCase()] || 'info'
+}
+
+const AD_STATUS_MAP: Record<string, string> = {
+  unauthorized: '未授权',
+  authorized: '已授权',
+  expired: '已过期',
+}
+
+function adStatusLabel(status: string): string {
+  return AD_STATUS_MAP[status.toLowerCase()] || status
+}
+
+function adStatusTagType(status: string): 'success' | 'warning' | 'info' {
+  const s = status.toLowerCase()
+  if (s === 'authorized') return 'success'
+  if (s === 'expired') return 'warning'
+  return 'info'
+}
 
 const pagedRows = computed(() => {
   const start = (page.value - 1) * pageSize.value
@@ -124,5 +175,11 @@ onMounted(reload)
 .mono {
   font-family: $font-family-mono;
   font-size: $font-size-xs;
+}
+
+.site-tag {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

@@ -2,8 +2,8 @@
   <PageSectionCard title="仓库">
     <el-table v-loading="loading" :data="pagedRows" style="width: 100%" :scrollbar-always-on="true">
       <el-table-column label="仓库名称" prop="name" min-width="200" sortable show-overflow-tooltip />
-      <el-table-column label="仓库 ID" prop="id" width="120" sortable show-overflow-tooltip />
-      <el-table-column label="类型" prop="type" width="120" align="center" sortable :sort-method="sortByTypeMethod">
+      <el-table-column label="仓库 ID" prop="id" width="100" sortable show-overflow-tooltip />
+      <el-table-column label="类型" prop="type" width="100" align="center" sortable :sort-method="sortByTypeMethod">
         <template #default="{ row }">
           <el-tag :type="warehouseTypeTag(row.type)" size="small">
             {{ warehouseTypeLabel(row.type) }}
@@ -12,16 +12,16 @@
       </el-table-column>
       <el-table-column label="补货站点" min-width="200">
         <template #default="{ row }">
-          <template v-if="parseSites(row.replenishSite).length">
+          <div v-if="parseSites(row.replenishSite).length" class="site-tags" :title="row.replenishSite">
             <el-tag
               v-for="site in parseSites(row.replenishSite)"
               :key="site"
               size="small"
-              style="margin-right: 4px; margin-bottom: 2px"
+              class="site-tag"
             >
               {{ site }}
             </el-tag>
-          </template>
+          </div>
           <span v-else class="muted">-</span>
         </template>
       </el-table-column>
@@ -151,5 +151,20 @@ onMounted(reload)
 .mono {
   font-family: $font-family-mono;
   font-size: $font-size-xs;
+}
+
+.site-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-height: 56px;
+  overflow: hidden;
+}
+
+.site-tag {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>
