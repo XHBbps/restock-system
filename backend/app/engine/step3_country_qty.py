@@ -1,9 +1,8 @@
-"""Step 3：各国建议补货量。
+"""Step 3:各国建议补货量。
 
-公式（FR-031）：
-    raw[国] = TARGET_DAYS × velocity[国] − (available + reserved + in_transit)
+公式(FR-031):
+    raw[国] = TARGET_DAYS x velocity[国] - (available + reserved + in_transit)
     country_qty[国] = max(raw, 0)
-    raw < 0 的国家记入 overstock_countries（只读提示）
 """
 
 import math
@@ -14,15 +13,13 @@ def compute_country_qty(
     velocity: dict[str, dict[str, float]],
     inventory: dict[str, dict[str, dict[str, int]]],
     target_days: int,
-) -> tuple[dict[str, dict[str, int]], dict[str, list[str]]]:
+) -> dict[str, dict[str, int]]:
     """计算各 SKU 各国的补货量。
 
-    返回：
+    返回:
         country_qty[sku][country] = int
-        overstock_countries[sku] = [country, ...]
     """
     country_qty: defaultdict[str, dict[str, int]] = defaultdict(dict)
-    overstock: defaultdict[str, list[str]] = defaultdict(list)
 
     for sku, country_map in velocity.items():
         for country, v in country_map.items():
@@ -31,10 +28,7 @@ def compute_country_qty(
             stock_total = inventory.get(sku, {}).get(country, {}).get("total", 0)
             raw = target_days * v - stock_total
             if raw <= 0:
-                # 库存超目标 → 积压国家（只记录 raw < 0 的）
-                if raw < 0:
-                    overstock[sku].append(country)
                 continue
             # 向上取整到件
             country_qty[sku][country] = math.ceil(raw)
-    return dict(country_qty), dict(overstock)
+    return dict(country_qty)
