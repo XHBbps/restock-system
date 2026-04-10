@@ -48,29 +48,3 @@ export async function retryCall(id: number): Promise<{ task_id: number | null; e
   const { data } = await client.post(`/api/monitor/api-calls/${id}/retry`)
   return data
 }
-
-// ========== Overstock ==========
-export interface Overstock {
-  id: number
-  commodity_sku: string
-  commodity_name: string | null
-  country: string
-  warehouse_id: string
-  warehouse_name: string | null
-  current_stock: number
-  last_sale_date: string | null
-  processed_at: string | null
-  note: string | null
-}
-
-export async function listOverstock(params: {
-  show_processed?: boolean
-  country?: string
-}): Promise<Overstock[]> {
-  const { data } = await client.get<Overstock[]>('/api/monitor/overstock', { params })
-  return data
-}
-
-export async function markOverstockProcessed(id: number, note?: string): Promise<void> {
-  await client.patch(`/api/monitor/overstock/${id}/processed`, { note })
-}

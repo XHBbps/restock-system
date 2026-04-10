@@ -121,13 +121,6 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/PerformanceMonitorView.vue'),
         meta: { title: '性能监控', section: 'SETTINGS' },
       },
-      {
-        path: 'settings/overstock',
-        name: 'overstock',
-        component: () => import('@/views/OverstockView.vue'),
-        meta: { title: '积压提示', section: 'SETTINGS' },
-      },
-
       // --- Legacy redirects ---
       { path: 'sync', redirect: '/settings/sync' },
       { path: 'sync/manual', redirect: '/settings/sync' },
@@ -147,9 +140,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'config/shop', redirect: '/settings/shop' },
       { path: 'troubleshooting/api-monitor', redirect: '/settings/api-monitor' },
       { path: 'troubleshooting/performance', redirect: '/settings/performance' },
-      { path: 'troubleshooting/overstock', redirect: '/settings/overstock' },
       { path: 'ops/sync', redirect: '/settings/sync' },
-      { path: 'monitor/overstock', redirect: '/settings/overstock' },
 
       // --- Not found ---
       {

@@ -17,7 +17,6 @@ import {
   ShoppingCart,
   SlidersHorizontal,
   Store,
-  TrendingDown,
   TrendingUp,
   Warehouse,
   Wrench,
@@ -106,7 +105,6 @@ export const navigationGroups: NavGroup[] = [
         items: [
           { to: '/settings/api-monitor', label: '接口监控', icon: Plug },
           { to: '/settings/performance', label: '性能监控', icon: Gauge },
-          { to: '/settings/overstock', label: '积压提示', icon: TrendingDown },
         ],
       },
     ],
