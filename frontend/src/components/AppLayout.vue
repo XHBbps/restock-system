@@ -124,8 +124,8 @@
       <header class="topbar">
         <div class="topbar-left">
           <button class="collapse-btn" :title="sidebar.isCollapsed ? '展开侧栏' : '收起侧栏'" @click="sidebar.toggleCollapse()">
-            <PanelLeftOpen v-if="sidebar.isCollapsed" :size="16" />
-            <PanelLeftClose v-else :size="16" />
+            <IndentIncrease v-if="sidebar.isCollapsed" :size="18" />
+            <IndentDecrease v-else :size="18" />
           </button>
           <div class="breadcrumb">
             <RouterLink to="/workspace" class="breadcrumb-root">Restock</RouterLink>
@@ -155,7 +155,7 @@ import { logout } from '@/api/auth'
 import { isSubCategory, navigationGroups } from '@/config/navigation'
 import { useAuthStore } from '@/stores/auth'
 import { useSidebarStore } from '@/stores/sidebar'
-import { ChevronRight, LogOut, PanelLeftClose, PanelLeftOpen } from 'lucide-vue-next'
+import { ChevronRight, IndentDecrease, IndentIncrease, LogOut } from 'lucide-vue-next'
 import { computed, onMounted, reactive, watch } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 
@@ -250,7 +250,6 @@ async function handleLogout(): Promise<void> {
   z-index: 2;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: $space-3;
   padding: $space-4;
   height: $layout-topbar-height;
