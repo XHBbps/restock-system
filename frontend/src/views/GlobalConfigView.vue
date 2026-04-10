@@ -47,7 +47,10 @@
         <span class="card-title">补货计算</span>
       </template>
       <el-form :model="form" label-width="180px" style="max-width: 560px">
-        <el-form-item label="自动计算时间">
+        <el-form-item label="自动计算">
+          <el-switch v-model="form.calc_enabled" />
+        </el-form-item>
+        <el-form-item v-if="form.calc_enabled" label="自动计算时间">
           <div class="cron-inline">
             <el-select v-model="selectedCronPreset" class="cron-select" @change="onCronPresetChange">
               <el-option

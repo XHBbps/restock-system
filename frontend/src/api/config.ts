@@ -8,6 +8,7 @@ export interface GlobalConfig {
   lead_time_days: number
   sync_interval_minutes: number
   calc_cron: string
+  calc_enabled: boolean
   default_purchase_warehouse_id: string | null
   include_tax: '0' | '1'
   shop_sync_mode: 'all' | 'specific'
@@ -47,6 +48,11 @@ export async function patchSkuConfig(
   patch: { enabled?: boolean; lead_time_days?: number | null }
 ): Promise<SkuConfig> {
   const { data } = await client.patch<SkuConfig>(`/api/config/sku/${commoditySku}`, patch)
+  return data
+}
+
+export async function initSkuConfigs(): Promise<{ created: number; total: number }> {
+  const { data } = await client.post('/api/config/sku/init')
   return data
 }
 
