@@ -15,14 +15,7 @@
       </template>
     </DashboardPageHeader>
 
-    <el-alert
-      v-if="overview && overview.postal_compliance_warning > 0"
-      type="warning"
-      :closable="false"
-      :title="`还有 ${overview.postal_compliance_warning} 个订单超过 50 天仍未拉取详情，已接近 60 天可见窗口。`"
-    />
-
-    <section class="stats-grid">
+    <section class="stats-grid-2">
       <DashboardStatCard
         title="自动任务数"
         :value="autoSyncDefinitions.length"
@@ -33,36 +26,15 @@
         :value="manualSyncActions.length"
         hint="可人工触发的同步任务"
       />
-      <DashboardStatCard
-        title="失败同步任务"
-        :value="failedSyncCount"
-        :trend="failedSyncCount > 0 ? '建议优先排查' : '状态正常'"
-        :trend-type="failedSyncCount > 0 ? 'negative' : 'positive'"
-        hint="按最近一次执行状态统计"
-      />
-      <DashboardStatCard
-        title="失败接口调用"
-        :value="failedCallCount"
-        hint="最近 24 小时累计失败调用"
-      />
     </section>
 
-    <section class="chart-grid">
-      <DashboardChartCard
-        title="同步任务状态分布"
-        description="查看当前同步面板最近一次执行结果的整体分布。"
-        :option="syncStatusChartOption"
-        :empty="syncState.length === 0"
-        empty-text="暂无同步状态数据"
-      />
-      <DashboardChartCard
-        title="自动同步下次执行"
-        description="展示调度器当前登记的自动任务，按下次执行时间排序。"
-        :option="nextRunChartOption"
-        :empty="autoScheduleRows.length === 0"
-        empty-text="暂无自动调度任务"
-      />
-    </section>
+    <DashboardChartCard
+      title="自动同步下次执行"
+      description="展示调度器当前登记的自动任务，按下次执行时间排序。"
+      :option="nextRunChartOption"
+      :empty="autoScheduleRows.length === 0"
+      empty-text="暂无自动调度任务"
+    />
 
     <DataTableCard title="调度器控制" description="控制自动同步总开关，并查看当前计划参数。">
       <template #toolbar>
@@ -124,33 +96,6 @@
       </div>
     </DashboardSection>
 
-    <section class="bottom-grid">
-      <DataTableCard title="同步任务状态" description="统一查看各同步任务最近一次执行结果。">
-        <SyncStateTable :rows="pagedSyncState" :job-label-map="syncJobLabelMap" />
-        <template #pagination>
-          <TablePaginationBar
-            v-model:current-page="syncStatePage"
-            v-model:page-size="syncStatePageSize"
-            :total="syncState.length"
-          />
-        </template>
-      </DataTableCard>
-
-      <DataTableCard title="最近失败调用" description="用于排查外部接口失败并直接重试。">
-        <template #toolbar>
-          <el-switch v-model="onlyFailed" active-text="仅失败" @change="loadRecentCalls" />
-        </template>
-        <FailedApiCallTable :rows="pagedRecentCalls" @retry="retry" />
-        <template #pagination>
-          <TablePaginationBar
-            v-model:current-page="recentPage"
-            v-model:page-size="recentPageSize"
-            :total="recentCalls.length"
-          />
-        </template>
-      </DataTableCard>
-    </section>
-
     <TaskProgress v-if="currentTaskId" :task-id="currentTaskId" @terminal="onTaskDone" />
   </div>
 </template>
@@ -158,13 +103,6 @@
 <script setup lang="ts">
 import client from '@/api/client'
 import { listSyncState, type SyncStateRow } from '@/api/data'
-import {
-  getApiCallsOverview,
-  getRecentCalls,
-  retryCall,
-  type ApiCallsOverview,
-  type RecentCall,
-} from '@/api/monitor'
 import { getSchedulerStatus, setSchedulerStatus, type SchedulerStatus } from '@/api/sync'
 import type { TaskRun } from '@/api/task'
 import DataTableCard from '@/components/dashboard/DataTableCard.vue'
@@ -172,11 +110,8 @@ import DashboardChartCard from '@/components/dashboard/DashboardChartCard.vue'
 import DashboardPageHeader from '@/components/dashboard/DashboardPageHeader.vue'
 import DashboardSection from '@/components/dashboard/DashboardSection.vue'
 import DashboardStatCard from '@/components/dashboard/DashboardStatCard.vue'
-import TablePaginationBar from '@/components/TablePaginationBar.vue'
 import TaskProgress from '@/components/TaskProgress.vue'
-import FailedApiCallTable from '@/components/sync/FailedApiCallTable.vue'
 import SchedulerControlPanel from '@/components/sync/SchedulerControlPanel.vue'
-import SyncStateTable from '@/components/sync/SyncStateTable.vue'
 import SyncTaskCard from '@/components/sync/SyncTaskCard.vue'
 import SyncTaskHeroCard from '@/components/sync/SyncTaskHeroCard.vue'
 import {
@@ -204,21 +139,8 @@ const schedulerStatus = ref<SchedulerStatus | null>(null)
 const schedulerLoading = ref(false)
 const schedulerToggleLoading = ref(false)
 const syncState = ref<SyncStateRow[]>([])
-const overview = ref<ApiCallsOverview | null>(null)
-const recentCalls = ref<RecentCall[]>([])
-const onlyFailed = ref(true)
 const currentTaskId = ref<number | null>(null)
 const loadingActions = reactive<Record<string, boolean>>({})
-
-const syncStatePage = ref(1)
-const syncStatePageSize = ref(10)
-const recentPage = ref(1)
-const recentPageSize = ref(10)
-
-const failedSyncCount = computed(() => syncState.value.filter((item) => item.last_status === 'failed').length)
-const failedCallCount = computed(() =>
-  (overview.value?.endpoints || []).reduce((sum, endpoint) => sum + endpoint.failed_count, 0),
-)
 
 function formatTime(value?: string | null): string {
   return value ? dayjs(value).format('MM-DD HH:mm:ss') : '暂无记录'
@@ -270,42 +192,6 @@ const autoScheduleRows = computed(() =>
     .sort((a, b) => dayjs(a.next_run_time).valueOf() - dayjs(b.next_run_time).valueOf())
     .slice(0, 8),
 )
-
-const pagedSyncState = computed(() => {
-  const start = (syncStatePage.value - 1) * syncStatePageSize.value
-  return syncState.value.slice(start, start + syncStatePageSize.value)
-})
-
-const pagedRecentCalls = computed(() => {
-  const start = (recentPage.value - 1) * recentPageSize.value
-  return recentCalls.value.slice(start, start + recentPageSize.value)
-})
-
-const syncStatusChartOption = computed<EChartsCoreOption>(() => {
-  const counts = syncState.value.reduce<Record<string, number>>((acc, item) => {
-    const key = item.last_status || 'idle'
-    acc[key] = (acc[key] || 0) + 1
-    return acc
-  }, {})
-  return {
-    tooltip: { trigger: 'item' },
-    legend: { bottom: 0, icon: 'circle', textStyle: { color: '#71717a' } },
-    series: [
-      {
-        type: 'pie',
-        radius: ['52%', '78%'],
-        itemStyle: { borderColor: '#ffffff', borderWidth: 4 },
-        label: { formatter: '{b}\n{c}', color: '#09090b', fontSize: 12 },
-        data: [
-          { name: '成功', value: (counts.success || 0) + (counts.completed || 0), itemStyle: { color: '#16a34a' } },
-          { name: '失败', value: counts.failed || 0, itemStyle: { color: '#dc2626' } },
-          { name: '执行中', value: counts.running || 0, itemStyle: { color: '#d97706' } },
-          { name: '未执行', value: counts.idle || 0, itemStyle: { color: '#a1a1aa' } },
-        ].filter((item) => item.value > 0),
-      },
-    ],
-  }
-})
 
 const nextRunChartOption = computed<EChartsCoreOption>(() => ({
   grid: { left: 24, right: 24, top: 24, bottom: 24, containLabel: true },
@@ -359,17 +245,8 @@ async function loadSyncState(): Promise<void> {
   syncState.value = await listSyncState()
 }
 
-async function loadOverview(): Promise<void> {
-  overview.value = await getApiCallsOverview(24)
-}
-
-async function loadRecentCalls(): Promise<void> {
-  recentPage.value = 1
-  recentCalls.value = await getRecentCalls({ only_failed: onlyFailed.value, limit: 200 })
-}
-
 async function reloadAll(): Promise<void> {
-  await Promise.allSettled([loadScheduler(), loadSyncState(), loadOverview(), loadRecentCalls()])
+  await Promise.allSettled([loadScheduler(), loadSyncState()])
 }
 
 async function trigger(action: SyncActionDefinition): Promise<void> {
@@ -386,20 +263,6 @@ async function trigger(action: SyncActionDefinition): Promise<void> {
     ElMessage.error(getActionErrorMessage(error, '同步任务触发失败。'))
   } finally {
     loadingActions[action.key] = false
-  }
-}
-
-async function retry(id: number): Promise<void> {
-  try {
-    const resp = await retryCall(id)
-    if (resp.task_id) {
-      currentTaskId.value = resp.task_id
-      ElMessage.success('重试任务已入队。')
-      return
-    }
-    ElMessage.warning('该调用暂不支持自动重试。')
-  } catch (error) {
-    ElMessage.error(getActionErrorMessage(error, '重试失败。'))
   }
 }
 
@@ -423,14 +286,7 @@ onMounted(reloadAll)
   gap: $space-6;
 }
 
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: $space-4;
-}
-
-.chart-grid,
-.bottom-grid {
+.stats-grid-2 {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: $space-4;
@@ -454,16 +310,13 @@ onMounted(reloadAll)
 }
 
 @media (max-width: 1280px) {
-  .stats-grid,
   .task-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 900px) {
-  .stats-grid,
-  .chart-grid,
-  .bottom-grid,
+  .stats-grid-2,
   .task-grid {
     grid-template-columns: 1fr;
   }
