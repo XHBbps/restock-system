@@ -193,6 +193,40 @@ export async function listDataProductListings(params: {
   return data
 }
 
+// ========== SKU Overview (grouped) ==========
+export interface SkuListingItem {
+  id: number
+  shop_id: string
+  marketplace_id: string
+  seller_sku: string | null
+  day7_sale_num: number | null
+  day14_sale_num: number | null
+  day30_sale_num: number | null
+  online_status: string
+  last_sync_at: string | null
+}
+
+export interface SkuOverviewItem {
+  commodity_sku: string
+  commodity_name: string | null
+  main_image: string | null
+  enabled: boolean
+  lead_time_days: number | null
+  listing_count: number
+  total_day30_sales: number
+  listings: SkuListingItem[]
+}
+
+export async function listSkuOverview(params: {
+  keyword?: string
+  enabled?: boolean
+  page?: number
+  page_size?: number
+}): Promise<PageResult<SkuOverviewItem>> {
+  const { data } = await client.get('/api/data/sku-overview', { params })
+  return data
+}
+
 // ========== Sync state ==========
 export interface SyncStateRow {
   job_name: string
