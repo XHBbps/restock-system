@@ -1,4 +1,4 @@
-"""店铺表（赛狐 shop/pageList 结果缓存）。"""
+"""店铺表(赛狐 shop/pageList 结果缓存)。"""
 
 from datetime import datetime
 
@@ -12,7 +12,7 @@ from app.db.base import Base
 class Shop(Base):
     """店铺缓存。
 
-    `status` 取值：0 正常 / 1 授权失效 / 2 SP授权失效。
+    `status` 取值:0 正常 / 1 授权失效 / 2 SP授权失效。
     `sync_enabled` 由用户在"指定店铺模式"下勾选。
     """
 

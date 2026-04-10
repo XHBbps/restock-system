@@ -1,7 +1,7 @@
-"""任务运行表（队列 + 历史 + 进度合一）。
+"""任务运行表(队列 + 历史 + 进度合一)。
 
-核心约束：同一 `dedupe_key` 在 pending/running 状态下最多一条
-（通过部分唯一索引实现）。
+核心约束:同一 `dedupe_key` 在 pending/running 状态下最多一条
+(通过部分唯一索引实现)。
 """
 
 from datetime import datetime
@@ -26,13 +26,13 @@ from app.db.base import Base
 class TaskRun(Base):
     """任务运行记录。
 
-    状态枚举：pending / running / success / failed / skipped / cancelled
-    - pending：已入队等待 Worker 领取
-    - running：Worker 持有租约执行中
-    - success：业务正常完成
-    - failed：业务失败或租约过期被 reaper 标记
-    - skipped：scheduler 触发但同键已有活跃任务，留痕
-    - cancelled：人工中止（为后续预留）
+    状态枚举:pending / running / success / failed / skipped / cancelled
+    - pending:已入队等待 Worker 领取
+    - running:Worker 持有租约执行中
+    - success:业务正常完成
+    - failed:业务失败或租约过期被 reaper 标记
+    - skipped:scheduler 触发但同键已有活跃任务,留痕
+    - cancelled:人工中止(为后续预留)
     """
 
     __tablename__ = "task_run"
@@ -45,7 +45,7 @@ class TaskRun(Base):
             "trigger_source IN ('scheduler','manual')",
             name="trigger_source_enum",
         ),
-        # ★ 核心约束：dedupe_key 在活跃状态下唯一
+        # * 核心约束:dedupe_key 在活跃状态下唯一
         Index(
             "uq_task_run_active_dedupe",
             "dedupe_key",

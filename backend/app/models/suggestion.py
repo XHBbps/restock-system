@@ -57,7 +57,7 @@ class Suggestion(Base):
 
 
 class SuggestionItem(Base):
-    """建议单条目：每行对应一个 commodity_sku 的完整补货建议。"""
+    """建议单条目:每行对应一个 commodity_sku 的完整补货建议。"""
 
     __tablename__ = "suggestion_item"
     __table_args__ = (
@@ -87,10 +87,9 @@ class SuggestionItem(Base):
     total_qty: Mapped[int] = mapped_column(Integer, nullable=False)
     country_breakdown: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     warehouse_breakdown: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    allocation_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     t_purchase: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     t_ship: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    overstock_countries: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
-
     # 可追溯快照
     velocity_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     sale_days_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)

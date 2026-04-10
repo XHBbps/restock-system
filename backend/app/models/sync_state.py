@@ -1,6 +1,6 @@
 """同步任务状态表。
 
-记录各增量同步 job 的 last_success_at，供下次 dateStart 计算使用。
+记录各增量同步 job 的 last_success_at,供下次 dateStart 计算使用。
 """
 
 from datetime import datetime

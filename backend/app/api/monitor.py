@@ -1,11 +1,10 @@
-"""监控 API：接口调用日志聚合 + 积压 SKU。"""
+"""监控 API:接口调用日志聚合。"""
 
 from datetime import datetime, timedelta
-from typing import Any
 
 from fastapi import APIRouter, Depends, Path, Query
 from pydantic import BaseModel
-from sqlalchemy import case, func, select, text, update
+from sqlalchemy import case, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import db_session, get_current_session
@@ -14,9 +13,6 @@ from app.core.logging import get_logger
 from app.core.timezone import now_beijing
 from app.models.api_call_log import ApiCallLog
 from app.models.order import OrderDetailFetchLog, OrderHeader
-from app.models.overstock import OverstockSkuMark
-from app.models.product_listing import ProductListing
-from app.models.warehouse import Warehouse
 from app.tasks.queue import enqueue_task
 
 router = APIRouter(prefix="/api/monitor", tags=["monitor"])
@@ -39,7 +35,7 @@ class EndpointStats(BaseModel):
 
 class ApiCallsOverview(BaseModel):
     endpoints: list[EndpointStats]
-    postal_compliance_warning: int  # 60 天合规计数（FR-004 + analyze U4）
+    postal_compliance_warning: int  # 60 天合规计数(FR-004 + analyze U4)
 
 
 @router.get("/api-calls", response_model=ApiCallsOverview)
@@ -66,7 +62,7 @@ async def get_api_calls(
         )
     ).all()
 
-    # 每个 endpoint 取最后一次记录（含错误信息）
+    # 每个 endpoint 取最后一次记录(含错误信息)
     last_call_per_endpoint: dict[str, ApiCallLog] = {}
     if rows:
         endpoint_names = [r[0] for r in rows]
@@ -109,7 +105,7 @@ async def get_api_calls(
             )
         )
 
-    # FR-004 合规监测：> 50 天 且 已配对 SKU 相关 且 未拉过详情
+    # FR-004 合规监测:> 50 天 且 已配对 SKU 相关 且 未拉过详情
     cutoff = now_beijing() - timedelta(days=50)
     compliance_warning = (
         await db.execute(
@@ -191,91 +187,3 @@ async def retry_call(
     )
     return {"task_id": task_id, "existing": existing}
 
-
-# ============================================================
-# Overstock SKU
-# ============================================================
-class OverstockOut(BaseModel):
-    id: int
-    commodity_sku: str
-    commodity_name: str | None = None
-    country: str
-    warehouse_id: str
-    warehouse_name: str | None = None
-    current_stock: int
-    last_sale_date: datetime | None = None
-    processed_at: datetime | None = None
-    note: str | None = None
-
-
-@router.get("/overstock", response_model=list[OverstockOut])
-async def list_overstock(
-    show_processed: bool = Query(default=False),
-    country: str | None = Query(default=None),
-    db: AsyncSession = Depends(db_session),
-    _: dict = Depends(get_current_session),
-) -> list[OverstockOut]:
-    stmt = (
-        select(
-            OverstockSkuMark,
-            ProductListing.commodity_name,
-            Warehouse.name.label("wh_name"),
-        )
-        .outerjoin(
-            ProductListing,
-            ProductListing.commodity_sku == OverstockSkuMark.commodity_sku,
-        )
-        .outerjoin(Warehouse, Warehouse.id == OverstockSkuMark.warehouse_id)
-    )
-    if not show_processed:
-        stmt = stmt.where(OverstockSkuMark.processed_at.is_(None))
-    if country:
-        stmt = stmt.where(OverstockSkuMark.country == country.upper())
-    stmt = stmt.order_by(OverstockSkuMark.country, OverstockSkuMark.commodity_sku)
-    rows = (await db.execute(stmt)).all()
-
-    result: list[OverstockOut] = []
-    seen: set[int] = set()
-    for mark, commodity_name, wh_name in rows:
-        if mark.id in seen:
-            continue
-        seen.add(mark.id)
-        result.append(
-            OverstockOut(
-                id=mark.id,
-                commodity_sku=mark.commodity_sku,
-                commodity_name=commodity_name,
-                country=mark.country,
-                warehouse_id=mark.warehouse_id,
-                warehouse_name=wh_name,
-                current_stock=mark.current_stock,
-                last_sale_date=mark.last_sale_date,
-                processed_at=mark.processed_at,
-                note=mark.note,
-            )
-        )
-    return result
-
-
-class OverstockProcessedPatch(BaseModel):
-    note: str | None = None
-
-
-@router.patch("/overstock/{mark_id}/processed")
-async def mark_overstock_processed(
-    body: OverstockProcessedPatch,
-    mark_id: int = Path(..., ge=1),
-    db: AsyncSession = Depends(db_session),
-    _: dict = Depends(get_current_session),
-) -> dict[str, Any]:
-    row = (
-        await db.execute(select(OverstockSkuMark).where(OverstockSkuMark.id == mark_id))
-    ).scalar_one_or_none()
-    if row is None:
-        raise NotFound(f"积压记录 {mark_id} 不存在")
-    await db.execute(
-        update(OverstockSkuMark)
-        .where(OverstockSkuMark.id == mark_id)
-        .values(processed_at=now_beijing(), note=body.note)
-    )
-    return {"status": "ok"}

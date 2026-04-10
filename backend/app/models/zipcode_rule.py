@@ -1,4 +1,4 @@
-"""邮编→仓库映射规则。"""
+"""邮编->仓库映射规则。"""
 
 from datetime import datetime
 
@@ -10,9 +10,9 @@ from app.db.base import Base
 
 
 class ZipcodeRule(Base):
-    """按 priority 升序匹配：首条命中即返回；全部未命中归"未知仓"。
+    """按 priority 升序匹配:首条命中即返回;全部未命中归"未知仓"。
 
-    表达式：`pref(zip, prefix_length)` 按 value_type 转型后与 compare_value
+    表达式:`pref(zip, prefix_length)` 按 value_type 转型后与 compare_value
     用 operator 比较。
     """
 
@@ -20,7 +20,8 @@ class ZipcodeRule(Base):
     __table_args__ = (
         CheckConstraint("value_type IN ('number','string')", name="value_type_enum"),
         CheckConstraint(
-            "operator IN ('=','!=','>','>=','<','<=')", name="operator_enum"
+            "operator IN ('=','!=','>','>=','<','<=','contains','not_contains')",
+            name="operator_enum",
         ),
         CheckConstraint("prefix_length BETWEEN 1 AND 10", name="prefix_length_range"),
         Index("ix_zipcode_rule_country_priority", "country", "priority"),

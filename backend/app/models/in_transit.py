@@ -1,10 +1,10 @@
-"""在途数据表（其他出库列表驱动）。
+"""在途数据表(其他出库列表驱动)。
 
-同步策略（spec FR-017a~d）：
+同步策略(spec FR-017a~d):
 - 每次同步记录 sync_start_time
 - 对备注含"在途中"的出库单 UPSERT in_transit_record (is_in_transit=true, last_seen_at=sync_start_time)
 - 同步结束后将 last_seen_at < sync_start_time 的活跃记录标记为 is_in_transit=false
-  （代表"在途中"标签已消失，自动归零）
+  (代表"在途中"标签已消失,自动归零)
 """
 
 from datetime import datetime
@@ -54,7 +54,7 @@ class InTransitRecord(Base):
 
 
 class InTransitItem(Base):
-    """出库单明细（SKU 级在途数量）。"""
+    """出库单明细(SKU 级在途数量)。"""
 
     __tablename__ = "in_transit_item"
     __table_args__ = (

@@ -1,4 +1,4 @@
-"""仓库表（赛狐同步 + 手动维护国家）。"""
+"""仓库表(赛狐同步 + 手动维护国家)。"""
 
 from datetime import datetime
 
@@ -12,8 +12,8 @@ from app.db.base import Base
 class Warehouse(Base):
     """仓库主数据。
 
-    `type` 取自赛狐：-1虚拟 / 0默认 / 1国内 / 2FBA / 3海外
-    `country` 由采购员手动维护，未指定前不参与计算。
+    `type` 取自赛狐:-1虚拟 / 0默认 / 1国内 / 2FBA / 3海外
+    `country` 由采购员手动维护,未指定前不参与计算。
     """
 
     __tablename__ = "warehouse"

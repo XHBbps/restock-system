@@ -12,7 +12,7 @@ from app.db.base import Base
 class SkuConfig(Base):
     """SKU 级可覆盖参数。
 
-    `lead_time_days` 为 NULL 表示使用全局参数；0 表示当天采购（有效值）。
+    `lead_time_days` 为 NULL 表示使用全局参数;0 表示当天采购(有效值)。
     """
 
     __tablename__ = "sku_config"

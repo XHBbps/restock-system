@@ -1,4 +1,4 @@
-"""在线产品 listing 表（SKU × 店铺 × 站点）。"""
+"""在线产品 listing 表(SKU x 店铺 x 站点)。"""
 
 from datetime import datetime
 
@@ -12,9 +12,9 @@ from app.db.base import Base
 class ProductListing(Base):
     """赛狐在线产品信息同步落库。
 
-    维度：(shop_id, marketplace_id, seller_sku) 唯一。
-    `day*_sale_num` 字段仅存储供对账参考，不参与 velocity 计算
-    （velocity 从 order_item 聚合）。
+    维度:(shop_id, marketplace_id, seller_sku) 唯一。
+    `day*_sale_num` 字段仅存储供对账参考,不参与 velocity 计算
+    (velocity 从 order_item 聚合)。
     """
 
     __tablename__ = "product_listing"

@@ -1,4 +1,4 @@
-"""订单相关表（order_header + order_item + order_detail + order_detail_fetch_log）。"""
+"""订单相关表(order_header + order_item + order_detail + order_detail_fetch_log)。"""
 
 from datetime import datetime
 from decimal import Decimal
@@ -22,9 +22,9 @@ from app.db.base import Base
 
 
 class OrderHeader(Base):
-    """订单骨架（列表接口同步）。
+    """订单骨架(列表接口同步)。
 
-    时间字段（purchase_date, last_update_date）已按订单站点时区解析并转为
+    时间字段(purchase_date, last_update_date)已按订单站点时区解析并转为
     Asia/Shanghai 存储。
     """
 
@@ -66,7 +66,7 @@ class OrderHeader(Base):
 
 
 class OrderItem(Base):
-    """订单明细（SKU 级）。
+    """订单明细(SKU 级)。
 
     PK = (order_id, order_item_id) 使订单状态更新时 UPSERT 稳定。
     """
@@ -93,7 +93,7 @@ class OrderItem(Base):
 
 
 class OrderDetail(Base):
-    """订单详情（含邮编，仅对已配对 SKU 相关订单拉取）。"""
+    """订单详情(含邮编,仅对已配对 SKU 相关订单拉取)。"""
 
     __tablename__ = "order_detail"
     __table_args__ = (
@@ -119,7 +119,7 @@ class OrderDetail(Base):
 
 
 class OrderDetailFetchLog(Base):
-    """订单详情已拉列表（避免重复调用 1 QPS 限流的详情接口）。"""
+    """订单详情已拉列表(避免重复调用 1 QPS 限流的详情接口)。"""
 
     __tablename__ = "order_detail_fetch_log"
 

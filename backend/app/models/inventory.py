@@ -1,4 +1,4 @@
-"""库存快照表（latest 单行 + history 每日归档）。"""
+"""库存快照表(latest 单行 + history 每日归档)。"""
 
 from datetime import date, datetime
 
@@ -10,10 +10,10 @@ from app.db.base import Base
 
 
 class InventorySnapshotLatest(Base):
-    """最新库存快照（每次同步 UPSERT）。
+    """最新库存快照(每次同步 UPSERT)。
 
-    只存 `available` + `reserved`；在途数据由 in_transit_record/item 独立
-    维护（spec FR-017 明确不读 stockWait）。
+    只存 `available` + `reserved`;在途数据由 in_transit_record/item 独立
+    维护(spec FR-017 明确不读 stockWait)。
     """
 
     __tablename__ = "inventory_snapshot_latest"
@@ -44,7 +44,7 @@ class InventorySnapshotLatest(Base):
 
 
 class InventorySnapshotHistory(Base):
-    """库存快照每日归档（02:00 由定时任务从 latest 表整表复制）。"""
+    """库存快照每日归档(02:00 由定时任务从 latest 表整表复制)。"""
 
     __tablename__ = "inventory_snapshot_history"
     __table_args__ = (

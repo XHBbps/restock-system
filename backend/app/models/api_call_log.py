@@ -1,4 +1,4 @@
-"""赛狐接口调用日志（观测与监控）。"""
+"""赛狐接口调用日志(观测与监控)。"""
 
 from datetime import datetime
 
@@ -12,7 +12,7 @@ from app.db.base import Base
 class ApiCallLog(Base):
     """赛狐 API 每次调用的结果日志。
 
-    由 SaihuClient 在每次请求结束后写入（成功/失败都记录）。
+    由 SaihuClient 在每次请求结束后写入(成功/失败都记录)。
     """
 
     __tablename__ = "api_call_log"

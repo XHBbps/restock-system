@@ -1,9 +1,16 @@
-"""建议单相关 Pydantic DTO（对应 contracts/suggestion.yaml）。"""
+"""建议单相关 Pydantic DTO(对应 contracts/suggestion.yaml)。"""
 
 from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+
+class AllocationExplanationOut(BaseModel):
+    allocation_mode: str
+    matched_order_qty: int
+    unknown_order_qty: int
+    eligible_warehouses: list[str]
 
 
 class SuggestionOut(BaseModel):
@@ -29,9 +36,9 @@ class SuggestionItemOut(BaseModel):
     total_qty: int
     country_breakdown: dict[str, Any]
     warehouse_breakdown: dict[str, Any]
+    allocation_snapshot: dict[str, AllocationExplanationOut] | None = None
     t_purchase: dict[str, Any]
     t_ship: dict[str, Any]
-    overstock_countries: list[str]
     velocity_snapshot: dict[str, Any] | None = None
     sale_days_snapshot: dict[str, Any] | None = None
     urgent: bool
@@ -55,7 +62,7 @@ class SuggestionListOut(BaseModel):
 
 
 class SuggestionItemPatch(BaseModel):
-    """编辑建议条目（FR-026 全字段可改 + 非负校验）。"""
+    """编辑建议条目(FR-026 全字段可改 + 非负校验)。"""
 
     total_qty: int | None = Field(default=None, ge=0)
     country_breakdown: dict[str, int] | None = None
@@ -65,6 +72,6 @@ class SuggestionItemPatch(BaseModel):
 
 
 class PushRequest(BaseModel):
-    """推送选中条目至赛狐（FR-045a 上限 50）。"""
+    """推送选中条目至赛狐(FR-045a 上限 50)。"""
 
     item_ids: list[int] = Field(..., min_length=1, max_length=50)

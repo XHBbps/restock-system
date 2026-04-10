@@ -1,4 +1,4 @@
-"""赛狐 access_token 缓存（单行）。"""
+"""赛狐 access_token 缓存(单行)。"""
 
 from datetime import datetime
 
@@ -10,7 +10,7 @@ from app.db.base import Base
 
 
 class AccessTokenCache(Base):
-    """单行 token 缓存，按 `expires_at` 管理生命周期。"""
+    """单行 token 缓存,按 `expires_at` 管理生命周期。"""
 
     __tablename__ = "access_token_cache"
     __table_args__ = (CheckConstraint("id = 1", name="single_row"),)
