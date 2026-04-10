@@ -9,53 +9,76 @@
             <div class="brand-meta">补货管理</div>
           </div>
         </template>
-        <button class="collapse-btn" :title="sidebar.isCollapsed ? '展开侧栏' : '收起侧栏'" @click="sidebar.toggleCollapse()">
-          <PanelLeftOpen v-if="sidebar.isCollapsed" :size="16" />
-          <PanelLeftClose v-else :size="16" />
-        </button>
       </div>
 
       <nav class="nav">
-        <div v-for="group in navigationGroups" :key="group.title" class="nav-group">
+        <div v-for="(group, gi) in navigationGroups" :key="group.title" class="nav-group">
+          <!-- Divider between groups (collapsed only) -->
+          <div v-if="gi > 0 && sidebar.isCollapsed" class="nav-group-divider" />
+
+          <!-- Group title (expanded only) -->
           <div v-if="!sidebar.isCollapsed" class="nav-group-title">{{ group.title }}</div>
+
           <template v-for="child in group.children" :key="'items' in child ? child.label : child.to">
+            <!-- SubCategory -->
             <template v-if="isSubCategory(child)">
-              <button
-                v-if="!sidebar.isCollapsed"
-                class="nav-subcategory-toggle"
-                @click="sidebar.toggleCategory(child.label)"
-              >
-                <span>{{ child.label }}</span>
-                <ChevronRight
-                  class="nav-subcategory-chevron"
-                  :class="{ 'nav-subcategory-chevron-open': sidebar.isCategoryExpanded(child.label) }"
-                  :size="12"
-                />
-              </button>
-              <div
-                v-if="!sidebar.isCollapsed && sidebar.isCategoryExpanded(child.label)"
-                class="nav-subcategory-items"
-              >
-                <RouterLink
-                  v-for="item in child.items"
-                  :key="item.to"
-                  :to="item.to"
-                  class="nav-item"
-                  active-class="nav-item-active"
+              <!-- EXPANDED: collapsible toggle + items -->
+              <template v-if="!sidebar.isCollapsed">
+                <button
+                  class="nav-subcategory-toggle"
+                  @click="sidebar.toggleCategory(child.label)"
                 >
-                  <component :is="item.icon" class="nav-item-icon" :size="16" />
-                  <span class="nav-item-label">{{ item.label }}</span>
-                </RouterLink>
+                  <span>{{ child.label }}</span>
+                  <ChevronRight
+                    class="nav-subcategory-chevron"
+                    :class="{ 'nav-subcategory-chevron-open': sidebar.isCategoryExpanded(child.label) }"
+                    :size="12"
+                  />
+                </button>
+                <div v-if="sidebar.isCategoryExpanded(child.label)" class="nav-subcategory-items">
+                  <RouterLink
+                    v-for="item in child.items"
+                    :key="item.to"
+                    :to="item.to"
+                    class="nav-item"
+                    active-class="nav-item-active"
+                  >
+                    <component :is="item.icon" class="nav-item-icon" :size="16" />
+                    <span class="nav-item-label">{{ item.label }}</span>
+                  </RouterLink>
+                </div>
+              </template>
+
+              <!-- COLLAPSED: icon with hover popover -->
+              <div v-else class="nav-popover-wrapper">
+                <div class="nav-item nav-item-collapsed" :title="child.label">
+                  <component :is="child.icon" class="nav-item-icon" :size="18" />
+                </div>
+                <div class="nav-popover">
+                  <div class="nav-popover-title">{{ child.label }}</div>
+                  <RouterLink
+                    v-for="item in child.items"
+                    :key="item.to"
+                    :to="item.to"
+                    class="nav-popover-item"
+                    active-class="nav-popover-item-active"
+                  >
+                    {{ item.label }}
+                  </RouterLink>
+                </div>
               </div>
             </template>
+
+            <!-- Direct NavItem -->
             <RouterLink
               v-else
               :to="child.to"
               class="nav-item"
+              :class="{ 'nav-item-collapsed': sidebar.isCollapsed }"
               active-class="nav-item-active"
               :title="sidebar.isCollapsed ? child.label : undefined"
             >
-              <component :is="child.icon" class="nav-item-icon" :size="16" />
+              <component :is="child.icon" class="nav-item-icon" :size="sidebar.isCollapsed ? 18 : 16" />
               <span v-if="!sidebar.isCollapsed" class="nav-item-label">{{ child.label }}</span>
             </RouterLink>
           </template>
@@ -77,12 +100,18 @@
 
     <main class="main">
       <header class="topbar">
-        <div class="breadcrumb">
-          <RouterLink to="/workspace" class="breadcrumb-root">Restock</RouterLink>
-          <ChevronRight class="breadcrumb-sep" :size="12" />
-          <span class="breadcrumb-section">{{ currentSection }}</span>
-          <ChevronRight class="breadcrumb-sep" :size="12" />
-          <span class="breadcrumb-current">{{ currentTitle }}</span>
+        <div class="topbar-left">
+          <button class="collapse-btn" :title="sidebar.isCollapsed ? '展开侧栏' : '收起侧栏'" @click="sidebar.toggleCollapse()">
+            <PanelLeftOpen v-if="sidebar.isCollapsed" :size="16" />
+            <PanelLeftClose v-else :size="16" />
+          </button>
+          <div class="breadcrumb">
+            <RouterLink to="/workspace" class="breadcrumb-root">Restock</RouterLink>
+            <ChevronRight class="breadcrumb-sep" :size="12" />
+            <span class="breadcrumb-section">{{ currentSection }}</span>
+            <ChevronRight class="breadcrumb-sep" :size="12" />
+            <span class="breadcrumb-current">{{ currentTitle }}</span>
+          </div>
         </div>
         <div class="topbar-right">
           <span class="badge-env">Dashboard</span>
@@ -185,31 +214,9 @@ async function handleLogout(): Promise<void> {
   border-bottom: 1px solid $color-border-default;
 }
 
-.sidebar-collapsed .brand-mark {
-  margin: 0 auto;
-}
-
-.collapse-btn {
-  width: 28px;
-  height: 28px;
-  border: none;
-  border-radius: $radius-md;
-  background: transparent;
-  color: $color-text-secondary;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
+.sidebar-collapsed .sidebar-brand {
   justify-content: center;
-  flex-shrink: 0;
-
-  &:hover {
-    background: $color-bg-subtle;
-    color: $color-text-primary;
-  }
-}
-
-.sidebar-collapsed .collapse-btn {
-  margin: 0 auto;
+  padding: $space-3;
 }
 
 .brand-mark {
@@ -310,9 +317,70 @@ async function handleLogout(): Promise<void> {
   display: none;
 }
 
-.sidebar-collapsed .nav-item {
+.nav-group-divider {
+  height: 1px;
+  margin: $space-2 $space-3;
+  background: $color-border-default;
+}
+
+.nav-item-collapsed {
   justify-content: center;
-  padding: 9px 0;
+  padding: 10px 0;
+}
+
+.nav-popover-wrapper {
+  position: relative;
+
+  &:hover .nav-popover {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(0);
+  }
+}
+
+.nav-popover {
+  position: absolute;
+  left: calc(100% + 6px);
+  top: 0;
+  z-index: 100;
+  min-width: 160px;
+  padding: $space-2;
+  background: $color-bg-card;
+  border: 1px solid $color-border-default;
+  border-radius: $radius-lg;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(-4px);
+  transition: opacity 150ms ease, transform 150ms ease, visibility 150ms;
+}
+
+.nav-popover-title {
+  padding: $space-1 $space-3;
+  font-size: 11px;
+  font-weight: $font-weight-semibold;
+  color: $color-text-secondary;
+  text-transform: uppercase;
+  letter-spacing: $tracking-wider;
+}
+
+.nav-popover-item {
+  display: block;
+  padding: 8px $space-3;
+  border-radius: $radius-md;
+  color: $color-text-primary;
+  text-decoration: none;
+  font-size: $font-size-sm;
+  transition: $transition-fast;
+
+  &:hover {
+    background: $color-bg-subtle;
+  }
+}
+
+.nav-popover-item-active {
+  font-weight: $font-weight-semibold;
+  background: $color-bg-subtle;
 }
 
 .sidebar-collapsed .nav-item-icon {
@@ -415,6 +483,31 @@ async function handleLogout(): Promise<void> {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: $space-3;
+}
+
+.collapse-btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: $radius-md;
+  background: transparent;
+  color: $color-text-secondary;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+
+  &:hover {
+    background: $color-bg-subtle;
+    color: $color-text-primary;
+  }
 }
 
 .breadcrumb {
