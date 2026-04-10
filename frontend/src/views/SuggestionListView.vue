@@ -14,7 +14,7 @@
               :disabled="selected.length === 0 || selected.length > 50"
               @click="handlePush"
             >
-              推送至赛狐（{{ selected.length }}）
+              推送（{{ selected.length }}）
             </el-button>
           </div>
         </div>
@@ -36,7 +36,7 @@
           @selection-change="handleSelection"
         >
           <el-table-column type="selection" width="48" :selectable="canSelect" />
-          <el-table-column label="商品信息" min-width="320" show-overflow-tooltip>
+          <el-table-column label="商品信息" min-width="320">
             <template #default="{ row }">
               <SkuCard
                 :sku="row.commodity_sku"
@@ -48,7 +48,7 @@
             </template>
           </el-table-column>
           <el-table-column label="总采购量" prop="total_qty" width="120" align="right" sortable show-overflow-tooltip />
-          <el-table-column label="国家分布" min-width="220" show-overflow-tooltip>
+          <el-table-column label="国家分布" min-width="220">
             <template #default="{ row }">
               <span v-for="(qty, country) in row.country_breakdown" :key="country" class="country-chip">
                 {{ country }}: {{ qty }}
@@ -60,14 +60,14 @@
               {{ earliestPurchase(row) }}
             </template>
           </el-table-column>
-          <el-table-column label="推送状态" width="120" sortable show-overflow-tooltip>
+          <el-table-column label="推送状态" width="120" sortable>
             <template #default="{ row }">
               <el-tag :type="getSuggestionPushStatusMeta(row.push_status).tagType">
                 {{ getSuggestionPushStatusMeta(row.push_status).label }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="100" align="center" show-overflow-tooltip>
+          <el-table-column label="操作" width="100" align="center">
             <template #default="{ row }">
               <el-button link type="primary" @click="goDetail(row.id)">详情</el-button>
             </template>
@@ -150,6 +150,9 @@ watch([searchSku, pageSize], () => {
   page.value = 1
   selected.value = []
 })
+watch(page, () => {
+  selected.value = []
+})
 
 function earliestPurchase(it: SuggestionItem): string {
   const dates = Object.values(it.t_purchase || {})
@@ -179,7 +182,7 @@ async function handlePush(): Promise<void> {
     return
   }
   await ElMessageBox.confirm(
-    `确认推送 ${selected.value.length} 条建议至赛狐生成采购单吗？`,
+    `确认推送 ${selected.value.length} 条建议生成采购单吗？`,
     '确认推送',
     { type: 'warning' },
   )
@@ -225,6 +228,8 @@ onMounted(loadCurrent)
 </script>
 
 <style lang="scss" scoped>
+@use 'sass:color';
+
 .suggestion-list {
   display: flex;
   flex-direction: column;
@@ -267,6 +272,16 @@ onMounted(loadCurrent)
 
 :deep(.row-urgent) {
   background-color: $color-danger-soft !important;
+}
+
+:deep(.el-table__body tr.row-urgent > td.el-table__cell) {
+  background-color: $color-danger-soft !important;
+  color: $color-text-primary !important;
+}
+
+:deep(.el-table__body tr.row-urgent:hover > td.el-table__cell) {
+  background-color: color.mix($color-danger-soft, $color-bg-subtle, $weight: 72%) !important;
+  color: $color-text-primary !important;
 }
 
 @media (max-width: 900px) {
