@@ -162,9 +162,6 @@ onMounted(reload)
 }
 
 .site-tag {
-  max-width: 160px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  flex-shrink: 0;
 }
 </style>
