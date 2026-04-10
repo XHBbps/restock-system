@@ -1,35 +1,32 @@
 """密码哈希与 JWT 工具。"""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from jose import JWTError, jwt
-from passlib.context import CryptContext
+import bcrypt
+import jwt
 
 from app.config import get_settings
 from app.core.exceptions import Unauthorized
 
-# bcrypt 上下文
-_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 
 def hash_password(plain: str) -> str:
     """生成密码 bcrypt 哈希。"""
-    return _pwd_context.hash(plain)
+    return bcrypt.hashpw(plain.encode(), bcrypt.gensalt()).decode()
 
 
 def verify_password(plain: str, hashed: str) -> bool:
     """验证密码哈希。"""
-    return _pwd_context.verify(plain, hashed)
+    return bcrypt.checkpw(plain.encode(), hashed.encode())
 
 
 def create_access_token(subject: str = "owner", extra: dict[str, Any] | None = None) -> str:
     """签发 JWT。
 
-    单用户场景下 subject 固定为 'owner'，可在 extra 中放入额外声明。
+    单用户场景下 subject 固定为 'owner',可在 extra 中放入额外声明。
     """
     settings = get_settings()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     expires_at = now + timedelta(hours=settings.jwt_expires_hours)
     payload: dict[str, Any] = {
         "sub": subject,
@@ -42,9 +39,9 @@ def create_access_token(subject: str = "owner", extra: dict[str, Any] | None = N
 
 
 def decode_token(token: str) -> dict[str, Any]:
-    """解码 + 校验 JWT，失败抛 Unauthorized。"""
+    """解码 + 校验 JWT,失败抛 Unauthorized。"""
     settings = get_settings()
     try:
         return jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
-    except JWTError as exc:
+    except jwt.PyJWTError as exc:
         raise Unauthorized("token 无效或已过期") from exc

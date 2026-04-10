@@ -30,9 +30,8 @@ dependencies = [
     "structlog>=24.4.0",
 
     # 安全
-    "passlib[bcrypt]>=1.7.4",
-    "python-jose[cryptography]>=3.3.0",
-    "bcrypt==4.0.1",  # 兼容 passlib 1.7.x
+    "PyJWT>=2.9.0",
+    "bcrypt>=4.0.1,<5",
 
     # 工具
     "python-dateutil>=2.9.0",
@@ -55,8 +54,6 @@ dev = [
     "pytest-mock>=3.14.0",
 
     # 类型桩
-    "types-python-jose",
-    "types-passlib",
     "types-python-dateutil",
 
     # 提交钩子
@@ -125,7 +122,6 @@ plugins = ["pydantic.mypy"]
 module = [
     "apscheduler.*",
     "aiolimiter.*",
-    "passlib.*",
 ]
 ignore_missing_imports = true
 
@@ -143,5 +139,5 @@ addopts = [
 ]
 filterwarnings = [
     "error",
-    "ignore::DeprecationWarning:passlib.*",
+    "ignore::ResourceWarning",
 ]
