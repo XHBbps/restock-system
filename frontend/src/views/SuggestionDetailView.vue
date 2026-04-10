@@ -137,20 +137,6 @@
                       <span class="status-label">失败原因</span>
                       <span class="status-value">{{ item.push_error || '-' }}</span>
                     </div>
-                    <div class="status-row">
-                      <span class="status-label">积压国家</span>
-                      <div v-if="item.overstock_countries?.length" class="status-tag-list">
-                        <el-tag
-                          v-for="country in item.overstock_countries"
-                          :key="country"
-                          type="warning"
-                          size="small"
-                        >
-                          {{ country }}
-                        </el-tag>
-                      </div>
-                      <span v-else class="status-value">-</span>
-                    </div>
                   </div>
                 </section>
 

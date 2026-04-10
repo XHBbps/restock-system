@@ -1,5 +1,14 @@
 // 建议单 API 客户端
+import type { SortOrder } from '@/utils/tableSort'
+
 import client from './client'
+
+export interface AllocationExplanation {
+  allocation_mode: 'matched' | 'fallback_even' | 'no_warehouse'
+  matched_order_qty: number
+  unknown_order_qty: number
+  eligible_warehouses: string[]
+}
 
 export interface Suggestion {
   id: number
@@ -22,9 +31,9 @@ export interface SuggestionItem {
   total_qty: number
   country_breakdown: Record<string, number>
   warehouse_breakdown: Record<string, Record<string, number>>
+  allocation_snapshot: Record<string, AllocationExplanation> | null
   t_purchase: Record<string, string>
   t_ship: Record<string, string>
-  overstock_countries: string[]
   velocity_snapshot: Record<string, number> | null
   sale_days_snapshot: Record<string, number> | null
   urgent: boolean
@@ -55,6 +64,8 @@ export async function listSuggestions(params: {
   sku?: string
   page?: number
   page_size?: number
+  sort_by?: string
+  sort_order?: SortOrder
 }): Promise<{ items: Suggestion[]; total: number }> {
   const { data } = await client.get('/api/suggestions', { params })
   return data
