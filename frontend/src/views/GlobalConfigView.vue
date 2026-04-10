@@ -143,7 +143,7 @@ async function save(): Promise<void> {
 }
 
 .card-title {
-  font-size: $font-size-base;
+  font-size: $font-size-sm;
   font-weight: $font-weight-semibold;
 }
 
