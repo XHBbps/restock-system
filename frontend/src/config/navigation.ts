@@ -3,6 +3,7 @@ import {
   Activity,
   Boxes,
   ClipboardList,
+  Database,
   FileText,
   Gauge,
   History,
@@ -13,6 +14,7 @@ import {
   Settings,
   ShieldAlert,
   Store,
+  TrendingUp,
   Truck,
   Warehouse,
 } from 'lucide-vue-next'
@@ -25,6 +27,7 @@ export interface NavItem {
 
 export interface NavSubCategory {
   label: string
+  icon: Component
   items: NavItem[]
 }
 
@@ -57,6 +60,7 @@ export const navigationGroups: NavGroup[] = [
     children: [
       {
         label: '基础数据',
+        icon: Database,
         items: [
           { to: '/data/shops', label: '店铺', icon: Store },
           { to: '/data/warehouses', label: '仓库', icon: Warehouse },
@@ -65,6 +69,7 @@ export const navigationGroups: NavGroup[] = [
       },
       {
         label: '业务数据',
+        icon: TrendingUp,
         items: [
           { to: '/data/orders', label: '订单', icon: ClipboardList },
           { to: '/data/inventory', label: '库存', icon: Boxes },
@@ -78,6 +83,7 @@ export const navigationGroups: NavGroup[] = [
     children: [
       {
         label: '同步管理',
+        icon: RefreshCw,
         items: [
           { to: '/settings/sync', label: '数据同步', icon: RefreshCw },
           { to: '/settings/sync-log', label: '同步日志', icon: FileText },
@@ -85,6 +91,7 @@ export const navigationGroups: NavGroup[] = [
       },
       {
         label: '基础配置',
+        icon: Settings,
         items: [
           { to: '/settings/global', label: '全局参数', icon: Settings },
           { to: '/settings/sku', label: 'SKU 配置', icon: PackageSearch },
@@ -95,6 +102,7 @@ export const navigationGroups: NavGroup[] = [
       },
       {
         label: '系统监控',
+        icon: ShieldAlert,
         items: [
           { to: '/settings/api-monitor', label: '接口监控', icon: ShieldAlert },
           { to: '/settings/performance', label: '性能监控', icon: Gauge },
