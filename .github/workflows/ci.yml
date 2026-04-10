@@ -50,8 +50,8 @@ jobs:
         run: npm ci
       - name: Run frontend build
         run: npm run build
-      - name: Run frontend tests
-        run: npm test
+      - name: Run frontend tests with coverage
+        run: npm run test:coverage
       - name: Audit frontend dependencies
         run: npm audit --audit-level=high
         continue-on-error: true
