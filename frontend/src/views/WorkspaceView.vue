@@ -35,49 +35,50 @@
     <section class="bottom-grid">
       <DataTableCard title="急需补货 SKU">
         <template v-if="data && data.top_urgent_skus.length > 0">
-          <el-table :data="data.top_urgent_skus" stripe>
-            <el-table-column prop="commodity_sku" label="SKU" min-width="180" />
-            <el-table-column prop="total_qty" label="建议补货量" width="120" align="right" />
-            <el-table-column label="国家分布" min-width="200">
-              <template #default="{ row }">
-                <el-tag
-                  v-for="(qty, country) in row.country_breakdown"
-                  :key="country"
-                  size="small"
-                  class="country-tag"
-                >
+          <div class="urgent-list">
+            <div v-for="item in data.top_urgent_skus" :key="item.commodity_sku" class="urgent-item">
+              <div class="urgent-item-main">
+                <SkuCard :sku="item.commodity_sku" :name="item.commodity_name" :image="item.main_image" />
+                <span class="urgent-qty">{{ item.total_qty }}</span>
+              </div>
+              <div class="urgent-countries">
+                <el-tag v-for="(qty, country) in item.country_breakdown" :key="country" size="small">
                   {{ country }}:{{ qty }}
                 </el-tag>
-              </template>
-            </el-table-column>
-          </el-table>
+              </div>
+            </div>
+          </div>
         </template>
         <el-empty v-else description="暂无紧急补货" :image-size="72" />
       </DataTableCard>
 
-      <DataTableCard title="当前建议">
-        <div v-if="data?.suggestion_id != null" class="summary-panel">
-          <div class="summary-item">
-            <span class="summary-label">建议单编号</span>
-            <strong>#{{ data.suggestion_id }}</strong>
+      <DataTableCard title="补货概览">
+        <div class="right-card-content">
+          <div v-if="data?.suggestion_id != null" class="suggestion-progress">
+            <div class="suggestion-header">
+              <div class="suggestion-meta">
+                <strong>#{{ data.suggestion_id }}</strong>
+                <el-tag :type="suggestionStatus.tagType" size="small">{{ suggestionStatus.label }}</el-tag>
+              </div>
+              <el-button link type="primary" @click="go('/restock/current')">查看详情</el-button>
+            </div>
+            <el-progress
+              :percentage="data.suggestion_item_count > 0 ? Math.round(data.pushed_count / data.suggestion_item_count * 100) : 0"
+              :stroke-width="10"
+            />
+            <span class="progress-text">已推送 {{ data.pushed_count }} / 总计 {{ data.suggestion_item_count }}</span>
           </div>
-          <div class="summary-item">
-            <span class="summary-label">状态</span>
-            <el-tag :type="suggestionStatus.tagType">{{ suggestionStatus.label }}</el-tag>
-          </div>
-          <div class="summary-item">
-            <span class="summary-label">条目数</span>
-            <strong>{{ data.suggestion_item_count }}</strong>
-          </div>
-          <div class="summary-item">
-            <span class="summary-label">已推送</span>
-            <strong>{{ data.pushed_count }}</strong>
-          </div>
-          <div class="summary-actions">
-            <el-button link type="primary" @click="go('/restock/current')">查看详情</el-button>
-          </div>
+
+          <template v-if="data && data.top_urgent_skus.length > 0">
+            <DashboardChartCard
+              title="补货量国家分布"
+              :option="countryDistChartOption"
+              :empty="false"
+              style="box-shadow: none; padding: 0;"
+            />
+          </template>
+          <el-empty v-else-if="!data?.suggestion_id" description="暂无数据" :image-size="72" />
         </div>
-        <el-empty v-else description="当前没有活跃建议单" :image-size="72" />
       </DataTableCard>
     </section>
   </div>
@@ -89,6 +90,7 @@ import DashboardChartCard from '@/components/dashboard/DashboardChartCard.vue'
 import DashboardPageHeader from '@/components/dashboard/DashboardPageHeader.vue'
 import DashboardStatCard from '@/components/dashboard/DashboardStatCard.vue'
 import DataTableCard from '@/components/dashboard/DataTableCard.vue'
+import SkuCard from '@/components/SkuCard.vue'
 import { getSuggestionStatusMeta } from '@/utils/status'
 import { getCountryLabel } from '@/utils/countries'
 import type { EChartsCoreOption } from 'echarts/core'
@@ -153,6 +155,33 @@ const stockDaysChartOption = computed<EChartsCoreOption>(() => {
   }
 })
 
+const countryDistChartOption = computed<EChartsCoreOption>(() => {
+  if (!data.value?.top_urgent_skus.length) return {}
+  const totals: Record<string, number> = {}
+  for (const item of data.value.top_urgent_skus) {
+    for (const [country, qty] of Object.entries(item.country_breakdown)) {
+      totals[country] = (totals[country] || 0) + qty
+    }
+  }
+  const sorted = Object.entries(totals).sort((a, b) => b[1] - a[1])
+  const colors = ['#18181b', '#3b82f6', '#16a34a', '#d97706', '#dc2626', '#8b5cf6', '#06b6d4', '#ec4899']
+  return {
+    tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+    legend: { bottom: 0, icon: 'circle', textStyle: { color: '#71717a' } },
+    series: [{
+      type: 'pie',
+      radius: ['45%', '70%'],
+      itemStyle: { borderColor: '#ffffff', borderWidth: 3 },
+      label: { formatter: '{b}\n{d}%', color: '#09090b', fontSize: 11 },
+      data: sorted.map(([country, qty], i) => ({
+        name: country,
+        value: qty,
+        itemStyle: { color: colors[i % colors.length] },
+      })),
+    }],
+  }
+})
+
 async function load(): Promise<void> {
   try {
     data.value = await getDashboardOverview()
@@ -193,32 +222,72 @@ onMounted(load)
   gap: $space-4;
 }
 
-.summary-panel {
+.urgent-list {
+  display: flex;
+  flex-direction: column;
+  gap: $space-3;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.urgent-item {
+  padding-bottom: $space-3;
+  border-bottom: 1px solid $color-border-default;
+
+  &:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+}
+
+.urgent-item-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.urgent-qty {
+  font-size: $font-size-lg;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+  flex-shrink: 0;
+}
+
+.urgent-countries {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: $space-2;
+}
+
+.right-card-content {
   display: flex;
   flex-direction: column;
   gap: $space-4;
 }
 
-.summary-item {
+.suggestion-progress {
+  display: flex;
+  flex-direction: column;
+  gap: $space-2;
+}
+
+.suggestion-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: $space-4;
 }
 
-.summary-label {
-  color: $color-text-secondary;
-}
-
-.summary-actions {
+.suggestion-meta {
   display: flex;
-  gap: $space-3;
-  flex-wrap: wrap;
+  align-items: center;
+  gap: $space-2;
 }
 
-.country-tag {
-  margin-right: 4px;
-  margin-bottom: 2px;
+.progress-text {
+  font-size: $font-size-xs;
+  color: $color-text-secondary;
+  margin-top: $space-1;
 }
 
 @media (max-width: 1280px) {
