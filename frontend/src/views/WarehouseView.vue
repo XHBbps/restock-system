@@ -91,7 +91,7 @@ function warehouseTypeTag(type: number): 'success' | 'warning' | 'info' | 'dange
 }
 
 function parseSites(raw: string): string[] {
-  return raw.split(/[,;，；\s]+/).filter(Boolean)
+  return raw.split(/[,;，；\s]+/).filter((s) => s && s !== '-')
 }
 
 const pagedRows = computed(() => {
