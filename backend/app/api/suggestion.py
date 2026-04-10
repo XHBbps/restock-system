@@ -149,15 +149,14 @@ async def patch_item(
                 if v < 0:
                     raise ValidationFailed("warehouse_breakdown 包含负数")
 
-    # H4:total_qty 与 country_breakdown 一致性
-    if (
-        patch.total_qty is not None
-        and patch.country_breakdown is not None
-        and sum(patch.country_breakdown.values()) != patch.total_qty
-    ):
-        raise ValidationFailed(
-            "country_breakdown 之和与 total_qty 不一致"
-        )
+    # H4:total_qty 与 country_breakdown 一致性(使用生效值)
+    effective_total = patch.total_qty if patch.total_qty is not None else item.total_qty
+    effective_breakdown = patch.country_breakdown if patch.country_breakdown is not None else item.country_breakdown
+    if effective_breakdown is not None and effective_total is not None:
+        if sum(effective_breakdown.values()) != effective_total:
+            raise ValidationFailed(
+                "country_breakdown 之和与 total_qty 不一致"
+            )
 
     updates: dict[str, Any] = {}
     if patch.total_qty is not None:
