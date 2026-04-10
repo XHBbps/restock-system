@@ -232,7 +232,7 @@ onMounted(load)
   flex-direction: column;
   max-height: 400px;
   overflow-y: auto;
-  padding-right: $space-1;
+  scrollbar-gutter: stable;
   scrollbar-width: none;
 
   &:hover {
