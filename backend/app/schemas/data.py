@@ -1,12 +1,12 @@
 """外部数据源观测 DTO。
 
-设计要点：
-- 字段内部使用 snake_case（与 ORM 一致），自动通过 alias_generator 输出 camelCase
-- `from_attributes=True` + `populate_by_name=True`：既支持 `Model.model_validate(orm_obj)`,
+设计要点:
+- 字段内部使用 snake_case(与 ORM 一致),自动通过 alias_generator 输出 camelCase
+- `from_attributes=True` + `populate_by_name=True`:既支持 `Model.model_validate(orm_obj)`,
   也允许外部构造时使用 snake_case 或 camelCase 字段名
-- 输出 JSON 遵循 `by_alias=True` 语义（FastAPI 默认会使用 alias 序列化）
+- 输出 JSON 遵循 `by_alias=True` 语义(FastAPI 默认会使用 alias 序列化)
 
-字段命名保持与赛狐接口返回结构一致，便于操作员对照核查。
+字段命名保持与赛狐接口返回结构一致,便于操作员对照核查。
 """
 
 from datetime import datetime
@@ -20,7 +20,7 @@ class SaihuLikeModel(BaseModel):
     """所有 data DTO 基类。
 
     使用 `alias_generator=to_camel` 自动把 snake_case 字段名转为 camelCase 别名。
-    FastAPI 序列化时会优先使用 alias，因此输出 JSON 字段是 camelCase。
+    FastAPI 序列化时会优先使用 alias,因此输出 JSON 字段是 camelCase。
     """
 
     model_config = ConfigDict(
@@ -70,7 +70,7 @@ class DataOrderListOut(BaseModel):
 
 
 class DataOrderDetail(SaihuLikeModel):
-    """订单完整信息（header + items + postcode detail）。"""
+    """订单完整信息(header + items + postcode detail)。"""
 
     shop_id: str
     amazon_order_id: str
@@ -213,3 +213,38 @@ class DataSyncStateRow(BaseModel):
     last_success_at: datetime | None = None
     last_status: str | None = None
     last_error: str | None = None
+
+
+# ==================== SKU Overview (grouped) ====================
+class SkuListingItem(BaseModel):
+    """Single marketplace listing under a SKU."""
+    id: int
+    shop_id: str
+    marketplace_id: str
+    seller_sku: str | None = None
+    day7_sale_num: int | None = None
+    day14_sale_num: int | None = None
+    day30_sale_num: int | None = None
+    online_status: str
+    last_sync_at: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class SkuOverviewItem(BaseModel):
+    """SKU-level row with config + aggregated listing info."""
+    commodity_sku: str
+    commodity_name: str | None = None
+    main_image: str | None = None
+    enabled: bool
+    lead_time_days: int | None = None
+    listing_count: int
+    total_day30_sales: int
+    listings: list[SkuListingItem]
+
+
+class SkuOverviewListOut(BaseModel):
+    items: list[SkuOverviewItem]
+    total: int
+    page: int
+    page_size: int
