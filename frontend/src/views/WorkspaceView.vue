@@ -38,18 +38,23 @@
           <div class="urgent-list">
             <div class="urgent-header">
               <span class="urgent-col-product">商品信息</span>
-              <span class="urgent-col-countries">国家分布</span>
+              <span class="urgent-col-countries">需求分布</span>
               <span class="urgent-col-qty">可售天数</span>
             </div>
             <div v-for="item in data.top_urgent_skus" :key="item.commodity_sku" class="urgent-item">
-              <div class="urgent-col-product">
+              <div class="urgent-col-product" :title="item.commodity_name || item.commodity_sku">
                 <SkuCard :sku="item.commodity_sku" :name="item.commodity_name" :image="item.main_image" />
               </div>
-              <div class="urgent-col-countries">
-                <el-tag v-for="(qty, country) in item.country_breakdown" :key="country" size="small">
-                  {{ country }}:{{ qty }}
-                </el-tag>
-              </div>
+              <el-tooltip
+                placement="top"
+                :content="Object.entries(item.country_breakdown).map(([c, q]) => `${c}:${q}`).join('  ')"
+              >
+                <div class="urgent-col-countries">
+                  <el-tag v-for="(qty, country) in item.country_breakdown" :key="country" size="small">
+                    {{ country }}:{{ qty }}
+                  </el-tag>
+                </div>
+              </el-tooltip>
               <div class="urgent-col-qty">{{ item.min_sale_days }}天</div>
             </div>
           </div>
@@ -293,6 +298,7 @@ onMounted(load)
 .urgent-col-product {
   flex: 1;
   min-width: 0;
+  margin-right: $space-4;
 
   :deep(.sku-card) {
     min-width: 0;
@@ -303,8 +309,9 @@ onMounted(load)
   width: 200px;
   flex-shrink: 0;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 4px;
+  overflow: hidden;
 }
 
 .urgent-col-qty {
