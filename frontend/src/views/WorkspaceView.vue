@@ -42,9 +42,15 @@
               <span class="urgent-col-qty">可售天数</span>
             </div>
             <div v-for="item in data.top_urgent_skus" :key="item.commodity_sku" class="urgent-item">
-              <div class="urgent-col-product" :title="item.commodity_name || item.commodity_sku">
-                <SkuCard :sku="item.commodity_sku" :name="item.commodity_name" :image="item.main_image" />
-              </div>
+              <el-tooltip
+                placement="top-start"
+                :content="item.commodity_name || item.commodity_sku"
+                :show-after="300"
+              >
+                <div class="urgent-col-product">
+                  <SkuCard :sku="item.commodity_sku" :name="item.commodity_name" :image="item.main_image" />
+                </div>
+              </el-tooltip>
               <el-tooltip
                 placement="top"
                 :content="Object.entries(item.country_breakdown).map(([c, q]) => `${c}:${q}`).join('  ')"
