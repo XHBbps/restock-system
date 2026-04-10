@@ -1,8 +1,9 @@
-"""配置相关 Pydantic DTO（contracts/config.yaml）。"""
+"""配置相关 Pydantic DTO(contracts/config.yaml)。"""
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from apscheduler.triggers.cron import CronTrigger
+from pydantic import BaseModel, Field, field_validator
 
 
 # ==================== Global Config ====================
@@ -11,6 +12,8 @@ class GlobalConfigOut(BaseModel):
     target_days: int
     lead_time_days: int
     sync_interval_minutes: int
+    scheduler_enabled: bool
+    calc_enabled: bool
     calc_cron: str
     default_purchase_warehouse_id: str | None = None
     include_tax: Literal["0", "1"]
@@ -24,10 +27,20 @@ class GlobalConfigPatch(BaseModel):
     target_days: int | None = Field(default=None, ge=1, le=365)
     lead_time_days: int | None = Field(default=None, ge=0, le=365)
     sync_interval_minutes: int | None = Field(default=None, ge=5, le=1440)
+    scheduler_enabled: bool | None = None
+    calc_enabled: bool | None = None
     calc_cron: str | None = None
     default_purchase_warehouse_id: str | None = None
     include_tax: Literal["0", "1"] | None = None
     shop_sync_mode: Literal["all", "specific"] | None = None
+
+    @field_validator("calc_cron")
+    @classmethod
+    def validate_calc_cron(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        CronTrigger.from_crontab(value)
+        return value
 
 
 # ==================== SKU Config ====================

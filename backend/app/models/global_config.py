@@ -31,6 +31,7 @@ class GlobalConfig(Base):
     # 调度
     sync_interval_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
     scheduler_enabled: Mapped[bool] = mapped_column(nullable=False, default=True)
+    calc_enabled: Mapped[bool] = mapped_column(nullable=False, default=True)
     calc_cron: Mapped[str] = mapped_column(String(50), nullable=False, default="0 8 * * *")
 
     # 推送
