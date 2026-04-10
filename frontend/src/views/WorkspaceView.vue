@@ -233,10 +233,11 @@ onMounted(load)
   max-height: 400px;
   overflow-y: auto;
   scrollbar-gutter: stable;
-  scrollbar-width: none;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
 
   &:hover {
-    scrollbar-width: thin;
+    scrollbar-color: $color-border-default transparent;
   }
 
   &::-webkit-scrollbar {
@@ -246,6 +247,7 @@ onMounted(load)
   &::-webkit-scrollbar-thumb {
     background: transparent;
     border-radius: 3px;
+    transition: background 150ms;
   }
 
   &:hover::-webkit-scrollbar-thumb {
