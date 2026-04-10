@@ -1,5 +1,5 @@
 <template>
-  <PageSectionCard title="仓库数据" description="展示赛狐仓库基础数据和手工维护的国家映射。">
+  <PageSectionCard title="仓库数据" description="展示外部仓库基础数据和手工维护的国家映射。">
     <el-table v-loading="loading" :data="pagedRows">
       <el-table-column label="仓库 ID" prop="id" width="120" />
       <el-table-column label="仓库名称" prop="name" min-width="240" />
@@ -19,7 +19,7 @@
           <el-tag v-else type="warning" size="small">待指定</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="赛狐 replenishSite" prop="replenishSite" width="180">
+      <el-table-column label="补货站点" prop="replenishSite" width="180">
         <template #default="{ row }">
           <span class="muted mono">{{ row.replenishSite || '-' }}</span>
         </template>

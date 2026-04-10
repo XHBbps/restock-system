@@ -37,8 +37,8 @@
           <div class="expand-panel">
             <div class="expand-title">出库单明细（{{ row.items.length }} 项）</div>
             <el-table :data="row.items" size="small">
-              <el-table-column label="commoditySku" prop="commoditySku" sortable show-overflow-tooltip />
-              <el-table-column label="goods（观测值）" prop="goods" width="160" align="right" sortable show-overflow-tooltip />
+              <el-table-column label="商品SKU" prop="commoditySku" sortable show-overflow-tooltip />
+              <el-table-column label="商品数量" prop="goods" width="160" align="right" sortable show-overflow-tooltip />
             </el-table>
             <div class="expand-meta">
               备注：<code>{{ row.remark || '-' }}</code>

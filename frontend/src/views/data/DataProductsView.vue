@@ -29,12 +29,12 @@
     <el-table v-loading="loading" :data="rows">
       <el-table-column label="SKU" prop="commoditySku" min-width="180" sortable show-overflow-tooltip />
       <el-table-column label="商品 ID" prop="commodityId" width="120" sortable show-overflow-tooltip />
-      <el-table-column label="商品名称" min-width="200" show-overflow-tooltip>
+      <el-table-column label="商品名称" min-width="200">
         <template #default="{ row }">
           <span class="ellipsis">{{ row.commodityName || '-' }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="店铺/站点" width="180" sortable show-overflow-tooltip>
+      <el-table-column label="店铺/站点" width="180" sortable>
         <template #default="{ row }">
           <div class="meta-stack">
             <span>{{ row.shopId }}</span>
@@ -42,11 +42,11 @@
           </div>
         </template>
       </el-table-column>
-      <el-table-column label="Seller SKU" prop="sellerSku" width="160" sortable show-overflow-tooltip />
+      <el-table-column label="卖家SKU" prop="sellerSku" width="160" sortable show-overflow-tooltip />
       <el-table-column label="7天销量" prop="day7SaleNum" width="90" align="right" sortable show-overflow-tooltip />
       <el-table-column label="14天销量" prop="day14SaleNum" width="90" align="right" sortable show-overflow-tooltip />
       <el-table-column label="30天销量" prop="day30SaleNum" width="90" align="right" sortable show-overflow-tooltip />
-      <el-table-column label="匹配状态" width="100" sortable show-overflow-tooltip>
+      <el-table-column label="匹配状态" width="100" sortable>
         <template #default="{ row }">
           <el-tag v-if="row.isMatched" type="success" size="small">已匹配</el-tag>
           <el-tag v-else type="warning" size="small">未匹配</el-tag>

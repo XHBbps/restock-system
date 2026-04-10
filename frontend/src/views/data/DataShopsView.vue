@@ -1,9 +1,9 @@
 <template>
-  <PageSectionCard title="店铺数据" description="展示赛狐店铺主数据、授权状态和同步参与状态。">
+  <PageSectionCard title="店铺数据" description="展示外部店铺主数据、授权状态和同步参与状态。">
     <el-table v-loading="loading" :data="pagedRows">
       <el-table-column label="店铺 ID" prop="id" width="110" />
       <el-table-column label="店铺名称" prop="name" min-width="220" />
-      <el-table-column label="Seller ID" prop="sellerId" width="180">
+      <el-table-column label="卖家ID" prop="sellerId" width="180">
         <template #default="{ row }">
           <span class="mono muted">{{ row.sellerId || '-' }}</span>
         </template>

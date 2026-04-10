@@ -34,11 +34,11 @@
             @clear="reload"
           />
           <el-select v-model="filters.status" placeholder="状态" clearable style="width: 140px" @change="reload">
-            <el-option label="Shipped" value="Shipped" />
-            <el-option label="PartiallyShipped" value="PartiallyShipped" />
-            <el-option label="Unshipped" value="Unshipped" />
-            <el-option label="Pending" value="Pending" />
-            <el-option label="Canceled" value="Canceled" />
+            <el-option label="已发货" value="Shipped" />
+            <el-option label="部分发货" value="PartiallyShipped" />
+            <el-option label="未发货" value="Unshipped" />
+            <el-option label="待处理" value="Pending" />
+            <el-option label="已取消" value="Canceled" />
           </el-select>
         </div>
       </div>

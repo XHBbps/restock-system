@@ -14,7 +14,7 @@
         <div class="card-header">
           <div class="title-block">
             <span class="card-title">触发操作</span>
-            <span class="card-meta">手动触发赛狐同步与规则引擎</span>
+            <span class="card-meta">手动触发同步与规则引擎</span>
           </div>
           <el-button @click="reloadAll">刷新全部数据</el-button>
         </div>
@@ -53,7 +53,7 @@
         </div>
       </template>
       <el-table v-loading="loadingSyncState" :data="syncState">
-        <el-table-column label="job_name" prop="job_name" min-width="200" sortable show-overflow-tooltip>
+        <el-table-column label="任务名称" prop="job_name" min-width="200" sortable show-overflow-tooltip>
           <template #default="{ row }">
             <span class="mono">{{ row.job_name }}</span>
           </template>
@@ -68,7 +68,7 @@
             <span class="muted mono">{{ row.last_success_at ? formatTime(row.last_success_at) : '—' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="120" sortable show-overflow-tooltip>
+        <el-table-column label="状态" width="120" sortable>
           <template #default="{ row }">
             <el-tag v-if="row.last_status === 'success'" type="success" size="small">success</el-tag>
             <el-tag v-else-if="row.last_status === 'failed'" type="danger" size="small">failed</el-tag>
@@ -90,7 +90,7 @@
       <template #header>
         <div class="title-block">
           <span class="card-title">接口监控（近 24h）</span>
-          <span class="card-meta">api_call_log · 每次赛狐调用的结果聚合</span>
+          <span class="card-meta">api_call_log · 每次外部接口调用的结果聚合</span>
         </div>
       </template>
       <div v-loading="loadingOverview" class="endpoint-grid">
@@ -127,21 +127,21 @@
         </div>
       </template>
       <el-table v-loading="loadingRecent" :data="recentCalls">
-        <el-table-column label="时间" width="170" sortable show-overflow-tooltip>
+        <el-table-column label="时间" width="170" sortable>
           <template #default="{ row }"><span class="mono muted">{{ formatTime(row.called_at) }}</span></template>
         </el-table-column>
-        <el-table-column label="接口" min-width="320" show-overflow-tooltip>
+        <el-table-column label="接口" min-width="320">
           <template #default="{ row }"><code class="mono">{{ row.endpoint }}</code></template>
         </el-table-column>
         <el-table-column label="耗时(ms)" prop="duration_ms" width="100" align="right" sortable show-overflow-tooltip />
-        <el-table-column label="HTTP" prop="http_status" width="80" align="center" sortable show-overflow-tooltip />
-        <el-table-column label="saihu code" prop="saihu_code" width="110" align="center" sortable show-overflow-tooltip />
+        <el-table-column label="HTTP状态" prop="http_status" width="90" align="center" sortable show-overflow-tooltip />
+        <el-table-column label="平台代码" prop="saihu_code" width="110" align="center" sortable show-overflow-tooltip />
         <el-table-column label="错误信息" min-width="180" show-overflow-tooltip>
           <template #default="{ row }">
             <span v-if="row.saihu_msg" class="error-text">{{ row.saihu_msg }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="90" align="center" show-overflow-tooltip>
+        <el-table-column label="操作" width="90" align="center">
           <template #default="{ row }">
             <el-button v-if="row.saihu_code !== 0" link type="primary" @click="retry(row)">重试</el-button>
           </template>
