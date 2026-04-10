@@ -19,7 +19,7 @@ const routes: RouteRecordRaw[] = [
         path: 'workspace',
         name: 'workspace',
         component: () => import('@/views/WorkspaceView.vue'),
-        meta: { title: '总览', section: 'HOME' },
+        meta: { title: '信息总览', section: 'HOME' },
       },
 
       // --- RESTOCK ---

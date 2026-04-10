@@ -15,7 +15,6 @@ import {
   Plug,
   RefreshCw,
   Rocket,
-  Settings,
   ShoppingCart,
   SlidersHorizontal,
   Store,
@@ -50,7 +49,7 @@ export const navigationGroups: NavGroup[] = [
   {
     title: 'HOME',
     children: [
-      { to: '/workspace', label: '总览', icon: LayoutDashboard },
+      { to: '/workspace', label: '信息总览', icon: LayoutDashboard },
     ],
   },
   {
