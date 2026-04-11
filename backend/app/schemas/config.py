@@ -81,12 +81,41 @@ class WarehouseCountryPatch(BaseModel):
 
 
 # ==================== Zipcode Rule ====================
+_BETWEEN_MAX_SEGMENTS = 20
+
+
+def _parse_between_segments(raw: str) -> list[tuple[int, int]]:
+    """解析 between compare_value '000-270, 500-700' -> [(0,270),(500,700)]。
+
+    仅做纯语法/数值校验,不做 prefix_length 越界检查(由调用方负责)。
+    遇到错误抛 ValueError。
+    """
+    segments: list[tuple[int, int]] = []
+    for chunk in raw.split(","):
+        piece = chunk.strip()
+        if not piece:
+            continue
+        parts = piece.split("-", 1)
+        if len(parts) != 2:
+            raise ValueError(f"between 段 '{piece}' 格式错误,需为 数字-数字")
+        lo_raw, hi_raw = parts[0].strip(), parts[1].strip()
+        if not lo_raw.isdigit() or not hi_raw.isdigit():
+            raise ValueError(f"between 段 '{piece}' 格式错误,需为 数字-数字")
+        lo, hi = int(lo_raw), int(hi_raw)
+        if lo > hi:
+            raise ValueError(f"between 区间下界不能大于上界: {piece}")
+        segments.append((lo, hi))
+    return segments
+
+
 class ZipcodeRuleIn(BaseModel):
     country: str = Field(..., min_length=2, max_length=2)
     prefix_length: int = Field(..., ge=1, le=10)
     value_type: Literal["number", "string"]
-    operator: Literal["=", "!=", ">", ">=", "<", "<=", "contains", "not_contains"]
-    compare_value: str = Field(..., min_length=1, max_length=50)
+    operator: Literal[
+        "=", "!=", ">", ">=", "<", "<=", "contains", "not_contains", "between"
+    ]
+    compare_value: str = Field(..., min_length=1, max_length=200)
     warehouse_id: str
     priority: int = Field(default=100, ge=1)
 
@@ -99,6 +128,30 @@ class ZipcodeRuleIn(BaseModel):
 
         operator = info.data.get("operator")
         value_type = info.data.get("value_type")
+        prefix_length = info.data.get("prefix_length")
+
+        if operator == "between":
+            if value_type != "number":
+                raise ValueError("between 运算符仅支持 number 值类型")
+            try:
+                segments = _parse_between_segments(compare_value)
+            except ValueError as exc:
+                raise ValueError(str(exc)) from exc
+            if not segments:
+                raise ValueError("between 至少需要一个有效区间段")
+            if len(segments) > _BETWEEN_MAX_SEGMENTS:
+                raise ValueError(
+                    f"between 段数不能超过 {_BETWEEN_MAX_SEGMENTS},当前 {len(segments)}"
+                )
+            if prefix_length is not None:
+                max_value = 10**prefix_length - 1
+                for lo, hi in segments:
+                    if hi > max_value:
+                        raise ValueError(
+                            f"between 上界 {hi} 超出前 {prefix_length} 位最大值 {max_value}"
+                        )
+            return compare_value
+
         if value_type == "number":
             try:
                 float(compare_value)
@@ -113,12 +166,12 @@ class ZipcodeRuleIn(BaseModel):
     @model_validator(mode="after")
     def validate_operator_by_value_type(self) -> "ZipcodeRuleIn":
         string_operators = {"=", "!=", "contains", "not_contains"}
-        number_operators = {"=", "!=", ">", ">=", "<", "<="}
+        number_operators = {"=", "!=", ">", ">=", "<", "<=", "between"}
 
         if self.value_type == "string" and self.operator not in string_operators:
             raise ValueError("字符串类型仅支持 等于/不等于/包含/不包含")
         if self.value_type == "number" and self.operator not in number_operators:
-            raise ValueError("数字类型仅支持 等于/不等于/大于/大于等于/小于/小于等于")
+            raise ValueError("数字类型仅支持 等于/不等于/大于/大于等于/小于/小于等于/区间")
         return self
 
 

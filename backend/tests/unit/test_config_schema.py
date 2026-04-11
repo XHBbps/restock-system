@@ -79,3 +79,55 @@ def test_zipcode_rule_rejects_invalid_number_compare_value() -> None:
             warehouse_id="wh-1",
             priority=10,
         )
+
+
+def _valid_between_body(**overrides):
+    base = {
+        "country": "JP",
+        "prefix_length": 3,
+        "value_type": "number",
+        "operator": "between",
+        "compare_value": "000-270",
+        "warehouse_id": "wh-jp",
+        "priority": 10,
+    }
+    base.update(overrides)
+    return base
+
+
+def test_zipcode_rule_in_accepts_single_between_segment() -> None:
+    rule = ZipcodeRuleIn(**_valid_between_body())
+    assert rule.operator == "between"
+    assert rule.compare_value == "000-270"
+
+
+def test_zipcode_rule_in_accepts_multi_between_segments() -> None:
+    rule = ZipcodeRuleIn(**_valid_between_body(compare_value="000-270, 500-700"))
+    assert rule.compare_value == "000-270, 500-700"
+
+
+def test_zipcode_rule_in_rejects_between_with_string_value_type() -> None:
+    with pytest.raises(ValidationError, match="between"):
+        ZipcodeRuleIn(**_valid_between_body(value_type="string", compare_value="000-270"))
+
+
+def test_zipcode_rule_in_rejects_between_bad_format() -> None:
+    with pytest.raises(ValidationError, match="格式"):
+        ZipcodeRuleIn(**_valid_between_body(compare_value="000_270"))
+
+
+def test_zipcode_rule_in_rejects_between_lo_gt_hi() -> None:
+    with pytest.raises(ValidationError, match="下界"):
+        ZipcodeRuleIn(**_valid_between_body(compare_value="300-270"))
+
+
+def test_zipcode_rule_in_rejects_between_hi_exceeds_prefix_length() -> None:
+    # prefix_length=3 → 最大值 999
+    with pytest.raises(ValidationError, match="超出"):
+        ZipcodeRuleIn(**_valid_between_body(compare_value="000-1000"))
+
+
+def test_zipcode_rule_in_rejects_between_too_many_segments() -> None:
+    segments = ",".join(f"{i}00-{i}50" for i in range(21))  # 21 段
+    with pytest.raises(ValidationError, match="段数"):
+        ZipcodeRuleIn(**_valid_between_body(compare_value=segments))
