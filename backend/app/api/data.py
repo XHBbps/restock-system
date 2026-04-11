@@ -643,12 +643,27 @@ async def list_data_warehouses(
 # ============================================================
 @router.get("/shops", response_model=DataShopListOut)
 async def list_data_shops(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=500, ge=1, le=1000),
     db: AsyncSession = Depends(db_session),
     _: dict[str, Any] = Depends(get_current_session),
 ) -> DataShopListOut:
-    rows = (await db.execute(select(Shop).order_by(Shop.marketplace_id, Shop.id))).scalars().all()
+    total = (await db.execute(select(func.count()).select_from(Shop))).scalar_one()
+    rows = (
+        await db.execute(
+            select(Shop)
+            .order_by(Shop.marketplace_id, Shop.id)
+            .limit(page_size)
+            .offset((page - 1) * page_size)
+        )
+    ).scalars().all()
     items = [DataShop.model_validate(r) for r in rows]
-    return DataShopListOut(items=items, total=len(items))
+    return DataShopListOut(
+        items=items,
+        total=int(total or 0),
+        page=page,
+        page_size=page_size,
+    )
 
 
 # ============================================================

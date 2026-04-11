@@ -181,6 +181,10 @@ class DataShop(SaihuLikeModel):
 class DataShopListOut(BaseModel):
     items: list[DataShop]
     total: int
+    page: int = 1
+    page_size: int = 500
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
 
 # ==================== 在线产品信息 ====================
