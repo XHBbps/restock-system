@@ -176,6 +176,18 @@ async function handleLogin(): Promise<void> {
   gap: $space-2;
 }
 
+// 覆盖浏览器 autofill 的蓝色背景（Chrome/Edge/Safari）
+// 用 inset box-shadow 遮盖 #E8F0FE 默认底色；transition 9999s 防止闪烁
+.card-form :deep(input:-webkit-autofill),
+.card-form :deep(input:-webkit-autofill:hover),
+.card-form :deep(input:-webkit-autofill:focus),
+.card-form :deep(input:-webkit-autofill:active) {
+  -webkit-box-shadow: 0 0 0 1000px $color-bg-card inset !important;
+  -webkit-text-fill-color: $color-text-primary !important;
+  transition: background-color 9999s ease-in-out 0s;
+  caret-color: $color-text-primary;
+}
+
 .field-label {
   font-size: $font-size-sm;
   font-weight: $font-weight-medium;
