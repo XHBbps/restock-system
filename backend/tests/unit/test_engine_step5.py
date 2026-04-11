@@ -201,3 +201,97 @@ def test_total_preserved_no_loss_to_rounding() -> None:
         country_warehouses=["haiyuan", "xiapu"],
     )
     assert sum(result.values()) == 997
+
+
+def _tied_rules_p10() -> list[ZipcodeRule]:
+    """B/C/D/E 四仓 priority=10 都含 451-599。"""
+    return [
+        ZipcodeRule(
+            id=10,
+            country="JP",
+            prefix_length=3,
+            value_type="number",
+            operator="between",
+            compare_value="271-450, 451-599",
+            warehouse_id="B",
+            priority=10,
+        ),
+        ZipcodeRule(
+            id=11,
+            country="JP",
+            prefix_length=3,
+            value_type="number",
+            operator="between",
+            compare_value="451-599, 851-999",
+            warehouse_id="C",
+            priority=10,
+        ),
+        ZipcodeRule(
+            id=12,
+            country="JP",
+            prefix_length=3,
+            value_type="number",
+            operator="between",
+            compare_value="451-599",
+            warehouse_id="D",
+            priority=10,
+        ),
+        ZipcodeRule(
+            id=13,
+            country="JP",
+            prefix_length=3,
+            value_type="number",
+            operator="between",
+            compare_value="451-599, 600-850",
+            warehouse_id="E",
+            priority=10,
+        ),
+    ]
+
+
+def test_step5_tied_even_split_across_four_warehouses() -> None:
+    """1 条 qty=8 订单落在 451-599,tied 4 仓各得 2 权重,country_qty=100 时各得 25。"""
+    result = explain_country_qty_split(
+        sku="sku-A",
+        country="JP",
+        country_qty=100,
+        orders=[("500-0001", 8)],
+        rules=_tied_rules_p10(),
+        country_warehouses=["B", "C", "D", "E"],
+    )
+    assert result.allocation_mode == "matched"
+    assert result.matched_order_qty == 8
+    assert result.unknown_order_qty == 0
+    assert result.warehouse_breakdown == {"B": 25, "C": 25, "D": 25, "E": 25}
+
+
+def test_step5_tied_filters_ineligible_warehouse() -> None:
+    """4 tied 仓其中 D 不在 country_warehouses -> 按剩 B/C/E 三仓均分。"""
+    result = explain_country_qty_split(
+        sku="sku-A",
+        country="JP",
+        country_qty=90,
+        orders=[("500-0001", 3)],
+        rules=_tied_rules_p10(),
+        country_warehouses=["B", "C", "E"],  # 故意不含 D
+    )
+    assert result.allocation_mode == "matched"
+    assert result.matched_order_qty == 3
+    assert result.unknown_order_qty == 0
+    assert result.warehouse_breakdown == {"B": 30, "C": 30, "E": 30}
+
+
+def test_step5_tied_all_ineligible_counts_as_unknown() -> None:
+    """tied 4 仓全部不在 country_warehouses -> 该订单 qty 记为 unknown。"""
+    result = explain_country_qty_split(
+        sku="sku-A",
+        country="JP",
+        country_qty=20,
+        orders=[("500-0001", 4), ("600-0001", 6)],
+        rules=_tied_rules_p10(),
+        country_warehouses=["otherWh"],
+    )
+    assert result.matched_order_qty == 0
+    assert result.unknown_order_qty == 10
+    assert result.allocation_mode == "fallback_even"
+    assert result.warehouse_breakdown == {"otherWh": 20}

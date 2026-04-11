@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.timezone import BEIJING
-from app.engine.zipcode_matcher import ZipcodeRule, match_warehouse
+from app.engine.zipcode_matcher import ZipcodeRule, match_warehouses
 from app.models.order import OrderDetail, OrderHeader, OrderItem
 from app.models.warehouse import Warehouse
 from app.models.zipcode_rule import ZipcodeRule as ZipcodeRuleModel
@@ -160,17 +160,20 @@ def explain_country_qty_split(
     eligible_set = set(eligible_warehouses)
 
     # 已知仓件数统计
-    known_counts: defaultdict[str, int] = defaultdict(int)
+    known_counts: defaultdict[str, float] = defaultdict(float)
     matched_order_qty = 0
     unknown_order_qty = 0
     for postal_code, qty in orders:
         if qty <= 0:
             continue
-        wid = match_warehouse(postal_code, country, rules)
-        if wid is None or wid not in eligible_set:
+        winners = match_warehouses(postal_code, country, rules)
+        eligible_winners = [w for w in winners if w in eligible_set]
+        if not eligible_winners:
             unknown_order_qty += qty
             continue
-        known_counts[wid] += qty
+        share = qty / len(eligible_winners)
+        for wid in eligible_winners:
+            known_counts[wid] += share
         matched_order_qty += qty
 
     total_known = sum(known_counts.values())
