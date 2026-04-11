@@ -226,7 +226,6 @@ async function handleLogout(): Promise<void> {
 }
 
 .sidebar {
-  position: relative;
   position: sticky;
   top: 0;
   width: 256px;
