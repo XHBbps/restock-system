@@ -1,15 +1,15 @@
-"""澶栭儴鏁版嵁婧愯娴?API銆?
+"""外部数据源观测 API。
 
-READ-ONLY銆傛墍鏈夌鐐逛粠鏈湴鍚屾钀藉簱鐨勮〃鏌ヨ,杩斿洖涓庤禌鐙愭帴鍙?
-鍩烘湰涓€鑷寸殑 camelCase 缁撴瀯,渚涢噰璐憳鎺掓煡"鍚屾杩涙潵鐨勬暟鎹槸鍚︽纭?銆?
+READ-ONLY。所有端点从本地同步落库的表查询,返回与赛狐接口
+基本一致的 camelCase 结构,供采购员排查"同步进来的数据是否正确"。
 
-瑕嗙洊鐨?7 涓祫婧?
-- 璁㈠崟鍒楄〃 + 璁㈠崟璇︽儏(order_header / order_item / order_detail)
-- 搴撳瓨鏄庣粏(inventory_snapshot_latest JOIN warehouse)
-- 鍏朵粬鍑哄簱(in_transit_record + in_transit_item)
-- 浠撳簱鍒楄〃(warehouse)
-- 搴楅摵鍒楄〃(shop)
-- 鍦ㄧ嚎浜у搧淇℃伅(product_listing)
+覆盖的 7 个资源:
+- 订单列表 + 订单详情(order_header / order_item / order_detail)
+- 库存明细(inventory_snapshot_latest JOIN warehouse)
+- 其他出库(in_transit_record + in_transit_item)
+- 仓库列表(warehouse)
+- 店铺列表(shop)
+- 在线产品信息(product_listing)
 """
 
 from datetime import date, datetime, timedelta
@@ -247,7 +247,7 @@ def _apply_out_record_sort(stmt, sort_by: str | None, sort_order: str):
 
 
 # ============================================================
-# 1. 璁㈠崟鍒楄〃 + 璇︽儏
+# 1. 订单列表 + 详情
 # ============================================================
 @router.get("/orders", response_model=DataOrderListOut)
 async def list_orders(
@@ -256,7 +256,7 @@ async def list_orders(
     country: str | None = Query(default=None),
     status: str | None = Query(default=None),
     sku: str | None = Query(
-        default=None, description="鎸?commodity_sku 鎴?amazon_order_id 妯＄硦鍖归厤"
+        default=None, description="按 commodity_sku 或 amazon_order_id 模糊匹配"
     ),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=5000),
@@ -282,7 +282,7 @@ async def list_orders(
     if status:
         base = base.where(OrderHeader.order_status == status)
     if sku:
-        # 鍦?amazon_order_id 鎴栭€氳繃 order_item JOIN 鍖归厤 commodity_sku
+        # 在 amazon_order_id 或通过 order_item JOIN 匹配 commodity_sku
         subq = (
             select(OrderItem.order_id)
             .where(OrderItem.commodity_sku.ilike(f"%{escape_like(sku)}%", escape="\\"))
@@ -299,7 +299,7 @@ async def list_orders(
     ).scalar_one()
     rows = (await db.execute(base.offset((page - 1) * page_size).limit(page_size))).scalars().all()
 
-    # 鎵归噺鍔犺浇 items 涓?detail 鏍囧織
+    # 批量加载 items 与 detail 标志
     order_ids = [r.id for r in rows]
     item_count_map: dict[int, int] = {}
     if order_ids:
@@ -315,8 +315,8 @@ async def list_orders(
     detail_set: set[tuple[str, str]] = set()
     if rows:
         keys = [(r.shop_id, r.amazon_order_id) for r in rows]
-        # * 蹇呴』鐢ㄥ鍚堥敭杩囨护銆傚彧鎸?shop_id IN(...) 浼氭媺鍥炶 shop 鐨勫叏閮ㄥ巻鍙?detail,
-        # 鍦ㄦ暟鎹噺澶ф椂閫犳垚鍐呭瓨鐖嗙偢(review H-N1)銆?
+        # * 必须用复合键过滤。只按 shop_id IN(...) 会拉回该 shop 的全部历史 detail,
+        # 在数据量大时造成内存爆炸(review H-N1)。
         det_rows = (
             (
                 await db.execute(
@@ -392,7 +392,7 @@ async def get_order_detail(
         )
     ).scalar_one_or_none()
 
-    # 鐢?from_attributes 鎶?ORM header 鐩存帴鏄犲皠鍒?DTO,detail 瀛楁鎵嬪姩琛?
+    # 用 from_attributes 把 ORM header 直接映射到 DTO,detail 字段手动补
     return DataOrderDetail.model_validate(
         {
             **{
@@ -420,7 +420,7 @@ async def get_order_detail(
 
 
 # ============================================================
-# 2. 搴撳瓨鏄庣粏
+# 2. 库存明细
 # ============================================================
 @router.get("/inventory", response_model=DataInventoryListOut)
 async def list_inventory(
@@ -459,7 +459,7 @@ async def list_inventory(
     ).scalar_one()
     rows = (await db.execute(base.offset((page - 1) * page_size).limit(page_size))).all()
 
-    # 鎵归噺鍔犺浇 commodity_name / main_image
+    # 批量加载 commodity_name / main_image
     sku_codes = list({r[0].commodity_sku for r in rows})
     name_map: dict[str, tuple[str | None, str | None]] = {}
     if sku_codes:
@@ -498,7 +498,7 @@ async def list_inventory(
 
 
 # ============================================================
-# 3. 鍏朵粬鍑哄簱鍒楄〃(鍦ㄩ€旀暟鎹?
+# 3. 其他出库列表(在途数据)
 # ============================================================
 @router.get("/out-records", response_model=DataOutRecordListOut)
 async def list_out_records(
@@ -533,7 +533,7 @@ async def list_out_records(
     ).scalar_one()
     rows = (await db.execute(base.offset((page - 1) * page_size).limit(page_size))).scalars().all()
 
-    # 鎵归噺鍔犺浇 items
+    # 批量加载 items
     record_ids = [r.saihu_out_record_id for r in rows]
     item_map: dict[str, list[InTransitItem]] = {}
     if record_ids:
@@ -549,7 +549,7 @@ async def list_out_records(
         for it in it_rows:
             item_map.setdefault(it.saihu_out_record_id, []).append(it)
 
-    # 鎵归噺鍔犺浇 warehouse 鍚嶇О
+    # 批量加载 warehouse 名称
     wh_ids = [r.target_warehouse_id for r in rows if r.target_warehouse_id]
     wh_name_map: dict[str, str] = {}
     if wh_ids:
@@ -581,7 +581,7 @@ async def list_out_records(
 
 
 # ============================================================
-# 4. 浠撳簱鍒楄〃
+# 4. 仓库列表
 # ============================================================
 @router.get("/warehouses", response_model=DataWarehouseListOut)
 async def list_data_warehouses(
@@ -639,7 +639,7 @@ async def list_data_warehouses(
 
 
 # ============================================================
-# 5. 搴楅摵鍒楄〃
+# 5. 店铺列表
 # ============================================================
 @router.get("/shops", response_model=DataShopListOut)
 async def list_data_shops(
@@ -667,13 +667,13 @@ async def list_data_shops(
 
 
 # ============================================================
-# 6. 鍦ㄧ嚎浜у搧淇℃伅
+# 6. 在线产品信息
 # ============================================================
 @router.get("/product-listings", response_model=DataProductListingListOut)
 async def list_product_listings_data(
     shop_id: str | None = Query(default=None),
     marketplace_id: str | None = Query(default=None),
-    sku: str | None = Query(default=None, description="鎸?commodity_sku/seller_sku 妯＄硦"),
+    sku: str | None = Query(default=None, description="按 commodity_sku/seller_sku 模糊"),
     only_matched: bool | None = Query(default=None),
     only_active: bool | None = Query(default=None),
     page: int = Query(default=1, ge=1),
@@ -711,7 +711,7 @@ async def list_product_listings_data(
 # ============================================================
 @router.get("/sku-overview", response_model=SkuOverviewListOut)
 async def list_sku_overview(
-    keyword: str | None = Query(default=None, description="鎸?commodity_sku 妯＄硦鎼滅储"),
+    keyword: str | None = Query(default=None, description="按 commodity_sku 模糊搜索"),
     enabled: bool | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=5000),
@@ -791,7 +791,7 @@ async def list_sku_overview(
 
 
 # ============================================================
-# 8. sync_state 姹囨€?鍚屾绠＄悊椤电敤)
+# 8. sync_state 汇总(同步管理页用)
 # ============================================================
 @router.get("/sync-state", response_model=list[DataSyncStateRow])
 async def list_sync_state(
