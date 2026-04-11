@@ -152,12 +152,17 @@ class DataWarehouse(SaihuLikeModel):
     type: int
     country: str | None = None
     replenish_site: str | None = None
+    total_stock: int = 0
     last_sync_at: datetime
 
 
 class DataWarehouseListOut(BaseModel):
     items: list[DataWarehouse]
     total: int
+    page: int = 1
+    page_size: int = 500
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
 
 # ==================== 店铺列表 ====================
@@ -218,6 +223,7 @@ class DataSyncStateRow(BaseModel):
 # ==================== SKU Overview (grouped) ====================
 class SkuListingItem(BaseModel):
     """Single marketplace listing under a SKU."""
+
     id: int
     shop_id: str
     marketplace_id: str
@@ -233,6 +239,7 @@ class SkuListingItem(BaseModel):
 
 class SkuOverviewItem(BaseModel):
     """SKU-level row with config + aggregated listing info."""
+
     commodity_sku: str
     commodity_name: str | None = None
     main_image: str | None = None

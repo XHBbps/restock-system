@@ -585,6 +585,8 @@ async def list_out_records(
 # ============================================================
 @router.get("/warehouses", response_model=DataWarehouseListOut)
 async def list_data_warehouses(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=500, ge=1, le=1000),
     db: AsyncSession = Depends(db_session),
     _: dict[str, Any] = Depends(get_current_session),
 ) -> DataWarehouseListOut:
@@ -599,6 +601,9 @@ async def list_data_warehouses(
         .group_by(InventorySnapshotLatest.warehouse_id)
         .subquery()
     )
+
+    total = (await db.execute(select(func.count()).select_from(Warehouse))).scalar_one()
+
     rows = (
         await db.execute(
             select(
@@ -607,6 +612,8 @@ async def list_data_warehouses(
             )
             .outerjoin(stock_subquery, stock_subquery.c.warehouse_id == Warehouse.id)
             .order_by(Warehouse.country, Warehouse.id)
+            .limit(page_size)
+            .offset((page - 1) * page_size)
         )
     ).all()
     items = [
@@ -623,7 +630,12 @@ async def list_data_warehouses(
         )
         for warehouse, total_stock in rows
     ]
-    return DataWarehouseListOut(items=items, total=len(items))
+    return DataWarehouseListOut(
+        items=items,
+        total=int(total or 0),
+        page=page,
+        page_size=page_size,
+    )
 
 
 # ============================================================
