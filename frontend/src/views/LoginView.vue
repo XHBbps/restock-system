@@ -1,6 +1,9 @@
 <template>
   <div class="login-page">
     <div class="grid-bg" />
+    <div class="grid-hover">
+      <div v-for="n in GRID_CELL_COUNT" :key="n" class="cell" />
+    </div>
 
     <div class="login-card">
       <div class="card-header">
@@ -53,6 +56,10 @@ import { useAuthStore } from '@/stores/auth'
 import { ElMessage } from 'element-plus'
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+
+// 80 列 × 35 行 = 2800 格，覆盖 2560px 宽度以下的桌面分辨率
+// 单元格是 32×32，使用 CSS Grid auto-fill 按视口宽度自动换行
+const GRID_CELL_COUNT = 2800
 
 const password = ref('')
 const loading = ref(false)
@@ -111,6 +118,29 @@ async function handleLogin(): Promise<void> {
   mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
   -webkit-mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
   pointer-events: none;
+}
+
+// 交互层：透明 DOM 格子，hover 时填充浅灰
+// 叠加在 .grid-bg 之上，不干扰网格线本身
+.grid-hover {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 32px);
+  grid-auto-rows: 32px;
+  overflow: hidden;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+
+  .cell {
+    // 进入 300ms / 离开 500ms（离开略慢有"余温"感）
+    transition: background-color 500ms ease;
+
+    &:hover {
+      background-color: $color-bg-subtle;
+      transition-duration: 300ms;
+    }
+  }
 }
 
 .login-card {
