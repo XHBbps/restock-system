@@ -89,7 +89,7 @@ async def list_suggestions(
     sort_by: str | None = Query(default=None),
     sort_order: str = Query(default="desc", pattern="^(asc|desc)$"),
     db: AsyncSession = Depends(db_session),
-    _: dict = Depends(get_current_session),
+    _: dict[str, Any] = Depends(get_current_session),
 ) -> SuggestionListOut:
     base = select(Suggestion)
     if status:
@@ -126,7 +126,7 @@ async def list_suggestions(
 @router.get("/current", response_model=SuggestionDetailOut)
 async def get_current_suggestion(
     db: AsyncSession = Depends(db_session),
-    _: dict = Depends(get_current_session),
+    _: dict[str, Any] = Depends(get_current_session),
 ) -> SuggestionDetailOut:
     row = (
         await db.execute(
@@ -145,7 +145,7 @@ async def get_current_suggestion(
 async def get_suggestion(
     suggestion_id: int = Path(..., ge=1),
     db: AsyncSession = Depends(db_session),
-    _: dict = Depends(get_current_session),
+    _: dict[str, Any] = Depends(get_current_session),
 ) -> SuggestionDetailOut:
     row = (
         await db.execute(select(Suggestion).where(Suggestion.id == suggestion_id))
@@ -161,7 +161,7 @@ async def patch_item(
     suggestion_id: int = Path(..., ge=1),
     item_id: int = Path(..., ge=1),
     db: AsyncSession = Depends(db_session),
-    _: dict = Depends(get_current_session),
+    _: dict[str, Any] = Depends(get_current_session),
 ) -> SuggestionItemOut:
     # N1: load parent suggestion first to enforce editable state
     parent = (
@@ -265,7 +265,7 @@ async def push_items(
     req: PushRequest,
     suggestion_id: int = Path(..., ge=1),
     db: AsyncSession = Depends(db_session),
-    _: dict = Depends(get_current_session),
+    _: dict[str, Any] = Depends(get_current_session),
 ) -> dict[str, Any]:
     sug = (
         await db.execute(select(Suggestion).where(Suggestion.id == suggestion_id))
@@ -310,7 +310,7 @@ async def push_items(
 async def archive_suggestion(
     suggestion_id: int = Path(..., ge=1),
     db: AsyncSession = Depends(db_session),
-    _: dict = Depends(get_current_session),
+    _: dict[str, Any] = Depends(get_current_session),
 ) -> None:
     sug = (
         await db.execute(select(Suggestion).where(Suggestion.id == suggestion_id))

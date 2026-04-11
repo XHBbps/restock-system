@@ -4,6 +4,7 @@
 """
 
 from datetime import timedelta
+from typing import Any
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import PlainTextResponse
@@ -15,7 +16,6 @@ from app.api.deps import db_session, get_current_session
 from app.core.timezone import now_beijing
 from app.models.api_call_log import ApiCallLog
 from app.models.task_run import TaskRun
-
 
 # --------------- Dashboard schemas ---------------
 
@@ -46,19 +46,18 @@ class DashboardOverview(BaseModel):
     country_stock_days: list[CountryStockDays]
     top_urgent_skus: list[UrgentSkuItem]
 
+
 router = APIRouter(prefix="/api/metrics", tags=["metrics"])
 
 
 @router.get("", response_class=PlainTextResponse)
 async def metrics(
     db: AsyncSession = Depends(db_session),
-    _: dict = Depends(get_current_session),
+    _: dict[str, Any] = Depends(get_current_session),
 ) -> str:
     # task_run 状态分布
-    rows = (
-        await db.execute(select(TaskRun.status, func.count()).group_by(TaskRun.status))
-    ).all()
-    task_status_lines = [f"task_run_status{{status=\"{s}\"}} {n}" for s, n in rows]
+    rows = (await db.execute(select(TaskRun.status, func.count()).group_by(TaskRun.status))).all()
+    task_status_lines = [f'task_run_status{{status="{s}"}} {n}' for s, n in rows]
 
     # 24h 同步成功率
     since = now_beijing() - timedelta(hours=24)
@@ -94,7 +93,7 @@ async def metrics(
 @router.get("/dashboard", response_model=DashboardOverview)
 async def get_dashboard_overview(
     db: AsyncSession = Depends(db_session),
-    _: dict = Depends(get_current_session),
+    _: dict[str, Any] = Depends(get_current_session),
 ) -> DashboardOverview:
     from app.models.global_config import GlobalConfig
     from app.models.sku import SkuConfig
@@ -136,10 +135,14 @@ async def get_dashboard_overview(
 
     # 4. Load all suggestion items
     items = (
-        await db.execute(
-            select(SuggestionItem).where(SuggestionItem.suggestion_id == suggestion.id)
+        (
+            await db.execute(
+                select(SuggestionItem).where(SuggestionItem.suggestion_id == suggestion.id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     pushed_count = sum(1 for it in items if it.push_status == "pushed")
     urgent_count = sum(1 for it in items if it.urgent)
@@ -203,9 +206,7 @@ async def get_dashboard_overview(
             main_image=(name_map.get(it.commodity_sku) or (None, None))[1],
             total_qty=it.total_qty,
             min_sale_days=round(_min_sale_days(it), 1),
-            country_breakdown={
-                k: int(v) for k, v in (it.country_breakdown or {}).items()
-            },
+            country_breakdown={k: int(v) for k, v in (it.country_breakdown or {}).items()},
         )
         for it in urgent_items
     ]
