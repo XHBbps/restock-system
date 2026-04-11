@@ -93,8 +93,23 @@
 - **对照 M1 [2] 的标尺**：M1 因为"代码层无代理/出口 IP 接入点、无 CVE 扫描、access_token 作为 URL query 参数传输"而打 2 分。M2 无外部 API 调用面，并发安全通过 advisory lock 解决，但 JSONB 快照无 DB 约束保护，与 M1 同级打 2 分。
 
 ### D4 可部署性
-- **得分**：N/A
-- **理由**：补货引擎无独立部署需求，作为 worker job 运行；部署属于 M4 任务队列 / M8 部署的范围。
+- **得分**：3/4（第二轮 review retroactive 更新——原评 N/A，新口径为实地评分，详见 §7 #6）
+- **判据匹配**：
+  - ✅ 满足 Rubric 2 级：docker-compose 一键启动（M2 引擎作为 calc_engine worker job 运行，容器化完整）；`.env.example` 文档化引擎相关配置（`DEFAULT_TARGET_DAYS`、`DEFAULT_BUFFER_DAYS`、`DEFAULT_LEAD_TIME_DAYS`、`DEFAULT_CALC_CRON`）；`suggestion`/`suggestion_item`/`global_config` 表已在 initial migration 创建；共享 `/readyz` 健康检查涵盖 worker 角色。
+  - ✅ 满足 Rubric 3 级：`deploy/scripts/deploy.sh` 一键部署脚本完整流程；`validate_settings()`（`config.py:72-94`）启动时校验关键密钥；共享 docker-compose 资源限制（worker 512M）；`PROCESS_ENABLE_WORKER/REAPER/SCHEDULER` 支持进程角色分离。
+  - ❌ 未满足 Rubric 4 级：无 CI/CD pipeline；无 IaC；无蓝绿/滚动部署；无多环境。
+- **支撑证据**：
+  - `backend/app/config.py:60-64` — `default_target_days`/`default_buffer_days`/`default_lead_time_days`/`default_calc_cron` 字段定义
+  - `backend/.env.example` — 引擎配置项文档化
+  - `backend/alembic/versions/20260408_1500_initial.py` — `suggestion`/`suggestion_item`/`global_config` 表迁移
+  - `deploy/docker-compose.yml:51-55,74-76` — worker 服务资源限制
+  - `backend/app/config.py:49-50` — `process_enable_worker/scheduler` 角色分离
+- **未达上一级的差距**：
+  1. 无 CI/CD pipeline（共性）
+  2. 无 IaC、蓝绿部署、多环境（共性）
+  3. **M2 独有**：`validate_settings` 不校验 `default_target_days`/`buffer_days`/`lead_time_days` 的合法性（设负数或 0 会导致引擎公式异常）
+- **对照 M1=[3], M3=[3] 的标尺**：M2 同样满足 3 级（共享部署基础设施 + 一键脚本 + 配置校验 + 资源限制），未达 4 级缺 CI/CD，与 M1/M3 持平评 3。
+- **注**：本评分为第二轮 review 的 retroactive 更新。第一轮 review 时按旧口径（"无独立部署需求即 N/A"）标 N/A，详见 §7 #6 用户澄清。
 
 ### D5 可观测性
 - **得分**：3/4
@@ -172,9 +187,10 @@
 ---
 
 ## 3. 模块得分
-- **各维度分数**：D1=3 D2=3 D3=2 D5=3 D6=3 D7=3 D8=2
-- **平均分（剔除 N/A，7 维度）**：(3+3+2+3+3+3+2) / 7 = 19 / 7 = **2.71 / 4**
+- **各维度分数**：D1=3 D2=3 D3=2 D4=3 D5=3 D6=3 D7=3 D8=2
+- **平均分（剔除 N/A，8 维度）**：(3+3+2+3+3+3+3+2) / 8 = 22 / 8 = **2.75 / 4**
 - **主战场维度**：D1=3 D6=3
+- **变更说明**：第一轮 review 时为 7 维度的 2.71（D4 标 N/A）；第二轮 review 用户决定 D4 不再标 N/A（理由见 §7 #6），retroactive 评 D4=3，平均分变为 8 维度的 2.75
 
 ---
 
@@ -192,6 +208,11 @@
 1. **step5 邮编匹配 O(R×N) 复杂度**：`match_warehouse` 对每条订单线性扫描所有规则。当前规模（规则 <50，订单 <500/日）无影响，但若规则数量增长应改为前缀树/分组索引。
 2. **无 ADR 记录核心算法决策**：邮编路由策略（按比例 vs 均分）、in_transit 去重（建议单 country_breakdown 而非 out_record 聚合）的选型决策未以 ADR 形式记录，影响未来维护者理解。
 3. **`calc_engine` 失败无自动重试**：worker 明确设计"不自动重入队"（`worker.py:8`），引擎失败需手动重触发。对于因瞬态 DB 故障导致的失败，需要人工干预，建议评估是否需要自动重试 1 次。
+
+5. **引擎核心参数缺少 `validate_settings` 校验** ｜ 第二轮 D4 评估发现
+   - 现状：`default_target_days`/`default_buffer_days`/`default_lead_time_days` 在 `config.py:60-64` 有默认值，但 `validate_settings()`（`config.py:72-94`）不校验值的合法性（设 0 或负数会导致引擎公式 `total = velocity × (target_days + buffer_days) - inventory` 产生异常结果）
+   - 修复动作：在 `validate_settings` 中添加 `if settings.default_target_days < 1: errors.append(...)` 等校验
+   - 类型：防御性配置校验，列入打分后的待办
 4. **`velocity_snapshot` / `sale_days_snapshot` 列定义与代码意图不一致** ｜ 用户已选清洁度加固方案
    - 现状：列定义为 `nullable=True`，但 `runner.py:182-183` 永远写入非空值；实地查询确认 728/728 条 suggestion_item 全部非空非空 dict（见 §7 #3）；`metrics.py:153` 的 `if not it.sale_days_snapshot` 防御检查实际为 dead code
    - 修复动作（用户已选 B 方案）：
@@ -273,3 +294,19 @@
   - Advisory lock 是**二道防线**（defense in depth），在单 worker 场景下永远不会被触发
 - **结论**：用户期望的"重复触发跳过"**已经在任务队列层实现**，无需修改 advisory lock 逻辑
 - **影响**：subagent 初评对此误读，已纠正；M2 D6 评分不变；无需代码改动
+
+### #6 D4 可部署性矩阵口径调整（第二轮 review，M3 阶段触发的 retroactive 更新）
+- **背景**：M3 审计时用户指出"D4不是N/A 这个项目需要部署"——反对 spec 原设计把 M2/M3 的 D4 标 N/A
+- **矩阵设计反思**：原 spec §3 把 M2/M3 的 D4 标 N/A 的依据是"无独立部署需求"，但这种标准把责任全部推给 M8，违反评分卡"每个模块为自己的可部署性负责"的初衷。只要项目要部署，每个模块就应该被评估其"部署就绪度"（借助共享基础设施也算在内）。
+- **用户决策**：
+  - M3 D4 从 N/A 改为实地评分（详见 M3-suggestions-pushback.md）
+  - **M2 retroactive 同步改为实地评分**（即本次更新）
+  - spec §3 矩阵同步更新（M2/M3 D4 标记从 `·` → `✓`）
+  - 未来 M4-M8 所有模块都按"实地评分"口径评 D4
+- **M2 D4 retroactive 评分**：**3/4**——满足 Rubric 3 级（docker-compose + .env.example + 迁移 + 一键脚本 + 启动校验 + 资源限制 + PROCESS_ENABLE_* 角色分离），未满足 4 级缺 CI/CD + IaC + 蓝绿
+- **M2 D4 独有缺口**：`validate_settings` 不校验引擎核心参数（`default_target_days`/`buffer_days`/`lead_time_days`）的合法性（设 0/负数会导致公式异常）—— 作为 P2 项追加
+- **影响**：
+  - M2 计分格数从 7 → 8
+  - M2 平均分从 2.71 → **2.75**
+  - M2 commit 历史保留（不重写已封板的 commit，只追加一个"retroactive 更新"的新 commit）
+  - spec §3 设计文档需同步更新
