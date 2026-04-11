@@ -1,9 +1,12 @@
-"""订单详情增量同步（FR-022/023）。
+"""Incremental sync for order details.
 
-策略：
-- 仅对"已配对 SKU 相关"的订单拉取详情
-- 通过 order_detail_fetch_log 排除已拉过的订单
-- 受 1 QPS 限流，每条订单约 1 秒
+Strategy:
+- Fetch details only for orders related to matched SKUs
+- Skip orders already recorded in ``order_detail_fetch_log``
+- Respect the endpoint's low QPS limit
+
+Current business rule:
+- Address fields from Saihu order detail are not used and are stored as null
 """
 
 from sqlalchemy import select
@@ -22,42 +25,61 @@ from app.tasks.jobs import JobContext, register
 
 logger = get_logger(__name__)
 JOB_NAME = "sync_order_detail"
-
-# 单次同步最多拉取的订单详情数（防止单次跑过长）
 MAX_PER_RUN = 500
+
+
+CONCURRENCY = 3  # 与 rate_limit 中 order_detail 的 QPS 一致
 
 
 @register(JOB_NAME)
 async def sync_order_detail_job(ctx: JobContext) -> None:
+    import asyncio
+
     await ctx.progress(current_step="同步订单详情", total_steps=1)
     async with async_session_factory() as db:
         started = await mark_sync_running(db, JOB_NAME)
 
     fetched = 0
     failed = 0
-    try:
-        async with async_session_factory() as db:
-            targets = await _find_pending_orders(db, MAX_PER_RUN)
-            await ctx.progress(step_detail=f"待拉取 {len(targets)} 条")
+    sem = asyncio.Semaphore(CONCURRENCY)
 
-        for shop_id, amazon_order_id in targets:
+    async def _fetch_one(shop_id: str, amazon_order_id: str) -> bool:
+        async with sem:
             try:
                 detail = await get_order_detail(shop_id=shop_id, amazon_order_id=amazon_order_id)
                 async with async_session_factory() as db:
                     await _save_detail(db, shop_id, amazon_order_id, detail)
                     await db.commit()
-                fetched += 1
-            except SaihuAPIError as exc:
-                failed += 1
-                async with async_session_factory() as db:
-                    await _log_fetch_failure(db, shop_id, amazon_order_id, exc)
-                    await db.commit()
+                return True
+            except Exception as exc:
+                if isinstance(exc, SaihuAPIError):
+                    async with async_session_factory() as db:
+                        await _log_fetch_failure(db, shop_id, amazon_order_id, exc)
+                        await db.commit()
                 logger.warning(
                     "order_detail_fetch_failed",
                     shop_id=shop_id,
                     amazon_order_id=amazon_order_id,
                     error=str(exc),
                 )
+                return False
+
+    try:
+        async with async_session_factory() as db:
+            targets = await _find_pending_orders(db, MAX_PER_RUN)
+            await ctx.progress(step_detail=f"待拉取 {len(targets)} 条")
+
+        # 分批并发，每批 CONCURRENCY 个
+        for i in range(0, len(targets), CONCURRENCY):
+            batch = targets[i : i + CONCURRENCY]
+            results = await asyncio.gather(
+                *[_fetch_one(sid, oid) for sid, oid in batch]
+            )
+            for ok in results:
+                if ok:
+                    fetched += 1
+                else:
+                    failed += 1
             if (fetched + failed) % 20 == 0:
                 await ctx.progress(step_detail=f"已拉 {fetched} / 失败 {failed}")
 
@@ -72,8 +94,6 @@ async def sync_order_detail_job(ctx: JobContext) -> None:
 
 
 async def _find_pending_orders(db: AsyncSession, limit: int) -> list[tuple[str, str]]:
-    """查找需要拉详情的订单：已配对 SKU 相关 + 未拉过详情。"""
-    # 已配对的 (shop_id, seller_sku) 集合
     matched_subq = (
         select(ProductListing.shop_id, ProductListing.seller_sku)
         .where(ProductListing.is_matched.is_(True))
@@ -81,9 +101,12 @@ async def _find_pending_orders(db: AsyncSession, limit: int) -> list[tuple[str, 
         .subquery()
     )
 
-    # 未拉过详情的订单：JOIN order_item 找已配对 → LEFT JOIN fetch_log 排除
     stmt = (
-        select(OrderHeader.shop_id, OrderHeader.amazon_order_id)
+        select(
+            OrderHeader.shop_id,
+            OrderHeader.amazon_order_id,
+            OrderHeader.purchase_date,
+        )
         .join(OrderItem, OrderItem.order_id == OrderHeader.id)
         .join(
             matched_subq,
@@ -104,25 +127,41 @@ async def _find_pending_orders(db: AsyncSession, limit: int) -> list[tuple[str, 
     return [(r[0], r[1]) for r in rows]
 
 
+def _sanitize_detail_country(detail: dict[str, object]) -> str | None:
+    marketplace_id_raw = detail.get("marketplaceId") or ""
+    return marketplace_to_country(marketplace_id_raw)
+
+
+def _postal_code_for_routing(detail: dict[str, object]) -> str | None:
+    raw = detail.get("postalCode")
+    if raw is None:
+        return None
+    postal_code = str(raw).strip()
+    return postal_code or None
+
+
+def _disabled_address_fields() -> dict[str, None]:
+    return {
+        "state_or_region": None,
+        "city": None,
+        "detail_address": None,
+        "receiver_name": None,
+    }
+
+
 async def _save_detail(
     db: AsyncSession,
     shop_id: str,
     amazon_order_id: str,
-    detail: dict,
+    detail: dict[str, object],
 ) -> None:
-    marketplace_id_raw = detail.get("marketplaceId") or ""
-    country_code = marketplace_to_country(marketplace_id_raw) or detail.get("countryCode")
-
     detail_values = {
         "shop_id": shop_id,
         "amazon_order_id": amazon_order_id,
-        "postal_code": detail.get("postalCode"),
-        "country_code": country_code,
-        "state_or_region": detail.get("stateOrRegion"),
-        "city": detail.get("city"),
-        "detail_address": detail.get("detailAddress"),
-        "receiver_name": detail.get("receiverName"),
+        "postal_code": _postal_code_for_routing(detail),
+        "country_code": _sanitize_detail_country(detail),
         "fetched_at": now_beijing(),
+        **_disabled_address_fields(),
     }
     stmt = pg_insert(OrderDetail).values(**detail_values)
     stmt = stmt.on_conflict_do_update(
