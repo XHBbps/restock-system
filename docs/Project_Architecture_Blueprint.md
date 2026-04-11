@@ -498,7 +498,7 @@ Step 3: country_qty 计算时已把已推送量视为库存一部分
 | `order_detail_fetch_log` | 详情拉取日志（防重复拉取） | — |
 | `inventory_snapshot_latest` | 当前库存快照 | 唯一键 `(commodity_sku, warehouse_id)` |
 | `in_transit_record` / `in_transit_item` | 其他出库记录（赛狐同步） | — |
-| `zipcode_rule` | 邮编 → 仓库分配规则 | — |
+| `zipcode_rule` | 邮编 → 仓库分配规则 | `operator_enum` CHECK 约束；`operator String(10)`，`compare_value String(200)` |
 | `suggestion` | 补货建议单头 | `status IN ('draft','partial','pushed','archived','error')` |
 | `suggestion_item` | 补货建议条目 | `push_status IN ('pending','pushed','push_failed','blocked')`，索引 urgent 部分索引 |
 | `task_run` | 任务队列 + 执行日志 | 部分唯一索引 `dedupe_key WHERE status IN ('pending','running')` |
@@ -506,6 +506,13 @@ Step 3: country_qty 计算时已把已推送量视为库存一部分
 | `api_call_log` | 赛狐 API 调用日志 | — |
 | `access_token_cache` | 赛狐 token 缓存 | PK id=1 |
 | `login_attempt` | 登录尝试日志（防暴力） | — |
+
+#### `zipcode_rule`（邮编→仓库规则）
+
+- 字段：`country`, `prefix_length`, `value_type`, `operator`, `compare_value`, `warehouse_id`, `priority`
+- `operator ∈ {=, !=, >, >=, <, <=, contains, not_contains, between}`（`String(10)`，CHECK 约束 `operator_enum`）
+- `compare_value: String(200)`，`between` 运算符承载一段或多段 `lo-hi` 闭区间（多段逗号分隔，最多 20 段，`hi ≤ 10^prefix_length - 1`）
+- 按 `(country, priority)` 升序匹配，首条命中返回仓库；全部未命中归"未知仓"
 
 ### 6.2 关键索引策略
 
