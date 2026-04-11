@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import SaihuAPIError
+from app.core.exceptions import SaihuAPIError, SaihuBizError
 from app.core.logging import get_logger
 from app.core.timezone import marketplace_to_country, now_beijing
 from app.db.session import async_session_factory
@@ -29,6 +29,20 @@ MAX_PER_RUN = 500
 
 
 CONCURRENCY = 3  # 与 rate_limit 中 order_detail 的 QPS 一致
+
+
+def _is_permanent_saihu_error(exc: BaseException) -> bool:
+    """Classify whether ``exc`` should be recorded as a permanent fetch failure.
+
+    Only :class:`SaihuBizError` represents real business-level errors (invalid
+    order id, closed shop, malformed response, etc.) that will never succeed
+    on retry. Rate-limited / network / auth-expired errors bubble up only
+    after the client-level tenacity budget is exhausted but a later run may
+    still succeed, so they must NOT be written to ``order_detail_fetch_log``.
+    Any other exception type is also treated as transient and left for the
+    next run (matches historical behavior for non-Saihu errors).
+    """
+    return isinstance(exc, SaihuBizError)
 
 
 @register(JOB_NAME)
