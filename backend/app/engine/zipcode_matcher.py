@@ -25,7 +25,7 @@ class ZipcodeRule:
     priority: int
 
 
-_OPERATORS = {"=", "!=", ">", ">=", "<", "<=", "contains", "not_contains"}
+_OPERATORS = {"=", "!=", ">", ">=", "<", "<=", "contains", "not_contains", "between"}
 
 
 def normalize_postal(code: str | None) -> str:
@@ -45,6 +45,30 @@ def _split_compare_values(raw: str) -> list[str]:
 
 def _compare(left: str, operator: str, right: str, value_type: str) -> bool:
     if operator not in _OPERATORS:
+        return False
+
+    if operator == "between":
+        # between 仅支持数字;prefix 以整数解析(保留前导零语义)
+        try:
+            l_num = int(left)
+        except (TypeError, ValueError):
+            return False
+        for chunk in right.split(","):
+            piece = chunk.strip()
+            if not piece:
+                continue
+            parts = piece.split("-", 1)
+            if len(parts) != 2:
+                return False
+            try:
+                lo = int(parts[0].strip())
+                hi = int(parts[1].strip())
+            except ValueError:
+                return False
+            if lo > hi:
+                return False
+            if lo <= l_num <= hi:
+                return True
         return False
 
     if value_type == "number":

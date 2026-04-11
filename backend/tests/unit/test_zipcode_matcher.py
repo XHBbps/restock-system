@@ -1,4 +1,4 @@
-"""邮编匹配器单元测试：归一化 + 各种 operator + priority。"""
+"""邮编匹配器单元测试:归一化 + 各种 operator + priority。"""
 
 from app.engine.zipcode_matcher import ZipcodeRule, match_warehouse, normalize_postal
 
@@ -48,13 +48,13 @@ def test_jp_number_ge_50_to_haiyuan() -> None:
 
 
 def test_jp_priority_first_match_wins() -> None:
-    """priority 小的先匹配；priority 10 命中后不再尝试 priority 20。"""
+    """priority 小的先匹配;priority 10 命中后不再尝试 priority 20。"""
     rules = [
         _rule(1, "JP", 2, ">=", "50", "haiyuan", priority=10),
         _rule(2, "JP", 2, ">=", "00", "xiapu", priority=20),  # 永不被命中
     ]
     assert match_warehouse("640-8453", "JP", rules) == "haiyuan"
-    # 即使 priority=20 也匹配 "00"，但 priority=10 已经命中
+    # 即使 priority=20 也匹配 "00",但 priority=10 已经命中
     assert match_warehouse("100-0001", "JP", rules) == "xiapu"
 
 
@@ -84,6 +84,24 @@ def test_string_neq() -> None:
     rules = [_rule(1, "UK", 2, "!=", "SW", "default", priority=10, value_type="string")]
     assert match_warehouse("EC1V 0HP", "UK", rules) == "default"
     assert match_warehouse("SW1A 1AA", "UK", rules) is None
+
+
+def test_string_contains_any_token() -> None:
+    rules = [_rule(1, "UK", 4, "contains", "SW,EC", "uk_mix", priority=10, value_type="string")]
+
+    assert match_warehouse("SW1A 1AA", "UK", rules) == "uk_mix"
+    assert match_warehouse("EC1V 0HP", "UK", rules) == "uk_mix"
+    assert match_warehouse("NW1 7BD", "UK", rules) is None
+
+
+def test_string_not_contains_all_tokens() -> None:
+    rules = [
+        _rule(1, "UK", 4, "not_contains", "SW,EC", "uk_other", priority=10, value_type="string")
+    ]
+
+    assert match_warehouse("NW1 7BD", "UK", rules) == "uk_other"
+    assert match_warehouse("SW1A 1AA", "UK", rules) is None
+    assert match_warehouse("EC1V 0HP", "UK", rules) is None
 
 
 # ==================== 操作符全覆盖 ====================
@@ -116,4 +134,56 @@ def test_invalid_number_value() -> None:
     """数值类型遇到无法转换的字符串应跳过。"""
     rules = [_rule(1, "UK", 2, ">", "50", "wh", priority=10)]  # number 类型
     # SW 不能转 float
+    assert match_warehouse("SW1A 1AA", "UK", rules) is None
+
+
+# ==================== between 运算符 ====================
+def test_between_single_segment_inclusive() -> None:
+    rules = [_rule(1, "JP", 3, "between", "000-270", "wh_west", priority=10)]
+    # 边界都命中
+    assert match_warehouse("000-1111", "JP", rules) == "wh_west"
+    assert match_warehouse("270-0001", "JP", rules) == "wh_west"
+    # 中间值命中
+    assert match_warehouse("100-0001", "JP", rules) == "wh_west"
+    # 越界未命中
+    assert match_warehouse("271-0001", "JP", rules) is None
+    assert match_warehouse("999-0001", "JP", rules) is None
+
+
+def test_between_multi_segment_any_hit() -> None:
+    rules = [
+        _rule(1, "JP", 3, "between", "000-270, 500-700", "wh_mix", priority=10),
+    ]
+    assert match_warehouse("050-0001", "JP", rules) == "wh_mix"  # 命中第一段
+    assert match_warehouse("600-0001", "JP", rules) == "wh_mix"  # 命中第二段
+    assert match_warehouse("400-0001", "JP", rules) is None      # 两段都不命中
+    assert match_warehouse("800-0001", "JP", rules) is None
+
+
+def test_between_leading_zero_prefix() -> None:
+    """前 3 位 '050' 应解析为整数 50,落在 000-270 范围内。"""
+    rules = [_rule(1, "JP", 3, "between", "000-270", "wh_west", priority=10)]
+    assert match_warehouse("050-0001", "JP", rules) == "wh_west"
+
+
+def test_between_priority_still_first_wins() -> None:
+    rules = [
+        _rule(1, "JP", 3, "between", "000-270", "wh_a", priority=10),
+        _rule(2, "JP", 3, "between", "000-999", "wh_b", priority=20),
+    ]
+    # 100 同时满足两段,但 priority=10 先命中
+    assert match_warehouse("100-0001", "JP", rules) == "wh_a"
+    # 500 只落在第二段
+    assert match_warehouse("500-0001", "JP", rules) == "wh_b"
+
+
+def test_between_invalid_format_returns_none() -> None:
+    """格式错误的 compare_value 不应让 matcher 抛异常,返回 None。"""
+    rules = [_rule(1, "JP", 3, "between", "abc-xyz", "wh", priority=10)]
+    assert match_warehouse("100-0001", "JP", rules) is None
+
+
+def test_between_non_numeric_prefix_skipped() -> None:
+    """UK 邮编前缀 'SW1' 不能转 int,between 规则跳过返回 None。"""
+    rules = [_rule(1, "UK", 3, "between", "000-999", "wh", priority=10)]
     assert match_warehouse("SW1A 1AA", "UK", rules) is None
