@@ -1,21 +1,22 @@
-"""Worker：原子领取 + 心跳续租 + 业务执行。
+"""Worker:原子领取 + 心跳续租 + 业务执行。
 
-设计要点（spec FR-058a/d/e）：
+设计要点(spec FR-058a/d/e):
 - 每 worker 通过 `UPDATE ... FOR UPDATE SKIP LOCKED` 抢占下一条 pending 任务
 - 抢占成功立即写 worker_id / started_at / heartbeat_at / lease_expires_at
 - 业务执行期间 30s 续租
 - 终态写入 finished_at + status
-- 异常：失败 + error_msg；不会自动重新入队
+- 异常:失败 + error_msg;不会自动重新入队
 """
 
 import asyncio
 import os
 import socket
 import uuid
+from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from typing import Any
 
 from sqlalchemy import text, update
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.core.logging import get_logger
@@ -27,7 +28,7 @@ from app.tasks.jobs import JOB_REGISTRY, JobContext
 logger = get_logger(__name__)
 
 
-# 稳定可读的 worker 标识：host:pid:短 uuid
+# 稳定可读的 worker 标识:host:pid:短 uuid
 _WORKER_ID = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
 
 
@@ -40,13 +41,13 @@ class Worker:
 
     def start(self) -> None:
         if self._task is None or self._task.done():
-            # ★ 不变式检查：心跳必须至少跑 2 次才到达租约过期点，否则一次心跳失败就被误杀
+            # * 不变式检查:心跳必须至少跑 2 次才到达租约过期点,否则一次心跳失败就被误杀
             settings = get_settings()
             lease_seconds = settings.worker_lease_minutes * 60
             heartbeat_seconds = settings.worker_heartbeat_seconds
             if heartbeat_seconds * 2 >= lease_seconds:
                 raise RuntimeError(
-                    f"worker heartbeat ({heartbeat_seconds}s) × 2 must be < lease "
+                    f"worker heartbeat ({heartbeat_seconds}s) x 2 must be < lease "
                     f"({lease_seconds}s); otherwise the reaper will kill healthy workers. "
                     f"fix config: WORKER_HEARTBEAT_SECONDS < WORKER_LEASE_MINUTES*60/2"
                 )
@@ -54,13 +55,19 @@ class Worker:
             self._task = asyncio.create_task(self._run_loop(), name="task-worker")
             logger.info("worker_started", worker_id=_WORKER_ID)
 
+    @property
+    def running(self) -> bool:
+        return self._task is not None and not self._task.done() and not self._stop.is_set()
+
     async def stop(self) -> None:
         self._stop.set()
         if self._task is not None:
             try:
                 await asyncio.wait_for(self._task, timeout=10.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 self._task.cancel()
+            finally:
+                self._task = None
         logger.info("worker_stopped")
 
     async def _run_loop(self) -> None:
@@ -74,7 +81,7 @@ class Worker:
                 await self._execute(claimed)
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.exception("worker_loop_error", error=str(exc))
                 await asyncio.sleep(settings.worker_poll_interval_seconds)
 
@@ -104,11 +111,15 @@ class Worker:
         )
         async with async_session_factory() as db:
             row = (
-                await db.execute(
-                    sql,
-                    {"worker_id": _WORKER_ID, "lease_seconds": lease_seconds},
+                (
+                    await db.execute(
+                        sql,
+                        {"worker_id": _WORKER_ID, "lease_seconds": lease_seconds},
+                    )
                 )
-            ).mappings().first()
+                .mappings()
+                .first()
+            )
             await db.commit()
             if row is None:
                 return None
@@ -135,15 +146,13 @@ class Worker:
             )
             await handler(ctx)
             await self._mark_success(task_id)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.exception("task_failed", task_id=task_id, job_name=job_name)
             await self._mark_failed(task_id, str(exc))
         finally:
             heartbeat_task.cancel()
-            try:
+            with suppress(asyncio.CancelledError, Exception):
                 await heartbeat_task
-            except (asyncio.CancelledError, Exception):  # noqa: BLE001
-                pass
 
     async def _heartbeat_loop(self, task_id: int) -> None:
         settings = get_settings()
@@ -168,7 +177,7 @@ class Worker:
         except asyncio.CancelledError:
             return
 
-    def _make_progress_setter(self, task_id: int):
+    def _make_progress_setter(self, task_id: int) -> Callable[..., Awaitable[None]]:
         async def setter(
             *,
             current_step: str | None = None,
@@ -185,9 +194,7 @@ class Worker:
             if not values:
                 return
             async with async_session_factory() as db:
-                await db.execute(
-                    update(TaskRun).where(TaskRun.id == task_id).values(**values)
-                )
+                await db.execute(update(TaskRun).where(TaskRun.id == task_id).values(**values))
                 await db.commit()
 
         return setter

@@ -1,6 +1,6 @@
-"""结构化日志（structlog JSON 输出）。
+"""结构化日志(structlog JSON 输出)。
 
-用法：
+用法:
     from app.core.logging import get_logger
     logger = get_logger(__name__)
     logger.info("event_name", key=value)
@@ -10,7 +10,7 @@
 
 import logging
 import sys
-from typing import Any
+from typing import Any, cast
 
 import structlog
 
@@ -22,7 +22,7 @@ def configure_logging() -> None:
     settings = get_settings()
     level = logging.getLevelName(settings.app_log_level.upper())
 
-    # stdlib logging → 仅做输出载体，实际格式由 structlog 决定
+    # stdlib logging -> 仅做输出载体,实际格式由 structlog 决定
     logging.basicConfig(
         format="%(message)s",
         stream=sys.stdout,
@@ -52,7 +52,7 @@ def configure_logging() -> None:
 
 
 def _safe_json_dumps(obj: Any, **kwargs: Any) -> str:
-    """使用 orjson 序列化，回退 stdlib。"""
+    """使用 orjson 序列化,回退 stdlib。"""
     try:
         import orjson
 
@@ -65,4 +65,4 @@ def _safe_json_dumps(obj: Any, **kwargs: Any) -> str:
 
 def get_logger(name: str | None = None) -> structlog.stdlib.BoundLogger:
     """获取命名日志器。"""
-    return structlog.get_logger(name)  # type: ignore[return-value]
+    return cast(structlog.stdlib.BoundLogger, structlog.get_logger(name))

@@ -36,7 +36,7 @@ from app.tasks.scheduler import reload_scheduler
 router = APIRouter(prefix="/api/config", tags=["config"])
 
 
-def _warehouse_total_stock_subquery():
+def _warehouse_total_stock_subquery() -> Any:
     return (
         select(
             InventorySnapshotLatest.warehouse_id.label("warehouse_id"),
@@ -50,7 +50,7 @@ def _warehouse_total_stock_subquery():
     )
 
 
-def _warehouse_list_stmt():
+def _warehouse_list_stmt() -> Any:
     stock_subquery = _warehouse_total_stock_subquery()
     return (
         select(
@@ -62,7 +62,7 @@ def _warehouse_list_stmt():
     )
 
 
-def _warehouse_out_from_row(row) -> WarehouseOut:
+def _warehouse_out_from_row(row: Any) -> WarehouseOut:
     warehouse, total_stock = row
     return WarehouseOut.model_validate(
         {
