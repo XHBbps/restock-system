@@ -86,6 +86,8 @@ class TaskRun(Base):
     step_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     total_steps: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # 诊断 tripwire: 当前设计失败任务不自动重入队,attempt_count 理论上应始终 = 1。
+    # 若排查时发现某任务 attempt_count > 1,说明发生了异常重抢占,需调查原因。
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     error_msg: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -111,6 +111,15 @@
 
 ## 3. 近期重大变更（2026-04-10 ~ 2026-04-11）
 
+### 3.0a Reaper 容器拓扑冗余（2026-04-11，云交付评分卡 M4 阶段）
+
+- `deploy/docker-compose.yml` 中 scheduler 服务的 `PROCESS_ENABLE_REAPER` 从 `false` 改为 `true`
+- Reaper 现在在 worker 和 scheduler 两个容器**冗余运行**，任一容器存活即可回收僵尸任务
+- 双 reaper 通过 PostgreSQL 行锁 + 幂等 UPDATE 天然并发安全
+- 背景：M4 审计发现"worker+reaper 共容器、backend 关 reaper"的拓扑下若 worker 容器整体 crash 则无进程回收僵尸任务（P1-M4-3）
+- `docs/runbook.md` 3.2 节同步更新：检查两个容器的 reaper 日志 + 追加"强制中断 running 任务"的 fallback 说明（因当前无 cooperative cancel 机制）
+- `backend/app/models/task_run.py:89` `attempt_count` 字段追加诊断 tripwire 注释
+
 ### 3.0 push 端点状态机封闭性修复（2026-04-11，云交付评分卡 M3 阶段）
 
 - `POST /api/suggestions/{id}/push` 添加状态前置校验：`sug.status not in ("draft","partial")` 时抛 `ConflictError("建议单状态为 X,不可推送")`

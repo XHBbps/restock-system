@@ -103,7 +103,10 @@ services:
       <<: *backend-env
       APP_DOCS_ENABLED: false
       PROCESS_ENABLE_WORKER: false
-      PROCESS_ENABLE_REAPER: false
+      # Reaper 在 worker 和 scheduler 两个容器冗余运行:
+      # 若 worker 容器整体 crash 未恢复,scheduler 的 reaper 仍能回收僵尸任务。
+      # 双 reaper 通过 PostgreSQL 行锁 + 幂等 UPDATE 天然并发安全。
+      PROCESS_ENABLE_REAPER: true
       PROCESS_ENABLE_SCHEDULER: true
       DB_POOL_SIZE: 3
       DB_MAX_OVERFLOW: 2
