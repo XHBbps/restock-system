@@ -107,32 +107,6 @@ def _compare(left: str, operator: str, right: str, value_type: str) -> bool:
         return False
 
 
-def match_warehouse(
-    postal_code: str | None,
-    country: str,
-    rules: list[ZipcodeRule],
-) -> str | None:
-    """对单个订单匹配仓库。
-
-    返回仓库 id 或 None(未知仓)。
-    rules 必须按 priority 升序传入(或在内部排序)。
-    """
-    normalized = normalize_postal(postal_code)
-    if not normalized:
-        return None
-    country_rules = sorted(
-        (r for r in rules if r.country == country),
-        key=lambda r: r.priority,
-    )
-    for rule in country_rules:
-        prefix = _extract_prefix(normalized, rule.prefix_length)
-        if not prefix or len(prefix) < rule.prefix_length:
-            continue
-        if _compare(prefix, rule.operator, rule.compare_value, rule.value_type):
-            return rule.warehouse_id
-    return None
-
-
 def match_warehouses(
     postal_code: str | None,
     country: str,
