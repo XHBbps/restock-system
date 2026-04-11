@@ -137,7 +137,7 @@ async function handleLogin(): Promise<void> {
     transition: background-color 500ms ease;
 
     &:hover {
-      background-color: $color-bg-subtle;
+      background-color: $color-border-default;
       transition-duration: 300ms;
     }
   }
