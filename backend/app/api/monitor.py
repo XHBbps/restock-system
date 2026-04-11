@@ -85,8 +85,6 @@ async def get_api_calls(
             await db.execute(
                 text(
                     """
-
-from typing import Any
                     SELECT DISTINCT ON (endpoint)
                         endpoint, saihu_code, saihu_msg, error_type
                     FROM api_call_log

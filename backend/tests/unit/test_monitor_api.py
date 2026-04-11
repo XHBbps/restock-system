@@ -54,3 +54,28 @@ async def test_get_api_calls_counts_only_orders_related_to_matched_skus() -> Non
     assert "order_item" in sql
     assert "product_listing" in sql
     assert "product_listing.is_matched is true" in sql
+
+
+@pytest.mark.asyncio
+async def test_get_api_calls_last_call_sql_has_no_embedded_python_import() -> None:
+    """Regression for code review C-1.
+
+    Ensure the "last call per endpoint" text() SQL does not accidentally contain
+    a Python import statement inside the string literal. Triggers the `if rows:`
+    branch by providing a non-empty first rows result.
+    """
+    db = _FakeDb([
+        _RowsResult([("GET /foo", 10, 8, None)]),  # non-empty -> enters if-branch
+        _RowsResult([]),                            # the buggy last_rows query
+        _ScalarResult(0),                           # postal_compliance
+    ])
+
+    await get_api_calls(hours=24, db=db, _={})  # type: ignore[arg-type]
+
+    # The second executed statement is the text() last_rows SELECT DISTINCT ON.
+    last_rows_stmt = db.executed[1]
+    sql_text = str(last_rows_stmt).lower()
+    assert "from typing import any" not in sql_text, (
+        "SQL literal must not contain embedded Python import statement"
+    )
+    assert "select distinct on" in sql_text
