@@ -8,7 +8,7 @@
     <div class="login-card">
       <div class="card-header">
         <div class="brand-mark">R</div>
-        <h1 class="card-title">Sign in to Restock</h1>
+        <h1 class="card-title">登录 Restock</h1>
       </div>
 
       <form class="card-form" @submit.prevent="handleLogin">
@@ -32,7 +32,7 @@
           :loading="loading"
           @click="handleLogin"
         >
-          Sign in
+          登录
         </el-button>
 
         <div v-if="errorMsg" class="error-banner">
@@ -54,7 +54,7 @@
 import { login } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage } from 'element-plus'
-import { ref } from 'vue'
+import { onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 // 80 列 × 35 行 = 2800 格，覆盖 2560px 宽度以下的桌面分辨率
@@ -64,10 +64,46 @@ const GRID_CELL_COUNT = 2800
 const password = ref('')
 const loading = ref(false)
 const errorMsg = ref('')
+let lockedCountdownTimer: number | null = null
 
 const auth = useAuthStore()
 const router = useRouter()
 const route = useRoute()
+
+function clearLockedCountdown(): void {
+  if (lockedCountdownTimer !== null) {
+    window.clearInterval(lockedCountdownTimer)
+    lockedCountdownTimer = null
+  }
+}
+
+function startLockedCountdown(lockedUntilIso: string): void {
+  clearLockedCountdown()
+  const lockedUntilMs = new Date(lockedUntilIso).getTime()
+  if (Number.isNaN(lockedUntilMs)) {
+    errorMsg.value = '账号已锁定，请稍后再试'
+    return
+  }
+  const update = (): void => {
+    const remainingMs = lockedUntilMs - Date.now()
+    if (remainingMs <= 0) {
+      clearLockedCountdown()
+      errorMsg.value = ''
+      return
+    }
+    const totalSec = Math.ceil(remainingMs / 1000)
+    const min = Math.floor(totalSec / 60)
+    const sec = totalSec % 60
+    const remaining = min > 0 ? `${min} 分 ${sec} 秒` : `${sec} 秒`
+    errorMsg.value = `账号已锁定，剩余 ${remaining}`
+  }
+  update()
+  lockedCountdownTimer = window.setInterval(update, 1000)
+}
+
+onUnmounted(() => {
+  clearLockedCountdown()
+})
 
 async function handleLogin(): Promise<void> {
   if (!password.value) {
@@ -76,6 +112,7 @@ async function handleLogin(): Promise<void> {
   }
   loading.value = true
   errorMsg.value = ''
+  clearLockedCountdown()
   try {
     const resp = await login(password.value)
     auth.setToken(resp.access_token)
@@ -84,9 +121,19 @@ async function handleLogin(): Promise<void> {
     const redirect = raw.startsWith('/') && !raw.startsWith('//') ? raw : '/'
     router.replace(redirect)
   } catch (err: unknown) {
-    const e = err as { response?: { status?: number; data?: { message?: string } } }
+    const e = err as {
+      response?: {
+        status?: number
+        data?: { message?: string; detail?: { locked_until?: string } }
+      }
+    }
     if (e.response?.status === 423) {
-      errorMsg.value = '账号已锁定，请稍后再试'
+      const lockedUntil = e.response?.data?.detail?.locked_until
+      if (lockedUntil) {
+        startLockedCountdown(lockedUntil)
+      } else {
+        errorMsg.value = '账号已锁定，请稍后再试'
+      }
     } else {
       errorMsg.value = e.response?.data?.message || '登录失败'
     }

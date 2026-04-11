@@ -12,12 +12,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import db_session, get_current_session
 from app.config import get_settings
 from app.core.exceptions import LoginLocked, Unauthorized
+from app.core.logging import get_logger
 from app.core.security import create_access_token, verify_password
 from app.core.timezone import now_beijing
 from app.models.global_config import GlobalConfig
 from app.models.login_attempt import LoginAttempt
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+logger = get_logger(__name__)
 
 
 class LoginRequest(BaseModel):
@@ -31,6 +33,11 @@ class LoginResponse(BaseModel):
 
 
 def _get_login_source_key(request: Request) -> str:
+    # 注:本函数无条件信任 X-Forwarded-For 首值,依赖 Caddy 反向代理通过
+    # `header_up X-Forwarded-For {remote_host}` **覆盖**(而非 append)原 XFF
+    # (见 deploy/Caddyfile 第 6 行),确保后端看到的是 Caddy 的真实对端 IP 而
+    # 非客户端伪造值。若未来脱离 Caddy 直接暴露 backend,必须引入
+    # TRUSTED_PROXIES 白名单校验 request.client.host 来源。
     forwarded_for = request.headers.get("x-forwarded-for", "").strip()
     if forwarded_for:
         client_ip = forwarded_for.split(",", 1)[0].strip()
@@ -62,6 +69,11 @@ async def login(
     ).scalar_one_or_none()
 
     if attempt is not None and attempt.locked_until is not None and attempt.locked_until > now:
+        logger.warning(
+            "auth_login_blocked_locked",
+            source_key=source_key,
+            locked_until=attempt.locked_until.isoformat(),
+        )
         raise LoginLocked(
             "当前来源已被临时锁定，请稍后再试", locked_until=attempt.locked_until.isoformat()
         )
@@ -91,6 +103,21 @@ async def login(
         )
         await db.execute(stmt)
         await db.commit()
+
+        if locked_until is not None:
+            logger.warning(
+                "auth_login_lockout_triggered",
+                source_key=source_key,
+                failed_count=settings.login_failed_max,
+                lock_minutes=settings.login_lock_minutes,
+                locked_until=locked_until.isoformat(),
+            )
+        else:
+            logger.warning(
+                "auth_login_failed",
+                source_key=source_key,
+                failed_count=new_count,
+            )
         raise Unauthorized("密码错误")
 
     if attempt is not None and (attempt.failed_count != 0 or attempt.locked_until is not None):
@@ -100,8 +127,10 @@ async def login(
             .values(failed_count=0, locked_until=None, updated_at=now)
         )
         await db.commit()
+        logger.info("auth_login_reset_after_success", source_key=source_key)
 
     token = create_access_token()
+    logger.info("auth_login_success", source_key=source_key)
     return LoginResponse(
         access_token=token,
         expires_in=settings.jwt_expires_hours * 3600,

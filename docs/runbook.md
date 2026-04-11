@@ -196,7 +196,110 @@ docker compose -f deploy/docker-compose.yml exec db psql -U postgres -d replenis
    - 03:30 `sync_warehouse`、02:00 `daily_archive`
    - 默认 08:00 `calc_engine`
 
-### 3.4 赛狐 API 调用异常
+### 3.4 JWT 密钥管理（首次生成 / 轮换 / 泄漏应急）
+
+**适用范围**：`JWT_SECRET` 和 `LOGIN_PASSWORD` 两个关键密钥的生命周期管理。
+
+#### 3.4.1 首次生成（部署前必做）
+
+生产环境 `validate_settings` 会在启动时拦截 placeholder 密钥 `please_change_me`，必须先生成真实值：
+
+```bash
+# 生成 32 字节随机 JWT 密钥（Base64 编码，约 44 字符）
+openssl rand -base64 32
+# 示例输出：Wx3kLm9pQ2fT8nR6vS4aBcDeFgHiJkLmNoPqRsTuVw=
+
+# 生成登录密码（建议 16 字符以上，混合大小写+数字+特殊字符）
+openssl rand -base64 16
+```
+
+把生成的值写入 `deploy/.env`（不是 `.env.example`）：
+
+```
+JWT_SECRET=Wx3kLm9pQ2fT8nR6vS4aBcDeFgHiJkLmNoPqRsTuVw=
+LOGIN_PASSWORD=你生成的密码
+```
+
+**双层防御**：
+- `backend/app/config.py:82-86` — 启动时 `validate_settings` 校验 `JWT_SECRET != "please_change_me"` 且 `LOGIN_PASSWORD != "please_change_me"`
+- `deploy/scripts/validate_env.sh` — 部署脚本二次校验（`deploy.sh` 会先调用）
+
+两层都通过后才能启动。
+
+#### 3.4.2 定期轮换（建议每 90 天）
+
+**JWT_SECRET 轮换步骤**：
+
+```bash
+# 1. 生成新密钥
+NEW_SECRET=$(openssl rand -base64 32)
+
+# 2. 备份当前 .env
+cp deploy/.env deploy/.env.bak.$(date +%Y%m%d)
+
+# 3. 写入新密钥（保留其他变量）
+sed -i "s|^JWT_SECRET=.*|JWT_SECRET=$NEW_SECRET|" deploy/.env
+
+# 4. 重启 backend + worker + scheduler（一起重启,确保所有进程加载新密钥）
+docker compose -f deploy/docker-compose.yml restart backend worker scheduler
+
+# 5. 验证 /readyz 返回 ok
+curl https://your-domain.com/readyz
+```
+
+**影响**：所有已发放的 JWT token 立即失效，所有活跃用户必须重新登录。由于本项目是单用户 1-5 人内部工具，影响面极小（只需通知用户重新登录一次）。
+
+**LOGIN_PASSWORD 轮换步骤**：
+
+```bash
+# 1. 生成新密码
+NEW_PASSWORD=$(openssl rand -base64 16)
+
+# 2. 更新 .env
+sed -i "s|^LOGIN_PASSWORD=.*|LOGIN_PASSWORD=$NEW_PASSWORD|" deploy/.env
+
+# 3. 重启 backend（必须重启以触发 main.py lifespan 的密码 seed 逻辑）
+docker compose -f deploy/docker-compose.yml restart backend
+
+# 4. 通知用户新密码
+```
+
+**注**：`global_config.login_password_hash` 会在 backend 启动时由 `main.py` 通过 bcrypt 重新 hash 并持久化到 DB。
+
+#### 3.4.3 密钥泄漏应急处理
+
+**症状**：可疑登录事件 / 已知密钥被外泄 / git 历史误 commit 密钥。
+
+**处理步骤**（按紧急度排序）：
+
+1. **立即轮换 `JWT_SECRET`**（按 3.4.2 流程）—— 使所有已发 JWT 立即失效
+2. **立即轮换 `LOGIN_PASSWORD`**（按 3.4.2 流程）
+3. **检查 `login_attempt` 表**，确认是否有异常登录尝试：
+   ```sql
+   SELECT * FROM login_attempt
+   WHERE updated_at > now() - interval '24 hours'
+   ORDER BY updated_at DESC;
+   ```
+4. **检查 backend 日志**中的 `auth_login_success` 和 `auth_login_failed` 事件：
+   ```bash
+   docker compose -f deploy/docker-compose.yml logs backend | grep auth_login
+   ```
+5. **如果密钥误 commit 到 git**：
+   - `git rm` 从追踪移除 `.env` 文件
+   - 使用 `git filter-repo` 或 `BFG Repo-Cleaner` 清除历史（高风险操作，先备份仓库）
+   - 强制推送（需所有协作者重新 clone）
+6. **审计其他可能被泄漏的敏感信息**：`SAIHU_CLIENT_SECRET` / 数据库密码等，按需一并轮换
+
+#### 3.4.4 常见问题
+
+- **Q：轮换后旧 token 怎么办？**
+  - A：立即失效。用户重新登录即可。
+- **Q：可以零停机轮换 JWT_SECRET 吗？**
+  - A：本项目不支持（会引入密钥表等复杂度，超出 1-5 用户场景的必要性）。重启 3 个容器约 5-10 秒，可接受。
+- **Q：密钥长度有最小要求吗？**
+  - A：`validate_settings` 当前只拦截 placeholder，不校验长度。建议始终使用 `openssl rand -base64 32`（32 字节 / 256 位）或更长。
+
+### 3.5 赛狐 API 调用异常
 
 **症状**：同步任务失败或长时间卡住；`api_call_log` 表中大量 `saihu_code != 0` 记录。
 
@@ -209,7 +312,7 @@ docker compose -f deploy/docker-compose.yml exec db psql -U postgres -d replenis
    - 网络错误（timeout / connection refused）— 检查服务器网络和赛狐域名解析
 3. **强制刷新 token**：重启 backend / worker 服务即可清空内存 token 缓存
 
-### 3.5 后端启动失败
+### 3.6 后端启动失败
 
 **排查顺序**：
 
@@ -231,7 +334,7 @@ docker compose -f deploy/docker-compose.yml exec db psql -U postgres -d replenis
    docker compose exec backend alembic current
    ```
 
-### 3.6 数据库恢复后应用异常
+### 3.7 数据库恢复后应用异常
 
 **排查**：
 
@@ -250,7 +353,7 @@ docker compose -f deploy/docker-compose.yml exec db psql -U postgres -d replenis
    bash deploy/scripts/deploy.sh
    ```
 
-### 3.7 发布后页面 502/503
+### 3.8 发布后页面 502/503
 
 **排查链路**：
 
@@ -272,7 +375,7 @@ docker compose -f deploy/docker-compose.yml exec db psql -U postgres -d replenis
        查看 deploy/Caddyfile
 ```
 
-### 3.8 补货引擎卡住或异常
+### 3.9 补货引擎卡住或异常
 
 **症状**：点击"生成补货建议"后任务长时间 running；或任务 failed 但无明确原因。
 

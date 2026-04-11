@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-11
+> 最近更新：2026-04-12（云交付评分卡 M6 阶段：auth 业务日志 + LoginView 中文化/倒计时 + runbook JWT 密钥管理章节）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -109,7 +109,17 @@
 
 ---
 
-## 3. 近期重大变更（2026-04-10 ~ 2026-04-11）
+## 3. 近期重大变更（2026-04-10 ~ 2026-04-12）
+
+### 3.0c 认证模块云交付就绪修复（2026-04-12，云交付评分卡 M6 阶段）
+
+- `backend/app/api/auth.py` 新增 5 类 structlog 业务事件日志（`auth_login_blocked_locked` / `auth_login_failed` / `auth_login_lockout_triggered` / `auth_login_reset_after_success` / `auth_login_success`），消除"认证模块零业务日志"缺口
+- `backend/app/api/auth.py:33-41` `_get_login_source_key` 加代码注释明确对 `deploy/Caddyfile` `header_up X-Forwarded-For {remote_host}` 覆盖行为的依赖关系
+- `frontend/src/views/LoginView.vue`：
+  - 中文化 "Sign in to Restock" → "登录 Restock"，"Sign in" → "登录"
+  - 新增 `startLockedCountdown` / `clearLockedCountdown` 消费后端 `LoginLocked.detail.locked_until`，每秒更新"账号已锁定，剩余 X 分 Y 秒"倒计时
+- `docs/runbook.md` 新增第 3.4 节"JWT 密钥管理（首次生成 / 轮换 / 泄漏应急）"，约 100 行 SOP；原 3.5-3.8 顺延到 3.5-3.9
+- 评分影响：M6 D5 从 2 升 3；M6 平均分 2.56 → 2.67；P0-5（JWT 轮换文档）从 ❌ 未实现升级为 ✅ 已实现；P1-6（XFF 信任源）降级到 P2（Caddy 架构已缓解）
 
 ### 3.0a Reaper 容器拓扑冗余（2026-04-11，云交付评分卡 M4 阶段）
 
