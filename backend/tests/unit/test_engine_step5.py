@@ -1,6 +1,6 @@
-"""Step 5 仓内分配单元测试：真实分布 + 零数据兜底。"""
+"""Step 5 仓内分配单元测试:真实分布 + 零数据兜底。"""
 
-from app.engine.step5_warehouse_split import split_country_qty
+from app.engine.step5_warehouse_split import explain_country_qty_split, split_country_qty
 from app.engine.zipcode_matcher import ZipcodeRule
 
 
@@ -30,7 +30,7 @@ def _jp_rules() -> list[ZipcodeRule]:
 
 
 def test_real_distribution() -> None:
-    """3 单 海源 + 2 单 夏普 → 60/40 分配 100 件。"""
+    """3 单 海源 + 2 单 夏普 -> 60/40 分配 100 件。"""
     orders = [
         ("640-8453", 1),  # haiyuan
         ("550-0000", 1),  # haiyuan
@@ -69,12 +69,12 @@ def test_unknown_warehouse_excluded_from_denominator() -> None:
         rules=rules,
         country_warehouses=["haiyuan", "xiapu"],
     )
-    # 已知仓只有 haiyuan，应得全部 50
+    # 已知仓只有 haiyuan,应得全部 50
     assert result == {"haiyuan": 50}
 
 
 def test_zero_data_fallback_even_split() -> None:
-    """零样本兜底：均分到所有已维护海外仓。"""
+    """零样本兜底:均分到所有已维护海外仓。"""
     result = split_country_qty(
         sku="sku-A",
         country="JP",
@@ -83,10 +83,68 @@ def test_zero_data_fallback_even_split() -> None:
         rules=_jp_rules(),
         country_warehouses=["haiyuan", "xiapu", "third"],
     )
-    # 100 / 3 = 33 余 1 → 34/33/33
+    # 100 / 3 = 33 余 1 -> 34/33/33
     assert sum(result.values()) == 100
     assert len(result) == 3
     assert max(result.values()) - min(result.values()) <= 1
+
+
+def test_matched_warehouse_outside_eligible_list_becomes_unknown() -> None:
+    """命中到非该国维护仓时,该样本不得进入有效已知仓分母。"""
+    rules = _jp_rules()
+    result = explain_country_qty_split(
+        sku="sku-A",
+        country="JP",
+        country_qty=50,
+        orders=[
+            ("640-8453", 5),  # haiyuan
+            ("100-0001", 5),  # xiapu but not eligible below
+        ],
+        rules=rules,
+        country_warehouses=["haiyuan"],
+    )
+
+    assert result.warehouse_breakdown == {"haiyuan": 50}
+    assert result.allocation_mode == "matched"
+    assert result.matched_order_qty == 5
+    assert result.unknown_order_qty == 5
+    assert result.eligible_warehouses == ["haiyuan"]
+
+
+def test_all_unknown_samples_fallback_even() -> None:
+    """全是未知样本时,进入均分兜底并保留 unknown 统计。"""
+    result = explain_country_qty_split(
+        sku="sku-A",
+        country="JP",
+        country_qty=9,
+        orders=[
+            (None, 4),
+            ("", 5),
+        ],
+        rules=_jp_rules(),
+        country_warehouses=["haiyuan", "xiapu"],
+    )
+
+    assert result.allocation_mode == "fallback_even"
+    assert result.matched_order_qty == 0
+    assert result.unknown_order_qty == 9
+    assert result.warehouse_breakdown == {"haiyuan": 5, "xiapu": 4}
+
+
+def test_no_warehouse_returns_empty_with_reason() -> None:
+    result = explain_country_qty_split(
+        sku="sku-A",
+        country="JP",
+        country_qty=20,
+        orders=[(None, 20)],
+        rules=_jp_rules(),
+        country_warehouses=[],
+    )
+
+    assert result.warehouse_breakdown == {}
+    assert result.allocation_mode == "no_warehouse"
+    assert result.matched_order_qty == 0
+    assert result.unknown_order_qty == 20
 
 
 def test_zero_data_no_warehouse_returns_empty() -> None:
@@ -114,7 +172,7 @@ def test_zero_country_qty() -> None:
 
 
 def test_single_known_warehouse_gets_all() -> None:
-    """所有匹配订单都落在同一仓 → 100% 分配。"""
+    """所有匹配订单都落在同一仓 -> 100% 分配。"""
     orders = [("640-8453", 10), ("550-0000", 10)]
     result = split_country_qty(
         sku="sku-A",
@@ -128,7 +186,7 @@ def test_single_known_warehouse_gets_all() -> None:
 
 
 def test_total_preserved_no_loss_to_rounding() -> None:
-    """分配后的总和必须等于 country_qty，不能因四舍五入丢失件数。"""
+    """分配后的总和必须等于 country_qty,不能因四舍五入丢失件数。"""
     orders = [
         ("640-8453", 7),
         ("550-0000", 11),

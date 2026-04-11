@@ -1,13 +1,14 @@
-"""Step 5：各国仓内分配（简化版 FR-033 + analyze G6）。
+"""Step 5:各国仓内分配(简化版 FR-033 + analyze G6)。
 
-策略：
+策略:
 - 取该 SKU 在该国近 30 天已拉详情且有 postal_code 的订单
-- 按 zipcode_rule 分配到具体仓 → 未匹配的归"未知仓"
-- 已知仓总件数 > 0：按真实比例分配（不设阈值，不做小占比归零）
-- 已知仓总件数 = 0：均分到该国所有"已维护国家"的海外仓（零数据兜底）
+- 按 zipcode_rule 分配到具体仓 -> 未匹配的归"未知仓"
+- 已知仓总件数 > 0:按真实比例分配(不设阈值,不做小占比归零)
+- 已知仓总件数 = 0:均分到该国所有"已维护国家"的海外仓(零数据兜底)
 """
 
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
 from sqlalchemy import select
@@ -22,10 +23,19 @@ from app.models.zipcode_rule import ZipcodeRule as ZipcodeRuleModel
 WINDOW_DAYS = 30
 
 
+@dataclass
+class CountryAllocationResult:
+    warehouse_breakdown: dict[str, int]
+    allocation_mode: str
+    matched_order_qty: int
+    unknown_order_qty: int
+    eligible_warehouses: list[str]
+
+
 async def load_country_warehouses(
     db: AsyncSession,
 ) -> dict[str, list[str]]:
-    """加载每个国家的可用海外仓 id（type ≠ 1 且已指定 country）。"""
+    """加载每个国家的可用海外仓 id(type ≠ 1 且已指定 country)。"""
     rows = (
         await db.execute(
             select(Warehouse.id, Warehouse.country)
@@ -63,9 +73,9 @@ async def load_all_sku_country_orders(
     commodity_skus: list[str],
     today: date,
 ) -> dict[tuple[str, str], list[tuple[str | None, int]]]:
-    """批量加载所有指定 SKU 近 30 天订单，按 (sku, country) 分组返回。
+    """批量加载所有指定 SKU 近 30 天订单,按 (sku, country) 分组返回。
 
-    规则引擎 runner 用一次查询替代 N×M 次（N SKU × M 国家），
+    规则引擎 runner 用一次查询替代 NxM 次(N SKU x M 国家),
     符合宪法 V 原则"禁止 N+1"。
     """
     if not commodity_skus:
@@ -112,21 +122,56 @@ def split_country_qty(
     rules: list[ZipcodeRule],
     country_warehouses: list[str],
 ) -> dict[str, int]:
+    return explain_country_qty_split(
+        sku=sku,
+        country=country,
+        country_qty=country_qty,
+        orders=orders,
+        rules=rules,
+        country_warehouses=country_warehouses,
+    ).warehouse_breakdown
+
+
+def explain_country_qty_split(
+    *,
+    sku: str,
+    country: str,
+    country_qty: int,
+    orders: list[tuple[str | None, int]],
+    rules: list[ZipcodeRule],
+    country_warehouses: list[str],
+) -> CountryAllocationResult:
     """把 country_qty 分配到该国的各个仓。
 
     orders: [(postal_code, qty_shipped), ...]
-    返回：{warehouse_id: qty}
+    返回结构化结果,同时携带解释快照。
     """
+    del sku  # 当前仅用于签名对齐 runner/测试调用
     if country_qty <= 0:
-        return {}
+        return CountryAllocationResult(
+            warehouse_breakdown={},
+            allocation_mode="matched",
+            matched_order_qty=0,
+            unknown_order_qty=0,
+            eligible_warehouses=list(dict.fromkeys(country_warehouses)),
+        )
+
+    eligible_warehouses = list(dict.fromkeys(country_warehouses))
+    eligible_set = set(eligible_warehouses)
 
     # 已知仓件数统计
     known_counts: defaultdict[str, int] = defaultdict(int)
+    matched_order_qty = 0
+    unknown_order_qty = 0
     for postal_code, qty in orders:
+        if qty <= 0:
+            continue
         wid = match_warehouse(postal_code, country, rules)
-        if wid is None:
+        if wid is None or wid not in eligible_set:
+            unknown_order_qty += qty
             continue
         known_counts[wid] += qty
+        matched_order_qty += qty
 
     total_known = sum(known_counts.values())
 
@@ -137,21 +182,39 @@ def split_country_qty(
         items = list(known_counts.items())
         for i, (wid, cnt) in enumerate(items):
             if i == len(items) - 1:
-                # 最后一仓兜底，避免四舍五入误差
+                # 最后一仓兜底,避免四舍五入误差
                 result[wid] = country_qty - accumulated
             else:
-                share = int(round(country_qty * cnt / total_known))
+                share = round(country_qty * cnt / total_known)
                 result[wid] = share
                 accumulated += share
         # 清理 0 值
-        return {k: v for k, v in result.items() if v > 0}
+        return CountryAllocationResult(
+            warehouse_breakdown={k: v for k, v in result.items() if v > 0},
+            allocation_mode="matched",
+            matched_order_qty=matched_order_qty,
+            unknown_order_qty=unknown_order_qty,
+            eligible_warehouses=eligible_warehouses,
+        )
 
-    # 零数据兜底：均分给该国所有已维护海外仓
-    if not country_warehouses:
-        return {}
-    base = country_qty // len(country_warehouses)
-    remainder = country_qty - base * len(country_warehouses)
+    # 零数据兜底:均分给该国所有已维护海外仓
+    if not eligible_warehouses:
+        return CountryAllocationResult(
+            warehouse_breakdown={},
+            allocation_mode="no_warehouse",
+            matched_order_qty=0,
+            unknown_order_qty=unknown_order_qty,
+            eligible_warehouses=[],
+        )
+    base = country_qty // len(eligible_warehouses)
+    remainder = country_qty - base * len(eligible_warehouses)
     result = {}
-    for i, wid in enumerate(country_warehouses):
+    for i, wid in enumerate(eligible_warehouses):
         result[wid] = base + (1 if i < remainder else 0)
-    return {k: v for k, v in result.items() if v > 0}
+    return CountryAllocationResult(
+        warehouse_breakdown={k: v for k, v in result.items() if v > 0},
+        allocation_mode="fallback_even",
+        matched_order_qty=0,
+        unknown_order_qty=unknown_order_qty,
+        eligible_warehouses=eligible_warehouses,
+    )
