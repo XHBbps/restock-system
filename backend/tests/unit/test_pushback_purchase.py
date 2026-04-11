@@ -215,3 +215,44 @@ async def test_push_saihu_job_rejects_empty_payload() -> None:
     ctx = _FakeContext({})
     with pytest.raises(ValueError, match="suggestion_id 或 item_ids"):
         await push_saihu_job(ctx)  # type: ignore[arg-type]
+
+
+# ---- Direct tests for _refresh_suggestion_counts ----
+
+from app.pushback.purchase import _refresh_suggestion_counts
+
+
+@pytest.mark.asyncio
+async def test_refresh_counts_all_pushed() -> None:
+    db = _FakeDb(
+        [
+            _ScalarResult(["pushed", "pushed", "pushed"]),
+            None,
+        ]
+    )
+    await _refresh_suggestion_counts(db, 100)  # type: ignore[arg-type]
+    assert len(db._responses) == 0
+
+
+@pytest.mark.asyncio
+async def test_refresh_counts_none_pushed() -> None:
+    db = _FakeDb(
+        [
+            _ScalarResult(["pending", "pending"]),
+            None,
+        ]
+    )
+    await _refresh_suggestion_counts(db, 100)  # type: ignore[arg-type]
+    assert len(db._responses) == 0
+
+
+@pytest.mark.asyncio
+async def test_refresh_counts_partial() -> None:
+    db = _FakeDb(
+        [
+            _ScalarResult(["pushed", "push_failed", "pending"]),
+            None,
+        ]
+    )
+    await _refresh_suggestion_counts(db, 100)  # type: ignore[arg-type]
+    assert len(db._responses) == 0
