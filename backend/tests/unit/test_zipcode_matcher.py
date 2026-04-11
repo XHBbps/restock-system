@@ -1,6 +1,11 @@
 """邮编匹配器单元测试:归一化 + 各种 operator + priority。"""
 
-from app.engine.zipcode_matcher import ZipcodeRule, match_warehouse, normalize_postal
+from app.engine.zipcode_matcher import (
+    ZipcodeRule,
+    match_warehouse,
+    match_warehouses,
+    normalize_postal,
+)
 
 
 def _rule(
@@ -187,3 +192,50 @@ def test_between_non_numeric_prefix_skipped() -> None:
     """UK 邮编前缀 'SW1' 不能转 int,between 规则跳过返回 None。"""
     rules = [_rule(1, "UK", 3, "between", "000-999", "wh", priority=10)]
     assert match_warehouse("SW1A 1AA", "UK", rules) is None
+
+
+# ==================== match_warehouses tied ====================
+def _tied_rules() -> list[ZipcodeRule]:
+    """B/C/D/E 四仓 priority=10 都含 451-599;只在其他段上互不重叠。"""
+    return [
+        _rule(10, "JP", 3, "between", "271-450, 451-599", "B", priority=10),
+        _rule(11, "JP", 3, "between", "451-599, 851-999", "C", priority=10),
+        _rule(12, "JP", 3, "between", "451-599", "D", priority=10),
+        _rule(13, "JP", 3, "between", "451-599, 600-850", "E", priority=10),
+    ]
+
+
+def test_tied_same_priority_returns_all_winners() -> None:
+    """postal 500 落在 451-599,B/C/D/E 四仓全部命中,按 rule.id 升序返回。"""
+    rules = _tied_rules()
+    assert match_warehouses("500-0001", "JP", rules) == ["B", "C", "D", "E"]
+
+
+def test_tied_higher_priority_absorbs_lower() -> None:
+    """priority=10 单命中屏蔽 priority=20 的 tied 候选。"""
+    rules = [
+        _rule(1, "JP", 3, "between", "451-599", "wh_p10", priority=10),
+        _rule(2, "JP", 3, "between", "451-599", "wh_p20_a", priority=20),
+        _rule(3, "JP", 3, "between", "451-599", "wh_p20_b", priority=20),
+    ]
+    # priority=10 单独命中,列表长度 1
+    assert match_warehouses("500-0001", "JP", rules) == ["wh_p10"]
+
+
+def test_tied_deduplicates_same_warehouse() -> None:
+    """同一 warehouse_id 被两条 tied 规则写入时,只返回一次。"""
+    rules = [
+        _rule(1, "JP", 3, "between", "451-599", "wh_A", priority=10),
+        _rule(2, "JP", 3, "between", "451-599", "wh_A", priority=10),
+        _rule(3, "JP", 3, "between", "451-599", "wh_B", priority=10),
+    ]
+    assert match_warehouses("500-0001", "JP", rules) == ["wh_A", "wh_B"]
+
+
+def test_tied_deterministic_order_by_rule_id() -> None:
+    """同 priority 内输入顺序乱序时,返回顺序仍按 rule.id 升序。"""
+    rules = [
+        _rule(5, "JP", 3, "between", "451-599", "wh_late", priority=10),
+        _rule(2, "JP", 3, "between", "451-599", "wh_early", priority=10),
+    ]
+    assert match_warehouses("500-0001", "JP", rules) == ["wh_early", "wh_late"]

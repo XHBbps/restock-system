@@ -131,3 +131,40 @@ def match_warehouse(
         if _compare(prefix, rule.operator, rule.compare_value, rule.value_type):
             return rule.warehouse_id
     return None
+
+
+def match_warehouses(
+    postal_code: str | None,
+    country: str,
+    rules: list[ZipcodeRule],
+) -> list[str]:
+    """返回所有并列命中（同最低优先级）的仓库 id 列表。
+
+    空列表 = 未匹配;长度 1 = 单仓命中;长度 ≥ 2 = tied。
+    同 priority 内按 rule.id 升序枚举,按 warehouse_id 去重后返回。
+    """
+    normalized = normalize_postal(postal_code)
+    if not normalized:
+        return []
+    country_rules = sorted(
+        (r for r in rules if r.country == country),
+        key=lambda r: (r.priority, r.id),
+    )
+    winners: list[str] = []
+    seen: set[str] = set()
+    winning_priority: int | None = None
+    for rule in country_rules:
+        # 首次命中前 winning_priority 仍为 None,不参与比较;
+        # 命中后若后续规则 priority 已大于首批命中的 priority,立刻收摊
+        if winning_priority is not None and rule.priority > winning_priority:
+            break
+        prefix = _extract_prefix(normalized, rule.prefix_length)
+        if not prefix or len(prefix) < rule.prefix_length:
+            continue
+        if _compare(prefix, rule.operator, rule.compare_value, rule.value_type):
+            if winning_priority is None:
+                winning_priority = rule.priority
+            if rule.warehouse_id not in seen:
+                seen.add(rule.warehouse_id)
+                winners.append(rule.warehouse_id)
+    return winners
