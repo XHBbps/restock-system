@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.core.exceptions import PushBlockedError, SaihuAPIError
-from app.pushback.purchase import push_saihu_job
+from app.pushback.purchase import _refresh_suggestion_counts, push_saihu_job
 
 
 class _FakeContext:
@@ -168,10 +168,12 @@ async def test_push_saihu_job_raises_on_blocker() -> None:
     factory = _FakeSessionFactory([db1])
 
     mock_api = AsyncMock()
-    with patch("app.pushback.purchase.async_session_factory", factory), \
-         patch("app.pushback.purchase.create_purchase_order", mock_api):
-        with pytest.raises(PushBlockedError):
-            await push_saihu_job(ctx)  # type: ignore[arg-type]
+    with (
+        patch("app.pushback.purchase.async_session_factory", factory),
+        patch("app.pushback.purchase.create_purchase_order", mock_api),
+        pytest.raises(PushBlockedError),
+    ):
+        await push_saihu_job(ctx)  # type: ignore[arg-type]
 
     mock_api.assert_not_called()
 
@@ -201,11 +203,13 @@ async def test_push_saihu_job_failure_writes_error() -> None:
     api_error = SaihuAPIError("server error", code=50000)
     mock_api = AsyncMock(side_effect=api_error)
 
-    with patch("app.pushback.purchase.async_session_factory", factory), \
-         patch("app.pushback.purchase.create_purchase_order", mock_api), \
-         patch("app.pushback.purchase.get_settings", return_value=mock_settings):
-        with pytest.raises(SaihuAPIError):
-            await push_saihu_job(ctx)  # type: ignore[arg-type]
+    with (
+        patch("app.pushback.purchase.async_session_factory", factory),
+        patch("app.pushback.purchase.create_purchase_order", mock_api),
+        patch("app.pushback.purchase.get_settings", return_value=mock_settings),
+        pytest.raises(SaihuAPIError),
+    ):
+        await push_saihu_job(ctx)  # type: ignore[arg-type]
 
     assert db2.commits == 2
 
@@ -218,8 +222,6 @@ async def test_push_saihu_job_rejects_empty_payload() -> None:
 
 
 # ---- Direct tests for _refresh_suggestion_counts ----
-
-from app.pushback.purchase import _refresh_suggestion_counts
 
 
 @pytest.mark.asyncio
