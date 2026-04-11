@@ -1,5 +1,6 @@
-import asyncio
 from datetime import datetime
+
+import pytest
 
 
 class _FakeJob:
@@ -28,7 +29,8 @@ class _FakeScheduler:
         self.shutdown_calls += 1
 
 
-def test_scheduler_status_returns_stable_payload(monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_scheduler_status_returns_stable_payload(monkeypatch) -> None:
     import app.tasks.scheduler as scheduler_module
 
     fake_scheduler = _FakeScheduler(
@@ -50,7 +52,7 @@ def test_scheduler_status_returns_stable_payload(monkeypatch) -> None:
     monkeypatch.setattr(scheduler_module, "setup_scheduler", fake_setup_scheduler)
     monkeypatch.setattr(scheduler_module, "_load_scheduler_config", fake_load_scheduler_config)
 
-    status = asyncio.run(scheduler_module.scheduler_status())
+    status = await scheduler_module.scheduler_status()
 
     assert status.enabled is False
     assert status.running is False
@@ -60,7 +62,8 @@ def test_scheduler_status_returns_stable_payload(monkeypatch) -> None:
     assert status.jobs[0].next_run_time == "2026-04-09T12:00:00"
 
 
-def test_set_scheduler_status_starts_scheduler(monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_set_scheduler_status_starts_scheduler(monkeypatch) -> None:
     import app.api.sync as sync_api_module
 
     class _FakeDb:
@@ -89,19 +92,18 @@ def test_set_scheduler_status_starts_scheduler(monkeypatch) -> None:
     fake_scheduler = _FakeScheduler(running=True)
     monkeypatch.setattr(sync_api_module, "reload_scheduler", fake_reload_scheduler)
 
-    result = asyncio.run(
-        sync_api_module.set_scheduler_status(
-            sync_api_module.SchedulerToggleIn(enabled=True),
-            db=fake_db,
-            _={},
-        )
+    result = await sync_api_module.set_scheduler_status(
+        sync_api_module.SchedulerToggleIn(enabled=True),
+        db=fake_db,
+        _={},
     )
 
     assert fake_db.committed is True
     assert result.enabled is True
 
 
-def test_set_scheduler_status_stops_scheduler(monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_set_scheduler_status_stops_scheduler(monkeypatch) -> None:
     import app.api.sync as sync_api_module
 
     class _FakeDb:
@@ -130,12 +132,10 @@ def test_set_scheduler_status_stops_scheduler(monkeypatch) -> None:
     fake_scheduler = _FakeScheduler(running=False)
     monkeypatch.setattr(sync_api_module, "reload_scheduler", fake_reload_scheduler)
 
-    result = asyncio.run(
-        sync_api_module.set_scheduler_status(
-            sync_api_module.SchedulerToggleIn(enabled=False),
-            db=fake_db,
-            _={},
-        )
+    result = await sync_api_module.set_scheduler_status(
+        sync_api_module.SchedulerToggleIn(enabled=False),
+        db=fake_db,
+        _={},
     )
 
     assert fake_db.committed is True
