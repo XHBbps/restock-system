@@ -1,7 +1,7 @@
 ﻿# Out Records
 
 ## Interface Info
-- Source doc: `鍏朵粬鍑哄簱鍒楄〃椤?md`
+- Source doc: `其他出库列表页.md`
 - Method: `POST`
 - URL path: `/api/warehouseInOut/outRecords.json`
 - Started at: `2026-04-08T10:04:59.8278923+08:00`

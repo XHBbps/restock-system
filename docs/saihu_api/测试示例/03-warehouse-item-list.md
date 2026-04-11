@@ -1,7 +1,7 @@
 ﻿# Warehouse Item List
 
 ## Interface Info
-- Source doc: `鏌ヨ搴撳瓨鏄庣粏.md`
+- Source doc: `查询库存明细.md`
 - Method: `POST`
 - URL path: `/api/warehouseManage/warehouseItemList.json`
 - Started at: `2026-04-08T10:04:57.7816169+08:00`

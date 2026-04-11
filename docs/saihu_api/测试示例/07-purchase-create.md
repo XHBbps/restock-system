@@ -1,7 +1,7 @@
 ﻿# Purchase Create
 
 ## Interface Info
-- Source doc: `閲囪喘鍗曞垱寤?md`
+- Source doc: `采购单创建.md`
 - Method: `POST`
 - URL path: `/api/purchase/create.json`
 - Started at: `2026-04-08T10:05:06.7138514+08:00`

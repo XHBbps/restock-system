@@ -1,7 +1,7 @@
 ﻿# Order Detail
 
 ## Interface Info
-- Source doc: `璁㈠崟璇︽儏.md`
+- Source doc: `订单详情.md`
 - Method: `POST`
 - URL path: `/api/order/detailByOrderId.json`
 - Started at: `2026-04-08T10:05:05.0416998+08:00`
