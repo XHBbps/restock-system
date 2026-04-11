@@ -9,6 +9,9 @@ repos:
         exclude: \.md$
       - id: end-of-file-fixer
       - id: check-yaml
+      - id: check-toml
+      - id: check-json
+        exclude: \.secrets\.baseline$|package-lock\.json$|tsconfig.*\.json$
       - id: check-added-large-files
         args: ["--maxkb=500"]
       - id: check-merge-conflict
