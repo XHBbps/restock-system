@@ -6,7 +6,6 @@
       <div class="card-header">
         <div class="brand-mark">R</div>
         <h1 class="card-title">Sign in to Restock</h1>
-        <p class="card-subtitle">输入密码继续访问补货管理系统</p>
       </div>
 
       <form class="card-form" @submit.prevent="handleLogin">
@@ -148,18 +147,12 @@ async function handleLogin(): Promise<void> {
   }
 
   .card-title {
-    margin: 0 0 $space-2 0;
+    margin: 0;
     font-size: $font-size-2xl;
     font-weight: $font-weight-semibold;
     color: $color-text-primary;
     letter-spacing: $tracking-tight;
     line-height: 1.2;
-  }
-
-  .card-subtitle {
-    margin: 0;
-    color: $color-text-secondary;
-    font-size: $font-size-sm;
   }
 }
 
