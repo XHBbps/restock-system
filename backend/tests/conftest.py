@@ -18,3 +18,17 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     for item in items:
         if "integration" in str(item.fspath):
             item.add_marker(skip_integration)
+
+
+@pytest.fixture(autouse=True)
+def _clear_settings_cache():
+    """Defensively clear get_settings lru_cache before and after each test.
+
+    Prevents pollution from tests that mutate environment variables or patch
+    settings attributes in ways that could be cached across tests.
+    """
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
