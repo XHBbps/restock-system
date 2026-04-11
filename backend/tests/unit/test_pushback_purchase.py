@@ -1,0 +1,155 @@
+"""Unit tests for app.pushback.purchase.
+
+Tests the push_saihu_job business logic by mocking the database session
+factory and the Saihu create_purchase_order endpoint.
+"""
+
+from types import SimpleNamespace
+from typing import Any
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+from app.core.exceptions import PushBlockedError, SaihuAPIError
+from app.pushback.purchase import push_saihu_job
+
+
+class _FakeContext:
+    """Minimal JobContext stub for tests."""
+
+    def __init__(self, payload: dict[str, Any]) -> None:
+        self.task_id = 1
+        self.job_name = "push_saihu"
+        self.payload = payload
+        self.progress_calls: list[dict[str, Any]] = []
+
+    async def progress(
+        self,
+        *,
+        current_step: str | None = None,
+        step_detail: str | None = None,
+        total_steps: int | None = None,
+    ) -> None:
+        self.progress_calls.append(
+            {"current_step": current_step, "step_detail": step_detail, "total_steps": total_steps}
+        )
+
+
+def _make_item(
+    item_id: int,
+    *,
+    commodity_id: str | None = "C001",
+    total_qty: int = 10,
+    push_blocker: str | None = None,
+    push_status: str = "pending",
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=item_id,
+        commodity_id=commodity_id,
+        total_qty=total_qty,
+        push_blocker=push_blocker,
+        push_status=push_status,
+        suggestion_id=100,
+    )
+
+
+def _make_config(warehouse_id: str = "WH-001") -> SimpleNamespace:
+    return SimpleNamespace(
+        id=1,
+        default_purchase_warehouse_id=warehouse_id,
+        include_tax="0",
+    )
+
+
+class _ScalarResult:
+    def __init__(self, value: Any) -> None:
+        self._value = value
+
+    def scalar_one(self) -> Any:
+        return self._value
+
+    def scalar_one_or_none(self) -> Any:
+        return self._value
+
+    def scalars(self) -> "_ScalarsProxy":
+        return _ScalarsProxy(self._value)
+
+
+class _ScalarsProxy:
+    def __init__(self, values: Any) -> None:
+        self._values = values if isinstance(values, list) else [values]
+
+    def all(self) -> list[Any]:
+        return list(self._values)
+
+
+class _FakeDb:
+    def __init__(self, responses: list[Any]) -> None:
+        self._responses = list(responses)
+        self.commits = 0
+
+    async def execute(self, stmt: Any) -> Any:
+        if self._responses:
+            return self._responses.pop(0)
+        return _ScalarResult(None)
+
+    async def commit(self) -> None:
+        self.commits += 1
+
+
+class _FakeSessionFactory:
+    """Async context manager factory that yields preconfigured _FakeDb instances."""
+
+    def __init__(self, db_sequence: list[_FakeDb]) -> None:
+        self._dbs = list(db_sequence)
+
+    def __call__(self) -> "_FakeSessionFactory":
+        return self
+
+    async def __aenter__(self) -> _FakeDb:
+        return self._dbs.pop(0)
+
+    async def __aexit__(self, *args: Any) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_push_saihu_job_success_path() -> None:
+    ctx = _FakeContext({"suggestion_id": 100, "item_ids": [1, 2]})
+    items = [_make_item(1), _make_item(2)]
+
+    # First db context: load config + items
+    db1 = _FakeDb(
+        [
+            _ScalarResult(_make_config()),
+            _ScalarResult(items),
+        ]
+    )
+    # Second db context: update items + refresh counts
+    db2 = _FakeDb(
+        [
+            None,  # update SuggestionItem
+            _ScalarResult(["pushed", "pushed"]),  # refresh counts select
+            None,  # update Suggestion status
+        ]
+    )
+    factory = _FakeSessionFactory([db1, db2])
+
+    mock_api = AsyncMock(return_value=[{"purchaseOrderNo": "PO-XYZ"}])
+
+    with patch("app.pushback.purchase.async_session_factory", factory), \
+         patch("app.pushback.purchase.create_purchase_order", mock_api):
+        await push_saihu_job(ctx)  # type: ignore[arg-type]
+
+    mock_api.assert_awaited_once()
+    call_kwargs = mock_api.call_args.kwargs
+    assert call_kwargs["warehouse_id"] == "WH-001"
+    assert call_kwargs["items"] == [
+        {"commodityId": "C001", "num": "10"},
+        {"commodityId": "C001", "num": "10"},
+    ]
+    assert call_kwargs["include_tax"] == "0"
+    assert call_kwargs["action"] == "1"
+
+    assert db1.commits == 0
+    assert db2.commits == 2
