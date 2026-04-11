@@ -93,7 +93,16 @@ export interface ZipcodeRule {
   country: string
   prefix_length: number
   value_type: 'number' | 'string'
-  operator: '=' | '!=' | '>' | '>=' | '<' | '<=' | 'contains' | 'not_contains'
+  operator:
+    | '='
+    | '!='
+    | '>'
+    | '>='
+    | '<'
+    | '<='
+    | 'contains'
+    | 'not_contains'
+    | 'between'
   compare_value: string
   warehouse_id: string
   priority: number

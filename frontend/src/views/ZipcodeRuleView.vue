@@ -288,6 +288,7 @@ const NUMBER_OPERATORS = [
   { value: '!=', label: '不等于' },
   { value: '<', label: '小于' },
   { value: '<=', label: '小于等于' },
+  { value: 'between', label: '区间' },
 ] as const
 
 const STRING_OPERATORS = [
@@ -386,7 +387,13 @@ const needsCommaSeparatedValues = computed(
   () => form.value_type === 'string' && ['contains', 'not_contains'].includes(form.operator),
 )
 
+const BETWEEN_SEGMENT_RE = /^\d+-\d+$/
+const MAX_BETWEEN_SEGMENTS = 20
+
+const isBetweenOperator = computed(() => form.operator === 'between')
+
 const compareValuePlaceholder = computed(() => {
+  if (isBetweenOperator.value) return '例如 000-270，或多段 000-270, 500-700'
   if (form.value_type === 'number') return '请输入数字，例如 100'
   if (needsCommaSeparatedValues.value) return '请输入多个文本，使用英文逗号分隔，例如 SW, EC'
   return '请输入文本，例如 SW'
@@ -397,6 +404,31 @@ const compareValueValidationMessage = computed(() => {
 
   const value = form.compare_value.trim()
   if (!value) return '请输入比较值'
+
+  if (isBetweenOperator.value) {
+    const segments = value
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean)
+    if (segments.length === 0) return '至少需要一段区间'
+    if (segments.length > MAX_BETWEEN_SEGMENTS) {
+      return `区间段数不能超过 ${MAX_BETWEEN_SEGMENTS}`
+    }
+    const maxValue = 10 ** form.prefix_length - 1
+    for (const seg of segments) {
+      if (!BETWEEN_SEGMENT_RE.test(seg)) {
+        return `区间格式错误：${seg}（应为 数字-数字）`
+      }
+      const [loStr, hiStr] = seg.split('-')
+      const lo = Number(loStr)
+      const hi = Number(hiStr)
+      if (lo > hi) return `区间下界不能大于上界：${seg}`
+      if (hi > maxValue) {
+        return `上界 ${hi} 超出前 ${form.prefix_length} 位最大值 ${maxValue}`
+      }
+    }
+    return ''
+  }
 
   if (form.value_type === 'number' && Number.isNaN(Number(value))) {
     return '数字类型请输入有效数字'
@@ -541,8 +573,13 @@ function operatorLabel(operator: ZipcodeRule['operator']): string {
   return OPERATORS.find((item) => item.value === operator)?.label ?? operator
 }
 
-function ruleConditionText(rule: Pick<ZipcodeRule, 'value_type' | 'operator' | 'compare_value'>): string {
+function ruleConditionText(
+  rule: Pick<ZipcodeRule, 'value_type' | 'operator' | 'compare_value'>,
+): string {
   const valueText = rule.compare_value
+  if (rule.operator === 'between') {
+    return `按数字区间 ${valueText}`
+  }
   if (rule.operator === 'contains') {
     return `按${valueTypeLabel(rule.value_type)}包含任一 ${valueText}`
   }
@@ -616,6 +653,16 @@ function resetValidationState(): void {
 function normalizeCompareValue(value: string): string {
   const trimmed = value.trim()
   if (!trimmed) return ''
+
+  if (isBetweenOperator.value) {
+    return trimmed
+      .replace(/[，、]/g, ',')
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .join(', ')
+  }
+
   if (!needsCommaSeparatedValues.value) return trimmed
 
   return trimmed
@@ -641,13 +688,16 @@ function normalizeFormForCurrentType(options?: { notify?: boolean }): void {
   syncOperatorByValueType(form.value_type)
 
   if (form.value_type === 'number') {
-    const trimmed = form.compare_value.trim()
-    if (trimmed && Number.isNaN(Number(trimmed))) {
-      form.compare_value = ''
-      if (options?.notify) {
-        ElMessage.warning('已切换为数字类型，原比较值不符合数字格式，已自动清空。')
+    // between 由自己的校验流程处理,不在此处要求单个数字
+    if (form.operator !== 'between') {
+      const trimmed = form.compare_value.trim()
+      if (trimmed && Number.isNaN(Number(trimmed))) {
+        form.compare_value = ''
+        if (options?.notify) {
+          ElMessage.warning('已切换为数字类型，原比较值不符合数字格式，已自动清空。')
+        }
+        return
       }
-      return
     }
   }
 
