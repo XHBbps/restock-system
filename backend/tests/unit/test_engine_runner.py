@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -27,7 +27,6 @@ from app.engine.runner import (
     _load_commodity_id_map,
     run_engine,
 )
-
 
 # ---------------------------------------------------------------------------
 # Shared fake DB plumbing (mirrors pattern in test_pushback_purchase.py)
@@ -44,7 +43,7 @@ class _ScalarResult:
     def scalar_one_or_none(self) -> Any:
         return self._value
 
-    def scalars(self) -> "_ScalarsProxy":
+    def scalars(self) -> _ScalarsProxy:
         return _ScalarsProxy(self._value)
 
     def all(self) -> list[Any]:
@@ -83,7 +82,7 @@ class _FakeSessionFactory:
     def __init__(self, db: _FakeDb) -> None:
         self._db = db
 
-    def __call__(self) -> "_FakeSessionFactory":
+    def __call__(self) -> _FakeSessionFactory:
         return self
 
     async def __aenter__(self) -> _FakeDb:
