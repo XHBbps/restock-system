@@ -1,4 +1,4 @@
-"""Unit tests for PATCH /api/suggestions/{id}/items/{item_id} (N1 + H4).
+"""Unit tests for suggestion API endpoints (PATCH item + POST push).
 
 Uses a lightweight stub in place of AsyncSession: only needs execute() to
 return an object that supports scalar_one_or_none().
@@ -11,9 +11,9 @@ from typing import Any
 
 import pytest
 
-from app.api.suggestion import patch_item
-from app.core.exceptions import ValidationFailed
-from app.schemas.suggestion import SuggestionItemPatch
+from app.api.suggestion import patch_item, push_items
+from app.core.exceptions import ConflictError, ValidationFailed
+from app.schemas.suggestion import PushRequest, SuggestionItemPatch
 
 
 @dataclass
@@ -57,9 +57,7 @@ class _FakeItem:
         self.total_qty: int = 1
         self.country_breakdown: dict[str, int] = {"US": 1}
         self.warehouse_breakdown: dict[str, dict[str, int]] = {"US": {"W1": 1}}
-        self.allocation_snapshot: dict[str, Any] | None = {
-            "US": {"allocation_mode": "matched"}
-        }
+        self.allocation_snapshot: dict[str, Any] | None = {"US": {"allocation_mode": "matched"}}
         self.t_purchase: dict[str, str] = {"US": "2099-01-01"}
         self.t_ship: dict[str, str] = {"US": "2099-01-15"}
         self.__dict__.setdefault("commodity_sku", "SKU-A")
@@ -98,7 +96,11 @@ async def test_suggestion_patch_requires_t_ship_for_positive_countries() -> None
     item = _FakeItem()
     item.t_ship = {"US": "2099-01-15"}
     db = _FakeSession([_FakeSuggestion(), item])
-    patch = SuggestionItemPatch(total_qty=7, country_breakdown={"US": 3, "UK": 4}, t_purchase={"US": "2099-01-01", "UK": "2099-01-02"})
+    patch = SuggestionItemPatch(
+        total_qty=7,
+        country_breakdown={"US": 3, "UK": 4},
+        t_purchase={"US": "2099-01-01", "UK": "2099-01-02"},
+    )
     with pytest.raises(ValidationFailed, match="t_ship"):
         await patch_item(patch=patch, suggestion_id=1, item_id=10, db=db, _={})  # type: ignore[arg-type]
 
@@ -108,6 +110,22 @@ async def test_suggestion_patch_rejects_invalid_t_purchase_date() -> None:
     patch = SuggestionItemPatch(t_purchase={"US": "not-a-date"})
     with pytest.raises(ValidationFailed, match="t_purchase"):
         await patch_item(patch=patch, suggestion_id=1, item_id=10, db=db, _={})  # type: ignore[arg-type]
+
+
+async def test_suggestion_push_archived_rejected() -> None:
+    """push_items 必须拒绝对 archived 建议单的推送（防止重复采购单）。"""
+    db = _FakeSession([_FakeSuggestion(status="archived")])
+    req = PushRequest(item_ids=[10])
+    with pytest.raises(ConflictError, match=r"archived|不可推送"):
+        await push_items(req=req, suggestion_id=1, db=db, _={})  # type: ignore[arg-type]
+
+
+async def test_suggestion_push_pushed_rejected() -> None:
+    """push_items 必须拒绝对 pushed 建议单的重新推送（幂等保护）。"""
+    db = _FakeSession([_FakeSuggestion(status="pushed")])
+    req = PushRequest(item_ids=[10])
+    with pytest.raises(ConflictError, match=r"pushed|不可推送"):
+        await push_items(req=req, suggestion_id=1, db=db, _={})  # type: ignore[arg-type]
 
 
 async def test_suggestion_patch_clears_allocation_snapshot_on_allocation_edit(monkeypatch) -> None:

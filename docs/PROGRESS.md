@@ -111,6 +111,14 @@
 
 ## 3. 近期重大变更（2026-04-10 ~ 2026-04-11）
 
+### 3.0 push 端点状态机封闭性修复（2026-04-11，云交付评分卡 M3 阶段）
+
+- `POST /api/suggestions/{id}/push` 添加状态前置校验：`sug.status not in ("draft","partial")` 时抛 `ConflictError("建议单状态为 X,不可推送")`
+- 修复点：`backend/app/api/suggestion.py:274-275`
+- 背景：审计中发现 PATCH 端点严格拒绝 archived 而 push 端点不检查的不对称缺陷，可能导致对已归档/已完全推送建议单触发重复采购单
+- 新增 2 个单测：`test_suggestion_push_archived_rejected` / `test_suggestion_push_pushed_rejected`，全 backend 156 单测通过
+- 评分影响：M3 D6 维持 3，M3 P0-2 候选从"⚠️ 部分实现"升级为"✅ 已实现"
+
 ### 3.1 Overstock 特性移除
 
 全栈清理：

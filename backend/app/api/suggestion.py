@@ -272,6 +272,8 @@ async def push_items(
     ).scalar_one_or_none()
     if sug is None:
         raise NotFound(f"建议单 {suggestion_id} 不存在")
+    if sug.status not in ("draft", "partial"):
+        raise ConflictError(f"建议单状态为 {sug.status},不可推送")
 
     items = (
         (
