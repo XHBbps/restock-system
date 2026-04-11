@@ -20,7 +20,7 @@ class ZipcodeRule(Base):
     __table_args__ = (
         CheckConstraint("value_type IN ('number','string')", name="value_type_enum"),
         CheckConstraint(
-            "operator IN ('=','!=','>','>=','<','<=','contains','not_contains')",
+            "operator IN ('=','!=','>','>=','<','<=','contains','not_contains','between')",
             name="operator_enum",
         ),
         CheckConstraint("prefix_length BETWEEN 1 AND 10", name="prefix_length_range"),
@@ -31,8 +31,8 @@ class ZipcodeRule(Base):
     country: Mapped[str] = mapped_column(String(2), nullable=False)
     prefix_length: Mapped[int] = mapped_column(Integer, nullable=False)
     value_type: Mapped[str] = mapped_column(String(10), nullable=False)
-    operator: Mapped[str] = mapped_column(String(5), nullable=False)
-    compare_value: Mapped[str] = mapped_column(String(50), nullable=False)
+    operator: Mapped[str] = mapped_column(String(10), nullable=False)
+    compare_value: Mapped[str] = mapped_column(String(200), nullable=False)
     warehouse_id: Mapped[str] = mapped_column(
         String(50), ForeignKey("warehouse.id"), nullable=False
     )
