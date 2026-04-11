@@ -1,4 +1,10 @@
-import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
+import {
+  createRouter,
+  createWebHistory,
+  type RouteLocationNormalized,
+  type RouteLocationRaw,
+  type RouteRecordRaw,
+} from 'vue-router'
 
 import { useAuthStore } from '@/stores/auth'
 
@@ -158,13 +164,20 @@ const router = createRouter({
   routes,
 })
 
-router.beforeEach((to) => {
-  const auth = useAuthStore()
+export function authGuard(
+  to: RouteLocationNormalized,
+  isAuthenticated: boolean,
+): true | RouteLocationRaw {
   if (to.meta.public) return true
-  if (!auth.isAuthenticated) {
+  if (!isAuthenticated) {
     return { name: 'login', query: { redirect: to.fullPath } }
   }
   return true
+}
+
+router.beforeEach((to) => {
+  const auth = useAuthStore()
+  return authGuard(to, auth.isAuthenticated)
 })
 
 export default router
