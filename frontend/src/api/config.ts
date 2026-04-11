@@ -63,6 +63,7 @@ export interface Warehouse {
   type: number
   country: string | null
   replenish_site_raw: string | null
+  total_stock: number
 }
 
 export async function listWarehouses(): Promise<Warehouse[]> {
@@ -70,9 +71,14 @@ export async function listWarehouses(): Promise<Warehouse[]> {
   return data
 }
 
+export async function refreshWarehouses(): Promise<{ task_id: number; existing: boolean }> {
+  const { data } = await client.post('/api/sync/warehouse')
+  return data
+}
+
 export async function patchWarehouseCountry(
   warehouseId: string,
-  country: string
+  country: string | null
 ): Promise<Warehouse> {
   const { data } = await client.patch<Warehouse>(
     `/api/config/warehouse/${warehouseId}/country`,
@@ -87,7 +93,7 @@ export interface ZipcodeRule {
   country: string
   prefix_length: number
   value_type: 'number' | 'string'
-  operator: '=' | '!=' | '>' | '>=' | '<' | '<='
+  operator: '=' | '!=' | '>' | '>=' | '<' | '<=' | 'contains' | 'not_contains'
   compare_value: string
   warehouse_id: string
   priority: number
