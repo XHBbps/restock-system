@@ -68,6 +68,7 @@
     <DashboardSection title="手动同步任务">
       <div class="manual-section">
         <SyncTaskHeroCard
+          v-if="heroAction"
           :title="heroAction.action.label"
           :status-meta="heroAction.statusMeta"
           :last-run-at="heroAction.lastRunAt"
@@ -154,6 +155,7 @@ function getActionMeta(action: SyncActionDefinition) {
 }
 
 const heroAction = computed(() => {
+  if (manualSyncActions.length === 0) return null
   const action = manualSyncActions[0]
   return {
     action,

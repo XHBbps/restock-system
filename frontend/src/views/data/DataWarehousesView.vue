@@ -120,6 +120,8 @@ async function reload(): Promise<void> {
   try {
     const resp = await listDataWarehouses()
     rows.value = sortByType(resp.items)
+  } catch {
+    ElMessage.error('加载仓库列表失败')
   } finally {
     loading.value = false
   }

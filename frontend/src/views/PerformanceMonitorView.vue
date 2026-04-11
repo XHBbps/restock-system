@@ -130,6 +130,7 @@ const resourceRows = computed<ResourceAggregateRow[]>(() => {
   }
   return [...groups.entries()]
     .map(([label, values]) => {
+      if (values.length === 0) return null
       const sorted = [...values].sort((a, b) => a - b)
       const total = values.reduce((sum, value) => sum + value, 0)
       const p95Index = Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))
@@ -141,6 +142,7 @@ const resourceRows = computed<ResourceAggregateRow[]>(() => {
         maxMs: sorted[sorted.length - 1].toFixed(2),
       }
     })
+    .filter((row): row is ResourceAggregateRow => row !== null)
     .sort((a, b) => Number(b.avgMs) - Number(a.avgMs))
 })
 
