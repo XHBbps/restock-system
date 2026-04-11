@@ -24,6 +24,7 @@ pip-wheel-metadata/
 share/python-wheels/
 MANIFEST
 .pytest_cache/
+backend/pytest-cache-files-*/
 .mypy_cache/
 .ruff_cache/
 .coverage
@@ -48,6 +49,8 @@ dist-ssr/
 .next/
 .nuxt/
 .output/
+# Vitest coverage HTML/JSON output
+frontend/coverage/
 
 # ========== Environment ==========
 .env
