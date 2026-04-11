@@ -1,6 +1,6 @@
 <template>
   <div class="detail-view">
-    <el-card v-loading="loading" v-if="suggestion" shadow="never">
+    <el-card v-if="suggestion" v-loading="loading" shadow="never">
       <template #header>
         <div class="header-row">
           <div class="header-main">
@@ -37,7 +37,6 @@
                   :sku="item.commodity_sku"
                   :name="item.commodity_name"
                   :image="item.main_image"
-                  :urgent="item.urgent"
                   :blocker="item.push_blocker"
                 />
               </div>
@@ -596,12 +595,6 @@ watch(
   font-size: $font-size-sm;
   line-height: 1.6;
   word-break: break-word;
-}
-
-.status-tag-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
 }
 
 .action-stack {
