@@ -1,10 +1,11 @@
 """监控 API:接口调用日志聚合。"""
 
 from datetime import datetime, timedelta
+from typing import Any
 
 from fastapi import APIRouter, Depends, Path, Query
 from pydantic import BaseModel
-from sqlalchemy import case, func, select, text
+from sqlalchemy import case, exists, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import db_session, get_current_session
@@ -12,11 +13,27 @@ from app.core.exceptions import NotFound
 from app.core.logging import get_logger
 from app.core.timezone import now_beijing
 from app.models.api_call_log import ApiCallLog
-from app.models.order import OrderDetailFetchLog, OrderHeader
+from app.models.order import OrderDetailFetchLog, OrderHeader, OrderItem
+from app.models.product_listing import ProductListing
 from app.tasks.queue import enqueue_task
 
 router = APIRouter(prefix="/api/monitor", tags=["monitor"])
 logger = get_logger(__name__)
+
+
+def _matched_order_detail_exists():
+    return exists(
+        select(1)
+        .select_from(OrderItem)
+        .join(
+            ProductListing,
+            (ProductListing.shop_id == OrderHeader.shop_id)
+            & (ProductListing.seller_sku == OrderItem.seller_sku),
+        )
+        .where(OrderItem.order_id == OrderHeader.id)
+        .where(ProductListing.is_matched.is_(True))
+        .where(ProductListing.seller_sku.is_not(None))
+    )
 
 
 # ============================================================
@@ -42,7 +59,7 @@ class ApiCallsOverview(BaseModel):
 async def get_api_calls(
     hours: int = Query(default=24, ge=1, le=720),
     db: AsyncSession = Depends(db_session),
-    _: dict = Depends(get_current_session),
+    _: dict[str, Any] = Depends(get_current_session),
 ) -> ApiCallsOverview:
     since = now_beijing() - timedelta(hours=hours)
 
@@ -51,9 +68,7 @@ async def get_api_calls(
             select(
                 ApiCallLog.endpoint,
                 func.count().label("total"),
-                func.sum(
-                    case((ApiCallLog.saihu_code == 0, 1), else_=0)
-                ).label("succ"),
+                func.sum(case((ApiCallLog.saihu_code == 0, 1), else_=0)).label("succ"),
                 func.max(ApiCallLog.called_at).label("last_at"),
             )
             .where(ApiCallLog.called_at >= since)
@@ -70,6 +85,8 @@ async def get_api_calls(
             await db.execute(
                 text(
                     """
+
+from typing import Any
                     SELECT DISTINCT ON (endpoint)
                         endpoint, saihu_code, saihu_msg, error_type
                     FROM api_call_log
@@ -118,6 +135,7 @@ async def get_api_calls(
             )
             .where(OrderHeader.purchase_date < cutoff)
             .where(OrderDetailFetchLog.amazon_order_id.is_(None))
+            .where(_matched_order_detail_exists())
         )
     ).scalar_one()
 
@@ -146,7 +164,7 @@ async def get_recent_calls(
     only_failed: bool = Query(default=False),
     limit: int = Query(default=50, ge=1, le=500),
     db: AsyncSession = Depends(db_session),
-    _: dict = Depends(get_current_session),
+    _: dict[str, Any] = Depends(get_current_session),
 ) -> list[RecentCallOut]:
     stmt = select(ApiCallLog).order_by(ApiCallLog.called_at.desc()).limit(limit)
     if endpoint:
@@ -172,8 +190,8 @@ _ENDPOINT_TO_JOB = {
 async def retry_call(
     call_id: int = Path(..., ge=1),
     db: AsyncSession = Depends(db_session),
-    _: dict = Depends(get_current_session),
-) -> dict:
+    _: dict[str, Any] = Depends(get_current_session),
+) -> dict[str, Any]:
     row = (
         await db.execute(select(ApiCallLog).where(ApiCallLog.id == call_id))
     ).scalar_one_or_none()
@@ -182,8 +200,5 @@ async def retry_call(
     job_name = _ENDPOINT_TO_JOB.get(row.endpoint)
     if not job_name:
         return {"task_id": None, "message": f"不支持自动重试该接口: {row.endpoint}"}
-    task_id, existing = await enqueue_task(
-        db, job_name=job_name, trigger_source="manual"
-    )
+    task_id, existing = await enqueue_task(db, job_name=job_name, trigger_source="manual")
     return {"task_id": task_id, "existing": existing}
-

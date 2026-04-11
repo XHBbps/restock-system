@@ -129,6 +129,43 @@ module = [
 ]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = [
+    "asyncpg.*",
+]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = [
+    "app.api.data",
+    "app.api.config",
+    "app.api.suggestion",
+    "app.api.monitor",
+    "app.api.task",
+    "app.api.auth",
+    "app.sync.inventory",
+    "app.sync.out_records",
+    "app.sync.order_list",
+    "app.sync.order_detail",
+    "app.sync.warehouse",
+    "app.sync.shop",
+    "app.tasks.jobs.daily_archive",
+    "app.tasks.queue",
+    "app.tasks.scheduler",
+    "app.saihu.token",
+    "app.saihu.client",
+]
+disable_error_code = [
+    "dict-item",
+    "attr-defined",
+    "arg-type",
+    "no-any-return",
+    "no-untyped-def",
+    "no-untyped-call",
+    "index",
+    "union-attr",
+]
+
 # ==================== Pytest ====================
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

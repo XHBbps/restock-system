@@ -13,6 +13,7 @@ READ-ONLY銆傛墍鏈夌鐐逛粠鏈湴鍚屾钀藉簱鐨勮〃鏌ヨ�
 """
 
 from datetime import date, datetime, timedelta
+from typing import Any
 
 from fastapi import APIRouter, Depends, Path, Query
 from sqlalchemy import Float, case, func, or_, select, tuple_
@@ -262,7 +263,7 @@ async def list_orders(
     sort_by: str | None = Query(default=None),
     sort_order: str = Query(default="desc", pattern="^(asc|desc)$"),
     db: AsyncSession = Depends(db_session),
-    _: dict = Depends(get_current_session),
+    _: dict[str, Any] = Depends(get_current_session),
 ) -> DataOrderListOut:
     base = select(OrderHeader)
 
@@ -367,7 +368,7 @@ async def get_order_detail(
     shop_id: str = Path(...),
     amazon_order_id: str = Path(...),
     db: AsyncSession = Depends(db_session),
-    _: dict = Depends(get_current_session),
+    _: dict[str, Any] = Depends(get_current_session),
 ) -> DataOrderDetail:
     header = (
         await db.execute(
@@ -432,7 +433,7 @@ async def list_inventory(
     sort_by: str | None = Query(default=None),
     sort_order: str = Query(default="asc", pattern="^(asc|desc)$"),
     db: AsyncSession = Depends(db_session),
-    _: dict = Depends(get_current_session),
+    _: dict[str, Any] = Depends(get_current_session),
 ) -> DataInventoryListOut:
     base = select(
         InventorySnapshotLatest,
@@ -509,7 +510,7 @@ async def list_out_records(
     sort_by: str | None = Query(default=None),
     sort_order: str = Query(default="desc", pattern="^(asc|desc)$"),
     db: AsyncSession = Depends(db_session),
-    _: dict = Depends(get_current_session),
+    _: dict[str, Any] = Depends(get_current_session),
 ) -> DataOutRecordListOut:
     base = select(InTransitRecord)
     if is_in_transit is not None:
@@ -585,7 +586,7 @@ async def list_out_records(
 @router.get("/warehouses", response_model=DataWarehouseListOut)
 async def list_data_warehouses(
     db: AsyncSession = Depends(db_session),
-    _: dict = Depends(get_current_session),
+    _: dict[str, Any] = Depends(get_current_session),
 ) -> DataWarehouseListOut:
     stock_subquery = (
         select(
@@ -631,7 +632,7 @@ async def list_data_warehouses(
 @router.get("/shops", response_model=DataShopListOut)
 async def list_data_shops(
     db: AsyncSession = Depends(db_session),
-    _: dict = Depends(get_current_session),
+    _: dict[str, Any] = Depends(get_current_session),
 ) -> DataShopListOut:
     rows = (await db.execute(select(Shop).order_by(Shop.marketplace_id, Shop.id))).scalars().all()
     items = [DataShop.model_validate(r) for r in rows]
@@ -651,7 +652,7 @@ async def list_product_listings_data(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=5000),
     db: AsyncSession = Depends(db_session),
-    _: dict = Depends(get_current_session),
+    _: dict[str, Any] = Depends(get_current_session),
 ) -> DataProductListingListOut:
     base = select(ProductListing).order_by(
         ProductListing.commodity_sku, ProductListing.marketplace_id
@@ -688,7 +689,7 @@ async def list_sku_overview(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=5000),
     db: AsyncSession = Depends(db_session),
-    _: dict = Depends(get_current_session),
+    _: dict[str, Any] = Depends(get_current_session),
 ) -> SkuOverviewListOut:
     """Return SKU-level overview: config + aggregated listings, paginated by SKU."""
     from app.schemas.data import SkuListingItem, SkuOverviewItem
@@ -721,7 +722,7 @@ async def list_sku_overview(
         .all()
     )
 
-    listings_by_sku: dict[str, list] = {}
+    listings_by_sku: dict[str, list[Any]] = {}
     for pl in listing_rows:
         listings_by_sku.setdefault(pl.commodity_sku, []).append(pl)
 
@@ -768,7 +769,7 @@ async def list_sku_overview(
 @router.get("/sync-state", response_model=list[DataSyncStateRow])
 async def list_sync_state(
     db: AsyncSession = Depends(db_session),
-    _: dict = Depends(get_current_session),
+    _: dict[str, Any] = Depends(get_current_session),
 ) -> list[DataSyncStateRow]:
     from app.models.sync_state import SyncState
 

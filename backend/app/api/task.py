@@ -73,7 +73,7 @@ async def list_tasks(
     status: str | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=100),
     db: AsyncSession = Depends(db_session),
-    _: dict = Depends(get_current_session),
+    _: dict[str, Any] = Depends(get_current_session),
 ) -> TaskListOut:
     base = select(TaskRun)
     if job_name:
@@ -81,9 +81,7 @@ async def list_tasks(
     if status:
         base = base.where(TaskRun.status == status)
     total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
-    rows = (
-        await db.execute(base.order_by(TaskRun.created_at.desc()).limit(limit))
-    ).scalars().all()
+    rows = (await db.execute(base.order_by(TaskRun.created_at.desc()).limit(limit))).scalars().all()
     return TaskListOut(items=[TaskRunOut.model_validate(r) for r in rows], total=total)
 
 
@@ -91,7 +89,7 @@ async def list_tasks(
 async def create_task(
     req: EnqueueRequest,
     db: AsyncSession = Depends(db_session),
-    _: dict = Depends(get_current_session),
+    _: dict[str, Any] = Depends(get_current_session),
 ) -> EnqueueResponse:
     if req.job_name not in VALID_JOB_NAMES:
         raise ConflictError(f"未知的 job_name: {req.job_name}")
@@ -109,7 +107,7 @@ async def create_task(
 async def get_task(
     task_id: int = Path(..., ge=1),
     db: AsyncSession = Depends(db_session),
-    _: dict = Depends(get_current_session),
+    _: dict[str, Any] = Depends(get_current_session),
 ) -> TaskRunOut:
     row = (await db.execute(select(TaskRun).where(TaskRun.id == task_id))).scalar_one_or_none()
     if row is None:
@@ -121,7 +119,7 @@ async def get_task(
 async def cancel_task(
     task_id: int = Path(..., ge=1),
     db: AsyncSession = Depends(db_session),
-    _: dict = Depends(get_current_session),
+    _: dict[str, Any] = Depends(get_current_session),
 ) -> dict[str, str]:
     row = (await db.execute(select(TaskRun).where(TaskRun.id == task_id))).scalar_one_or_none()
     if row is None:
