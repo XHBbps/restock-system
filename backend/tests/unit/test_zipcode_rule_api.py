@@ -157,3 +157,35 @@ async def test_delete_zipcode_rule_succeeds_when_row_exists() -> None:
     result = await delete_zipcode_rule(rule_id=9, db=db, _={})  # type: ignore[arg-type]
 
     assert result is None
+
+
+class _FakeDbWithAutoId(_FakeDb):
+    """_FakeDb variant that assigns id=1 on flush, simulating DB auto-increment."""
+
+    async def flush(self) -> None:
+        for row in self.added:
+            if not hasattr(row, "id") or row.id is None:
+                row.id = 1
+        await super().flush()
+
+
+@pytest.mark.asyncio
+async def test_create_zipcode_rule_accepts_between_operator() -> None:
+    db = _FakeDbWithAutoId([SimpleNamespace(id="wh-jp", country="JP")])
+
+    body = ZipcodeRuleIn(
+        country="JP",
+        prefix_length=3,
+        value_type="number",
+        operator="between",
+        compare_value="000-270, 500-700",
+        warehouse_id="wh-jp",
+        priority=15,
+    )
+
+    result = await create_zipcode_rule(body, db=db, _={})  # type: ignore[arg-type]
+
+    assert db.added, "规则应被写入"
+    assert db.added[0].operator == "between"
+    assert db.added[0].compare_value == "000-270, 500-700"
+    assert result.operator == "between"
