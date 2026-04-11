@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import SaihuAPIError, SaihuBizError
+from app.core.exceptions import SaihuBizError
 from app.core.logging import get_logger
 from app.core.timezone import marketplace_to_country, now_beijing
 from app.db.session import async_session_factory
@@ -66,16 +66,30 @@ async def sync_order_detail_job(ctx: JobContext) -> None:
                     await db.commit()
                 return True
             except Exception as exc:
-                if isinstance(exc, SaihuAPIError):
+                if _is_permanent_saihu_error(exc):
+                    # Only SaihuBizError reaches here — record as permanent so
+                    # _find_pending_orders will skip this order on future runs.
+                    assert isinstance(exc, SaihuBizError)  # narrows type for _log_fetch_failure
                     async with async_session_factory() as db:
                         await _log_fetch_failure(db, shop_id, amazon_order_id, exc)
                         await db.commit()
-                logger.warning(
-                    "order_detail_fetch_failed",
-                    shop_id=shop_id,
-                    amazon_order_id=amazon_order_id,
-                    error=str(exc),
-                )
+                    logger.warning(
+                        "order_detail_fetch_permanent_failure",
+                        shop_id=shop_id,
+                        amazon_order_id=amazon_order_id,
+                        saihu_code=exc.code,
+                        error=str(exc),
+                    )
+                else:
+                    # Transient: rate limited, network, auth expired, or non-Saihu
+                    # exception. Don't persist — next sync run will pick this order
+                    # up again via _find_pending_orders.
+                    logger.warning(
+                        "order_detail_fetch_transient_failure",
+                        shop_id=shop_id,
+                        amazon_order_id=amazon_order_id,
+                        error=str(exc),
+                    )
                 return False
 
     try:
@@ -201,7 +215,7 @@ async def _log_fetch_failure(
     db: AsyncSession,
     shop_id: str,
     amazon_order_id: str,
-    exc: SaihuAPIError,
+    exc: SaihuBizError,
 ) -> None:
     log_values = {
         "shop_id": shop_id,
