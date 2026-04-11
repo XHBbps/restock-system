@@ -109,7 +109,7 @@
 | 2 | `step2_sale_days.py` | velocity + 海外库存 + 在途 | `sale_days[sku][country]`, `inventory[sku][country]` | 可售天数 = 库存总和 / velocity；`load_in_transit` 基于已推送未归档的建议条目 |
 | 3 | `step3_country_qty.py` | velocity + inventory + target_days | `country_qty[sku][country]` | `max(target × v − 库存, 0)`，纯函数无 DB |
 | 4 | `step4_total.py` | country_qty + velocity + 国内库存 + buffer_days | `total_qty[sku]` | 汇总各国补货量 + 缓冲天数 − 国内库存 |
-| 5 | `step5_warehouse_split.py` | country_qty + 订单邮编 + 邮编规则 + 国家仓库映射 | `warehouse_breakdown[country][wh_id]` | 按邮编规则分配到具体仓库，无订单时均分 |
+| 5 | `step5_warehouse_split.py` | country_qty + 订单邮编 + 邮编规则 + 国家仓库映射 | `warehouse_breakdown[country][wh_id]` | 按邮编规则分配到具体仓库，无订单时均分；**2026-04-11 起**同优先级 tied 均分：`match_warehouses()` 返回首批同 priority 命中列表，qty 按 `1/N` 均分（先过滤不可用仓再定 N） |
 | 6 | `step6_timing.py` | sale_days + lead_time | `t_purchase[country]`, `t_ship[country]`, `urgent` | 计算建议采购日和发货日，判断紧急标志 |
 
 **并发控制**：通过 `pg_advisory_xact_lock(7429001)` 事务级咨询锁（`runner.py:58-61`），防止并发引擎覆盖彼此。
@@ -513,6 +513,7 @@ Step 3: country_qty 计算时已把已推送量视为库存一部分
 - `operator ∈ {=, !=, >, >=, <, <=, contains, not_contains, between}`（`String(10)`，CHECK 约束 `operator_enum`）
 - `compare_value: String(200)`，`between` 运算符承载一段或多段 `lo-hi` 闭区间（多段逗号分隔，最多 20 段，`hi ≤ 10^prefix_length - 1`）
 - 按 `(country, priority)` 升序匹配，首条命中返回仓库；全部未命中归"未知仓"
+- **tied 配置**：把多条规则的 `priority` 填相同值即触发同优先级均分；tied 定义基于命中该具体订单的最低 priority 批次，跨 operator 通用
 
 ### 6.2 关键索引策略
 
