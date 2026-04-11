@@ -153,3 +153,65 @@ async def test_push_saihu_job_success_path() -> None:
 
     assert db1.commits == 0
     assert db2.commits == 2
+
+
+@pytest.mark.asyncio
+async def test_push_saihu_job_raises_on_blocker() -> None:
+    ctx = _FakeContext({"suggestion_id": 100, "item_ids": [1]})
+    blocked_item = _make_item(1, push_blocker="missing_commodity_id", commodity_id=None)
+    db1 = _FakeDb(
+        [
+            _ScalarResult(_make_config()),
+            _ScalarResult([blocked_item]),
+        ]
+    )
+    factory = _FakeSessionFactory([db1])
+
+    mock_api = AsyncMock()
+    with patch("app.pushback.purchase.async_session_factory", factory), \
+         patch("app.pushback.purchase.create_purchase_order", mock_api):
+        with pytest.raises(PushBlockedError):
+            await push_saihu_job(ctx)  # type: ignore[arg-type]
+
+    mock_api.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_push_saihu_job_failure_writes_error() -> None:
+    ctx = _FakeContext({"suggestion_id": 100, "item_ids": [1]})
+    items = [_make_item(1)]
+
+    db1 = _FakeDb(
+        [
+            _ScalarResult(_make_config()),
+            _ScalarResult(items),
+        ]
+    )
+    db2 = _FakeDb(
+        [
+            None,  # update SuggestionItem (failed branch)
+            _ScalarResult(["push_failed"]),  # refresh counts
+            None,  # update Suggestion status
+        ]
+    )
+    factory = _FakeSessionFactory([db1, db2])
+
+    mock_settings = SimpleNamespace(push_auto_retry_times=1)
+
+    api_error = SaihuAPIError("server error", code=50000)
+    mock_api = AsyncMock(side_effect=api_error)
+
+    with patch("app.pushback.purchase.async_session_factory", factory), \
+         patch("app.pushback.purchase.create_purchase_order", mock_api), \
+         patch("app.pushback.purchase.get_settings", return_value=mock_settings):
+        with pytest.raises(SaihuAPIError):
+            await push_saihu_job(ctx)  # type: ignore[arg-type]
+
+    assert db2.commits == 2
+
+
+@pytest.mark.asyncio
+async def test_push_saihu_job_rejects_empty_payload() -> None:
+    ctx = _FakeContext({})
+    with pytest.raises(ValueError, match="suggestion_id 或 item_ids"):
+        await push_saihu_job(ctx)  # type: ignore[arg-type]
