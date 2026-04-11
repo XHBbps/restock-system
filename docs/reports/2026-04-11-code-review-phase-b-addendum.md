@@ -12,7 +12,7 @@
 |---|---|---|---|
 | `backend/alembic` | 7 | ✅ 完成 | **1** |
 | `deploy` | 4 | ✅ 完成 | **1** |
-| `backend/tests` | 18 | 🔄 重试中（rate limit cooldown） | 待补 |
+| `backend/tests` | 18 | ✅ 完成（第二次重试通过） | **0** |
 
 ---
 
@@ -55,18 +55,22 @@
 - **建议增强**：加 timeout 防止无限等待（30s 上限）
 - **优先级**：P2（部署脚本，影响灾备恢复路径的可靠性）
 
-### F-B3. `backend/tests` 切片 — 待补
+### F-B3. `backend/tests` 切片 — ✅ 0 findings
 
-- **状态**：在第二次尝试时仍被 rate limit 拦截，约 30 分钟后再补
-- **预期范围**：18 个测试文件（test_engine_*、test_health_endpoints、test_suggestion_patch 等）
-- **重试命令**：
-  ```bash
-  wsl
-  export PATH="$HOME/.local/bin:$PATH"
-  cd /mnt/e/Ai_project/restock_system
-  coderabbit review --plain -t uncommitted --dir backend/tests > /tmp/cr-tests.txt 2>&1
-  tail -50 /tmp/cr-tests.txt
+- **状态**：第三次重试通过（前两次被 rate limit 拦截）
+- **范围**：18 个测试文件（test_engine_*、test_health_endpoints、test_suggestion_patch、test_zipcode_matcher 等）
+- **CodeRabbit 输出**：
   ```
+  Starting CodeRabbit review in plain text mode...
+  Review directory: /mnt/e/Ai_project/restock_system/backend/tests
+  Connecting to review service
+  Setting up
+  Summarizing
+  Reviewing
+
+  Review completed: No findings ✔
+  ```
+- **结论**：测试代码层面 CodeRabbit 未发现任何问题。这与 Phase C 的人工评审结论一致——测试覆盖良好（39+ 单测覆盖引擎 6 步），无质量缺陷。
 
 ---
 
@@ -76,7 +80,7 @@
 |---|---|---|---|
 | **P2** | F-B2 restore_db.sh 加 pg_isready 等待 | 5 min | 直接编辑 deploy/scripts/restore_db.sh |
 | **P3** | F-B1 alembic docstring 修正 | 2 min | 直接编辑 docstring |
-| **P3** | F-B3 重跑 backend/tests 切片 | 5 min + 等 | 30 min cooldown 后再跑 |
+| ✅ | F-B3 backend/tests 切片 | 已完成 | 0 findings |
 
 ---
 
