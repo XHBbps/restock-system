@@ -258,3 +258,28 @@ async def test_refresh_counts_partial() -> None:
     )
     await _refresh_suggestion_counts(db, 100)  # type: ignore[arg-type]
     assert len(db._responses) == 0
+
+
+@pytest.mark.asyncio
+async def test_push_saihu_job_rejects_all_zero_qty() -> None:
+    """P2-7: 全部 total_qty=0 时应抛 ValueError,不发送赛狐请求。"""
+    ctx = _FakeContext({"suggestion_id": 100, "item_ids": [1, 2]})
+    items = [_make_item(1, total_qty=0), _make_item(2, total_qty=0)]
+
+    db1 = _FakeDb(
+        [
+            _ScalarResult(_make_config()),
+            _ScalarResult(items),
+        ]
+    )
+    factory = _FakeSessionFactory([db1])
+
+    mock_api = AsyncMock()
+    with (
+        patch("app.pushback.purchase.async_session_factory", factory),
+        patch("app.pushback.purchase.create_purchase_order", mock_api),
+        pytest.raises(ValueError, match="total_qty 均为 0"),
+    ):
+        await push_saihu_job(ctx)  # type: ignore[arg-type]
+
+    mock_api.assert_not_called()
