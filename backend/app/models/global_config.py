@@ -16,9 +16,7 @@ class GlobalConfig(Base):
     __table_args__ = (
         CheckConstraint("id = 1", name="single_row"),
         CheckConstraint("include_tax IN ('0','1')", name="include_tax_enum"),
-        CheckConstraint(
-            "shop_sync_mode IN ('all','specific')", name="shop_sync_mode_enum"
-        ),
+        CheckConstraint("shop_sync_mode IN ('all','specific')", name="shop_sync_mode_enum"),
     )
 
     id: Mapped[int] = mapped_column(SmallInteger, primary_key=True, default=1)

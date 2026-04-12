@@ -1,8 +1,8 @@
 """库存明细同步。
 
 仅写入 inventory_snapshot_latest 的 available + reserved。
-**跳过 stockWait 字段** —— 在途由 sync_out_records 独立维护
-（spec FR-017 + analyze U1 修订）。
+**跳过 stockWait 字段** -- 在途由 sync_out_records 独立维护
+(spec FR-017 + analyze U1 修订)。
 """
 
 from typing import Any
@@ -54,7 +54,7 @@ async def sync_inventory_job(ctx: JobContext) -> None:
 
 async def _load_warehouse_countries(db: AsyncSession) -> dict[str, str | None]:
     rows = (await db.execute(select(Warehouse.id, Warehouse.country))).all()
-    return {wid: country for wid, country in rows}
+    return dict(rows)
 
 
 async def _upsert_inventory(
@@ -67,12 +67,12 @@ async def _upsert_inventory(
     if not commodity_sku or not warehouse_id:
         return
     if warehouse_id not in warehouse_country_map:
-        # 仓库尚未同步入库，跳过
+        # 仓库尚未同步入库,跳过
         return
 
     available = _to_int(raw.get("stockAvailable"), 0)
     reserved = _to_int(raw.get("stockOccupy"), 0)
-    # **故意不读 stockWait** —— 在途由 sync_out_records 维护
+    # **故意不读 stockWait** -- 在途由 sync_out_records 维护
 
     values = {
         "commodity_sku": commodity_sku,

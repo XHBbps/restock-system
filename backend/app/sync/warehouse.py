@@ -1,7 +1,7 @@
 """仓库列表同步。
 
-新仓库自动入库（country=None，UI 标记"待指定国家"）。
-已存在仓库更新 name/type/replenish_site_raw，**不覆盖采购员维护的 country**。
+新仓库自动入库(country=None,UI 标记"待指定国家")。
+已存在仓库更新 name/type/replenish_site_raw,**不覆盖采购员维护的 country**。
 """
 
 from typing import Any
@@ -18,6 +18,7 @@ from app.tasks.jobs import JobContext, register
 
 logger = get_logger(__name__)
 JOB_NAME = "sync_warehouse"
+REPLENISH_SITE_RAW_MAX_LEN = 50
 
 
 @register(JOB_NAME)
@@ -55,12 +56,12 @@ async def _upsert_warehouse(db, raw: dict[str, Any]) -> None:
         "id": warehouse_id,
         "name": raw.get("name") or warehouse_id,
         "type": type_int,
-        "replenish_site_raw": raw.get("replenishSite"),
+        "replenish_site_raw": _normalize_replenish_site(raw.get("replenishSite")),
         "last_sync_at": now_beijing(),
     }
 
     stmt = pg_insert(Warehouse).values(**values)
-    # 注意：country 不覆盖已有值
+    # 注意:country 不覆盖已有值
     stmt = stmt.on_conflict_do_update(
         index_elements=["id"],
         set_={
@@ -71,3 +72,14 @@ async def _upsert_warehouse(db, raw: dict[str, Any]) -> None:
         },
     )
     await db.execute(stmt)
+
+
+def _normalize_replenish_site(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if len(text) <= REPLENISH_SITE_RAW_MAX_LEN:
+        return text
+    return text[: REPLENISH_SITE_RAW_MAX_LEN - 1] + "…"

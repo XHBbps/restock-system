@@ -1,8 +1,8 @@
 """时区工具。
 
-核心规则（spec FR-007/FR-007a）：
-赛狐返回的所有时间字段按订单所在站点时区解析，统一转换为
-Asia/Shanghai 后存储，避免跨站点订单的窗口边界错位。
+核心规则(spec FR-007/FR-007a):
+赛狐返回的所有时间字段按订单所在站点时区解析,统一转换为
+Asia/Shanghai 后存储,避免跨站点订单的窗口边界错位。
 """
 
 from datetime import datetime
@@ -15,7 +15,7 @@ _logger = structlog.get_logger(__name__)
 
 BEIJING = ZoneInfo("Asia/Shanghai")
 
-# marketplaceId 长串 → 二字码（来源：docs/saihu_api/开发指南/站点对应关系.md）
+# marketplaceId 长串 -> 二字码(来源:docs/saihu_api/开发指南/站点对应关系.md)
 MARKETPLACE_ID_TO_COUNTRY: dict[str, str] = {
     "ATVPDKIKX0DER": "US",
     "A2EUQ1WTGCTBG2": "CA",
@@ -40,7 +40,7 @@ MARKETPLACE_ID_TO_COUNTRY: dict[str, str] = {
     "A28R8C7NBKEWEA": "IE",
 }
 
-# 国家二字码 → IANA 时区
+# 国家二字码 -> IANA 时区
 COUNTRY_TO_TIMEZONE: dict[str, str] = {
     "US": "America/Los_Angeles",  # 亚马逊 US 默认 PST
     "CA": "America/Toronto",
@@ -70,7 +70,7 @@ COUNTRY_TO_TIMEZONE: dict[str, str] = {
 def marketplace_to_country(marketplace_id: str | None) -> str | None:
     """把 marketplaceId 转为二字码。
 
-    订单列表返回长串（A1VC38T7YXB528），订单详情可能直接返回二字码（JP）。
+    订单列表返回长串(A1VC38T7YXB528),订单详情可能直接返回二字码(JP)。
     两种都兼容。
     """
     if not marketplace_id:
@@ -82,7 +82,7 @@ def marketplace_to_country(marketplace_id: str | None) -> str | None:
 
 
 def country_to_tz(country: str | None) -> ZoneInfo:
-    """国家 → ZoneInfo，未知国家回退北京。"""
+    """国家 -> ZoneInfo,未知国家回退北京。"""
     if not country:
         return BEIJING
     tz_name = COUNTRY_TO_TIMEZONE.get(country)
@@ -94,15 +94,15 @@ def country_to_tz(country: str | None) -> ZoneInfo:
 def parse_saihu_time(raw: str | None, marketplace_id: str | None = None) -> datetime | None:
     """把赛狐返回的时间字符串解析为带时区的 datetime。
 
-    输入格式：'2026-04-08 10:11:15' 或 '2026-04-08T10:11:15'
-    解析逻辑：按站点时区解析 → 转换为 Asia/Shanghai
+    输入格式:'2026-04-08 10:11:15' 或 '2026-04-08T10:11:15'
+    解析逻辑:按站点时区解析 -> 转换为 Asia/Shanghai
     """
     if not raw:
         return None
     try:
         naive = date_parser.parse(raw)
     except (ValueError, TypeError) as exc:
-        # 失败快速（宪法原则 III）：时间解析失败应作为结构化事件暴露
+        # 失败快速(宪法原则 III):时间解析失败应作为结构化事件暴露
         _logger.warning(
             "parse_saihu_time_failed",
             raw=raw,
@@ -111,7 +111,7 @@ def parse_saihu_time(raw: str | None, marketplace_id: str | None = None) -> date
         )
         return None
     if naive.tzinfo is not None:
-        # 已带时区，直接转北京
+        # 已带时区,直接转北京
         return naive.astimezone(BEIJING)
     country = marketplace_to_country(marketplace_id) if marketplace_id else None
     source_tz = country_to_tz(country)
@@ -120,5 +120,5 @@ def parse_saihu_time(raw: str | None, marketplace_id: str | None = None) -> date
 
 
 def now_beijing() -> datetime:
-    """当前北京时间（带 tz）。"""
+    """当前北京时间(带 tz)。"""
     return datetime.now(BEIJING)

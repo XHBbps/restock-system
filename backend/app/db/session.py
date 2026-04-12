@@ -1,6 +1,6 @@
 """异步数据库会话工厂。
 
-用法：
+用法:
     from app.db.session import get_db
     async def handler(db: AsyncSession = Depends(get_db)):
         ...
@@ -32,7 +32,7 @@ async_session_factory = async_sessionmaker(
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """FastAPI Dependency：提供事务化的 AsyncSession。"""
+    """FastAPI Dependency:提供事务化的 AsyncSession。"""
     async with async_session_factory() as session:
         try:
             yield session

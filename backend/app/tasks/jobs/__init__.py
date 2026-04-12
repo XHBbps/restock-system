@@ -1,7 +1,7 @@
-"""Job 注册表：job_name → 异步执行函数。
+"""Job 注册表:job_name -> 异步执行函数。
 
 Worker 通过 `JOB_REGISTRY[task.job_name]` 找到要执行的函数。
-Phase 2 仅注册 placeholder；Phase 3+ 由各 sync/engine/pushback 模块注册。
+Phase 2 仅注册 placeholder;Phase 3+ 由各 sync/engine/pushback 模块注册。
 """
 
 from collections.abc import Awaitable, Callable
@@ -11,7 +11,7 @@ JobHandler = Callable[["JobContext"], Awaitable[None]]
 
 
 class JobContext:
-    """Job 执行上下文，封装进度更新与 payload 访问。"""
+    """Job 执行上下文,封装进度更新与 payload 访问。"""
 
     def __init__(
         self,
@@ -43,7 +43,7 @@ JOB_REGISTRY: dict[str, JobHandler] = {}
 
 
 def register(job_name: str) -> Callable[[JobHandler], JobHandler]:
-    """装饰器：把函数注册到 JOB_REGISTRY。"""
+    """装饰器:把函数注册到 JOB_REGISTRY。"""
 
     def decorator(fn: JobHandler) -> JobHandler:
         JOB_REGISTRY[job_name] = fn
@@ -52,7 +52,7 @@ def register(job_name: str) -> Callable[[JobHandler], JobHandler]:
     return decorator
 
 
-# Phase 2 占位：echo 任务用于联调
+# Phase 2 占位:echo 任务用于联调
 @register("echo")
 async def _echo(ctx: JobContext) -> None:
     await ctx.progress(current_step="echo", step_detail=str(ctx.payload), total_steps=1)

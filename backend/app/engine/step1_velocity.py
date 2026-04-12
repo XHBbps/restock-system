@@ -1,16 +1,16 @@
-"""Step 1：动销速度（按 SKU × 国家二维矩阵）。
+"""Step 1:动销速度(按 SKU x 国家二维矩阵)。
 
-公式（FR-028）：
+公式(FR-028):
     effective[order_item] = max(quantity_shipped - refund_num, 0)
     过滤 order_status ∈ {Shipped, PartiallyShipped}
-    过滤 purchase_date ∈ [昨天-29, 昨天]（不含今天）
+    过滤 purchase_date ∈ [昨天-29, 昨天](不含今天)
     按 (commodity_sku, country, date) 聚合 SUM(effective)
 
     day7_sum  = Σ effective where date ∈ [昨天-6, 昨天]
     day14_sum = Σ effective where date ∈ [昨天-13, 昨天]
     day30_sum = Σ effective where date ∈ [昨天-29, 昨天]
 
-    velocity = day7/7 × 0.5 + day14/14 × 0.3 + day30/30 × 0.2
+    velocity = day7/7 x 0.5 + day14/14 x 0.3 + day30/30 x 0.2
 """
 
 from collections import defaultdict
@@ -45,10 +45,10 @@ def aggregate_velocity_from_items(
     items: list[tuple[str, str, date, int, int]],
     today: date,
 ) -> dict[str, dict[str, float]]:
-    """从订单明细聚合 velocity（暴露为纯函数便于单测）。
+    """从订单明细聚合 velocity(暴露为纯函数便于单测)。
 
     items: list of (commodity_sku, country, order_date, quantity_shipped, refund_num)
-    返回：velocity[commodity_sku][country] = float
+    返回:velocity[commodity_sku][country] = float
     """
     # bucket: {(sku, country): {date: effective}}
     daily: defaultdict[tuple[str, str], defaultdict[date, int]] = defaultdict(

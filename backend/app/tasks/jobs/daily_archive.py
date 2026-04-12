@@ -37,6 +37,4 @@ async def daily_archive_job(ctx: JobContext) -> None:
         await db.commit()
 
     logger.info("daily_archive_done", rows=row_count, date=str(today))
-    await ctx.progress(
-        current_step="完成", step_detail=f"归档 {row_count} 行 -> {today}"
-    )
+    await ctx.progress(current_step="完成", step_detail=f"归档 {row_count} 行 -> {today}")

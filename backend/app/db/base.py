@@ -5,13 +5,13 @@
 """
 
 from datetime import datetime
-from typing import Any
+from typing import Any, ClassVar
 
 from sqlalchemy import MetaData
 from sqlalchemy.orm import DeclarativeBase, Mapped, declared_attr, mapped_column
 from sqlalchemy.sql import func
 
-# 命名约定：让 Alembic 生成的约束名稳定可读
+# 命名约定:让 Alembic 生成的约束名稳定可读
 NAMING_CONVENTION = {
     "ix": "ix_%(column_0_label)s",
     "uq": "uq_%(table_name)s_%(column_0_name)s",
@@ -25,11 +25,11 @@ class Base(DeclarativeBase):
     """所有模型的基类。"""
 
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
-    type_annotation_map: dict[type, Any] = {}
+    type_annotation_map: ClassVar[dict[type, Any]] = {}
 
 
 class TimestampMixin:
-    """提供 created_at / updated_at，多数业务表会使用。"""
+    """提供 created_at / updated_at,多数业务表会使用。"""
 
     @declared_attr
     def created_at(cls) -> Mapped[datetime]:  # noqa: N805

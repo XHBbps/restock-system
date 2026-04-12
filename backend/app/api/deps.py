@@ -23,10 +23,10 @@ async def get_current_session(
     return {"subject": payload["sub"]}
 
 
-# 同步会话依赖的类型别名（方便路由签名书写）
+# 同步会话依赖的类型别名(方便路由签名书写)
 async def db_session() -> AsyncGenerator[AsyncSession, None]:
     async for session in get_db():
         yield session
 
 
-__all__ = ["get_current_session", "db_session", "Depends"]
+__all__ = ["Depends", "db_session", "get_current_session"]

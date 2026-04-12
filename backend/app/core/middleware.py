@@ -1,7 +1,7 @@
 """HTTP 请求结构化日志中间件。
 
-每个请求生成 request_id（structlog contextvar 绑定），记录方法、路径、
-状态、耗时；4xx/5xx 单独高亮。
+每个请求生成 request_id(structlog contextvar 绑定),记录方法、路径、
+状态、耗时;4xx/5xx 单独高亮。
 """
 
 import time

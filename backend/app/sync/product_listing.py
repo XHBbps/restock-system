@@ -1,12 +1,9 @@
-"""在线产品信息同步任务。
-
-数据源：赛狐 /api/order/api/product/pageList.json (match=true, onlineStatus=active)
-落库：product_listing 表（按 (shop_id, marketplace_id, seller_sku) UPSERT）
-"""
+"""Sync online product listings from Saihu."""
 
 from typing import Any
 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.core.timezone import marketplace_to_country, now_beijing
@@ -47,15 +44,20 @@ async def sync_product_listing_job(ctx: JobContext) -> None:
         raise
 
 
-async def _upsert_listing(db, raw: dict[str, Any]) -> None:
+def _normalize_online_status(status: Any) -> str:
+    value = str(status or "").strip()
+    if not value:
+        return "active"
+    return value.lower()
+
+
+async def _upsert_listing(db: AsyncSession, raw: dict[str, Any]) -> None:
     commodity_sku = raw.get("commoditySku")
     commodity_id = raw.get("commodityId")
     if not commodity_sku or not commodity_id:
-        # 未配对，跳过
         return
 
     marketplace_id = raw.get("marketplaceId") or ""
-    # 长串站点 → 二字码统一存储
     mkt_normalized = marketplace_to_country(marketplace_id) or marketplace_id
 
     values = {
@@ -71,14 +73,16 @@ async def _upsert_listing(db, raw: dict[str, Any]) -> None:
         "day14_sale_num": _to_int(raw.get("day14SaleNum")),
         "day30_sale_num": _to_int(raw.get("day30SaleNum")),
         "is_matched": True,
-        "online_status": raw.get("onlineStatus") or "active",
+        "online_status": _normalize_online_status(raw.get("onlineStatus")),
         "last_sync_at": now_beijing(),
     }
 
     stmt = pg_insert(ProductListing).values(**values)
     stmt = stmt.on_conflict_do_update(
         index_elements=["shop_id", "marketplace_id", "seller_sku"],
-        set_={k: v for k, v in values.items() if k not in ("shop_id", "marketplace_id", "seller_sku")},
+        set_={
+            k: v for k, v in values.items() if k not in ("shop_id", "marketplace_id", "seller_sku")
+        },
     )
     await db.execute(stmt)
 

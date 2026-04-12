@@ -19,9 +19,7 @@ class ProductListing(Base):
 
     __tablename__ = "product_listing"
     __table_args__ = (
-        UniqueConstraint(
-            "shop_id", "marketplace_id", "seller_sku", name="uq_product_listing_key"
-        ),
+        UniqueConstraint("shop_id", "marketplace_id", "seller_sku", name="uq_product_listing_key"),
         Index("ix_product_listing_sku_mkt", "commodity_sku", "marketplace_id"),
         Index("ix_product_listing_commodity_sku", "commodity_sku"),
     )

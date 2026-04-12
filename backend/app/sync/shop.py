@@ -1,7 +1,7 @@
-"""店铺列表同步（手动触发）。
+"""店铺列表同步(手动触发)。
 
-调用 /api/shop/pageList.json，UPSERT 到本地 shop 表。
-保留所有 status 的店铺供 UI 显示，由前端按 status='0' 过滤可勾选项。
+调用 /api/shop/pageList.json,UPSERT 到本地 shop 表。
+保留所有 status 的店铺供 UI 显示,由前端按 status='0' 过滤可勾选项。
 """
 
 from typing import Any
@@ -58,7 +58,7 @@ async def _upsert_shop(db, raw: dict[str, Any]) -> None:
         "last_sync_at": now_beijing(),
     }
     stmt = pg_insert(Shop).values(**values)
-    # 不覆盖 sync_enabled（用户手动维护）
+    # 不覆盖 sync_enabled(用户手动维护)
     stmt = stmt.on_conflict_do_update(
         index_elements=["id"],
         set_={
