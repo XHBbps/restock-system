@@ -94,10 +94,14 @@ async def _resolve_shop_ids(db: AsyncSession) -> list[str] | None:
     if config is None or config.shop_sync_mode == "all":
         return None
     rows = (
-        await db.execute(
-            select(Shop.id).where(Shop.sync_enabled.is_(True)).where(Shop.status == "0")
+        (
+            await db.execute(
+                select(Shop.id).where(Shop.sync_enabled.is_(True)).where(Shop.status == "0")
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return list(rows) if rows else []
 
 
@@ -139,19 +143,20 @@ async def _upsert_order(db: AsyncSession, raw: dict[str, Any]) -> int:
     )
     order_id = (await db.execute(stmt)).scalar_one()
 
-    # 删除旧 items 后重插
-    await db.execute(delete(OrderItem).where(OrderItem.order_id == order_id))
-
+    # P1-3: UPSERT 替代 delete-then-insert,避免中间状态数据丢失
     items_to_insert: list[dict[str, Any]] = []
+    seen_item_ids: list[str] = []
     for raw_item in raw.get("orderItemVoList") or []:
         order_item_id = raw_item.get("orderItemId")
         commodity_sku = raw_item.get("commoditySku")
         if not order_item_id or not commodity_sku:
             continue
+        oid = str(order_item_id)
+        seen_item_ids.append(oid)
         items_to_insert.append(
             {
                 "order_id": order_id,
-                "order_item_id": str(order_item_id),
+                "order_item_id": oid,
                 "commodity_sku": commodity_sku,
                 "seller_sku": raw_item.get("sellerSku"),
                 "quantity_ordered": _to_int(raw_item.get("quantityOrdered")),
@@ -163,7 +168,31 @@ async def _upsert_order(db: AsyncSession, raw: dict[str, Any]) -> int:
             }
         )
     if items_to_insert:
-        await db.execute(pg_insert(OrderItem).values(items_to_insert))
+        stmt = pg_insert(OrderItem).values(items_to_insert)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["order_id", "order_item_id"],
+            set_={
+                "commodity_sku": stmt.excluded.commodity_sku,
+                "seller_sku": stmt.excluded.seller_sku,
+                "quantity_ordered": stmt.excluded.quantity_ordered,
+                "quantity_shipped": stmt.excluded.quantity_shipped,
+                "quantity_unfulfillable": stmt.excluded.quantity_unfulfillable,
+                "refund_num": stmt.excluded.refund_num,
+                "item_price_currency": stmt.excluded.item_price_currency,
+                "item_price_amount": stmt.excluded.item_price_amount,
+            },
+        )
+        await db.execute(stmt)
+    # 清理本次 API 响应中不再存在的旧 items
+    if seen_item_ids:
+        await db.execute(
+            delete(OrderItem).where(
+                OrderItem.order_id == order_id,
+                OrderItem.order_item_id.not_in(seen_item_ids),
+            )
+        )
+    elif not items_to_insert:
+        await db.execute(delete(OrderItem).where(OrderItem.order_id == order_id))
     return len(items_to_insert)
 
 

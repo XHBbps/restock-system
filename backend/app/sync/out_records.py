@@ -1,10 +1,10 @@
-"""其他出库列表（在途数据）同步。
+"""其他出库列表(在途数据)同步。
 
-实现 spec FR-017a~d：
+实现 spec FR-017a~d:
 - 记录 sync_start_time
-- 拉所有备注含'在途中'的出库单 → UPSERT in_transit_record (is_in_transit=true, last_seen_at=sync_start_time)
-- 同步结束后：UPDATE in_transit_record SET is_in_transit=false WHERE last_seen_at < sync_start_time
-  → 表示这些单据的'在途中'标签已消失，自动归零
+- 拉所有备注含'在途中'的出库单 -> UPSERT in_transit_record (is_in_transit=true, last_seen_at=sync_start_time)
+- 同步结束后:UPDATE in_transit_record SET is_in_transit=false WHERE last_seen_at < sync_start_time
+  -> 表示这些单据的'在途中'标签已消失,自动归零
 """
 
 from typing import Any
@@ -45,7 +45,7 @@ async def sync_out_records_job(ctx: JobContext) -> None:
                     await ctx.progress(step_detail=f"已处理 {record_count} 单 / {item_count} 行")
             await db.commit()
 
-        # 老化处理：last_seen_at < sync_start_time 且 is_in_transit=true → 标记 false
+        # 老化处理:last_seen_at < sync_start_time 且 is_in_transit=true -> 标记 false
         await ctx.progress(current_step="老化标签消失的记录")
         aged = await _age_out_records(sync_start_time)
 
@@ -69,7 +69,7 @@ async def sync_out_records_job(ctx: JobContext) -> None:
 
 async def _load_warehouse_countries(db: AsyncSession) -> dict[str, str | None]:
     rows = (await db.execute(select(Warehouse.id, Warehouse.country))).all()
-    return {wid: country for wid, country in rows}
+    return dict(rows)
 
 
 async def _upsert_out_record(
@@ -88,7 +88,9 @@ async def _upsert_out_record(
     rec_values = {
         "saihu_out_record_id": record_id,
         "out_warehouse_no": raw.get("outWarehouseNo"),
-        "target_warehouse_id": target_warehouse_id if target_warehouse_id in warehouse_country_map else None,
+        "target_warehouse_id": target_warehouse_id
+        if target_warehouse_id in warehouse_country_map
+        else None,
         "target_country": target_country,
         "remark": raw.get("remark"),
         "status": str(raw.get("status") or "") or None,
@@ -110,7 +112,9 @@ async def _upsert_out_record(
     )
     await db.execute(stmt)
 
-    # 重写 items：先删后插（每次同步全量覆盖该出库单的明细）
+    # P1-3 审查结论: InTransitItem 无自然唯一约束(同 record 可含重复 SKU),
+    # 保留 delete+insert 模式。delete 和 insert 在同一个 db session 内,
+    # 只有 batch commit(每 50 条)时才提交,所以单条记录的 delete+insert 是原子的。
     await db.execute(delete(InTransitItem).where(InTransitItem.saihu_out_record_id == record_id))
 
     items: list[dict[str, Any]] = []
