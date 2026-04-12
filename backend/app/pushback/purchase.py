@@ -126,9 +126,13 @@ async def push_saihu_job(ctx: JobContext) -> None:
                 )
             )
         else:
+            # P0-4: 防止失败覆盖已成功的 push_status
             await db.execute(
                 update(SuggestionItem)
-                .where(SuggestionItem.id.in_(item_ids))
+                .where(
+                    SuggestionItem.id.in_(item_ids),
+                    SuggestionItem.push_status != "pushed",
+                )
                 .values(
                     push_status="push_failed",
                     push_error=last_error,
