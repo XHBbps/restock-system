@@ -1,14 +1,12 @@
 <template>
-  <div v-if="form" class="global-config-view">
-    <div class="page-header">
-      <h2 class="page-title">全局参数</h2>
+  <PageSectionCard v-if="form" title="全局参数">
+    <template #actions>
       <el-button type="primary" :loading="saving" @click="save">保存</el-button>
-    </div>
+    </template>
 
-    <el-card shadow="never">
-      <template #header>
-        <span class="card-title">补货参数</span>
-      </template>
+    <div class="config-sections">
+      <div class="config-section">
+        <div class="section-label">补货参数</div>
       <el-form :model="form" label-width="180px" style="max-width: 560px">
         <el-form-item label="国内中心仓周转天数">
           <el-input-number v-model="form.buffer_days" :min="1" :max="365" />
@@ -23,12 +21,10 @@
           <el-input v-model="form.default_purchase_warehouse_id" placeholder="外部仓库 ID" />
         </el-form-item>
       </el-form>
-    </el-card>
+      </div>
 
-    <el-card shadow="never">
-      <template #header>
-        <span class="card-title">同步设置</span>
-      </template>
+      <div class="config-section">
+        <div class="section-label">同步设置</div>
       <el-form :model="form" label-width="180px" style="max-width: 560px">
         <el-form-item label="同步间隔(分钟)">
           <el-input-number v-model="form.sync_interval_minutes" :min="5" :max="1440" />
@@ -40,12 +36,10 @@
           </el-radio-group>
         </el-form-item>
       </el-form>
-    </el-card>
+      </div>
 
-    <el-card shadow="never">
-      <template #header>
-        <span class="card-title">补货计算</span>
-      </template>
+      <div class="config-section">
+        <div class="section-label">补货计算</div>
       <el-form :model="form" label-width="180px" style="max-width: 560px">
         <el-form-item label="自动计算">
           <el-switch v-model="form.calc_enabled" />
@@ -70,18 +64,41 @@
           </div>
         </el-form-item>
       </el-form>
-    </el-card>
-
-  </div>
+      </div>
+    </div>
+  </PageSectionCard>
 </template>
 
 <script setup lang="ts">
 import { getGlobalConfig, patchGlobalConfig, type GlobalConfig } from '@/api/config'
+import PageSectionCard from '@/components/PageSectionCard.vue'
+import { getActionErrorMessage } from '@/utils/apiError'
 import { ElMessage } from 'element-plus'
 import { onMounted, ref } from 'vue'
 
 const form = ref<GlobalConfig | null>(null)
 const saving = ref(false)
+
+// 记录影响补货计算的参数原始值，用于保存后比较
+let savedCalcParams = { target_days: 0, buffer_days: 0, lead_time_days: 0 }
+
+function snapshotCalcParams(): void {
+  if (!form.value) return
+  savedCalcParams = {
+    target_days: form.value.target_days,
+    buffer_days: form.value.buffer_days,
+    lead_time_days: form.value.lead_time_days,
+  }
+}
+
+function calcParamsChanged(): boolean {
+  if (!form.value) return false
+  return (
+    form.value.target_days !== savedCalcParams.target_days ||
+    form.value.buffer_days !== savedCalcParams.buffer_days ||
+    form.value.lead_time_days !== savedCalcParams.lead_time_days
+  )
+}
 
 const cronPresets = [
   { label: '每天 06:00', value: '0 6 * * *' },
@@ -124,6 +141,7 @@ function onCustomCronInput(val: string): void {
 
 onMounted(async () => {
   form.value = await getGlobalConfig()
+  snapshotCalcParams()
   initCronState()
 })
 
@@ -131,11 +149,19 @@ async function save(): Promise<void> {
   if (!form.value) return
   saving.value = true
   try {
+    const changed = calcParamsChanged()
     form.value = await patchGlobalConfig(form.value)
+    snapshotCalcParams()
     initCronState()
     ElMessage.success('已保存')
-  } catch {
-    ElMessage.error('保存失败')
+    if (changed) {
+      ElMessage.warning({
+        message: '补货参数已变更（目标天数/周转天数/提前期），建议重新生成补货建议单。',
+        duration: 5000,
+      })
+    }
+  } catch (err) {
+    ElMessage.error(getActionErrorMessage(err, '保存失败'))
   } finally {
     saving.value = false
   }
@@ -143,27 +169,17 @@ async function save(): Promise<void> {
 </script>
 
 <style lang="scss" scoped>
-.global-config-view {
+.config-sections {
   display: flex;
   flex-direction: column;
   gap: $space-5;
 }
 
-.page-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.page-title {
-  font-size: $font-size-xl;
-  font-weight: $font-weight-semibold;
-  margin: 0;
-}
-
-.card-title {
+.section-label {
   font-size: $font-size-sm;
   font-weight: $font-weight-semibold;
+  margin-bottom: $space-3;
+  color: $color-text-primary;
 }
 
 // Force label and input on same horizontal line

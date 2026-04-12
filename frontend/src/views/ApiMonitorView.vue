@@ -139,6 +139,7 @@ import {
   type SortState,
 } from '@/utils/tableSort'
 import type { EChartsCoreOption } from 'echarts/core'
+import { getActionErrorMessage } from '@/utils/apiError'
 import { ElMessage } from 'element-plus'
 import { computed, onMounted, ref, watch } from 'vue'
 
@@ -345,8 +346,8 @@ async function retry(id: number): Promise<void> {
       return
     }
     ElMessage.warning('该调用暂不支持自动重试')
-  } catch {
-    ElMessage.error('重试触发失败')
+  } catch (err) {
+    ElMessage.error(getActionErrorMessage(err, '重试触发失败'))
   }
 }
 

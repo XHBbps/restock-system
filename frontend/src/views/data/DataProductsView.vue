@@ -22,7 +22,7 @@
       <el-button :loading="initLoading" @click="initFromListings">从商品同步初始化</el-button>
     </template>
 
-    <el-table v-loading="loading" :data="rows" row-key="commodity_sku">
+    <el-table v-loading="loading" :data="pagedRows" row-key="commodity_sku">
       <el-table-column type="expand">
         <template #default="{ row }">
           <div class="expand-wrapper">
@@ -44,7 +44,7 @@
               </el-table-column>
               <el-table-column label="最后同步" width="140">
                 <template #default="{ row: listing }">
-                  <span class="muted mono">{{ formatTime(listing.last_sync_at) }}</span>
+                  <span class="muted mono">{{ formatShortTime(listing.last_sync_at) }}</span>
                 </template>
               </el-table-column>
             </el-table>
@@ -52,7 +52,7 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="SKU" min-width="280">
+      <el-table-column label="商品信息" min-width="280">
         <template #default="{ row }">
           <SkuCard :sku="row.commodity_sku" :name="row.commodity_name" :image="row.main_image" />
         </template>
@@ -67,20 +67,6 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="覆盖提前期（天）" width="200">
-        <template #default="{ row }">
-          <el-input-number
-            v-model="row.lead_time_days"
-            :min="0"
-            :max="365"
-            :controls="false"
-            placeholder="使用全局"
-            size="small"
-            @change="(v: number | undefined) => updateLeadTime(row, v)"
-          />
-        </template>
-      </el-table-column>
-
       <el-table-column label="站点数" prop="listing_count" width="100" align="right" />
       <el-table-column label="30天总销量" prop="total_day30_sales" width="120" align="right" />
     </el-table>
@@ -88,10 +74,8 @@
     <TablePaginationBar
       v-model:current-page="page"
       v-model:page-size="pageSize"
-      :total="total"
+      :total="rows.length"
       :page-sizes="[20, 50, 100, 200]"
-      @current-change="reload"
-      @size-change="reload"
     />
   </PageSectionCard>
 </template>
@@ -103,14 +87,18 @@ import SkuCard from '@/components/SkuCard.vue'
 import PageSectionCard from '@/components/PageSectionCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
 import { normalizeSwitchValue } from '@/utils/element'
-import dayjs from 'dayjs'
+import { formatShortTime } from '@/utils/format'
+import { getActionErrorMessage } from '@/utils/apiError'
 import { ElMessage } from 'element-plus'
-import { onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 
 const rows = ref<SkuOverviewItem[]>([])
-const total = ref(0)
 const page = ref(1)
 const pageSize = ref(50)
+const pagedRows = computed(() => {
+  const start = (page.value - 1) * pageSize.value
+  return rows.value.slice(start, start + pageSize.value)
+})
 const loading = ref(false)
 const initLoading = ref(false)
 
@@ -132,11 +120,13 @@ async function reload(): Promise<void> {
     const resp = await listSkuOverview({
       keyword: filters.keyword || undefined,
       enabled: filters.enabled,
-      page: page.value,
-      page_size: pageSize.value,
+      page: 1,
+      page_size: 5000,
     })
     rows.value = resp.items
-    total.value = resp.total
+    page.value = 1
+  } catch (err) {
+    ElMessage.error(getActionErrorMessage(err, '加载失败'))
   } finally {
     loading.value = false
   }
@@ -146,20 +136,13 @@ async function updateEnabled(row: SkuOverviewItem, value: boolean): Promise<void
   try {
     await patchSkuConfig(row.commodity_sku, { enabled: value })
     ElMessage.success(`已${value ? '启用' : '禁用'} ${row.commodity_sku}`)
-  } catch {
+  } catch (err) {
     row.enabled = !value
-    ElMessage.error('更新失败。')
+    ElMessage.error(getActionErrorMessage(err, '更新失败。'))
   }
 }
 
-async function updateLeadTime(row: SkuOverviewItem, value: number | undefined): Promise<void> {
-  try {
-    await patchSkuConfig(row.commodity_sku, { lead_time_days: value ?? null })
-    ElMessage.success(`已更新 ${row.commodity_sku} 的提前期配置。`)
-  } catch {
-    ElMessage.error('更新失败。')
-  }
-}
+
 
 async function initFromListings(): Promise<void> {
   initLoading.value = true
@@ -167,16 +150,11 @@ async function initFromListings(): Promise<void> {
     const resp = await initSkuConfigs()
     await reload()
     ElMessage.success(`已初始化 ${resp.created} 个 SKU，当前共 ${resp.total} 个配置。`)
-  } catch {
-    ElMessage.error('初始化 SKU 配置失败。')
+  } catch (err) {
+    ElMessage.error(getActionErrorMessage(err, '初始化 SKU 配置失败。'))
   } finally {
     initLoading.value = false
   }
-}
-
-function formatTime(value: string | null): string {
-  if (!value) return '-'
-  return dayjs(value).format('MM-DD HH:mm')
 }
 
 onMounted(reload)

@@ -1,88 +1,78 @@
-<template>
-  <el-card shadow="never">
-    <template #header>
-      <div class="card-header">
-        <div class="title-block">
-          <span class="card-title">订单列表</span>
-        </div>
-        <div class="actions">
-          <el-date-picker
-            v-model="dateRange"
-            type="daterange"
-            range-separator="至"
-            start-placeholder="开始"
-            end-placeholder="结束"
-            value-format="YYYY-MM-DD"
-            style="width: 260px"
-            @change="reload"
-          />
-          <el-input
-            v-model="filters.sku"
-            placeholder="SKU / 订单号"
-            clearable
-            style="width: 200px"
-            @keyup.enter="reload"
-            @clear="reload"
-          />
-          <el-input
-            v-model="filters.country"
-            placeholder="国家"
-            clearable
-            maxlength="2"
-            style="width: 100px"
-            @keyup.enter="reload"
-            @clear="reload"
-          />
-          <el-select v-model="filters.status" placeholder="状态" clearable style="width: 140px" @change="reload">
-            <el-option label="已发货" value="Shipped" />
-            <el-option label="部分发货" value="PartiallyShipped" />
-            <el-option label="未发货" value="Unshipped" />
-            <el-option label="待处理" value="Pending" />
-            <el-option label="已取消" value="Canceled" />
-          </el-select>
-        </div>
-      </div>
+﻿<template>
+  <PageSectionCard title="订单列表">
+    <template #actions>
+      <el-date-picker
+        v-model="dateRange"
+        type="daterange"
+        range-separator="至"
+        start-placeholder="开始"
+        end-placeholder="结束"
+        value-format="YYYY-MM-DD"
+        style="width: 260px"
+        @change="reload"
+      />
+      <el-input
+        v-model="filters.sku"
+        placeholder="SKU / 订单号"
+        clearable
+        style="width: 200px"
+        @keyup.enter="reload"
+        @clear="reload"
+      />
+      <el-select v-model="filters.country" placeholder="国家" clearable filterable style="width: 140px" @change="reload">
+        <el-option v-for="c in COUNTRY_OPTIONS" :key="c.code" :label="c.code" :value="c.code" />
+      </el-select>
+      <el-select v-model="filters.shop" placeholder="店铺" clearable filterable style="width: 160px">
+        <el-option v-for="s in shopOptions" :key="s" :label="s" :value="s" />
+      </el-select>
+      <el-select v-model="filters.status" placeholder="状态" clearable style="width: 140px" @change="reload">
+        <el-option label="已发货" value="Shipped" />
+        <el-option label="部分发货" value="PartiallyShipped" />
+        <el-option label="未发货" value="Unshipped" />
+        <el-option label="待处理" value="Pending" />
+        <el-option label="已取消" value="Canceled" />
+      </el-select>
     </template>
 
-    <el-table v-loading="loading" :data="rows" table-layout="auto">
-      <el-table-column label="订单号" prop="amazonOrderId" min-width="240" sortable>
+    <el-table v-loading="loading" :data="pagedRows" table-layout="auto" @sort-change="handleSortChange">
+      <el-table-column label="订单号" prop="amazonOrderId" min-width="240" sortable="custom">
         <template #default="{ row }">
           <span class="mono nowrap">{{ row.amazonOrderId }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="店铺" prop="shopId" width="96" sortable>
+      <el-table-column label="店铺" prop="shopId" width="96" sortable="custom">
         <template #default="{ row }">
           <span class="mono muted nowrap">{{ row.shopId }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="国家" width="72" align="center" sortable>
+      <el-table-column label="国家" prop="countryCode" width="72" align="center" sortable="custom">
         <template #default="{ row }">
           <el-tag size="small">{{ row.countryCode }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="状态" width="128" sortable>
+      <el-table-column label="状态" prop="orderStatus" width="128" sortable="custom">
         <template #default="{ row }">
-          <el-tag :type="statusType(row.orderStatus)" size="small">{{ row.orderStatus }}</el-tag>
+          <el-tag :type="statusType(row.orderStatus)" size="small">{{ statusLabel(row.orderStatus) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="金额" min-width="136" align="right" sortable>
+      <el-table-column label="金额" prop="orderTotalAmount" min-width="136" align="right" sortable="custom">
         <template #default="{ row }">
           <span v-if="row.orderTotalAmount" class="mono nowrap">{{ row.orderTotalAmount }} {{ row.orderTotalCurrency }}</span>
           <span v-else class="muted">-</span>
         </template>
       </el-table-column>
-      <el-table-column label="明细数" width="80" align="right" sortable show-overflow-tooltip>
+      <el-table-column label="明细数" prop="itemCount" width="80" align="right" sortable="custom" show-overflow-tooltip>
         <template #default="{ row }">{{ row.itemCount }}</template>
       </el-table-column>
-      <el-table-column label="详情状态" width="120" align="center" sortable>
+      <el-table-column label="详情状态" prop="hasDetail" width="120" align="center" sortable="custom">
         <template #default="{ row }">
           <el-tag v-if="row.hasDetail" type="success" size="small">已拉取</el-tag>
           <el-tag v-else type="info" size="small">无详情</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="下单时间" min-width="168" sortable>
+      <el-table-column label="下单时间" prop="purchaseDate" min-width="168" sortable="custom">
         <template #default="{ row }">
-          <span class="muted mono nowrap">{{ formatTime(row.purchaseDate) }}</span>
+          <span class="muted mono nowrap">{{ formatDateTime(row.purchaseDate) }}</span>
         </template>
       </el-table-column>
       <el-table-column label="操作" width="84" align="center">
@@ -95,13 +85,11 @@
     <TablePaginationBar
       v-model:current-page="page"
       v-model:page-size="pageSize"
-      :total="total"
+      :total="filteredRows.length"
       :page-sizes="[20, 50, 100, 200]"
-      @current-change="reload"
-      @size-change="reload"
     />
 
-    <el-dialog v-model="dialogVisible" :title="detail ? `订单详情｜${detail.amazonOrderId}` : '加载中...'" width="800px">
+    <el-dialog v-model="dialogVisible" :title="detail ? `订单详情 · ${detail.amazonOrderId}` : '加载中...'" width="800px">
       <div v-if="detail" class="detail-body">
         <div class="detail-section">
           <div class="section-title">基本信息</div>
@@ -112,8 +100,8 @@
             <div><span class="label">订单状态（orderStatus）</span><span class="mono">{{ detail.orderStatus }}</span></div>
             <div><span class="label">履约渠道（fulfillmentChannel）</span><span class="mono">{{ detail.fulfillmentChannel || '-' }}</span></div>
             <div><span class="label">退款状态（refundStatus）</span><span class="mono">{{ detail.refundStatus || '-' }}</span></div>
-            <div><span class="label">下单时间（purchaseDate）</span><span class="mono">{{ formatTime(detail.purchaseDate) }}</span></div>
-            <div><span class="label">最后更新时间（lastUpdateDate）</span><span class="mono">{{ formatTime(detail.lastUpdateDate) }}</span></div>
+            <div><span class="label">下单时间（purchaseDate）</span><span class="mono">{{ formatDateTime(detail.purchaseDate) }}</span></div>
+            <div><span class="label">最后更新时间（lastUpdateDate）</span><span class="mono">{{ formatDateTime(detail.lastUpdateDate) }}</span></div>
             <div><span class="label">订单金额</span><span class="mono">{{ detail.orderTotalAmount }} {{ detail.orderTotalCurrency }}</span></div>
           </div>
         </div>
@@ -141,8 +129,8 @@
             <div><span class="label">收件人（receiverName）</span><span class="mono">{{ detail.receiverName || '-' }}</span></div>
             <div class="full-row"><span class="label">详细地址（detailAddress）</span><span>{{ detail.detailAddress || '-' }}</span></div>
             <div class="full-row">
-              <span class="label">拉取时间（fetchedAt）</span>
-              <span class="mono muted">{{ detail.detailFetchedAt ? formatTime(detail.detailFetchedAt) : '-' }}</span>
+              <span class="label">抓取时间（fetchedAt）</span>
+              <span class="mono muted">{{ detail.detailFetchedAt ? formatDateTime(detail.detailFetchedAt) : '-' }}</span>
             </div>
           </div>
           <el-alert
@@ -155,27 +143,43 @@
         </div>
       </div>
     </el-dialog>
-  </el-card>
+  </PageSectionCard>
 </template>
 
 <script setup lang="ts">
 import { getOrderDetail, listOrders, type DataOrderDetail, type DataOrderSummary } from '@/api/data'
+import { COUNTRY_OPTIONS } from '@/utils/countries'
+import PageSectionCard from '@/components/PageSectionCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
 import type { TagType } from '@/utils/element'
-import dayjs from 'dayjs'
+import { formatDateTime } from '@/utils/format'
+import { normalizeSortOrder, type SortChangeEvent, type SortState } from '@/utils/tableSort'
+import { getActionErrorMessage } from '@/utils/apiError'
 import { ElMessage } from 'element-plus'
-import { onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 
 const rows = ref<DataOrderSummary[]>([])
-const total = ref(0)
 const page = ref(1)
 const pageSize = ref(50)
+const shopOptions = computed(() => [...new Set(rows.value.map((r) => r.shopId))].sort())
+
+const filteredRows = computed(() => {
+  if (!filters.shop) return rows.value
+  return rows.value.filter((r) => r.shopId === filters.shop)
+})
+
+const pagedRows = computed(() => {
+  const start = (page.value - 1) * pageSize.value
+  return filteredRows.value.slice(start, start + pageSize.value)
+})
 const loading = ref(false)
+const sortState = ref<SortState>({ prop: 'purchaseDate', order: 'desc' })
 const dateRange = ref<[string, string] | null>(null)
 const filters = reactive({
   country: '',
   status: '',
   sku: '',
+  shop: '',
 })
 
 const dialogVisible = ref(false)
@@ -191,11 +195,15 @@ async function reload(): Promise<void> {
       country: filters.country || undefined,
       status: filters.status || undefined,
       sku: filters.sku || undefined,
-      page: page.value,
-      page_size: pageSize.value,
+      page: 1,
+      page_size: 5000,
+      sort_by: sortState.value.prop,
+      sort_order: sortState.value.order,
     })
     rows.value = resp.items
-    total.value = resp.total
+    page.value = 1
+  } catch (err) {
+    ElMessage.error(getActionErrorMessage(err, '加载失败'))
   } finally {
     loading.value = false
   }
@@ -210,10 +218,10 @@ async function openDetail(row: DataOrderSummary): Promise<void> {
     if (myReqId === detailReqId && dialogVisible.value) {
       detail.value = data
     }
-  } catch {
+  } catch (err) {
     if (myReqId === detailReqId) {
       dialogVisible.value = false
-      ElMessage.error('获取订单详情失败')
+      ElMessage.error(getActionErrorMessage(err, '获取订单详情失败'))
     }
   }
 }
@@ -230,8 +238,16 @@ function statusType(status: string): TagType {
   )[status] || 'info'
 }
 
-function formatTime(value: string): string {
-  return dayjs(value).format('YYYY-MM-DD HH:mm')
+const ORDER_STATUS_LABEL: Record<string, string> = {
+  Shipped: '已发货',
+  PartiallyShipped: '部分发货',
+  Unshipped: '未发货',
+  Pending: '待处理',
+  Canceled: '已取消',
+}
+
+function statusLabel(status: string): string {
+  return ORDER_STATUS_LABEL[status] || status
 }
 
 function hasVisibleDetail(detail: DataOrderDetail): boolean {
@@ -244,8 +260,17 @@ function hasVisibleDetail(detail: DataOrderDetail): boolean {
   )
 }
 
+function handleSortChange({ prop, order }: SortChangeEvent): void {
+  const normalizedOrder = normalizeSortOrder(order)
+  sortState.value = normalizedOrder && prop
+    ? { prop, order: normalizedOrder }
+    : { prop: 'purchaseDate', order: 'desc' }
+  page.value = 1
+  void reload()
+}
+
 watch(
-  () => [filters.sku, filters.country, filters.status],
+  () => [filters.sku, filters.country, filters.status, filters.shop],
   () => { page.value = 1 },
 )
 
@@ -253,38 +278,6 @@ onMounted(reload)
 </script>
 
 <style lang="scss" scoped>
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: $space-4;
-  flex-wrap: wrap;
-}
-
-.title-block {
-  display: flex;
-  flex-direction: column;
-}
-
-.card-title {
-  font-size: $font-size-lg;
-  font-weight: $font-weight-semibold;
-  letter-spacing: $tracking-tight;
-}
-
-.card-meta {
-  font-size: $font-size-xs;
-  color: $color-text-secondary;
-  font-family: $font-family-mono;
-  margin-top: 2px;
-}
-
-.actions {
-  display: flex;
-  gap: $space-3;
-  flex-wrap: wrap;
-}
-
 .muted {
   color: $color-text-secondary;
 }

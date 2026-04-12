@@ -1,59 +1,52 @@
-<template>
-  <el-card shadow="never">
-    <template #header>
-      <div class="card-header">
-        <div>
-          <div class="card-title">历史记录</div>
-        </div>
-        <div class="filters">
-          <el-date-picker
-            v-model="dateRange"
-            type="daterange"
-            range-separator="至"
-            start-placeholder="开始日期"
-            end-placeholder="结束日期"
-            value-format="YYYY-MM-DD"
-            style="width: 280px"
-            @change="reload"
-          />
-          <el-select v-model="status" placeholder="状态" clearable style="width: 140px" @change="reload">
-            <el-option label="草稿" value="draft" />
-            <el-option label="部分推送" value="partial" />
-            <el-option label="已推送" value="pushed" />
-            <el-option label="已归档" value="archived" />
-            <el-option label="异常" value="error" />
-          </el-select>
-          <el-input
-            v-model="sku"
-            placeholder="SKU 关键字"
-            clearable
-            style="width: 200px"
-            @clear="reload"
-            @keyup.enter="reload"
-          />
-        </div>
-      </div>
+﻿<template>
+  <PageSectionCard title="历史记录">
+    <template #actions>
+      <el-date-picker
+        v-model="dateRange"
+        type="daterange"
+        range-separator="至"
+        start-placeholder="开始日期"
+        end-placeholder="结束日期"
+        value-format="YYYY-MM-DD"
+        style="width: 280px"
+        @change="reload"
+      />
+      <el-select v-model="status" placeholder="状态" clearable style="width: 140px" @change="reload">
+        <el-option label="草稿" value="draft" />
+        <el-option label="部分推送" value="partial" />
+        <el-option label="已推送" value="pushed" />
+        <el-option label="已归档" value="archived" />
+        <el-option label="异常" value="error" />
+      </el-select>
+      <el-input
+        v-model="sku"
+        placeholder="SKU 关键字"
+        clearable
+        style="width: 200px"
+        @clear="reload"
+        @keyup.enter="reload"
+      />
     </template>
 
-    <el-table v-loading="loading" :data="rows">
-      <el-table-column label="建议单 ID" prop="id" width="100" sortable show-overflow-tooltip />
-      <el-table-column label="生成时间" min-width="180" sortable show-overflow-tooltip>
+    <el-table v-loading="loading" :data="pagedRows" @sort-change="handleSortChange">
+      <el-table-column label="建议单 ID" prop="id" width="130" sortable="custom" show-overflow-tooltip />
+      <el-table-column label="生成时间" prop="created_at" min-width="180" sortable="custom" show-overflow-tooltip>
         <template #default="{ row }">
-          {{ formatTime(row.created_at) }}
+          {{ formatDateTime(row.created_at) }}
         </template>
       </el-table-column>
-      <el-table-column label="触发方式" prop="triggered_by" width="140" sortable show-overflow-tooltip />
-      <el-table-column label="状态" width="120" sortable>
+      <el-table-column label="触发方式" prop="triggered_by" width="140" sortable="custom" show-overflow-tooltip />
+      <el-table-column label="状态" prop="status" width="120" sortable="custom">
         <template #default="{ row }">
           <el-tag :type="getSuggestionStatusMeta(row.status).tagType">
             {{ getSuggestionStatusMeta(row.status).label }}
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="条目数" prop="total_items" width="100" align="right" sortable show-overflow-tooltip />
-      <el-table-column label="已推送" prop="pushed_items" width="100" align="right" sortable show-overflow-tooltip />
-      <el-table-column label="失败数" prop="failed_items" width="100" align="right" sortable show-overflow-tooltip />
-      <el-table-column label="推送成功率" width="120" align="right" sortable>
+      <el-table-column label="条目数" prop="total_items" width="100" align="right" sortable="custom" show-overflow-tooltip />
+      <el-table-column label="已推送" prop="pushed_items" width="100" align="right" sortable="custom" show-overflow-tooltip />
+      <el-table-column label="失败数" prop="failed_items" width="100" align="right" sortable="custom" show-overflow-tooltip />
+      <el-table-column label="推送成功率" prop="success_rate" width="120" align="right" sortable="custom">
         <template #default="{ row }">
           {{ successRate(row) }}
         </template>
@@ -68,28 +61,34 @@
     <TablePaginationBar
       v-model:current-page="page"
       v-model:page-size="pageSize"
-      :total="total"
+      :total="rows.length"
       :page-sizes="[20, 50, 100]"
-      @current-change="reload"
-      @size-change="reload"
     />
-  </el-card>
+  </PageSectionCard>
 </template>
 
 <script setup lang="ts">
 import { listSuggestions, type Suggestion } from '@/api/suggestion'
+import PageSectionCard from '@/components/PageSectionCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
 import { getSuggestionStatusMeta } from '@/utils/status'
-import dayjs from 'dayjs'
-import { onMounted, ref } from 'vue'
+import { formatDateTime } from '@/utils/format'
+import { normalizeSortOrder, type SortChangeEvent, type SortState } from '@/utils/tableSort'
+import { getActionErrorMessage } from '@/utils/apiError'
+import { ElMessage } from 'element-plus'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
 const rows = ref<Suggestion[]>([])
-const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
+const pagedRows = computed(() => {
+  const start = (page.value - 1) * pageSize.value
+  return rows.value.slice(start, start + pageSize.value)
+})
 const loading = ref(false)
+const sortState = ref<SortState>({ prop: 'created_at', order: 'desc' })
 
 const dateRange = ref<[string, string] | null>(null)
 const status = ref<string | undefined>(undefined)
@@ -103,18 +102,18 @@ async function reload(): Promise<void> {
       date_to: dateRange.value?.[1],
       status: status.value,
       sku: sku.value || undefined,
-      page: page.value,
-      page_size: pageSize.value,
+      page: 1,
+      page_size: 5000,
+      sort_by: sortState.value.prop,
+      sort_order: sortState.value.order,
     })
     rows.value = resp.items
-    total.value = resp.total
+    page.value = 1
+  } catch (err) {
+    ElMessage.error(getActionErrorMessage(err, '加载失败'))
   } finally {
     loading.value = false
   }
-}
-
-function formatTime(value: string): string {
-  return dayjs(value).format('YYYY-MM-DD HH:mm')
 }
 
 function successRate(row: Suggestion): string {
@@ -127,38 +126,17 @@ function goDetail(id: number): void {
   router.push(`/restock/suggestions/${id}`)
 }
 
+function handleSortChange({ prop, order }: SortChangeEvent): void {
+  const normalizedOrder = normalizeSortOrder(order)
+  sortState.value = normalizedOrder && prop
+    ? { prop, order: normalizedOrder }
+    : { prop: 'created_at', order: 'desc' }
+  page.value = 1
+  void reload()
+}
+
 onMounted(reload)
 </script>
 
 <style lang="scss" scoped>
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: $space-4;
-}
-
-.card-title {
-  font-size: $font-size-lg;
-  font-weight: $font-weight-semibold;
-}
-
-.card-meta {
-  margin-top: 4px;
-  color: $color-text-secondary;
-  font-size: $font-size-sm;
-}
-
-.filters {
-  display: flex;
-  gap: $space-3;
-  flex-wrap: wrap;
-}
-
-@media (max-width: 900px) {
-  .card-header {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-}
 </style>
