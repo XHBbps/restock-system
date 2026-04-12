@@ -43,11 +43,16 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         now = time()
         cutoff = now - self.window_seconds
 
-        # 清理过期记录
+        # 清理过期记录 + 释放空 key（防公网 bot 扫描导致 dict 无限膨胀）
         timestamps = self._requests[client_ip]
-        self._requests[client_ip] = [t for t in timestamps if t > cutoff]
+        active = [t for t in timestamps if t > cutoff]
+        if not active:
+            self._requests.pop(client_ip, None)
+            active = []
+        else:
+            self._requests[client_ip] = active
 
-        if len(self._requests[client_ip]) >= self.max_requests:
+        if len(active) >= self.max_requests:
             return JSONResponse(
                 status_code=429,
                 content={"status": "error", "message": "请求过于频繁，请稍后再试"},

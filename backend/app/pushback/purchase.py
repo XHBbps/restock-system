@@ -1,8 +1,8 @@
 """推送选中条目至赛狐生成采购单。
 
-策略（FR-027/045/046）：
-- 选中条目合并为一张采购单（包含多个 items）
-- 每条 item 自动重试 3 次（FR-046）
+策略(FR-027/045/046):
+- 选中条目合并为一张采购单(包含多个 items)
+- 每条 item 自动重试 3 次(FR-046)
 - 整批结果写回 suggestion_item 状态
 - 更新 suggestion 计数
 """
@@ -17,8 +17,8 @@ from app.config import get_settings
 from app.core.exceptions import (
     PushBlockedError,
     SaihuAPIError,
-    SaihuRateLimited,
     SaihuNetworkError,
+    SaihuRateLimited,
 )
 from app.core.logging import get_logger
 from app.core.timezone import now_beijing
@@ -43,9 +43,7 @@ async def push_saihu_job(ctx: JobContext) -> None:
 
     # 加载配置 + 条目
     async with async_session_factory() as db:
-        config = (
-            await db.execute(select(GlobalConfig).where(GlobalConfig.id == 1))
-        ).scalar_one()
+        config = (await db.execute(select(GlobalConfig).where(GlobalConfig.id == 1))).scalar_one()
         if not config.default_purchase_warehouse_id:
             raise ValueError("global_config.default_purchase_warehouse_id 未配置")
 
@@ -65,7 +63,7 @@ async def push_saihu_job(ctx: JobContext) -> None:
     if not items:
         raise ValueError("未找到选中的建议条目")
 
-    # 校验全部带 commodity_id（push_blocker 应该已在 API 层过滤）
+    # 校验全部带 commodity_id(push_blocker 应该已在 API 层过滤)
     blocked = [it.id for it in items if it.push_blocker or not it.commodity_id]
     if blocked:
         raise PushBlockedError(f"以下条目无法推送: {blocked}")
@@ -73,9 +71,7 @@ async def push_saihu_job(ctx: JobContext) -> None:
     await ctx.progress(current_step="调用赛狐采购单创建")
 
     # 构造 items
-    saihu_items = [
-        {"commodityId": it.commodity_id, "num": str(it.total_qty)} for it in items
-    ]
+    saihu_items = [{"commodityId": it.commodity_id, "num": str(it.total_qty)} for it in items]
 
     success = False
     saihu_response: list[dict[str, Any]] = []
@@ -114,9 +110,13 @@ async def push_saihu_job(ctx: JobContext) -> None:
     pushed_at = now_beijing()
     async with async_session_factory() as db:
         if success:
+            # 防 TOCTOU：仅更新尚未被推送的条目（防重复提交窗口内的竞态覆盖）
             await db.execute(
                 update(SuggestionItem)
-                .where(SuggestionItem.id.in_(item_ids))
+                .where(
+                    SuggestionItem.id.in_(item_ids),
+                    SuggestionItem.push_status != "pushed",
+                )
                 .values(
                     push_status="pushed",
                     saihu_po_number=po_number,
@@ -142,9 +142,9 @@ async def push_saihu_job(ctx: JobContext) -> None:
         await db.commit()
 
     summary = (
-        f"成功推送 {len(item_ids)} 条 → 采购单号 {po_number}"
+        f"成功推送 {len(item_ids)} 条 -> 采购单号 {po_number}"
         if success
-        else f"推送失败：{last_error}"
+        else f"推送失败:{last_error}"
     )
     await ctx.progress(current_step="完成", step_detail=summary)
     if not success:
