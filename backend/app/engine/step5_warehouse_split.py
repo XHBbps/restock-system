@@ -7,7 +7,6 @@
 - 已知仓总件数 = 0:均分到该国所有"已维护国家"的海外仓(零数据兜底)
 """
 
-import math
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -186,10 +185,10 @@ def explain_country_qty_split(
         items = list(known_counts.items())
         for i, (wid, cnt) in enumerate(items):
             if i == len(items) - 1:
-                # 最后一仓兜底,避免取整误差(ceil 可能使累计值超过 country_qty)
-                result[wid] = max(country_qty - accumulated, 0)
+                # 最后一仓兜底,吸收所有取整误差
+                result[wid] = country_qty - accumulated
             else:
-                share = math.ceil(country_qty * cnt / total_known)
+                share = round(country_qty * cnt / total_known)
                 result[wid] = share
                 accumulated += share
         # 清理 0 值

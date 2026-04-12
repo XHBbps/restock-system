@@ -295,3 +295,37 @@ def test_step5_tied_all_ineligible_counts_as_unknown() -> None:
     assert result.unknown_order_qty == 10
     assert result.allocation_mode == "fallback_even"
     assert result.warehouse_breakdown == {"otherWh": 20}
+
+
+def test_four_warehouse_ceil_regression_sum_equals_country_qty() -> None:
+    """Regression: math.ceil on warehouse split caused sum > country_qty.
+
+    4 warehouses with equal order counts, country_qty=5.
+    With ceil: ceil(5*0.25)=2 × 3 non-last = 6 > 5, last=max(5-6,0)=0 → sum=6≠5.
+    With round: round(5*0.25)=1 × 3 = 3, last=5-3=2 → sum=5. Correct.
+    """
+    rules = [
+        ZipcodeRule(id=1, country="JP", prefix_length=1, value_type="number",
+                    operator="=", compare_value="1", warehouse_id="WH-A", priority=10),
+        ZipcodeRule(id=2, country="JP", prefix_length=1, value_type="number",
+                    operator="=", compare_value="2", warehouse_id="WH-B", priority=10),
+        ZipcodeRule(id=3, country="JP", prefix_length=1, value_type="number",
+                    operator="=", compare_value="3", warehouse_id="WH-C", priority=10),
+        ZipcodeRule(id=4, country="JP", prefix_length=1, value_type="number",
+                    operator="=", compare_value="4", warehouse_id="WH-D", priority=10),
+    ]
+    orders = [
+        ("100-0000", 1),  # WH-A
+        ("200-0000", 1),  # WH-B
+        ("300-0000", 1),  # WH-C
+        ("400-0000", 1),  # WH-D
+    ]
+    result = split_country_qty(
+        sku="sku-A",
+        country="JP",
+        country_qty=5,
+        orders=orders,
+        rules=rules,
+        country_warehouses=["WH-A", "WH-B", "WH-C", "WH-D"],
+    )
+    assert sum(result.values()) == 5
