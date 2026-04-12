@@ -185,7 +185,6 @@ components:
         warehouse_breakdown: {type: object}
         t_purchase: {type: object}
         t_ship: {type: object}
-        overstock_countries: {type: array, items: {type: string}}
         velocity_snapshot: {type: object}
         sale_days_snapshot: {type: object}
         urgent: {type: boolean}

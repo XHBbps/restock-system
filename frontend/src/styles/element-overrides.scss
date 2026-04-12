@@ -345,6 +345,14 @@ body {
       padding: 0 !important;
     }
 
+    .cell[class*='-tooltip'] {
+      display: block;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
     &.is-right .cell {
       text-align: right;
     }
@@ -485,14 +493,38 @@ body {
 }
 
 // ==================== Dropdown ====================
-.el-popper,
 .el-select__popper,
-.el-dropdown__popper {
+.el-dropdown__popper,
+.el-picker__popper,
+.el-popover.el-popper,
+.el-autocomplete__popper.el-popper,
+.el-mention__popper.el-popper {
   border-radius: $radius-md !important;
   border: 1px solid $color-border-default !important;
   box-shadow: $shadow-popup !important;
   background: $color-bg-elevated !important;
   padding: $space-1;
+}
+
+.el-tooltip__popper,
+.el-popper.is-dark {
+  max-width: 320px;
+  padding: $space-2 $space-3 !important;
+  border-radius: $radius-md !important;
+  border: 1px solid $color-text-primary !important;
+  background: $color-text-primary !important;
+  color: $color-bg-card !important;
+  box-shadow: $shadow-popup !important;
+  line-height: $line-height-normal;
+  white-space: normal;
+  word-break: break-word;
+  transition: opacity 0.1s ease !important;
+}
+
+.el-tooltip__popper .el-popper__arrow::before,
+.el-popper.is-dark .el-popper__arrow::before {
+  background: $color-text-primary !important;
+  border-color: $color-text-primary !important;
 }
 
 .el-select-dropdown__item {
@@ -666,15 +698,26 @@ body {
   border: 1px solid $color-border-strong;
   background: $color-bg-card;
 
-  &::after {
-    height: 8px;
-    left: 5px;
-    top: 1px;
+  // Hide default pseudo-element marks — we use background-image instead
+  &::after,
+  &::before {
+    display: none !important;
   }
 }
 
+// Checked: white checkmark SVG, perfectly centered
 .el-checkbox__input.is-checked .el-checkbox__inner {
-  background: $color-brand-primary;
+  background: $color-brand-primary
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M12.207 4.793a1 1 0 0 1 0 1.414l-5 5a1 1 0 0 1-1.414 0l-2.5-2.5a1 1 0 0 1 1.414-1.414L6.5 9.086l4.293-4.293a1 1 0 0 1 1.414 0z' fill='%23fff'/%3E%3C/svg%3E")
+    no-repeat center / 12px 12px;
+  border-color: $color-brand-primary;
+}
+
+// Indeterminate: white dash SVG, perfectly centered
+.el-checkbox__input.is-indeterminate .el-checkbox__inner {
+  background: $color-brand-primary
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='3' y='7' width='10' height='2' rx='1' fill='%23fff'/%3E%3C/svg%3E")
+    no-repeat center / 12px 12px;
   border-color: $color-brand-primary;
 }
 

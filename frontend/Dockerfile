@@ -1,18 +1,15 @@
-# 多阶段构建
 FROM node:20-alpine AS builder
 
 WORKDIR /build
 
-COPY package.json ./
-RUN npm install
+COPY package.json package-lock.json ./
+RUN npm ci
 
 COPY . .
 RUN npm run build
 
-# ==================== 运行时：nginx 静态托管 ====================
 FROM nginx:1.27-alpine AS runtime
 
-# 去掉默认配置
 RUN rm /etc/nginx/conf.d/default.conf
 
 COPY nginx.conf /etc/nginx/conf.d/default.conf

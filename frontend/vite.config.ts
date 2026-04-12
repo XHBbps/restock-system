@@ -1,38 +1,61 @@
 import { fileURLToPath, URL } from 'node:url'
-import { defineConfig } from 'vite'
-import vue from '@vitejs/plugin-vue'
 
-// 参考 https://vite.dev/config/
-export default defineConfig({
-  plugins: [vue()],
-  resolve: {
-    alias: {
-      '@': fileURLToPath(new URL('./src', import.meta.url))
-    }
-  },
-  css: {
-    preprocessorOptions: {
-      scss: {
-        // 全局自动引入设计 tokens
-        additionalData: `@use "@/styles/tokens.scss" as *;`
-      }
-    }
-  },
-  server: {
-    host: '0.0.0.0',
-    port: 5173,
-    proxy: {
-      // 开发环境代理后端
-      '/api': {
-        target: 'http://localhost:8000',
-        changeOrigin: true
-      }
-    }
-  },
-  build: {
-    outDir: 'dist',
-    sourcemap: false,
-    // 对应宪法性能门禁：首屏 JS gzip < 250KB
-    chunkSizeWarningLimit: 500
+import vue from '@vitejs/plugin-vue'
+import { defineConfig, loadEnv } from 'vite'
+
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), '')
+  const apiProxyTarget = env.VITE_API_PROXY_TARGET || 'http://localhost:8000'
+
+  return {
+    plugins: [vue()],
+    resolve: {
+      alias: {
+        '@': fileURLToPath(new URL('./src', import.meta.url)),
+      },
+    },
+    css: {
+      preprocessorOptions: {
+        scss: {
+          additionalData: `@use "@/styles/tokens.scss" as *;`,
+        },
+      },
+    },
+    server: {
+      host: '0.0.0.0',
+      port: 5173,
+      proxy: {
+        '/api': {
+          target: apiProxyTarget,
+          changeOrigin: true,
+        },
+      },
+    },
+    build: {
+      outDir: 'dist',
+      sourcemap: false,
+      chunkSizeWarningLimit: 500,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes('echarts') || id.includes('vue-echarts')) {
+              return 'charts'
+            }
+            if (id.includes('element-plus')) {
+              return 'element-plus'
+            }
+            if (
+              id.includes('/vue/') ||
+              id.includes('/vue-router/') ||
+              id.includes('/pinia/') ||
+              id.includes('lucide-vue-next')
+            ) {
+              return 'framework'
+            }
+            return undefined
+          },
+        },
+      },
+    },
   }
 })

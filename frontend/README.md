@@ -9,7 +9,13 @@ npm install
 npm run dev  # http://localhost:5173
 ```
 
-开发服务器会自动将 `/api/*` 代理到 `http://localhost:8000`。
+开发服务器默认会自动将 `/api/*` 代理到 `http://localhost:8000`。
+
+如果本机 `8000` 端口被占用，可在 `frontend/.env` 中覆盖代理目标：
+
+```bash
+VITE_API_PROXY_TARGET=http://localhost:8001
+```
 
 ## 常用命令
 

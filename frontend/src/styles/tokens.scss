@@ -130,6 +130,7 @@ $font-family-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', 'Cascadia C
 // shadcn 字号 (对应 tailwind text-xs/sm/base/lg/xl/2xl/3xl)
 $font-size-xs: 12px;                  // text-xs
 $font-size-sm: 14px;                  // text-sm ★ 主体字号
+$font-size-base: $font-size-sm;       // 兼容旧样式命名
 $font-size-md: 14px;                  // 同 sm（shadcn body）
 $font-size-lg: 16px;                  // text-base / lg
 $font-size-xl: 18px;                  // text-lg

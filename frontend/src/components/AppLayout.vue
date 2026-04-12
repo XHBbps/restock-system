@@ -79,12 +79,7 @@
       </nav>
 
       <div class="sidebar-footer">
-        <template v-if="!sidebar.isCollapsed">
-          <div class="user-meta">
-            <div class="user-name">采购控制台</div>
-            <div class="user-role">内部系统</div>
-          </div>
-        </template>
+        <span v-if="!sidebar.isCollapsed" class="footer-version">v0.1.0</span>
         <button class="logout-btn" title="退出登录" @click="handleLogout">
           <LogOut :size="14" />
         </button>
@@ -136,8 +131,6 @@
           </div>
         </div>
         <div class="topbar-right">
-          <span class="badge-env">Dashboard</span>
-          <span class="badge-version">v0.1.0</span>
         </div>
       </header>
 
@@ -421,13 +414,9 @@ async function handleLogout(): Promise<void> {
   box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.04);
 }
 
-.user-name {
-  font-weight: $font-weight-semibold;
-}
-
-.user-role {
+.footer-version {
   font-size: $font-size-xs;
-  color: $color-text-secondary;
+  color: $color-text-disabled;
 }
 
 .logout-btn {
