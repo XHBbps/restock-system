@@ -265,7 +265,12 @@ class SaihuClient:
                 await db.commit()
         except Exception as exc:
             # 日志写入失败不应阻断业务
-            logger.warning("api_call_log_write_failed", error=str(exc))
+            logger.warning(
+                "api_call_log_write_failed",
+                error=str(exc),
+                endpoint=endpoint,
+                log_write_failed=True,
+            )
 
 
 # 进程级单例
