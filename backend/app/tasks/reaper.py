@@ -1,10 +1,11 @@
-"""僵尸任务回收器（spec FR-058f）。
+"""僵尸任务回收器(spec FR-058f)。
 
-每 60s 运行一次：将 status='running' 且 lease_expires_at < now() 的
-任务标记为 failed。回收后**不自动重新入队**，由业务侧决定是否触发新任务。
+每 60s 运行一次:将 status='running' 且 lease_expires_at < now() 的
+任务标记为 failed。回收后**不自动重新入队**,由业务侧决定是否触发新任务。
 """
 
 import asyncio
+from contextlib import suppress
 
 from sqlalchemy import text
 
@@ -28,13 +29,19 @@ class Reaper:
             self._task = asyncio.create_task(self._run_loop(), name="task-reaper")
             logger.info("reaper_started")
 
+    @property
+    def running(self) -> bool:
+        return self._task is not None and not self._task.done() and not self._stop.is_set()
+
     async def stop(self) -> None:
         self._stop.set()
         if self._task is not None:
             try:
                 await asyncio.wait_for(self._task, timeout=5.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 self._task.cancel()
+            finally:
+                self._task = None
         logger.info("reaper_stopped")
 
     async def _run_loop(self) -> None:
@@ -44,14 +51,10 @@ class Reaper:
                 await self._reap_once()
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.exception("reaper_error", error=str(exc))
-            try:
-                await asyncio.wait_for(
-                    self._stop.wait(), timeout=settings.reaper_interval_seconds
-                )
-            except asyncio.TimeoutError:
-                pass
+            with suppress(TimeoutError):
+                await asyncio.wait_for(self._stop.wait(), timeout=settings.reaper_interval_seconds)
 
     async def _reap_once(self) -> None:
         async with async_session_factory() as db:
@@ -71,7 +74,12 @@ class Reaper:
             ids = [row[0] for row in result.all()]
             await db.commit()
         if ids:
-            logger.warning("reaper_collected_zombies", task_ids=ids)
+            import os
+            logger.warning(
+                "reaper_collected_zombies",
+                task_ids=ids,
+                worker_id=os.getenv("HOSTNAME", "unknown"),
+            )
 
 
 _reaper_instance: Reaper | None = None
