@@ -71,7 +71,13 @@ async def push_saihu_job(ctx: JobContext) -> None:
     await ctx.progress(current_step="调用赛狐采购单创建")
 
     # 构造 items
-    saihu_items = [{"commodityId": it.commodity_id, "num": str(it.total_qty)} for it in items]
+    saihu_items = [
+        {"commodityId": it.commodity_id, "num": str(it.total_qty)}
+        for it in items
+        if it.total_qty > 0  # P2-7: 过滤零数量条目
+    ]
+    if not saihu_items:
+        raise ValueError("所有条目的 total_qty 均为 0,无法推送")
 
     success = False
     saihu_response: list[dict[str, Any]] = []
