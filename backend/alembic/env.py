@@ -3,16 +3,16 @@
 import asyncio
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+from alembic import context
 from app.config import get_settings
 from app.db.base import Base
 
-# 注册所有模型的 metadata（必须 import 全部 model 模块）
-from app.models import *  # noqa: F401, F403
+# 注册所有模型的 metadata(必须 import 全部 model 模块)
+from app.models import *  # noqa: F403
 
 config = context.config
 
@@ -26,7 +26,7 @@ target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
-    """offline 模式：只生成 SQL，不连数据库。"""
+    """offline 模式:只生成 SQL,不连数据库。"""
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
         url=url,
@@ -52,7 +52,7 @@ def do_run_migrations(connection: Connection) -> None:
 
 
 async def run_async_migrations() -> None:
-    """online 模式：连数据库应用迁移。"""
+    """online 模式:连数据库应用迁移。"""
     connectable = async_engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",

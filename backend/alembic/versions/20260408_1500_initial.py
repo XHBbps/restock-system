@@ -36,8 +36,18 @@ def upgrade() -> None:
         sa.Column("login_password_hash", sa.String(length=255), nullable=False),
         sa.Column("login_failed_count", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("login_locked_until", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.CheckConstraint("id = 1", name="ck_global_config_single_row"),
         sa.CheckConstraint("include_tax IN ('0','1')", name="ck_global_config_include_tax_enum"),
         sa.CheckConstraint(
@@ -53,7 +63,12 @@ def upgrade() -> None:
         sa.Column("access_token", sa.Text(), nullable=False),
         sa.Column("acquired_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.CheckConstraint("id = 1", name="ck_access_token_cache_single_row"),
         sa.PrimaryKeyConstraint("id", name="pk_access_token_cache"),
     )
@@ -67,8 +82,18 @@ def upgrade() -> None:
         sa.Column("country", sa.String(length=2), nullable=True),
         sa.Column("replenish_site_raw", sa.String(length=50), nullable=True),
         sa.Column("last_sync_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.PrimaryKeyConstraint("id", name="pk_warehouse"),
     )
     op.create_index(
@@ -91,8 +116,18 @@ def upgrade() -> None:
         sa.Column("ad_status", sa.String(length=50), nullable=True),
         sa.Column("sync_enabled", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("last_sync_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.PrimaryKeyConstraint("id", name="pk_shop"),
     )
     op.create_index("ix_shop_status", "shop", ["status"])
@@ -103,8 +138,18 @@ def upgrade() -> None:
         sa.Column("commodity_sku", sa.String(length=100), nullable=False),
         sa.Column("enabled", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("lead_time_days", sa.Integer(), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.PrimaryKeyConstraint("commodity_sku", name="pk_sku_config"),
     )
     op.create_index(
@@ -132,8 +177,18 @@ def upgrade() -> None:
         sa.Column("is_matched", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("online_status", sa.String(length=20), nullable=False, server_default="active"),
         sa.Column("last_sync_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.PrimaryKeyConstraint("id", name="pk_product_listing"),
         sa.UniqueConstraint(
             "shop_id", "marketplace_id", "seller_sku", name="uq_product_listing_key"
@@ -152,7 +207,12 @@ def upgrade() -> None:
         sa.Column("country", sa.String(length=2), nullable=True),
         sa.Column("available", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("reserved", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.ForeignKeyConstraint(
             ["warehouse_id"],
             ["warehouse.id"],
@@ -203,8 +263,18 @@ def upgrade() -> None:
         sa.Column("status", sa.String(length=10), nullable=True),
         sa.Column("is_in_transit", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("last_seen_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.ForeignKeyConstraint(
             ["target_warehouse_id"],
             ["warehouse.id"],
@@ -218,9 +288,7 @@ def upgrade() -> None:
         ["is_in_transit", "target_country"],
         postgresql_where=sa.text("is_in_transit = true"),
     )
-    op.create_index(
-        "ix_in_transit_record_last_seen", "in_transit_record", ["last_seen_at"]
-    )
+    op.create_index("ix_in_transit_record_last_seen", "in_transit_record", ["last_seen_at"])
 
     # ==================== in_transit_item ====================
     op.create_table(
@@ -259,8 +327,18 @@ def upgrade() -> None:
         ),
         sa.Column("refund_status", sa.String(length=10), nullable=True),
         sa.Column("last_sync_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.PrimaryKeyConstraint("id", name="pk_order_header"),
         sa.UniqueConstraint("shop_id", "amazon_order_id", name="uq_order_header_key"),
     )
@@ -319,13 +397,16 @@ def upgrade() -> None:
         "order_detail_fetch_log",
         sa.Column("shop_id", sa.String(length=50), nullable=False),
         sa.Column("amazon_order_id", sa.String(length=50), nullable=False),
-        sa.Column("fetched_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "fetched_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.Column("http_status", sa.Integer(), nullable=True),
         sa.Column("saihu_code", sa.Integer(), nullable=True),
         sa.Column("saihu_msg", sa.Text(), nullable=True),
-        sa.PrimaryKeyConstraint(
-            "shop_id", "amazon_order_id", name="pk_order_detail_fetch_log"
-        ),
+        sa.PrimaryKeyConstraint("shop_id", "amazon_order_id", name="pk_order_detail_fetch_log"),
     )
 
     # ==================== zipcode_rule ====================
@@ -339,8 +420,18 @@ def upgrade() -> None:
         sa.Column("compare_value", sa.String(length=50), nullable=False),
         sa.Column("warehouse_id", sa.String(length=50), nullable=False),
         sa.Column("priority", sa.Integer(), nullable=False, server_default="100"),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.ForeignKeyConstraint(
             ["warehouse_id"],
             ["warehouse.id"],
@@ -358,9 +449,7 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("id", name="pk_zipcode_rule"),
     )
-    op.create_index(
-        "ix_zipcode_rule_country_priority", "zipcode_rule", ["country", "priority"]
-    )
+    op.create_index("ix_zipcode_rule_country_priority", "zipcode_rule", ["country", "priority"])
 
     # ==================== suggestion ====================
     op.create_table(
@@ -372,9 +461,19 @@ def upgrade() -> None:
         sa.Column("pushed_items", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("failed_items", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("triggered_by", sa.String(length=20), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.Column("archived_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.CheckConstraint(
             "status IN ('draft','partial','pushed','archived','error')",
             name="ck_suggestion_status_enum",
@@ -405,8 +504,18 @@ def upgrade() -> None:
         sa.Column("push_error", sa.Text(), nullable=True),
         sa.Column("push_attempt_count", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("pushed_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.ForeignKeyConstraint(
             ["suggestion_id"],
             ["suggestion.id"],
@@ -452,7 +561,12 @@ def upgrade() -> None:
         sa.Column("lease_expires_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.CheckConstraint(
             "status IN ('pending','running','success','failed','skipped','cancelled')",
             name="ck_task_run_status_enum",
@@ -493,7 +607,12 @@ def upgrade() -> None:
         sa.Column("last_success_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("last_status", sa.String(length=20), nullable=True),
         sa.Column("last_error", sa.Text(), nullable=True),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.PrimaryKeyConstraint("job_name", name="pk_sync_state"),
     )
 
@@ -503,7 +622,9 @@ def upgrade() -> None:
         sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
         sa.Column("endpoint", sa.String(length=200), nullable=False),
         sa.Column("method", sa.String(length=10), nullable=False),
-        sa.Column("called_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "called_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+        ),
         sa.Column("duration_ms", sa.Integer(), nullable=True),
         sa.Column("http_status", sa.Integer(), nullable=True),
         sa.Column("saihu_code", sa.Integer(), nullable=True),
@@ -535,9 +656,7 @@ def upgrade() -> None:
         "calc_engine",
     ]
     for job_name in job_names:
-        op.execute(
-            sa.text("INSERT INTO sync_state (job_name) VALUES (:j)").bindparams(j=job_name)
-        )
+        op.execute(sa.text("INSERT INTO sync_state (job_name) VALUES (:j)").bindparams(j=job_name))
 
 
 def downgrade() -> None:
