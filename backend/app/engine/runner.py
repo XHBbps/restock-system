@@ -60,22 +60,25 @@ async def run_engine(ctx: JobContext, *, triggered_by: str = "scheduler") -> int
             {"key": ENGINE_RUN_ADVISORY_LOCK_KEY},
         )
         # 加载全局配置
-        config = (
-            await db.execute(select(GlobalConfig).where(GlobalConfig.id == 1))
-        ).scalar_one()
+        config = (await db.execute(select(GlobalConfig).where(GlobalConfig.id == 1))).scalar_one()
         global_snapshot = _config_snapshot(config)
+
+        # P1-1: 配置正值校验,防止静默产出错误结果
+        if config.target_days <= 0:
+            raise ValueError(f"GlobalConfig.target_days must be > 0, got {config.target_days}")
+        if config.buffer_days < 0:
+            raise ValueError(f"GlobalConfig.buffer_days must be >= 0, got {config.buffer_days}")
+        if config.lead_time_days < 0:
+            raise ValueError(f"GlobalConfig.lead_time_days must be >= 0, got {config.lead_time_days}")
 
         # 加载启用 SKU
         enabled_skus = (
-            (
-                await db.execute(
-                    select(SkuConfig.commodity_sku, SkuConfig.lead_time_days).where(
-                        SkuConfig.enabled.is_(True)
-                    )
+            await db.execute(
+                select(SkuConfig.commodity_sku, SkuConfig.lead_time_days).where(
+                    SkuConfig.enabled.is_(True)
                 )
             )
-            .all()
-        )
+        ).all()
         sku_list = [r[0] for r in enabled_skus]
         sku_lead_time: dict[str, int | None] = {r[0]: r[1] for r in enabled_skus}
 
@@ -101,9 +104,7 @@ async def run_engine(ctx: JobContext, *, triggered_by: str = "scheduler") -> int
         sale_days, inventory = await run_step2(db, velocity, sku_list)
 
         await ctx.progress(current_step="Step 3: 各国补货量")
-        country_qty = compute_country_qty(
-            velocity, inventory, config.target_days
-        )
+        country_qty = compute_country_qty(velocity, inventory, config.target_days)
 
         await ctx.progress(current_step="Step 4: 总采购量")
         local_stock = await load_local_inventory(db, sku_list)
@@ -222,9 +223,7 @@ def _config_snapshot(config: GlobalConfig) -> dict[str, Any]:
     }
 
 
-async def _load_commodity_id_map(
-    db: AsyncSession, skus: list[str]
-) -> dict[str, str | None]:
+async def _load_commodity_id_map(db: AsyncSession, skus: list[str]) -> dict[str, str | None]:
     """每个 commodity_sku 取任意一个 commodity_id。"""
     rows = (
         await db.execute(
