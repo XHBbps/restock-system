@@ -236,20 +236,28 @@ async def patch_item(
     if missing_ship:
         raise ValidationFailed(f"以下采购国家缺少 t_ship: {', '.join(missing_ship)}")
 
+    # API 输入层日期格式校验(parse_purchase_date 对引擎侧容错,但 API 输入应严格)
+    from datetime import date as _date
+
+    for field_name, field_dict in [("t_purchase", effective_t_purchase), ("t_ship", effective_t_ship)]:
+        for country, d in field_dict.items():
+            if isinstance(d, str):
+                try:
+                    _date.fromisoformat(d)
+                except (ValueError, TypeError) as exc:
+                    raise ValidationFailed(f"{field_name}[{country}] 包含无效日期: {exc}") from exc
+
     # H3:重新计算 urgent(与 engine/step6_timing 共享同一规则)
     if (
         patch.t_purchase is not None
         or patch.total_qty is not None
         or patch.country_breakdown is not None
     ):
-        try:
-            updates["urgent"] = has_urgent_purchase(
-                effective_t_purchase,
-                today=now_beijing().date(),
-                countries=positive_qty_countries(effective_country_breakdown),
-            )
-        except (ValueError, TypeError) as exc:
-            raise ValidationFailed(f"t_purchase 包含无效日期: {exc}") from exc
+        updates["urgent"] = has_urgent_purchase(
+            effective_t_purchase,
+            today=now_beijing().date(),
+            countries=positive_qty_countries(effective_country_breakdown),
+        )
 
     if updates:
         await db.execute(
