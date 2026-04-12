@@ -15,6 +15,10 @@ import math
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
+
 from app.models.inventory import InventorySnapshotLatest
 from app.models.warehouse import Warehouse
 
@@ -75,5 +79,13 @@ def compute_total(
     # Invariant: total_qty >= sum(country_breakdown),保证人工编辑后
     # "分国家数量之和不超过总采购量" 的约束始终成立(H4 PATCH 校验依赖)。
     if raw < sum_qty:
+        logger.info(
+            "step4_invariant_adjusted",
+            sku=sku,
+            original_raw=raw,
+            adjusted_to=sum_qty,
+            buffer_qty=buffer_qty,
+            local_total=local_total,
+        )
         raw = sum_qty
     return max(math.ceil(raw), 0)

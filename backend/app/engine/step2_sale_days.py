@@ -1,20 +1,18 @@
-"""Step 2：各国销售天数。
+"""Step 2: sale_days from overseas stock.
 
-公式（FR-030）：
-    sale_days[国] = (海外仓 available + reserved + in_transit) / velocity[国]
+Formula (FR-030):
+    sale_days[country] = (available + reserved + in_transit) / velocity[country]
 
-数据源：
-- available + reserved 来自 inventory_snapshot_latest（按 country 聚合 type ≠ 1 的仓）
-- in_transit 来自 in_transit_item JOIN in_transit_record (is_in_transit=true)
+Current business rule:
+- available + reserved still come from overseas warehouse inventory
+- in_transit comes from pushed (unarchived) suggestion items' country_breakdown
 """
 
 from collections import defaultdict
-from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.in_transit import InTransitItem, InTransitRecord
 from app.models.inventory import InventorySnapshotLatest
 from app.models.warehouse import Warehouse
 
@@ -23,10 +21,7 @@ async def load_oversea_inventory(
     db: AsyncSession,
     commodity_skus: list[str] | None,
 ) -> dict[tuple[str, str], dict[str, int]]:
-    """加载海外仓库存（按 sku × country 聚合 available/reserved）。
-
-    返回：{(sku, country): {available, reserved}}
-    """
+    """Load overseas inventory aggregated by ``(sku, country)``."""
     stmt = (
         select(
             InventorySnapshotLatest.commodity_sku,
@@ -35,7 +30,7 @@ async def load_oversea_inventory(
             func.sum(InventorySnapshotLatest.reserved).label("reserv"),
         )
         .join(Warehouse, Warehouse.id == InventorySnapshotLatest.warehouse_id)
-        .where(Warehouse.type != 1)  # 非国内仓
+        .where(Warehouse.type != 1)
         .where(InventorySnapshotLatest.country.is_not(None))
         .group_by(InventorySnapshotLatest.commodity_sku, InventorySnapshotLatest.country)
     )
@@ -55,37 +50,56 @@ async def load_in_transit(
     db: AsyncSession,
     commodity_skus: list[str] | None,
 ) -> dict[tuple[str, str], int]:
-    """加载在途数据（按 sku × target_country 聚合）。
+    """Load in-transit quantities from recently pushed (unarchived) suggestion items.
 
-    返回：{(sku, country): in_transit_qty}
+    Already-pushed suggestion items represent planned replenishment that hasn't
+    arrived yet. Their country_breakdown quantities are treated as in-transit
+    stock to prevent the engine from generating duplicate suggestions.
+
+    Only considers suggestions created within the last 90 days to avoid
+    accumulating unbounded historical data.
     """
+    from datetime import timedelta
+
+    from app.core.timezone import now_beijing
+    from app.models.suggestion import Suggestion, SuggestionItem
+
+    # 海运通常 30-45 天,90 天覆盖绝大多数正常物流周期。
+    # 超过 90 天未到货通常意味着物流异常(丢件),不算在途反而正确。
+    cutoff = now_beijing() - timedelta(days=90)
+
     stmt = (
         select(
-            InTransitItem.commodity_sku,
-            InTransitRecord.target_country,
-            func.sum(InTransitItem.goods).label("in_transit"),
+            SuggestionItem.commodity_sku,
+            SuggestionItem.country_breakdown,
         )
-        .join(
-            InTransitRecord,
-            InTransitRecord.saihu_out_record_id == InTransitItem.saihu_out_record_id,
-        )
-        .where(InTransitRecord.is_in_transit.is_(True))
-        .where(InTransitRecord.target_country.is_not(None))
-        .group_by(InTransitItem.commodity_sku, InTransitRecord.target_country)
+        .join(Suggestion, Suggestion.id == SuggestionItem.suggestion_id)
+        .where(SuggestionItem.push_status == "pushed")
+        .where(Suggestion.status != "archived")
+        .where(Suggestion.created_at >= cutoff)
     )
     if commodity_skus is not None:
-        stmt = stmt.where(InTransitItem.commodity_sku.in_(commodity_skus))
+        stmt = stmt.where(SuggestionItem.commodity_sku.in_(commodity_skus))
+
     rows = (await db.execute(stmt)).all()
-    return {(sku, country): int(qty or 0) for sku, country, qty in rows}
+
+    result: dict[tuple[str, str], int] = {}
+    for sku, breakdown in rows:
+        if not breakdown:
+            continue
+        for country, qty in breakdown.items():
+            key = (sku, country)
+            result[key] = result.get(key, 0) + int(qty)
+    return result
 
 
 def merge_inventory(
     oversea: dict[tuple[str, str], dict[str, int]],
     in_transit: dict[tuple[str, str], int],
 ) -> dict[str, dict[str, dict[str, int]]]:
-    """合并海外仓库存与在途为统一结构。
+    """Merge overseas stock and in-transit stock into one structure.
 
-    返回：{sku: {country: {available, reserved, in_transit, total}}}
+    Returns: ``{sku: {country: {available, reserved, in_transit, total}}}``
     """
     merged: defaultdict[str, dict[str, dict[str, int]]] = defaultdict(dict)
     keys = set(oversea.keys()) | set(in_transit.keys())
@@ -106,7 +120,7 @@ def compute_sale_days(
     velocity: dict[str, dict[str, float]],
     inventory: dict[str, dict[str, dict[str, int]]],
 ) -> dict[str, dict[str, float]]:
-    """对每个 (sku, country) 算 sale_days。"""
+    """Compute ``sale_days`` for each ``(sku, country)`` with positive velocity."""
     result: defaultdict[str, dict[str, float]] = defaultdict(dict)
     for sku, country_map in velocity.items():
         for country, v in country_map.items():

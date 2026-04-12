@@ -151,7 +151,7 @@ def explain_country_qty_split(
     if country_qty <= 0:
         return CountryAllocationResult(
             warehouse_breakdown={},
-            allocation_mode="matched",
+            allocation_mode="zero_qty",
             matched_order_qty=0,
             unknown_order_qty=0,
             eligible_warehouses=list(dict.fromkeys(country_warehouses)),
