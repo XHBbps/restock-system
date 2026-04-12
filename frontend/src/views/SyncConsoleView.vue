@@ -119,6 +119,7 @@ import {
   type SyncActionDefinition,
 } from '@/config/sync'
 import { getActionErrorMessage } from '@/utils/apiError'
+import { formatDetailTime } from '@/utils/format'
 import { getSyncStatusMeta } from '@/utils/status'
 import type { EChartsCoreOption } from 'echarts/core'
 import dayjs from 'dayjs'
@@ -140,16 +141,12 @@ const syncState = ref<SyncStateRow[]>([])
 const currentTaskId = ref<number | null>(null)
 const loadingActions = reactive<Record<string, boolean>>({})
 
-function formatTime(value?: string | null): string {
-  return value ? dayjs(value).format('MM-DD HH:mm:ss') : '暂无记录'
-}
-
 function getActionMeta(action: SyncActionDefinition) {
   const row = syncState.value.find((item) => item.job_name === action.jobName)
   return {
     statusMeta: getSyncStatusMeta(row?.last_status),
-    lastRunAt: formatTime(row?.last_run_at),
-    lastSuccessAt: formatTime(row?.last_success_at),
+    lastRunAt: formatDetailTime(row?.last_run_at),
+    lastSuccessAt: formatDetailTime(row?.last_success_at),
     lastError: row?.last_error || '',
   }
 }
@@ -177,10 +174,10 @@ const autoJobCards = computed(() =>
     return {
       ...definition,
       statusMeta: getSyncStatusMeta(stateRow?.last_status),
-      lastRunAt: formatTime(stateRow?.last_run_at),
-      lastSuccessAt: formatTime(stateRow?.last_success_at),
+      lastRunAt: formatDetailTime(stateRow?.last_run_at),
+      lastSuccessAt: formatDetailTime(stateRow?.last_success_at),
       lastError: stateRow?.last_error || '',
-      nextRunAt: formatTime(scheduledJob?.next_run_time),
+      nextRunAt: formatDetailTime(scheduledJob?.next_run_time),
     }
   }),
 )

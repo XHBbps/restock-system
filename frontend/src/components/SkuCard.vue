@@ -15,7 +15,6 @@ defineProps<{
   sku: string
   name?: string | null
   image?: string | null
-  urgent?: boolean
   blocker?: string | null
 }>()
 </script>

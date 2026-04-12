@@ -103,7 +103,3 @@ export async function pushItems(
   )
   return data
 }
-
-export async function archiveSuggestion(id: number): Promise<void> {
-  await client.post(`/api/suggestions/${id}/archive`)
-}

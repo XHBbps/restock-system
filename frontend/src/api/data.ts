@@ -1,5 +1,6 @@
 // 外部数据源 API 客户端（字段和赛狐接口一致，camelCase）
 import client from './client'
+import type { SortOrder } from '@/utils/tableSort'
 
 // ========== 订单 ==========
 export interface DataOrderSummary {
@@ -57,6 +58,8 @@ export async function listOrders(params: {
   sku?: string
   page?: number
   page_size?: number
+  sort_by?: string
+  sort_order?: SortOrder
 }): Promise<PageResult<DataOrderSummary>> {
   const { data } = await client.get('/api/data/orders', { params })
   return data
@@ -93,6 +96,8 @@ export async function listInventory(params: {
   only_nonzero?: boolean
   page?: number
   page_size?: number
+  sort_by?: string
+  sort_order?: SortOrder
 }): Promise<PageResult<DataInventoryItem>> {
   const { data } = await client.get('/api/data/inventory', { params })
   return data
@@ -123,6 +128,8 @@ export async function listOutRecords(params: {
   sku?: string
   page?: number
   page_size?: number
+  sort_by?: string
+  sort_order?: SortOrder
 }): Promise<PageResult<DataOutRecord>> {
   const { data } = await client.get('/api/data/out-records', { params })
   return data
@@ -135,6 +142,7 @@ export interface DataWarehouse {
   type: number
   country: string | null
   replenishSite: string | null
+  totalStock: number
   lastSyncAt: string
 }
 

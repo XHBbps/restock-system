@@ -28,32 +28,7 @@ export interface TaskRun {
   created_at: string
 }
 
-export interface EnqueueRequest {
-  job_name: string
-  payload?: Record<string, unknown>
-  dedupe_key?: string
-}
-
-export interface EnqueueResponse {
-  task_id: number
-  existing: boolean
-}
-
-export async function enqueueTask(req: EnqueueRequest): Promise<EnqueueResponse> {
-  const { data } = await client.post<EnqueueResponse>('/api/tasks', req)
-  return data
-}
-
 export async function getTask(taskId: number): Promise<TaskRun> {
   const { data } = await client.get<TaskRun>(`/api/tasks/${taskId}`)
-  return data
-}
-
-export async function listTasks(params: {
-  job_name?: string
-  status?: TaskStatus
-  limit?: number
-}): Promise<{ items: TaskRun[]; total: number }> {
-  const { data } = await client.get<{ items: TaskRun[]; total: number }>('/api/tasks', { params })
   return data
 }
