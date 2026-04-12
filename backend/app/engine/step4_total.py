@@ -16,11 +16,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
-
-logger = get_logger(__name__)
-
 from app.models.inventory import InventorySnapshotLatest
 from app.models.warehouse import Warehouse
+
+logger = get_logger(__name__)
 
 
 async def load_local_inventory(

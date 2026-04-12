@@ -1,17 +1,18 @@
 """enqueue_task 递归深度限制测试。"""
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 from sqlalchemy.exc import IntegrityError
 
 from app.tasks.queue import enqueue_task
 
 
-class _FakeOriginal(Exception):
+class _FakeOriginalError(Exception):
     pass
 
 
 def _make_dedupe_integrity_error():
-    orig = _FakeOriginal("uq_task_run_active_dedupe")
+    orig = _FakeOriginalError("uq_task_run_active_dedupe")
     exc = IntegrityError("", {}, orig)
     return exc
 

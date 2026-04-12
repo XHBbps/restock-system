@@ -79,7 +79,7 @@ async def enqueue_task(
             if _retry_depth >= 2:
                 raise RuntimeError(
                     f"enqueue_task: 去重竞态重试耗尽 (job={job_name}, key={dedupe_key})"
-                )
+                ) from exc
             logger.warning("task_enqueue_race_retry", job_name=job_name)
             return await enqueue_task(
                 db,
