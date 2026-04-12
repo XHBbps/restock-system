@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-12（云交付评分卡 M6 阶段：auth 业务日志 + LoginView 中文化/倒计时 + runbook JWT 密钥管理章节）
+> 最近更新：2026-04-12（全链路 Review 修复 — 28 项发现，Phase 1-3 已完成）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -110,6 +110,36 @@
 ---
 
 ## 3. 近期重大变更（2026-04-10 ~ 2026-04-12）
+
+### 3.15 全链路 Review 修复（2026-04-12）
+
+审查范围：引擎链路 + 数据同步 + 任务队列 + 推送 + API + 前端 + 部署。28 项发现，16 个 Task 已修复。
+
+**Phase 1 — 数据正确性：**
+- P0-1: Step4 国内库存不参与扣减 — 确认 by design，添加业务意图注释
+- P0-2: 引擎取整策略统一为 `math.ceil()`（数量）/ `round()`（日期偏移）
+- P0-3: `SuggestionItemPatch` 添加 `country_breakdown` / `warehouse_breakdown` 非负校验
+- P0-4: 推送失败路径添加 `push_status != 'pushed'` guard 防覆盖
+- P1-1: GlobalConfig 加载后添加 `target_days > 0` 等正值校验
+
+**Phase 2 — 健壮性：**
+- P1-2: `enqueue_task` 递归重试添加深度限制（max 2）
+- P1-3: OrderItem 同步改用 UPSERT + 清理旧 items
+- P1-7: `parse_purchase_date` 容错（格式错误视为紧急），API 层保持严格校验
+- P1-4/P1-5: 同步 overlap 窗口提取为可配置参数
+- P1-6: Token 重试添加 0.3-0.7s 随机 jitter
+- P1-8: Reaper 日志标注容器实例 ID
+
+**Phase 3 — 工程质量：**
+- P2-1: Step4 invariant 触发时添加结构化日志
+- P2-4: 在途 90 天 cutoff 添加业务理由注释
+- P2-5: `allocation_mode` 零数量语义从 `"matched"` 改为 `"zero_qty"`
+- P2-6: zipcode 数值 `=`/`!=` 比较改用整数避免浮点精度
+- P2-7: 推送过滤 `total_qty=0` 条目
+- P2-8: `api_call_log` 写入失败添加结构化计数字段
+- P3-5: `rate_limit._LIMITERS` 添加有界性说明
+
+测试基线：169 passed（原 163 + 新增 6）
 
 ### 3.0c 认证模块云交付就绪修复（2026-04-12，云交付评分卡 M6 阶段）
 
