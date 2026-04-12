@@ -324,3 +324,64 @@
 - **关键证据**：`frontend/src/views/LoginView.vue:11,35` — 英文硬编码反面证据；`frontend/src/views/LoginView.vue:87-91` — 423 专门分支但未消费 locked_until；`frontend/src/views/LoginView.vue:4-6,125-144` — 网格 hover 交互亮点；`frontend/src/views/LoginView.vue:99-273` — shadcn token 对齐；`frontend/src/views/GlobalConfigView.vue:2` — PageSectionCard 使用；`frontend/src/views/GlobalConfigView.vue:155-161` — 参数变更二次提示；`backend/app/core/exceptions.py:39-41` — LoginLocked.detail 已返回 locked_until 但前端未消费；Grep `@media` in `LoginView.vue|GlobalConfigView.vue` → 0 matches
 - **对照 M5=3**：M6 低一级。M5 十项硬指标全部通过作为 L1 基准；M6 三项偏差（英文硬编码/锁定倒计时未消费/移动端断点缺失）未达 3 级门槛。亮点（网格 hover + autofill 覆盖 + 状态变更二次提示）不足以抵消偏差。
 - **对照 M3=2（L2 标尺）**：M6=2 与 M3=2 数字相同但标尺层次不同——M6 是 L1 "前端 UX 整体偏差"，M3 是 L2 "后端错误字段局部偏差"，不可 1:1 类比。
+
+## M7 基础设施 标尺记录
+
+> 审计日期：2026-04-11
+> M7 特殊性：基础设施模块，被 M1-M6 所有模块 leverage。D1 低权重（非功能性），D9 = N/A（无 UI）。
+
+### D1 功能完整性 ◦（低权重）
+
+### M7 基础设施
+- **得分**：3
+- **理由**：满足 Rubric 3 级（DB session 生命周期 open/close/rollback 三路径闭合；RequestLoggingMiddleware 注册 + request_id 生成/绑定/回传完整；/healthz 存活探针 + /readyz 角色感知联合检查 DB+worker+reaper+scheduler 四项按 PROCESS_ENABLE_* 动态跳过；9 个 alembic 迁移全部有 upgrade+downgrade 覆盖 20 张表；lifespan 四事件 app_starting/started/stopping/stopped 含有条件启停三角色；边界：/readyz 分别处理 DB 失败和 background 失败返回不同 503 body），未满足 4 级（健康检查测试用 monkeypatch 非真实 DB，无 M7 基础设施集成测试）；与 M1-M6=3 持平
+- **关键证据**：`backend/app/db/session.py:34-43` — try/except rollback + else commit；`backend/app/main.py:110` — middleware 注册；`backend/app/main.py:144-147` — /healthz；`backend/app/main.py:175-193` — /readyz 角色感知；`backend/app/main.py:73-99` — lifespan 四事件；`backend/alembic/versions/` — 9 个迁移文件全有 downgrade
+
+### D2 代码质量
+
+### M7 基础设施
+- **得分**：2
+- **理由**：满足 Rubric 2 级（core/ 5 个文件全部职责单一且简洁——base.py 54 行/session.py 44 行/exceptions.py 96 行/middleware.py 50 行/logging.py 69 行；26 个基础设施相关单测全 pass——health 4 + query_utils 5 + runtime_settings 3 + config_schema 14；全部文件有模块级 docstring + 用法示例；BusinessError 6 子类 + SaihuAPIError 4 子类继承体系清晰无代码异味），未满足 3 级（middleware.py/exceptions.py/logging.py 三核心模块**零专项单测**——只有间接覆盖，覆盖率低于 70%；无 mypy/type-check）；与 M1=2/M3=2/M4=2 持平——核心文件有部分单测但不达 70% 覆盖率
+- **关键证据**：`backend/tests/unit/test_health_endpoints.py:1-94` — 4 个 readyz 路径测试；`backend/tests/unit/test_query_utils.py:1-22` — 5 个 LIKE 转义测试；`backend/tests/unit/test_runtime_settings.py:6-57` — 3 个配置测试；无 `test_*middleware*.py` / `test_*exception*.py` / `test_*logging*.py` 文件
+
+### D3 安全性
+
+### M7 基础设施
+- **得分**：2
+- **理由**：满足 Rubric 2 级（DB DSN 走环境变量 `config.py:26-29` pydantic-settings；生产 fail-fast `config.py:82-86` 拦截 4 个 placeholder；异常 handler 不泄漏 traceback——BusinessError 返回 `{message, detail}` / SaihuAPIError 返回 `{message, endpoint, code, request_id}`；FastAPI 无 `debug=True`；Caddy `{$APP_DOMAIN}` 自动 TLS + Let's Encrypt），未满足 3 级（❌ 无 CORS 中间件 Grep 0 matches——完全依赖 Caddy 同源策略；❌ 无安全 headers CSP/X-Frame-Options 等；❌ structlog processors 链无 sanitize/redact 脱敏步骤；❌ 无 CVE 扫描；❌ 5xx unhandled exception 返回 Starlette 默认纯文本非 JSON 与 BusinessError shape 不一致）；与 M1-M5=2 持平
+- **关键证据**：`backend/app/config.py:26-29` — DB DSN env var；`backend/app/config.py:82-86` — 生产 fail-fast；`backend/app/main.py:113-131` — 两个 exception handler 不含 traceback；`deploy/Caddyfile:1` — 自动 HTTPS；Grep `CORSMiddleware` → 0 matches（反面证据）；`backend/app/core/logging.py:32-38` — processors 链无 sanitize（反面证据）
+
+### D4 可部署性
+
+### M7 基础设施
+- **得分**：3
+- **理由**：满足 Rubric 3 级（多阶段 Dockerfile builder→runtime + apt 最小依赖 libpq5/tzdata + `USER app` 非 root + HEALTHCHECK 探测 /readyz；docker-compose 5+1 服务全有 YAML anchor 复用 `*backend-env/*backend-build/*backend-healthcheck` + 资源限制 db 1G/backend 512M/worker 512M/scheduler 512M/frontend 256M/caddy 128M + healthcheck 全配置；alembic env.py async 在线 + offline 模式均有 compare_type + compare_server_default + NullPool 迁移；9 个迁移有序 down_revision 链；validate_settings 启动时 fail-fast 校验 DATABASE_URL + heartbeat 不变式 + 生产密钥；.env.example 25+ 变量分 7 区块注释完整），未满足 4 级（共性：无 CI/CD + IaC + 蓝绿部署 + 多环境配置）；与 M1-M6=3 持平
+- **关键证据**：`backend/Dockerfile:1-48` — 多阶段 + non-root + HEALTHCHECK；`deploy/docker-compose.yml:1-165` — 5+1 服务 + anchor 复用 + 资源限制；`backend/alembic/env.py:28-38,43-68` — 双模式 + compare_type + NullPool；`backend/app/config.py:72-96` — validate_settings；`backend/.env.example:1-66` — 25+ 变量
+
+### D5 可观测性
+
+### M7 基础设施
+- **得分**：2
+- **理由**：满足 Rubric 2 级（structlog 双模式 dev ConsoleRenderer / prod JSONRenderer `logging.py:40-43`；request_id contextvar 绑定 + X-Request-Id 回传 `middleware.py:22-24,48`；4xx/5xx 日志级别分化 `middleware.py:40`；异常事件 `logger.exception` 含 method/path/duration_ms `middleware.py:29-37`；lifecycle 四事件 `main.py:76,88,92,99`；日志级别可配 `config.py:24`），未满足 3 级（❌ structlog processors 链无 sanitize/redact 脱敏 `logging.py:32-38`；❌ 无 /metrics 端点；❌ 无 OpenTelemetry / 分布式追踪；❌ 无错误告警接入 Sentry/PagerDuty；❌ 无日志统一收集 ELK/Loki）；**M7 D5=2 低于 M1-M4=3 一级**——理由：M1-M4 在 M7 基础之上各自有业务事件日志（api_call_log/ctx.progress/push 日志等）满足 Rubric 3 的"业务事件指标+健康检查端点"，M7 自身仅提供基础设施层可观测性缺少 Rubric 3 要求的业务事件指标/metrics/告警
+- **关键证据**：`backend/app/core/logging.py:32-43` — structlog 双模式配置；`backend/app/core/middleware.py:22-48` — request_id 生成/绑定/回传 + 异常捕获；`backend/app/main.py:76,88,92,99` — lifecycle 四事件；`backend/app/core/logging.py:32-38` — processors 链无 sanitize（反面证据）
+
+### D6 可靠性
+
+### M7 基础设施
+- **得分**：3
+- **理由**：满足 Rubric 3 级（session rollback on exception `session.py:39-41` + pool_pre_ping 连接自愈 `session.py:22` + BusinessError 6 子类+SaihuAPIError 4 子类统一异常分类映射 `exceptions.py` → `main.py:113-131` 两个全局 handler + /readyz DB 探测失败不崩溃返回 503 `main.py:150-157` + lifespan graceful shutdown scheduler→reaper→worker 有序关停 `main.py:91-99` + expire_on_commit=False 防 lazy load 异常 `session.py:29`），未满足 4 级（无 custom 500 handler——unhandled exception 返回纯文本非 JSON；无熔断器/死信队列；DB 连接池耗尽无优雅降级；无 chaos test）；与 M1-M6=3 持平
+- **关键证据**：`backend/app/db/session.py:36-43` — rollback + commit；`backend/app/db/session.py:22` — pool_pre_ping；`backend/app/core/exceptions.py:11-96` — 双层异常层次；`backend/app/main.py:113-131` — 两个 handler；`backend/app/main.py:150-157` — readyz graceful；`backend/app/main.py:91-99` — shutdown 序列
+
+### D7 可维护性
+
+### M7 基础设施
+- **得分**：3
+- **理由**：满足 Rubric 3 级（架构蓝图 §3.4 横切关注点表格明确文档化异常/日志/中间件/配置四大基础设施及代码位置 `Blueprint:248-255`；ADR-1 全栈 async 直接关联 M7 DB/session 选型 `Blueprint:623-627` + ADR-3 数据库咨询锁关联 M7 DB 基础设施 `Blueprint:639-646`；runbook 6 个章节深度覆盖——§2 健康检查含诊断流程图 + §3.1 DB 不可用 4 步排查含连接池耗尽 + §3.4 JWT 密钥管理含首次生成/定期轮换/泄漏应急/FAQ 共 100+ 行 + §3.6 启动失败 + §3.7 DB 恢复后异常 + §6 备份恢复；alembic 迁移命名规范文档化 `Blueprint:528-533`；全部 core/ 文件有 docstring + 注释），未满足 4 级（无自动化文档生成；无"如何新增中间件/异常类型" how-to；无 structlog vs loguru 选型 ADR）；与 M1/M2/M3/M4=3 持平（M7 的 runbook 覆盖度是最高的之一，§3.4 JWT 管理 100+ 行尤为突出）
+- **关键证据**：`docs/Project_Architecture_Blueprint.md:248-255` — 横切关注点表格；`docs/Project_Architecture_Blueprint.md:623-627` — ADR-1；`docs/runbook.md:44-116` — §2 健康检查 + §3.1 DB 不可用；`docs/runbook.md:199-301` — §3.4 JWT 密钥管理 100+ 行；`docs/Project_Architecture_Blueprint.md:528-533` — 迁移命名规范
+
+### D8 性能与容量
+
+### M7 基础设施
+- **得分**：2
+- **理由**：满足 Rubric 2 级（连接池三项可配 `config.py:30-32` db_pool_size=10/db_max_overflow=5/db_pool_recycle_seconds=3600；pool_pre_ping `session.py:22`；/readyz SELECT 1 轻量探针 `main.py:153`；6 个服务全有 memory limit `docker-compose.yml`；session async with 作用域及时释放；alembic NullPool 迁移不占池 `env.py:59`），未满足 3 级（共性：无 SLO + 慢查询日志 + 容量评估；无连接池使用率监控；三服务合计最多 45 连接 vs PostgreSQL max_connections 未对照文档化）；与 M1/M2/M3/M4/M6=2 持平
+- **关键证据**：`backend/app/config.py:30-32` — 连接池三项可配；`backend/app/db/session.py:17-24` — engine 配置含 pool_pre_ping；`backend/app/main.py:152-153` — SELECT 1 探针；`deploy/docker-compose.yml:52-55,73-75,95-97,120-122,135-137,160-161` — 6 服务资源限制；`backend/alembic/env.py:59` — NullPool
