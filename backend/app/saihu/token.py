@@ -1,12 +1,12 @@
 """赛狐 access_token 管理。
 
-特性：
+特性:
 - GET /api/oauth/v2/token.json 是唯一不走签名的 GET 接口
-- 返回 expires_in 单位为毫秒（实测 ~24h）
+- 返回 expires_in 单位为毫秒(实测 ~24h)
 - 缓存到 access_token_cache 表 + 内存
-- 提前 5 分钟（settings.saihu_token_refresh_ahead_seconds）主动续期
+- 提前 5 分钟(settings.saihu_token_refresh_ahead_seconds)主动续期
 - 收到 40001 时由 SaihuClient 调用 force_refresh()
-- 不能频繁调用（赛狐另有限流）
+- 不能频繁调用(赛狐另有限流)
 """
 
 import asyncio
@@ -37,9 +37,9 @@ class TokenManager:
         self._refresh_task: asyncio.Task[None] | None = None
 
     async def get_token(self) -> str:
-        """获取有效 token，必要时刷新。"""
+        """获取有效 token,必要时刷新。"""
         settings = get_settings()
-        # 单飞（single-flight）：快速路径先检查内存，未命中再走共享刷新
+        # 单飞(single-flight):快速路径先检查内存,未命中再走共享刷新
         async with self._lock:
             if (
                 self._token
@@ -65,13 +65,13 @@ class TokenManager:
         return await future
 
     async def force_refresh(self) -> str:
-        """收到 40001 时强制刷新（single-flight：多个并发调用共享同一次 HTTP 刷新）。"""
+        """收到 40001 时强制刷新(single-flight:多个并发调用共享同一次 HTTP 刷新)。"""
         async with self._lock:
             future = self._get_or_start_refresh_locked()
         return await future
 
     def _get_or_start_refresh_locked(self) -> "asyncio.Future[str]":
-        """必须在持有 self._lock 时调用。返回当前进行中的刷新 future，或新建一个。"""
+        """必须在持有 self._lock 时调用。返回当前进行中的刷新 future,或新建一个。"""
         if self._refresh_future is not None and not self._refresh_future.done():
             return self._refresh_future
         loop = asyncio.get_running_loop()
@@ -136,7 +136,7 @@ class TokenManager:
         self._token = token
         self._expires_at = expires_at
 
-        # 持久化（UPSERT 单行）
+        # 持久化(UPSERT 单行)
         async with async_session_factory() as db:
             stmt = pg_insert(AccessTokenCache).values(
                 id=1,

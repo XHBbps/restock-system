@@ -1,7 +1,7 @@
-"""其他出库列表接口封装（在途数据源）。
+"""其他出库列表接口封装(在途数据源)。
 
 POST /api/warehouseInOut/outRecords.json
-关键参数：searchField=remark, searchValue=在途中
+关键参数:searchField=remark, searchValue=在途中
 """
 
 from collections.abc import AsyncIterator

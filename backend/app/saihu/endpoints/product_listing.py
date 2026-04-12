@@ -1,7 +1,7 @@
 """在线产品信息接口封装。
 
 POST /api/order/api/product/pageList.json
-关键参数：
+关键参数:
 - match=true 仅拉已配对产品
 - onlineStatusList=['active'] 仅在售
 """

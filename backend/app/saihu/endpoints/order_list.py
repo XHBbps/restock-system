@@ -1,7 +1,7 @@
 """订单列表接口封装。
 
 POST /api/order/pageList.json
-增量同步使用 dateType=updateDateTime 捕获状态变化（FR-021）。
+增量同步使用 dateType=updateDateTime 捕获状态变化(FR-021)。
 """
 
 from collections.abc import AsyncIterator
@@ -22,8 +22,8 @@ async def list_orders(
 ) -> AsyncIterator[dict[str, Any]]:
     """迭代订单列表。
 
-    date_start / date_end 格式：'YYYY-MM-DD HH:MM:SS'
-    date_type：updateDateTime / createDateTime / purchase
+    date_start / date_end 格式:'YYYY-MM-DD HH:MM:SS'
+    date_type:updateDateTime / createDateTime / purchase
     """
     client = get_saihu_client()
     page_no = 1

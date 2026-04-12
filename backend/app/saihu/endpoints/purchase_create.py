@@ -2,13 +2,13 @@
 
 POST /api/purchase/create.json
 
-必填字段（FR-045）：
-- warehouseId：主仓 ID
-- action：操作行为，"1"=提交
-- includeTax：含税标记，**字符串 "0"/"1"**（不是 true/false）
-- items：采购明细，每条含 commodityId（赛狐内部商品ID）+ num（**字符串**）
+必填字段(FR-045):
+- warehouseId:主仓 ID
+- action:操作行为,"1"=提交
+- includeTax:含税标记,**字符串 "0"/"1"**(不是 true/false)
+- items:采购明细,每条含 commodityId(赛狐内部商品ID)+ num(**字符串**)
 
-其他字段（supplierId/partyaId 等）第一版不填，由赛狐 Web 端事后补全。
+其他字段(supplierId/partyaId 等)第一版不填,由赛狐 Web 端事后补全。
 """
 
 from typing import Any
@@ -29,7 +29,7 @@ async def create_purchase_order(
     """创建采购单。
 
     items: [{"commodityId": "2349630", "num": "928"}, ...]
-    返回：赛狐返回的采购单对象数组（含 purchaseOrderNo）。
+    返回:赛狐返回的采购单对象数组(含 purchaseOrderNo)。
     """
     if include_tax not in ("0", "1"):
         raise ValueError("include_tax MUST be '0' or '1'")
