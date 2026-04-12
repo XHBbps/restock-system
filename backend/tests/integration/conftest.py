@@ -17,6 +17,14 @@ def db_engine():
     import os
 
     url = os.environ["TEST_DATABASE_URL"]
+    # 安全检查：拒绝在生产数据库上运行（防 drop_all 误删生产表）
+    db_name = url.rsplit("/", 1)[-1].split("?")[0]
+    if db_name == "replenish":
+        pytest.exit(
+            "❌ 拒绝在生产数据库 'replenish' 上运行集成测试！"
+            "请使用独立测试库：TEST_DATABASE_URL=...replenish_test",
+            returncode=1,
+        )
     engine = create_async_engine(url, echo=False)
     return engine
 
