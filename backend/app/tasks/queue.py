@@ -1,10 +1,10 @@
-"""任务入队（事务化 + 部分唯一索引去重）。
+"""任务入队(事务化 + 部分唯一索引去重)。
 
-行为（spec FR-058b/c）：
+行为(spec FR-058b/c):
 - INSERT 时数据库部分唯一索引保证同 dedupe_key 在 pending/running 下唯一
 - 捕获 UniqueViolation 即视为"已有活跃任务"
-- scheduler 触发 → 额外插入 status='skipped' 留痕
-- manual 触发 → 直接返回已有 task_id 供前端复用轮询
+- scheduler 触发 -> 额外插入 status='skipped' 留痕
+- manual 触发 -> 直接返回已有 task_id 供前端复用轮询
 """
 
 from typing import Any
@@ -28,12 +28,13 @@ async def enqueue_task(
     dedupe_key: str | None = None,
     payload: dict[str, Any] | None = None,
     priority: int = 100,
+    _retry_depth: int = 0,
 ) -> tuple[int, bool]:
     """入队任务。
 
-    返回 (task_id, is_existing)：
+    返回 (task_id, is_existing):
     - is_existing=False 表示成功新建
-    - is_existing=True 表示同键活跃任务已存在，返回的是它的 id
+    - is_existing=True 表示同键活跃任务已存在,返回的是它的 id
     """
     if trigger_source not in ("scheduler", "manual"):
         raise ValueError("trigger_source MUST be 'scheduler' or 'manual'")
@@ -56,9 +57,7 @@ async def enqueue_task(
         )
         await db.commit()
         task_id = result.scalar_one()
-        logger.info(
-            "task_enqueued", task_id=task_id, job_name=job_name, source=trigger_source
-        )
+        logger.info("task_enqueued", task_id=task_id, job_name=job_name, source=trigger_source)
         return task_id, False
     except IntegrityError as exc:
         await db.rollback()
@@ -76,7 +75,11 @@ async def enqueue_task(
         existing_id = existing.scalar_one_or_none()
 
         if existing_id is None:
-            # 罕见竞争：唯一冲突但活跃记录又消失了，重试一次入队
+            # 罕见竞争:唯一冲突但活跃记录又消失了,重试一次入队
+            if _retry_depth >= 2:
+                raise RuntimeError(
+                    f"enqueue_task: 去重竞态重试耗尽 (job={job_name}, key={dedupe_key})"
+                )
             logger.warning("task_enqueue_race_retry", job_name=job_name)
             return await enqueue_task(
                 db,
@@ -85,10 +88,11 @@ async def enqueue_task(
                 dedupe_key=dedupe_key,
                 payload=payload,
                 priority=priority,
+                _retry_depth=_retry_depth + 1,
             )
 
         if trigger_source == "scheduler":
-            # 留痕：插入一条 skipped 记录
+            # 留痕:插入一条 skipped 记录
             await db.execute(
                 insert(TaskRun).values(
                     job_name=job_name,
@@ -114,6 +118,4 @@ async def enqueue_task(
 def _is_dedupe_conflict(exc: IntegrityError) -> bool:
     """识别 dedupe_key 冲突的部分唯一索引违规。"""
     msg = str(exc.orig) if exc.orig else str(exc)
-    return "uq_task_run_active_dedupe" in msg or isinstance(
-        exc.orig, AsyncpgUniqueViolation
-    )
+    return "uq_task_run_active_dedupe" in msg or isinstance(exc.orig, AsyncpgUniqueViolation)
