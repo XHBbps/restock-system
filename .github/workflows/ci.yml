@@ -34,7 +34,6 @@ jobs:
         run: python -m mypy app
       - name: Audit backend dependencies
         run: pip-audit
-        continue-on-error: true
 
   frontend:
     runs-on: ubuntu-latest
@@ -56,4 +55,3 @@ jobs:
         run: npm run test:coverage
       - name: Audit frontend dependencies
         run: npm audit --audit-level=high
-        continue-on-error: true

@@ -20,6 +20,7 @@ from app.config import get_settings
 from app.core.exceptions import BusinessError, SaihuAPIError
 from app.core.logging import configure_logging, get_logger
 from app.core.middleware import RequestLoggingMiddleware
+from app.core.rate_limit import RateLimitMiddleware
 from app.core.security import hash_password
 from app.db.session import async_session_factory
 from app.engine import calc_engine_job as _job_calc  # noqa: F401
@@ -108,6 +109,9 @@ app = FastAPI(
 )
 
 app.add_middleware(RequestLoggingMiddleware)
+# 速率限制：每 IP 每分钟 60 个请求（公网暴露防御层）。
+# 健康检查路径 (/healthz, /readyz) 豁免。内存存储，进程级独立。
+app.add_middleware(RateLimitMiddleware, max_requests=60, window_seconds=60)
 
 
 @app.exception_handler(BusinessError)
