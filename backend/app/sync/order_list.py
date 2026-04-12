@@ -31,7 +31,7 @@ JOB_NAME = "sync_order_list"
 # 首次回填窗口
 INITIAL_BACKFILL_DAYS = 30
 # 增量同步重叠
-OVERLAP_MINUTES = 5
+DEFAULT_OVERLAP_MINUTES = 5
 
 
 @register(JOB_NAME)
@@ -73,12 +73,14 @@ async def sync_order_list_job(ctx: JobContext) -> None:
         raise
 
 
-async def _compute_window(db: AsyncSession, now: datetime) -> tuple[datetime, datetime]:
+async def _compute_window(
+    db: AsyncSession, now: datetime, overlap_minutes: int = DEFAULT_OVERLAP_MINUTES,
+) -> tuple[datetime, datetime]:
     state = (
         await db.execute(select(SyncState).where(SyncState.job_name == JOB_NAME))
     ).scalar_one_or_none()
     if state and state.last_success_at:
-        date_start = state.last_success_at - timedelta(minutes=OVERLAP_MINUTES)
+        date_start = state.last_success_at - timedelta(minutes=overlap_minutes)
     else:
         date_start = now - timedelta(days=INITIAL_BACKFILL_DAYS)
     return date_start, now
