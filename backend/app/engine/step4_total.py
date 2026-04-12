@@ -1,13 +1,13 @@
-"""Step 4：总采购量。
+"""Step 4:总采购量。
 
-公式（FR-032）：
+公式(FR-032):
     total = Σ country_qty[国]                       仅累加 country_qty > 0 的国家
-          + Σ velocity[国] × BUFFER_DAYS            同样仅累加 country_qty > 0 的国家
-          − (本地仓 available + 本地仓 reserved)
+          + Σ velocity[国] x BUFFER_DAYS            同样仅累加 country_qty > 0 的国家
+          - (本地仓 available + 本地仓 reserved)
 
     total = max(total, 0)
 
-本地仓识别：warehouse.type = 1
+本地仓识别:warehouse.type = 1
 """
 
 from sqlalchemy import func, select
@@ -21,7 +21,7 @@ async def load_local_inventory(
     db: AsyncSession,
     commodity_skus: list[str] | None,
 ) -> dict[str, dict[str, int]]:
-    """加载本地仓（type=1）库存，按 SKU 聚合。"""
+    """加载本地仓(type=1)库存,按 SKU 聚合。"""
     stmt = (
         select(
             InventorySnapshotLatest.commodity_sku,
@@ -47,7 +47,9 @@ def compute_total(
 ) -> int:
     """计算单个 SKU 的总采购量。
 
-    仅累加 `country_qty > 0` 的国家（spec 显式要求）。
+    仅累加 `country_qty > 0` 的国家(spec 显式要求)。
+    同时显式保持 total_qty >= sum(country_breakdown),避免人工编辑后出现
+    "分国家数量之和大于总采购量" 的自相矛盾状态。
     """
     if not country_qty_for_sku:
         return 0
@@ -67,8 +69,9 @@ def compute_total(
         )
 
     raw = sum_qty + buffer_qty - local_total
-    # Invariant: total_qty must be >= sum(country_breakdown) so that edited
-    # breakdowns do not exceed the total (keeps H4 PATCH check consistent).
+    # 业务规则: 国内库存(type=1)仅用于抵消 buffer 部分,不影响各国实际补货需求。
+    # Invariant: total_qty >= sum(country_breakdown),保证人工编辑后
+    # "分国家数量之和不超过总采购量" 的约束始终成立(H4 PATCH 校验依赖)。
     if raw < sum_qty:
         raw = sum_qty
-    return max(int(round(raw)), 0)
+    return max(round(raw), 0)
