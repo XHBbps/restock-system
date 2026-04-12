@@ -1,4 +1,4 @@
-"""Step 4 total 单元测试：仅累加 country_qty>0 + 本地仓扣减 + max(0)。"""
+"""Step 4 total 单元测试:仅累加 country_qty>0 + 本地仓扣减 + max(0)。"""
 
 from app.engine.step4_total import compute_total
 
@@ -21,7 +21,7 @@ def test_basic_total() -> None:
 
 
 def test_excludes_zero_country_velocity() -> None:
-    """积压国（country_qty=0）的 velocity 不应计入 buffer。"""
+    """积压国(country_qty=0)的 velocity 不应计入 buffer。"""
     total = compute_total(
         sku="sku-A",
         country_qty_for_sku={"JP": 0, "US": 100},
@@ -86,3 +86,17 @@ def test_empty_country_qty() -> None:
         buffer_days=30,
     )
     assert total == 0
+
+
+def test_total_uses_ceil_not_banker_round():
+    """P0-2: round(2.5)=2 (银行家舍入) 但 ceil(2.5)=3,补货宁多勿少。"""
+    result = compute_total(
+        sku="SKU-CEIL",
+        country_qty_for_sku={"US": 1},
+        velocity_for_sku={"US": 0.05},  # buffer = 0.05 * 30 = 1.5
+        local_stock_for_sku=None,
+        buffer_days=30,
+    )
+    # sum_qty=1, buffer=1.5, raw=2.5
+    # round(2.5)=2 (wrong), ceil(2.5)=3 (correct)
+    assert result == 3

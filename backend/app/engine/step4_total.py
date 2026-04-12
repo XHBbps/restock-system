@@ -10,6 +10,8 @@
 本地仓识别:warehouse.type = 1
 """
 
+import math
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -74,4 +76,4 @@ def compute_total(
     # "分国家数量之和不超过总采购量" 的约束始终成立(H4 PATCH 校验依赖)。
     if raw < sum_qty:
         raw = sum_qty
-    return max(round(raw), 0)
+    return max(math.ceil(raw), 0)
