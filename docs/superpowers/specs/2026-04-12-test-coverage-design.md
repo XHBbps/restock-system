@@ -12,8 +12,7 @@
 
 1. 修复 Step5 ceil 回归（Review 修复引入的真实缺陷）
 2. 补充推送零数量测试（验证 P2-7 修复）
-3. 前端 API 层 + 核心页面单元测试
-4. Playwright E2E 黄金路径
+3. 前端核心页面编辑逻辑单元测试
 
 ## 设计决策
 
@@ -22,9 +21,16 @@
 | 引擎边界测试数量 | 1 个（Step5 ceil） | 其余 7 个场景经逐项验证：已覆盖或生产不可达 |
 | Step5 仓分配取整 | 改回 `round()` | 仓分配是固定总量的分配，不适用"宁多勿少"；`ceil` 导致 sum > country_qty |
 | 前端测试框架 | Vitest + Vue Test Utils | 项目已配置，CI 已集成 |
-| E2E 框架 | Playwright | 社区标准，支持多浏览器，API mock 能力强 |
-| 后端覆盖率目标 | 55% → ~60% | 新增 2 个后端测试，提升有限但都在高风险路径 |
-| 前端覆盖率目标 | ~2% → ~15% | 补核心路径，不追数字 |
+| Playwright E2E | **拆为独立 plan** | 未安装、需下载浏览器+配置+mock 后端，工作量是 Task A-C 的 2-3 倍 |
+
+## 排除项（经验证）
+
+| 原 Task | 排除理由 |
+|---------|---------|
+| ~~Task C: api/suggestion.ts 测试~~ | 3 行 axios wrapper，零业务逻辑，测它 = 测 axios |
+| ~~Task E: client.ts 401 测试~~ | `client.test.ts:46-74` 已完整覆盖（清 token + 非 401 不清） |
+| ~~Task F: Playwright E2E~~ | 拆为独立 plan（未安装、配置重、scope 大） |
+| ~~Task D 推送按钮禁用~~ | SuggestionDetailView 无 push 按钮，scope 已修正 |
 
 ---
 
@@ -42,9 +48,9 @@
   sum = 6 ≠ 5
 ```
 
-**修复**: Step5 `step5_warehouse_split.py:191` 改回 `round()`。Step3/Step4 保持 `ceil()`。
+**修复**: `step5_warehouse_split.py:191` 改回 `round()`。同时移除 line 189 的 `max(..., 0)` 保护（不再需要）。Step3/Step4 保持 `ceil()`。
 
-**测试**: 3+ 仓不等比例场景断言 `sum(breakdown) == country_qty`。
+**测试**: 新增 3+ 仓不等比例场景，断言 `sum(breakdown) == country_qty`。
 
 ---
 
@@ -54,50 +60,23 @@
 
 **代码路径**: `pushback/purchase.py:74-80` — 过滤 total_qty=0 条目，空列表时 raise。
 
-**测试**: 构造全部 total_qty=0 的 items，断言 ValueError。
+**测试**: 构造全部 total_qty=0 的 items，断言 ValueError（"所有条目的 total_qty 均为 0"）。
 
 ---
 
-## Task C: 前端 api/suggestion.ts 单元测试
+## Task D: 前端 SuggestionDetailView 编辑逻辑测试
 
-**覆盖范围**:
-- `fetchSuggestionDetail(id)` — 正常返回 + 404 处理
-- `patchSuggestionItem(suggestionId, itemId, data)` — 正常 + 422 校验错误
-- `pushSuggestionItems(suggestionId, itemIds)` — 正常 + 409 冲突
+**实际可测逻辑**（经代码验证）:
+- `isEditable(item)`: suggestion.status !== 'archived' && item.push_status !== 'pushed'
+- `save(item)`: 调用 `patchSuggestionItem` → 成功后 `load()` 刷新 → 失败时 `ElMessage.error`
+- Save 按钮 `:disabled="!isEditable(item) || !hasChanges(item)"`
 
-**Mock 方式**: vi.mock axios 拦截请求，验证 URL/参数/错误处理。
+**测试用例**:
+1. archived 建议单的条目 → isEditable 返回 false → save 按钮 disabled
+2. pushed 条目 → isEditable 返回 false
+3. draft 建议单 + pending 条目 + 已修改 → save 按钮 enabled → 点击触发 API 调用
 
----
-
-## Task D: 前端 SuggestionDetailView 编辑测试
-
-**覆盖范围**:
-- 编辑 total_qty 输入框 → 触发 save → 调用 patchSuggestionItem
-- push 按钮对 blocked 状态条目禁用
-- push 按钮对已 pushed 建议单禁用
-
-**Mock 方式**: Vue Test Utils mount + stub API 调用 + 断言 DOM 状态。
-
----
-
-## Task E: 前端 api/client.ts 401 处理测试
-
-**场景**: API 返回 401 → 清除 token → 跳转 /login。
-
-**现有测试**: `client.test.ts` 有基础 setup 测试，但不测 401 拦截器逻辑。
-
----
-
-## Task F: Playwright E2E
-
-**前置**: 安装 Playwright + 配置 `playwright.config.ts`。
-
-**测试流程**:
-1. 登录页输入凭证 → 跳转 Dashboard
-2. 导航到建议单列表 → 点击进入详情
-3. 编辑 total_qty → 保存 → 验证更新
-
-**环境**: 需要 docker-compose 运行后端 + 种子数据。可用 `playwright.config.ts` 的 `webServer` 配置自动启动前端 dev server。后端 API 用 Playwright 的 `route` API mock。
+**Mock 方式**: Vue Test Utils mount + vi.mock api/suggestion + 断言 DOM 状态和函数调用。
 
 ---
 
@@ -105,8 +84,9 @@
 
 | 排除项 | 理由 |
 |--------|------|
-| 引擎 Step1/2/3/6 边界测试 | 经逐项验证已有充分覆盖 |
+| 引擎 Step1/2/3/4/6 边界测试 | 经逐项验证已有充分覆盖（169 个测试） |
+| api/suggestion.ts 单元测试 | 3 行 axios wrapper，无逻辑 |
+| client.ts 401 处理测试 | 已有 4 个拦截器测试覆盖 |
 | 同步层 UPSERT 行为测试 | 需真实 DB，属集成测试 |
-| 数据页面（订单/库存/出库）测试 | 只读展示页，风险低 |
-| 配置页面测试 | 后端 schema 测试已覆盖校验逻辑 |
-| 后端覆盖率提升到 70% | 当前 ~60% 的缺口主要在 sync/API 层薄包装代码，单测 ROI 低 |
+| 数据/配置页面测试 | 只读展示 + 后端 schema 已覆盖 |
+| Playwright E2E | 拆为独立 plan |
