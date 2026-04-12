@@ -67,8 +67,9 @@ async def client(db_engine) -> AsyncIterator[AsyncClient]:
 @pytest.fixture
 async def engine_session_factory(db_engine):
     """Patch async_session_factory so run_engine uses the test DB."""
-    from sqlalchemy.ext.asyncio import async_sessionmaker
     from unittest.mock import patch
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
 
     factory = async_sessionmaker(db_engine, expire_on_commit=False)
     with patch("app.engine.runner.async_session_factory", factory):

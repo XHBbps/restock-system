@@ -130,8 +130,9 @@ async def test_suggestion_push_pushed_rejected() -> None:
 
 def test_suggestion_item_patch_rejects_negative_country_breakdown():
     """P0-3: country_breakdown 值不可为负。"""
-    from app.schemas.suggestion import SuggestionItemPatch
     from pydantic import ValidationError
+
+    from app.schemas.suggestion import SuggestionItemPatch
 
     with pytest.raises(ValidationError, match="不可为负"):
         SuggestionItemPatch(country_breakdown={"US": -10, "JP": 5})
@@ -139,8 +140,9 @@ def test_suggestion_item_patch_rejects_negative_country_breakdown():
 
 def test_suggestion_item_patch_rejects_negative_warehouse_breakdown():
     """P0-3: warehouse_breakdown 嵌套值不可为负。"""
-    from app.schemas.suggestion import SuggestionItemPatch
     from pydantic import ValidationError
+
+    from app.schemas.suggestion import SuggestionItemPatch
 
     with pytest.raises(ValidationError, match="不可为负"):
         SuggestionItemPatch(warehouse_breakdown={"US": {"WH-1": -5}})

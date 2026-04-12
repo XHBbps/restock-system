@@ -132,7 +132,7 @@ async def seed_order(
     header = OrderHeader(
         shop_id=shop_id,
         amazon_order_id=order_id,
-        marketplace_id="ATVPDKIKX0DER" if country == "US" else "UNKNOWN",
+        marketplace_id="US" if country == "US" else "UNKNOWN",
         country_code=country,
         order_status="Shipped",
         fulfillment_channel="AFN",
@@ -170,7 +170,7 @@ async def seed_product_listing(
     sku: str,
     commodity_id: str,
     shop_id: str,
-    marketplace_id: str = "ATVPDKIKX0DER",
+    marketplace_id: str = "US_MKT",
 ) -> ProductListing:
     """Seed one row in product_listing.
 
@@ -221,27 +221,28 @@ async def seed_minimum_dataset(
 
     Returns a dict of all created objects for assertions.
     """
-    # 15 days before today, as a timezone-aware datetime
-    purchase_dt = datetime(
-        today.year, today.month, today.day, 12, 0, 0, tzinfo=BEIJING
-    )
+    # 5 days before today (falls within 7-day, 14-day, and 30-day windows)
     from datetime import timedelta
 
-    purchase_dt = purchase_dt - timedelta(days=15)
+    purchase_dt = datetime(
+        today.year, today.month, today.day, 12, 0, 0, tzinfo=BEIJING
+    ) - timedelta(days=5)
 
     config = await seed_global_config(db)
     sku = await seed_sku(db, _DEFAULT_SKU, enabled=True, lead_time_days=None)
     wh_local = await seed_warehouse(db, _LOCAL_WH_ID, "国内本地仓", wtype=1, country="CN")
     wh_us = await seed_warehouse(db, _OVERSEAS_WH_ID, "美国FBA仓", wtype=3, country="US")
-    inv_us = await seed_inventory(db, _DEFAULT_SKU, _OVERSEAS_WH_ID, country="US", available=50)
-    inv_local = await seed_inventory(db, _DEFAULT_SKU, _LOCAL_WH_ID, country="CN", available=20)
+    # Set overseas stock to 0 so country_qty is positive (velocity > 0 → replenishment needed)
+    inv_us = await seed_inventory(db, _DEFAULT_SKU, _OVERSEAS_WH_ID, country="US", available=0)
+    # Set local stock to 0 so total_qty is also positive
+    inv_local = await seed_inventory(db, _DEFAULT_SKU, _LOCAL_WH_ID, country="CN", available=0)
     header, item, detail = await seed_order(
         db,
         shop_id=_SHOP_ID,
         order_id=_ORDER_ID,
         country="US",
         sku=_DEFAULT_SKU,
-        qty_shipped=5,
+        qty_shipped=10,
         purchase_date=purchase_dt,
         postal_code="90001",
     )
