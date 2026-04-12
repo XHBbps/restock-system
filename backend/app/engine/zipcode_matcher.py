@@ -79,9 +79,9 @@ def _compare(left: str, operator: str, right: str, value_type: str) -> bool:
             return False
 
         if operator == "=":
-            return l_num == r_num
+            return int(l_num) == int(r_num)  # P2-6: 整数比较避免浮点精度
         if operator == "!=":
-            return l_num != r_num
+            return int(l_num) != int(r_num)
         if operator == ">":
             return l_num > r_num
         if operator == ">=":
