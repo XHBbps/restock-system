@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class AllocationExplanationOut(BaseModel):
@@ -70,8 +70,23 @@ class SuggestionItemPatch(BaseModel):
     t_purchase: dict[str, str] | None = None  # ISO date strings
     t_ship: dict[str, str] | None = None
 
+    @model_validator(mode="after")
+    def _values_non_negative(self) -> "SuggestionItemPatch":
+        if self.country_breakdown:
+            for k, v in self.country_breakdown.items():
+                if v < 0:
+                    raise ValueError(f"country_breakdown[{k}] 不可为负")
+        if self.warehouse_breakdown:
+            for country, wh_dict in self.warehouse_breakdown.items():
+                for wid, qty in wh_dict.items():
+                    if qty < 0:
+                        raise ValueError(
+                            f"warehouse_breakdown[{country}][{wid}] 不可为负"
+                        )
+        return self
+
 
 class PushRequest(BaseModel):
-    """推送选中条目至赛狐(FR-045a 上限 50)。"""
+    """推送选中条目至赛狐。"""
 
-    item_ids: list[int] = Field(..., min_length=1, max_length=50)
+    item_ids: list[int] = Field(..., min_length=1)

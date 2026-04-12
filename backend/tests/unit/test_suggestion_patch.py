@@ -128,6 +128,32 @@ async def test_suggestion_push_pushed_rejected() -> None:
         await push_items(req=req, suggestion_id=1, db=db, _={})  # type: ignore[arg-type]
 
 
+def test_suggestion_item_patch_rejects_negative_country_breakdown():
+    """P0-3: country_breakdown 值不可为负。"""
+    from app.schemas.suggestion import SuggestionItemPatch
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="不可为负"):
+        SuggestionItemPatch(country_breakdown={"US": -10, "JP": 5})
+
+
+def test_suggestion_item_patch_rejects_negative_warehouse_breakdown():
+    """P0-3: warehouse_breakdown 嵌套值不可为负。"""
+    from app.schemas.suggestion import SuggestionItemPatch
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="不可为负"):
+        SuggestionItemPatch(warehouse_breakdown={"US": {"WH-1": -5}})
+
+
+def test_suggestion_item_patch_accepts_zero_values():
+    """P0-3: 零值是允许的(清零某国补货量)。"""
+    from app.schemas.suggestion import SuggestionItemPatch
+
+    patch = SuggestionItemPatch(country_breakdown={"US": 0, "JP": 5})
+    assert patch.country_breakdown == {"US": 0, "JP": 5}
+
+
 async def test_suggestion_patch_clears_allocation_snapshot_on_allocation_edit(monkeypatch) -> None:
     import app.api.suggestion as suggestion_module
 
