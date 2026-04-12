@@ -385,3 +385,57 @@
 - **得分**：2
 - **理由**：满足 Rubric 2 级（连接池三项可配 `config.py:30-32` db_pool_size=10/db_max_overflow=5/db_pool_recycle_seconds=3600；pool_pre_ping `session.py:22`；/readyz SELECT 1 轻量探针 `main.py:153`；6 个服务全有 memory limit `docker-compose.yml`；session async with 作用域及时释放；alembic NullPool 迁移不占池 `env.py:59`），未满足 3 级（共性：无 SLO + 慢查询日志 + 容量评估；无连接池使用率监控；三服务合计最多 45 连接 vs PostgreSQL max_connections 未对照文档化）；与 M1/M2/M3/M4/M6=2 持平
 - **关键证据**：`backend/app/config.py:30-32` — 连接池三项可配；`backend/app/db/session.py:17-24` — engine 配置含 pool_pre_ping；`backend/app/main.py:152-153` — SELECT 1 探针；`deploy/docker-compose.yml:52-55,73-75,95-97,120-122,135-137,160-161` — 6 服务资源限制；`backend/alembic/env.py:59` — NullPool
+
+## M8 部署与交付 标尺记录
+
+> 审计日期：2026-04-11
+> M8 特殊性：部署与交付模块，是评分卡目标场景"云上交付就绪度"的主承载模块。D1/D9 = N/A。主战场 D3 + D4 + D7。
+
+### D2 代码质量 ◦
+
+### M8 部署与交付
+- **得分**：3
+- **理由**：满足 Rubric 3 级（7 个 shell 脚本全部 `set -euo pipefail` 确保错误传播 + `trap` 错误处理覆盖关键脚本；变量外部化无硬编码通过 `${VAR:-default}` 模式；Dockerfile 多阶段 builder→runtime + 最小依赖 + non-root USER app；docker-compose YAML anchor 三重复用 `x-backend-env/build/healthcheck`；.env.example 完整文档化；脚本可读性高路径推导一致 SCRIPT_DIR/DEPLOY_DIR/REPO_DIR；rollback.sh 有文件头 Usage 注释），未满足 4 级（无 shellcheck in CI；无 bats/shunit2 脚本测试；restore_db.sh 无 trap/错误处理；CI 未包含 deploy 脚本检查）；**M8 D2=3 高于 M1/M3/M4/M7=2 一级**——理由：脚本错误处理覆盖度高 + Dockerfile/compose 质量高 + 无明显代码异味，与 M2/M5/M6=3 持平
+- **关键证据**：`deploy/scripts/deploy.sh:2,16-23` — set -euo pipefail + trap EXIT；`deploy/scripts/validate_env.sh:2,17-26` — set -euo pipefail + required_keys 数组化；`backend/Dockerfile:1-48` — 多阶段 + non-root；`deploy/docker-compose.yml:3-31` — 三 YAML anchor；`deploy/.env.example:1-13` — 8 变量文档化；`deploy/scripts/rollback.sh:1-10` — Usage 注释；`deploy/scripts/restore_db.sh:20-22` — 无 trap 反面证据
+
+### D3 安全性
+
+### M8 部署与交付
+- **得分**：2
+- **理由**：满足 Rubric 2 级（Caddy `{$APP_DOMAIN}` 自动 TLS Let's Encrypt 含自动续签——P0-3 ✅ 已解决；DB 服务仅 `internal` 网络无 ports 映射不对外暴露；所有敏感值通过 `${VAR}` 从 .env 注入 + `.gitignore:57-58` 忽略 .env + validate_env.sh 三重 placeholder 拦截 DB_PASSWORD/JWT_SECRET/LOGIN_PASSWORD；`APP_DOCS_ENABLED: ${APP_DOCS_ENABLED:-false}` 默认关闭 OpenAPI——P1-3 ✅），未满足 3 级（❌ **Caddy 零安全 headers** Grep CSP/X-Frame-Options/HSTS in Caddyfile → 0 matches —— P1-M7-2 确认 ❌；❌ **nginx 零安全 headers** Grep in nginx.conf → 0 matches —— P1-M5-2 确认 ❌；❌ 备份无加密 pg_backup.sh `pg_dump | gzip` 明文存储 Grep encrypt/gpg → 0 matches；❌ CVE 扫描 `continue-on-error: true` 不阻塞合入形同虚设——P1-5 ⚠️；❌ 无入口级速率限制/WAF）；与 M1-M7=2 持平——**M8 是共性安全缺口的根源模块**
+- **关键证据**：`deploy/Caddyfile:1` — 自动 HTTPS；`deploy/docker-compose.yml:50-51` — db 无 ports；`deploy/docker-compose.yml:142-143` — 仅 caddy 暴露 80/443；`.gitignore:57-58` — .env 忽略；`deploy/scripts/validate_env.sh:34-47` — placeholder 拦截；`deploy/docker-compose.yml:62` — APP_DOCS_ENABLED 默认 false；`deploy/Caddyfile:1-39` — 无安全 headers 反面证据；`deploy/scripts/pg_backup.sh:21-23` — 明文 gzip 反面证据；`.github/workflows/ci.yml:36-37,58-59` — continue-on-error 反面证据
+
+### D4 可部署性
+
+### M8 部署与交付
+- **得分**：3
+- **理由**：满足 Rubric 3 级（**docker-compose 一键启动**：6 服务完整定义 + depends_on service_healthy + 单 internal 网络；**.env.example 完整**：8 必填 + 25+ 可选变量分区块文档化；**迁移脚本**：migrate.sh + 9 个有序 alembic 迁移全有 up/down；**健康检查全覆盖**：db pg_isready + backend/worker/scheduler /readyz urllib + frontend wget；**一键部署 deploy.sh 10 步完整流程**：validate→pull→db-up→wait-ready→backup→build→migrate→up-all→smoke→trap-rollback；**回滚**：rollback.sh git checkout + alembic downgrade -1 + rebuild + restart，deploy.sh trap EXIT 自动触发；**冒烟检查**：smoke_check.sh retry_curl 10×3s 探测 /healthz+/readyz；**三层配置校验**：validate_env.sh→validate_settings→Pydantic；**资源限制**：6 服务全有 memory limit；**CI/CD 存在**：ci.yml lint+test+audit + deploy.yml SSH workflow_dispatch），未满足 4 级（❌ 无蓝绿/滚动部署 in-place docker compose up -d 有短暂停机；❌ 无 IaC Terraform/Ansible；❌ 无多环境 dev/staging/prod 区分；❌ CD 仅手动触发无 tag push 自动；❌ CVE 扫描 continue-on-error 不阻塞）；**M8 D4=3 与 M1-M7 一致——M8 就是 D4 的基座，M1-M7 的 D4 全部基于 M8**
+- **关键证据**：`deploy/docker-compose.yml:1-165` — 6 服务完整；`deploy/scripts/deploy.sh:1-54` — 10 步流程 + trap EXIT；`deploy/scripts/rollback.sh:1-40` — 完整回滚；`deploy/scripts/smoke_check.sh:16-32` — retry_curl；`deploy/scripts/validate_env.sh:17-47` — 7 key + 3 placeholder；`deploy/.env.example:1-13` — 8 变量；`.github/workflows/ci.yml:1-59` — CI；`.github/workflows/deploy.yml:1-28` — CD 手动触发；`backend/Dockerfile:1-48` — 多阶段 + non-root + HEALTHCHECK
+
+### D5 可观测性
+
+### M8 部署与交付
+- **得分**：2
+- **理由**：满足 Rubric 2 级（deploy.sh/pg_backup.sh 有 `[$(date)]` 时间戳结构化输出；smoke_check.sh `[smoke] OK/FAILED` 格式化结果含 attempt 编号；Caddy JSON access log + `roll_size 10mb roll_keep 10` rotation；deploy.sh `[deploy] previous SHA` / `[deploy] success` 进度标记），未满足 3 级（❌ 无部署事件通知 webhook/Slack；❌ 无集中日志收集 ELK/Loki；❌ 无 /metrics；❌ 无部署追踪记录到 DB/外部系统）；M8 D5=2 与 M7=2/M5=2 持平——**M8 作为部署工具的日志输出满足基本可观测但无业务事件级指标**
+- **关键证据**：`deploy/scripts/pg_backup.sh:19,26,32,36,38` — 时间戳输出；`deploy/scripts/smoke_check.sh:23,27` — 格式化结果；`deploy/Caddyfile:33-37` — JSON log + rotation；`deploy/scripts/deploy.sh:14,54` — 进度标记
+
+### D6 可靠性
+
+### M8 部署与交付
+- **得分**：3
+- **理由**：满足 Rubric 3 级（deploy.sh `trap rollback_on_failure EXIT` 任何步骤失败自动触发 rollback.sh + 成功后 `trap - EXIT` 解除；deploy.sh:46 备份在 migrate 前确保迁移失败可恢复；pg_backup.sh `find -mtime +30 -delete` 30 天轮转 + OSS 上传选项；restore_db.sh 参数校验 + 文件存在检查；6 服务全 `restart: unless-stopped`；deploy.sh DB ready 等待 60s；rollback.sh alembic downgrade 失败 `|| WARNING` 降级不崩溃），未满足 4 级（❌ 无灾难恢复演练；❌ restore_db.sh 管道无 trap 可能静默失败；❌ rollback.sh `alembic downgrade -1` 与 CLAUDE.md 禁止规则矛盾；❌ 备份无 integrity check）；与 M1-M7=3 持平
+- **关键证据**：`deploy/scripts/deploy.sh:16-23` — trap EXIT + rollback_on_failure；`deploy/scripts/deploy.sh:46` — 备份在 migrate 前；`deploy/scripts/pg_backup.sh:28-31,35` — OSS 上传 + 30 天轮转；`deploy/scripts/restore_db.sh:6-13` — 参数校验；`deploy/docker-compose.yml:35,59,79,101,128,141` — restart unless-stopped；`deploy/scripts/rollback.sh:30-31` — downgrade 失败 WARNING 不崩溃
+
+### D7 可维护性
+
+### M8 部署与交付
+- **得分**：3
+- **理由**：满足 Rubric 3 级（**deployment.md 7 节完整**覆盖架构图/前置条件/环境变量表/一键发布 7 步/发布后 4 项检查/升级流程/常见问题链接；**runbook.md 9 个故障场景**含 DB 不可用/Worker 异常/Scheduler 异常/JWT 密钥管理 100+ 行/赛狐 API/启动失败/DB 恢复后/502-503/引擎卡住 + 监控端点速查 + 回滚原则 + 备份恢复；**onboarding.md 10 节新成员入门**含项目概览/结构/环境要求/本地启动/命令/环境变量/开发约定/健康检查/CI-CD/下一步；**ADR 关联**：ADR-1 全栈 async + ADR-2 TaskRun + ADR-3 咨询锁均与 M8 运行时选型相关；脚本 rollback.sh 有文件头 Usage 注释），未满足 4 级（❌ 无"为什么选 Caddy"/"为什么 Docker Compose 不用 K8s" M8 专属 ADR；❌ 无自动化文档生成；❌ onboarding 时间未量化；❌ 无"如何新增 deploy 脚本" how-to）；与 M1/M2/M3/M4/M7=3 持平，**M8 的运维文档覆盖度是全项目最高的**——deployment.md + runbook.md + onboarding.md 三份文档直接归属 M8
+- **关键证据**：`docs/deployment.md:1-205` — 7 节完整部署指南；`docs/runbook.md:1-467` — 9 个故障场景 + 6 个辅助章节；`docs/onboarding.md:1-353` — 10 节新成员入门；`docs/Project_Architecture_Blueprint.md:621-680` — ADR-1/2/3；`deploy/scripts/rollback.sh:1-10` — 文件头 Usage 注释
+
+### D8 性能与容量
+
+### M8 部署与交付
+- **得分**：2
+- **理由**：满足 Rubric 2 级（6 服务全有 `deploy.resources.limits.memory` db 1G/backend 512M/worker 512M/scheduler 512M/frontend 256M/caddy 128M；Caddy `encode gzip zstd` 双压缩；nginx gzip level 6 + `/assets/` `expires 1y immutable` 强缓存；Caddy access log `roll_size 10mb roll_keep 10` 防无限增长），未满足 3 级（❌ 无容量评估文档；❌ 无负载测试；❌ 无 CPU limit 仅 memory；❌ Caddy 层无静态缓存 header 补充）；与 M1/M2/M3/M4/M6/M7=2 持平
+- **关键证据**：`deploy/docker-compose.yml:52-55,73-75,95-97,120-122,135-137,160-161` — 6 服务 memory limit；`deploy/Caddyfile:2` — gzip zstd；`frontend/nginx.conf:8-19` — gzip + immutable cache；`deploy/Caddyfile:33-36` — log rotation
