@@ -72,13 +72,21 @@
 
       <DataTableCard title="补货概览">
         <div class="right-card-content">
-          <div v-if="data?.suggestion_id != null" class="suggestion-progress">
+          <div
+            v-if="data?.suggestion_id != null"
+            class="suggestion-progress"
+            role="button"
+            tabindex="0"
+            aria-label="查看当前建议单详情"
+            @click="goToCurrentSuggestion"
+            @keydown.enter.prevent="goToCurrentSuggestion"
+            @keydown.space.prevent="goToCurrentSuggestion"
+          >
             <div class="suggestion-header">
               <div class="suggestion-meta">
                 <strong>#{{ data.suggestion_id }}</strong>
                 <el-tag :type="suggestionStatus.tagType" size="small">{{ suggestionStatus.label }}</el-tag>
               </div>
-              <el-button link type="primary" @click="go('/restock/current')">查看详情</el-button>
             </div>
             <el-progress
               :percentage="data.suggestion_item_count > 0 ? Math.round((data.pushed_count / data.suggestion_item_count) * 100) : 0"
@@ -241,6 +249,11 @@ function go(path: string): void {
   router.push(path)
 }
 
+function goToCurrentSuggestion(): void {
+  if (data.value?.suggestion_id == null) return
+  go('/restock/current')
+}
+
 onMounted(load)
 </script>
 
@@ -361,6 +374,27 @@ onMounted(load)
   display: flex;
   flex-direction: column;
   gap: $space-2;
+  padding: $space-4;
+  border: 1px solid $color-border-default;
+  border-radius: $radius-lg;
+  background: $color-bg-subtle;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    background-color 160ms ease,
+    transform 160ms ease;
+
+  &:hover {
+    border-color: $color-border-strong;
+    background: $color-bg-subtle-hover;
+    box-shadow: $shadow-card-hover;
+    transform: translateY(-1px);
+  }
+
+  &:focus-visible {
+    @include focus-ring;
+  }
 }
 
 .suggestion-header {
