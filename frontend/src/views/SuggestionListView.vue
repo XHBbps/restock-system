@@ -31,7 +31,6 @@
               <el-option label="待推送" value="pending" />
               <el-option label="已推送" value="pushed" />
               <el-option label="推送失败" value="push_failed" />
-              <el-option label="阻塞" value="blocked" />
             </el-select>
           </div>
           <el-button
@@ -66,7 +65,6 @@
                   :sku="row.commodity_sku"
                   :name="row.commodity_name"
                   :image="row.main_image"
-                  :blocker="row.push_blocker"
                 />
               </el-tooltip>
             </template>
@@ -151,9 +149,9 @@ const sortState = ref<SortState>({})
 
 const PUSH_STATUS_SORT_ORDER: Record<SuggestionItem['push_status'], number> = {
   pending: 0,
+  blocked: 0,
   push_failed: 1,
-  blocked: 2,
-  pushed: 3,
+  pushed: 2,
 }
 
 const statusMeta = computed(() =>
@@ -205,6 +203,10 @@ async function onGenDone(task: TaskRun): Promise<void> {
   ElMessage.error(task.error_msg || '补货任务执行失败，请查看任务详情')
 }
 
+function getDisplayPushStatus(status: SuggestionItem['push_status']): 'pending' | 'push_failed' | 'pushed' {
+  return status === 'blocked' ? 'pending' : status
+}
+
 const filteredItems = computed(() => {
   if (!suggestion.value) return []
   let items = suggestion.value.items
@@ -213,7 +215,7 @@ const filteredItems = computed(() => {
     items = items.filter((it) => it.commodity_sku.toLowerCase().includes(q))
   }
   if (filterPushStatus.value) {
-    items = items.filter((it) => it.push_status === filterPushStatus.value)
+    items = items.filter((it) => getDisplayPushStatus(it.push_status) === filterPushStatus.value)
   }
   return items
 })
