@@ -1,6 +1,8 @@
 ﻿<template>
   <PageSectionCard title="订单列表">
     <template #actions>
+      <el-input-number v-model="refetchDays" :min="1" :max="365" controls-position="right" style="width: 132px" />
+      <el-button type="primary" :loading="refetchLoading" @click="submitOrderDetailRefetch">补拉订单详情</el-button>
       <el-date-picker
         v-model="dateRange"
         type="daterange"
@@ -89,6 +91,8 @@
       :page-sizes="[20, 50, 100, 200]"
     />
 
+    <TaskProgress v-if="refetchTaskId" :task-id="refetchTaskId" @terminal="onRefetchDone" />
+
     <el-dialog v-model="dialogVisible" :title="detail ? `订单详情 · ${detail.amazonOrderId}` : '加载中...'" width="800px">
       <div v-if="detail" class="detail-body">
         <div class="detail-section">
@@ -148,9 +152,12 @@
 
 <script setup lang="ts">
 import { getOrderDetail, listOrders, type DataOrderDetail, type DataOrderSummary } from '@/api/data'
+import { refetchOrderDetail } from '@/api/sync'
 import { COUNTRY_OPTIONS } from '@/utils/countries'
 import PageSectionCard from '@/components/PageSectionCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
+import TaskProgress from '@/components/TaskProgress.vue'
+import type { TaskRun } from '@/api/task'
 import type { TagType } from '@/utils/element'
 import { formatDateTime } from '@/utils/format'
 import { normalizeSortOrder, type SortChangeEvent, type SortState } from '@/utils/tableSort'
@@ -175,6 +182,9 @@ const pagedRows = computed(() => {
 const loading = ref(false)
 const sortState = ref<SortState>({ prop: 'purchaseDate', order: 'desc' })
 const dateRange = ref<[string, string] | null>(null)
+const refetchDays = ref(7)
+const refetchLoading = ref(false)
+const refetchTaskId = ref<number | null>(null)
 const filters = reactive({
   country: '',
   status: '',
@@ -224,6 +234,42 @@ async function openDetail(row: DataOrderSummary): Promise<void> {
       ElMessage.error(getActionErrorMessage(err, '获取订单详情失败'))
     }
   }
+}
+
+async function submitOrderDetailRefetch(): Promise<void> {
+  refetchLoading.value = true
+  try {
+    const result = await refetchOrderDetail({ days: refetchDays.value })
+    if (!result.task_id) {
+      ElMessage.success('当前条件下没有需要补拉的订单')
+      return
+    }
+
+    refetchTaskId.value = result.task_id
+    if (result.existing) {
+      ElMessage.warning('已有订单详情补拉任务在运行，当前复用现有任务进度')
+      return
+    }
+
+    const message = result.truncated
+      ? `订单详情补拉任务已入队，共 ${result.queued_count} 条，命中数量超过上限，已按上限处理`
+      : `订单详情补拉任务已入队，共 ${result.queued_count} 条`
+    ElMessage.success(message)
+  } catch (err) {
+    ElMessage.error(getActionErrorMessage(err, '订单详情补拉触发失败'))
+  } finally {
+    refetchLoading.value = false
+  }
+}
+
+async function onRefetchDone(task: TaskRun): Promise<void> {
+  refetchTaskId.value = null
+  await reload()
+  if (task.status === 'success') {
+    ElMessage.success('订单详情补拉完成，订单列表已刷新')
+    return
+  }
+  ElMessage.error(task.error_msg || '订单详情补拉失败，请查看任务状态')
 }
 
 function statusType(status: string): TagType {

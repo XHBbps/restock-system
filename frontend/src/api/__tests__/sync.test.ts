@@ -21,14 +21,10 @@ describe('api/sync', () => {
 
     const result = await refetchOrderDetail({
       days: 7,
-      limit: 100,
-      shop_id: 'shop-1',
     })
 
     expect(post).toHaveBeenCalledWith('/api/sync/order-detail/refetch', {
       days: 7,
-      limit: 100,
-      shop_id: 'shop-1',
     })
     expect(result.task_id).toBe(12)
     expect(result.queued_count).toBe(20)

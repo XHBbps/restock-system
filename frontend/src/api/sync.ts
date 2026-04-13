@@ -26,7 +26,7 @@ export async function setSchedulerStatus(enabled: boolean): Promise<SchedulerSta
 
 export interface OrderDetailRefetchPayload {
   days: number
-  limit: number
+  limit?: number
   shop_id?: string
 }
 

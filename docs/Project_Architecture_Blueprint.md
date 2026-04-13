@@ -143,7 +143,7 @@ async def sync_inventory_job(ctx: JobContext) -> None:
 
 **状态追踪**：每个 job 在 `sync_state` 表中维护最后运行时间、状态、错误信息。
 
-**订单详情补拉**：除自动 `sync_order_detail` 外，`POST /api/sync/order-detail/refetch` 还支持按“最近 N 天 + 店铺 + 数量上限”批量筛选本地缺少详情的订单，创建 `refetch_order_detail` TaskRun 后台任务；该任务绕过 `order_detail_fetch_log` 的去重过滤，但继续复用既有失败分类、2 QPS / 2 并发抓取与落库逻辑。
+**订单详情补拉**：除自动 `sync_order_detail` 外，订单页还提供“补拉订单详情”入口，前端仅提交回溯天数到 `POST /api/sync/order-detail/refetch`；后端按“最近 N 天 + 默认上限”筛选本地缺少详情的订单，创建 `refetch_order_detail` TaskRun 后台任务。该任务绕过 `order_detail_fetch_log` 的去重过滤，但继续复用既有失败分类、2 QPS / 2 并发抓取与落库逻辑。
 
 ### 3.3 任务队列系统（app/tasks）
 
