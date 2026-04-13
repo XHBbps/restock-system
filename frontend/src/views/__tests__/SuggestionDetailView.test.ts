@@ -36,7 +36,6 @@ function makeItem(overrides: Partial<SuggestionItem> = {}): SuggestionItem {
     warehouse_breakdown: { US: { 'WH-1': 60 }, JP: { 'WH-2': 40 } },
     allocation_snapshot: null,
     t_purchase: { US: '2026-05-01', JP: '2026-05-01' },
-    t_ship: { US: '2026-05-15', JP: '2026-05-15' },
     velocity_snapshot: null,
     sale_days_snapshot: null,
     urgent: false,
@@ -70,14 +69,13 @@ function makeSuggestion(
 }
 
 const STUBS = {
-  // Must render slots so v-if content and nested tags are visible
   ElCard: { template: '<div><slot /><slot name="header" /></div>' },
   ElCollapse: { template: '<div><slot /></div>' },
   ElCollapseItem: { template: '<div><slot /><slot name="title" /></div>' },
-  ElAlert: true,
   ElTag: { template: '<span><slot /></span>' },
   ElButton: true,
   ElInputNumber: true,
+  ElDatePicker: true,
   ElTable: true,
   ElTableColumn: true,
   ElEmpty: true,
@@ -118,5 +116,42 @@ describe('SuggestionDetailView', () => {
     await flushPromises()
 
     expect(mockGetSuggestion).toHaveBeenCalledWith(1)
+  })
+
+  it('submits edited quantity, country replenishment, warehouse and timing fields together', async () => {
+    mockGetSuggestion.mockResolvedValueOnce(makeSuggestion()).mockResolvedValueOnce(makeSuggestion())
+    mockPatchSuggestionItem.mockResolvedValue(makeItem())
+
+    const { default: View } = await import('../SuggestionDetailView.vue')
+    const wrapper = shallowMount(View, { global: { stubs: STUBS } })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      suggestion: SuggestionDetail
+      editing: Record<
+        number,
+        {
+          total_qty: number
+          country_breakdown: Record<string, number>
+          warehouse_breakdown: Record<string, Record<string, number>>
+          t_purchase: Record<string, string>
+        }
+      >
+      save: (item: SuggestionItem) => Promise<void>
+    }
+
+    vm.editing[10].total_qty = 90
+    vm.editing[10].country_breakdown = { US: 50, JP: 35 }
+    vm.editing[10].warehouse_breakdown = { US: { 'WH-1': 50 }, JP: { 'WH-2': 35 } }
+    vm.editing[10].t_purchase = { US: '2026-05-03', JP: '2026-05-04' }
+
+    await vm.save(vm.suggestion.items[0])
+
+    expect(mockPatchSuggestionItem).toHaveBeenCalledWith(1, 10, {
+      total_qty: 90,
+      country_breakdown: { US: 50, JP: 35 },
+      warehouse_breakdown: { US: { 'WH-1': 50 }, JP: { 'WH-2': 35 } },
+      t_purchase: { US: '2026-05-03', JP: '2026-05-04' },
+    })
   })
 })
