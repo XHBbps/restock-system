@@ -22,10 +22,10 @@
         </div>
       </template>
 
-      <el-alert
+      <el-alert v-if="false"
         type="info"
         :closable="false"
-        title="当前仅支持修改总采购量；国家分量、仓库分量为只读，保存后将按服务端最新结果刷新。"
+        title="支持修改总采购量、国家分量、仓库分量与采购/发货时间；保存前会校验汇总一致性。"
       />
 
       <el-collapse v-model="expanded">
@@ -54,7 +54,7 @@
                   <div class="panel-header">
                     <div>
                       <div class="section-title">采购调整</div>
-                      <div class="section-desc">当前只支持修改总采购量，保存后会按服务端最新结果刷新。</div>
+                      <div class="section-desc">可统一调整总量，并按国家、仓库与时间维度逐项校正。</div>
                     </div>
                   </div>
                   <div class="editor-row">
@@ -62,7 +62,7 @@
                       <span class="editor-label">总采购量</span>
                       <el-input-number v-model="editing[item.id].total_qty" :min="0" size="small" />
                     </div>
-                    <div class="editor-hint">国家分量、仓库分量当前为只读。</div>
+                    <div class="editor-hint">国家总量之和必须等于总采购量；已配置仓库时，仓内分量之和必须等于国家总量。</div>
                   </div>
                 </section>
 
@@ -70,18 +70,66 @@
                   <div class="panel-header">
                     <div>
                       <div class="section-title">国家分量与仓内拆分</div>
-                      <div class="section-desc">统一查看国家总量、仓内分配、拆分依据。</div>
+                      <div class="section-desc">支持按国家修改数量、采购/发货时间，并调整对应仓内拆分。</div>
                     </div>
                   </div>
                   <el-table :data="countryRows(item)" size="small" class="detail-table">
                     <el-table-column prop="country" label="国家" width="88" sortable show-overflow-tooltip />
-                    <el-table-column prop="qty" label="国家总量" width="108" sortable show-overflow-tooltip />
-                    <el-table-column label="各仓明细" min-width="180">
+                    <el-table-column label="国家总量" width="140">
+                      <template #default="{ row }">
+                        <el-input-number
+                          v-if="isEditable(item)"
+                          v-model="editing[item.id].country_breakdown[row.country]"
+                          :min="0"
+                          class="table-number-input"
+                          size="small"
+                        />
+                        <span v-else>{{ row.qty }}</span>
+                      </template>
+                    </el-table-column>
+                    <el-table-column label="采购时间" min-width="156">
+                      <template #default="{ row }">
+                        <el-date-picker
+                          v-if="isEditable(item)"
+                          v-model="editing[item.id].t_purchase[row.country]"
+                          type="date"
+                          value-format="YYYY-MM-DD"
+                          class="table-date-input"
+                          placeholder="选择日期"
+                          size="small"
+                        />
+                        <span v-else class="allocation-text">{{ row.tPurchase || '-' }}</span>
+                      </template>
+                    </el-table-column>
+                    <el-table-column label="发货时间" min-width="156">
+                      <template #default="{ row }">
+                        <el-date-picker
+                          v-if="isEditable(item)"
+                          v-model="editing[item.id].t_ship[row.country]"
+                          type="date"
+                          value-format="YYYY-MM-DD"
+                          class="table-date-input"
+                          placeholder="选择日期"
+                          size="small"
+                        />
+                        <span v-else class="allocation-text">{{ row.tShip || '-' }}</span>
+                      </template>
+                    </el-table-column>
+                    <el-table-column label="各仓明细" min-width="240">
                       <template #default="{ row }">
                         <div v-if="Object.keys(row.warehouses).length" class="warehouse-list">
-                          <span v-for="(wq, w) in row.warehouses" :key="w" class="warehouse-chip">
-                            {{ w }}: {{ wq }}
-                          </span>
+                          <template v-for="(wq, w) in row.warehouses" :key="w">
+                            <label v-if="isEditable(item)" class="warehouse-editor">
+                              <span class="warehouse-label">{{ w }}</span>
+                              <el-input-number
+                                v-model="editing[item.id].warehouse_breakdown[row.country][w]"
+                                :min="0"
+                                class="table-number-input warehouse-number-input"
+                                size="small"
+                              />
+                            </label>
+                            <span v-else class="warehouse-chip">{{ w }}: {{ wq }}</span>
+                          </template>
                         </div>
                         <span v-else class="allocation-text">未拆分</span>
                       </template>
@@ -159,7 +207,7 @@
                     <el-tag v-if="!isEditable(item)" type="info">
                       {{ item.push_status === 'pushed' ? '已推送条目不可编辑' : '已归档建议单不可编辑' }}
                     </el-tag>
-                    <span v-else-if="!hasChanges(item)" class="action-hint">修改总采购量后可保存</span>
+                    <span v-else-if="!hasChanges(item)" class="action-hint">修改国家分量、仓库分量或时间后可保存</span>
                   </div>
                 </section>
               </aside>
@@ -202,7 +250,15 @@ const route = useRoute()
 const router = useRouter()
 const suggestion = ref<SuggestionDetail | null>(null)
 const expanded = ref<number[]>([])
-const editing = reactive<Record<number, { total_qty: number }>>({})
+interface ItemEditingState {
+  total_qty: number
+  country_breakdown: Record<string, number>
+  warehouse_breakdown: Record<string, Record<string, number>>
+  t_purchase: Record<string, string>
+  t_ship: Record<string, string>
+}
+
+const editing = reactive<Record<number, ItemEditingState>>({})
 const savingState = reactive<Record<number, boolean>>({})
 const loading = ref(false)
 const notFound = ref(false)
@@ -252,20 +308,28 @@ interface CountryRow {
   country: string
   qty: number
   warehouses: Record<string, number>
+  tPurchase: string | null
+  tShip: string | null
   allocation: AllocationExplanation | null
 }
 
 function countryRows(item: SuggestionItem): CountryRow[] {
-  return Object.entries(item.country_breakdown).map(([country, qty]) => ({
+  const state = editing[item.id]
+  const countries = collectCountries(item, state)
+  return countries.map((country) => ({
     country,
-    qty,
-    warehouses: item.warehouse_breakdown[country] || {},
+    qty: state?.country_breakdown[country] ?? item.country_breakdown[country] ?? 0,
+    warehouses: state?.warehouse_breakdown[country] ?? item.warehouse_breakdown[country] ?? {},
+    tPurchase: state?.t_purchase[country] ?? item.t_purchase[country] ?? null,
+    tShip: state?.t_ship[country] ?? item.t_ship[country] ?? null,
     allocation: item.allocation_snapshot?.[country] || null,
   }))
 }
 
 function hasChanges(item: SuggestionItem): boolean {
-  return editing[item.id]?.total_qty !== item.total_qty
+  const state = editing[item.id]
+  if (!state) return false
+  return JSON.stringify(normalizeEditingState(state)) !== JSON.stringify(snapshotItemState(item))
 }
 
 function isEditable(item: SuggestionItem): boolean {
@@ -274,11 +338,17 @@ function isEditable(item: SuggestionItem): boolean {
 
 async function save(item: SuggestionItem): Promise<void> {
   if (!suggestion.value || !isEditable(item)) return
+  const state = editing[item.id]
+  const validationError = validateEditingState(item, state)
+  if (validationError) {
+    ElMessage.error(validationError)
+    return
+  }
+  const patch = buildPatch(item, state)
+  if (!Object.keys(patch).length) return
   savingState[item.id] = true
   try {
-    await patchSuggestionItem(suggestion.value.id, item.id, {
-      total_qty: editing[item.id].total_qty,
-    })
+    await patchSuggestionItem(suggestion.value.id, item.id, patch)
     await load()
     ElMessage.success('已保存，详情已刷新。')
   } catch (error) {
@@ -298,6 +368,122 @@ function parsePositiveInt(value: unknown): number | null {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null
 }
 
+function collectCountries(item: SuggestionItem, state?: ItemEditingState): string[] {
+  return [...new Set([
+    ...Object.keys(item.country_breakdown),
+    ...Object.keys(item.warehouse_breakdown),
+    ...Object.keys(item.t_purchase),
+    ...Object.keys(item.t_ship),
+    ...Object.keys(item.allocation_snapshot || {}),
+    ...(state ? [
+      ...Object.keys(state.country_breakdown),
+      ...Object.keys(state.warehouse_breakdown),
+      ...Object.keys(state.t_purchase),
+      ...Object.keys(state.t_ship),
+    ] : []),
+  ])].sort()
+}
+
+function normalizeNumberMap(input: Record<string, number>): Record<string, number> {
+  return Object.fromEntries(
+    Object.entries(input)
+      .map(([key, value]) => [key, Number(value ?? 0)])
+      .sort(([left], [right]) => String(left).localeCompare(String(right))),
+  )
+}
+
+function normalizeWarehouseBreakdown(input: Record<string, Record<string, number>>): Record<string, Record<string, number>> {
+  return Object.fromEntries(
+    Object.entries(input)
+      .map(([country, warehouses]) => [
+        country,
+        Object.fromEntries(
+          Object.entries(warehouses)
+            .map(([warehouseId, qty]) => [warehouseId, Number(qty ?? 0)])
+            .sort(([left], [right]) => String(left).localeCompare(String(right))),
+        ),
+      ])
+      .sort(([left], [right]) => left.localeCompare(right)),
+  )
+}
+
+function normalizeDateMap(input: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(input)
+      .map(([country, value]) => [country, value || ''])
+      .sort(([left], [right]) => left.localeCompare(right)),
+  )
+}
+
+function normalizeEditingState(state: ItemEditingState) {
+  return {
+    total_qty: Number(state.total_qty ?? 0),
+    country_breakdown: normalizeNumberMap(state.country_breakdown),
+    warehouse_breakdown: normalizeWarehouseBreakdown(state.warehouse_breakdown),
+    t_purchase: normalizeDateMap(state.t_purchase),
+    t_ship: normalizeDateMap(state.t_ship),
+  }
+}
+
+function snapshotItemState(item: SuggestionItem) {
+  return normalizeEditingState({
+    total_qty: item.total_qty,
+    country_breakdown: item.country_breakdown,
+    warehouse_breakdown: item.warehouse_breakdown,
+    t_purchase: item.t_purchase,
+    t_ship: item.t_ship,
+  })
+}
+
+function buildPatch(item: SuggestionItem, state: ItemEditingState) {
+  const patch: {
+    total_qty?: number
+    country_breakdown?: Record<string, number>
+    warehouse_breakdown?: Record<string, Record<string, number>>
+    t_purchase?: Record<string, string>
+    t_ship?: Record<string, string>
+  } = {}
+  const normalizedState = normalizeEditingState(state)
+  const normalizedItem = snapshotItemState(item)
+
+  if (normalizedState.total_qty !== normalizedItem.total_qty) {
+    patch.total_qty = normalizedState.total_qty
+  }
+  if (JSON.stringify(normalizedState.country_breakdown) !== JSON.stringify(normalizedItem.country_breakdown)) {
+    patch.country_breakdown = normalizedState.country_breakdown
+  }
+  if (JSON.stringify(normalizedState.warehouse_breakdown) !== JSON.stringify(normalizedItem.warehouse_breakdown)) {
+    patch.warehouse_breakdown = normalizedState.warehouse_breakdown
+  }
+  if (JSON.stringify(normalizedState.t_purchase) !== JSON.stringify(normalizedItem.t_purchase)) {
+    patch.t_purchase = normalizedState.t_purchase
+  }
+  if (JSON.stringify(normalizedState.t_ship) !== JSON.stringify(normalizedItem.t_ship)) {
+    patch.t_ship = normalizedState.t_ship
+  }
+  return patch
+}
+
+function validateEditingState(item: SuggestionItem, state?: ItemEditingState): string | null {
+  if (!state) return '编辑状态缺失，请刷新后重试。'
+  const totalQty = Number(state.total_qty ?? 0)
+  const countryTotal = Object.values(state.country_breakdown).reduce((sum, qty) => sum + Number(qty || 0), 0)
+  if (countryTotal !== totalQty) {
+    return '国家分量之和必须等于总采购量。'
+  }
+  for (const country of collectCountries(item, state)) {
+    const countryQty = Number(state.country_breakdown[country] ?? 0)
+    const warehouses = state.warehouse_breakdown[country] || {}
+    const warehouseValues = Object.values(warehouses)
+    if (!warehouseValues.length) continue
+    const warehouseTotal = warehouseValues.reduce((sum, qty) => sum + Number(qty || 0), 0)
+    if (warehouseTotal !== countryQty) {
+      return `${country} 的各仓明细之和必须等于国家总量。`
+    }
+  }
+  return null
+}
+
 function syncEditingState(data: SuggestionDetail): void {
   const activeIds = new Set(data.items.map((item) => item.id))
   expanded.value = expanded.value.filter((itemId) => activeIds.has(itemId))
@@ -309,7 +495,22 @@ function syncEditingState(data: SuggestionDetail): void {
     }
   }
   for (const item of data.items) {
-    editing[item.id] = { total_qty: item.total_qty }
+    editing[item.id] = {
+      total_qty: item.total_qty,
+      country_breakdown: Object.fromEntries(
+        Object.entries(item.country_breakdown).map(([country, qty]) => [country, Number(qty)]),
+      ),
+      warehouse_breakdown: Object.fromEntries(
+        Object.entries(item.warehouse_breakdown).map(([country, warehouses]) => [
+          country,
+          Object.fromEntries(
+            Object.entries(warehouses).map(([warehouseId, qty]) => [warehouseId, Number(qty)]),
+          ),
+        ]),
+      ),
+      t_purchase: { ...item.t_purchase },
+      t_ship: { ...item.t_ship },
+    }
   }
 }
 
@@ -465,6 +666,10 @@ watch(
   padding: $space-4;
 }
 
+.item-main > .panel:nth-of-type(2) .section-desc {
+  display: none;
+}
+
 .panel-compact {
   padding-bottom: $space-3;
 }
@@ -536,8 +741,25 @@ watch(
 
 .warehouse-list {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.warehouse-editor {
+  display: grid;
+  grid-template-columns: minmax(48px, max-content) minmax(0, 1fr);
+  align-items: center;
   gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+
+.warehouse-label {
+  min-width: 0;
+  color: $color-text-secondary;
+  font-size: $font-size-xs;
+  overflow-wrap: anywhere;
 }
 
 .allocation-meta {
@@ -666,6 +888,27 @@ watch(
 
 :deep(.detail-table .cell) {
   line-height: 1.5;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+:deep(.detail-table .table-number-input) {
+  width: 100%;
+  max-width: 116px;
+}
+
+:deep(.detail-table .table-date-input) {
+  width: 100%;
+  min-width: 0;
+}
+
+:deep(.detail-table .table-date-input.el-date-editor.el-input) {
+  width: 100%;
+  max-width: 160px;
+}
+
+:deep(.detail-table .warehouse-number-input) {
+  max-width: 108px;
 }
 
 :deep(.sku-card) {
