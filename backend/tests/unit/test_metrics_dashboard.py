@@ -1,0 +1,169 @@
+from types import SimpleNamespace
+
+import pytest
+
+from app.api.metrics import get_dashboard_overview
+
+
+class _ScalarOneResult:
+    def __init__(self, value) -> None:
+        self._value = value
+
+    def scalar_one(self):
+        return self._value
+
+
+class _ScalarOneOrNoneResult:
+    def __init__(self, value) -> None:
+        self._value = value
+
+    def scalar_one_or_none(self):
+        return self._value
+
+
+class _ScalarsResult:
+    def __init__(self, values) -> None:
+        self._values = values
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return self._values
+
+
+class _RowsResult:
+    def __init__(self, rows) -> None:
+        self._rows = rows
+
+    def all(self):
+        return self._rows
+
+
+class _FakeDb:
+    def __init__(self, responses) -> None:
+        self._responses = list(responses)
+
+    async def execute(self, stmt, *args, **kwargs):
+        return self._responses.pop(0)
+
+
+@pytest.mark.asyncio
+async def test_dashboard_returns_empty_risk_distribution_without_active_suggestion() -> None:
+    db = _FakeDb(
+        [
+            _ScalarOneResult(12),
+            _ScalarOneOrNoneResult(SimpleNamespace(target_days=60, lead_time_days=50)),
+            _ScalarOneOrNoneResult(None),
+        ]
+    )
+
+    result = await get_dashboard_overview(db=db, _={})  # type: ignore[arg-type]
+
+    assert result.enabled_sku_count == 12
+    assert result.target_days == 60
+    assert result.lead_time_days == 50
+    assert result.suggestion_id is None
+    assert result.country_risk_distribution == []
+    assert result.top_urgent_skus == []
+
+
+@pytest.mark.asyncio
+async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() -> None:
+    items = [
+        SimpleNamespace(
+            commodity_sku="SKU-1",
+            sale_days_snapshot={"US": 10, "CA": 70},
+            urgent=True,
+            total_qty=12,
+            country_breakdown={"US": 12},
+            push_status="pending",
+        ),
+        SimpleNamespace(
+            commodity_sku="SKU-2",
+            sale_days_snapshot={"US": 30, "CA": 15},
+            urgent=False,
+            total_qty=8,
+            country_breakdown={"CA": 8},
+            push_status="pushed",
+        ),
+        SimpleNamespace(
+            commodity_sku="SKU-3",
+            sale_days_snapshot={"US": 60, "JP": 19},
+            urgent=True,
+            total_qty=5,
+            country_breakdown={"JP": 5},
+            push_status="pending",
+        ),
+        SimpleNamespace(
+            commodity_sku="SKU-4",
+            sale_days_snapshot=None,
+            urgent=False,
+            total_qty=3,
+            country_breakdown={"US": 3},
+            push_status="pending",
+        ),
+    ]
+    db = _FakeDb(
+        [
+            _ScalarOneResult(4),
+            _ScalarOneOrNoneResult(SimpleNamespace(target_days=60, lead_time_days=20)),
+            _ScalarOneOrNoneResult(SimpleNamespace(id=9, status="draft")),
+            _ScalarsResult(items),
+            _RowsResult(
+                [
+                    ("SKU-1", "Alpha", None),
+                    ("SKU-3", "Gamma", "https://img.example/gamma.png"),
+                ]
+            ),
+        ]
+    )
+
+    result = await get_dashboard_overview(db=db, _={})  # type: ignore[arg-type]
+
+    assert result.suggestion_id == 9
+    assert result.pushed_count == 1
+    assert result.urgent_count == 2
+    assert result.lead_time_days == 20
+    assert result.target_days == 60
+    assert [item.model_dump() for item in result.country_risk_distribution] == [
+        {
+            "country": "CA",
+            "urgent_count": 1,
+            "warning_count": 0,
+            "safe_count": 1,
+            "total_count": 2,
+        },
+        {
+            "country": "JP",
+            "urgent_count": 1,
+            "warning_count": 0,
+            "safe_count": 0,
+            "total_count": 1,
+        },
+        {
+            "country": "US",
+            "urgent_count": 1,
+            "warning_count": 1,
+            "safe_count": 1,
+            "total_count": 3,
+        },
+    ]
+    assert [item.model_dump() for item in result.top_urgent_skus] == [
+        {
+            "commodity_sku": "SKU-1",
+            "commodity_name": "Alpha",
+            "main_image": None,
+            "total_qty": 12,
+            "min_sale_days": 10.0,
+            "country_breakdown": {"US": 12},
+        },
+        {
+            "commodity_sku": "SKU-3",
+            "commodity_name": "Gamma",
+            "main_image": "https://img.example/gamma.png",
+            "total_qty": 5,
+            "min_sale_days": 19.0,
+            "country_breakdown": {"JP": 5},
+        },
+    ]
