@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-13（补货发起页推送标签口径收敛）
+> 最近更新：2026-04-13（建议单商品ID自动补齐与推送状态口径修复）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -116,6 +116,12 @@
 ---
 
 ## 3. 近期重大变更（2026-04-10 ~ 2026-04-13）
+
+### 3.28 建议单商品ID自动补齐与推送状态口径修复（2026-04-13）
+- `backend/app/core/commodity_id.py` 新增 SKU -> `commodity_id` 解析与建议条目推送可用性修复逻辑，按 `commodity_sku` / `seller_sku` 分层回退匹配；`backend/app/engine/runner.py` 复用该解析逻辑，生成建议单时尽量直接补齐 `commodity_id`
+- `backend/app/api/suggestion.py` 在读取当前建议单/建议单详情以及手动推送前，自动为缺少 `commodity_id` 的条目重新解析并修复 `push_blocker`、`push_status`；已能补齐商品ID的旧条目刷新后会恢复为可推送
+- `frontend/src/views/SuggestionListView.vue` 恢复推送状态真实语义：仅真正可推送条目显示为“待推送”并允许勾选，`blocked` 改为“待处理”独立筛选；`frontend/src/utils/status.ts` 同步状态标签文案
+- **测试**：新增 `backend/tests/unit/test_commodity_id.py`，并更新 `backend/tests/unit/test_engine_runner.py`、`backend/tests/unit/test_suggestion_patch.py`、`frontend/src/views/__tests__/SuggestionListView.test.ts`、`frontend/src/utils/status.test.ts`
 
 ### 3.27 补货发起页推送标签口径收敛（2026-04-13）
 - `frontend/src/views/SuggestionListView.vue` 移除商品信息卡片后的推送阻塞标签展示，并将 `blocked` 条目在前端筛选与排序口径中并入“待推送”

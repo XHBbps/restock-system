@@ -20,6 +20,7 @@ from typing import Any
 from sqlalchemy import insert, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.commodity_id import resolve_commodity_id_map
 from app.core.logging import get_logger
 from app.core.restock_regions import resolve_allowed_restock_regions
 from app.core.timezone import now_beijing
@@ -36,7 +37,6 @@ from app.engine.step5_warehouse_split import (
 )
 from app.engine.step6_timing import compute_timing_for_sku
 from app.models.global_config import GlobalConfig
-from app.models.product_listing import ProductListing
 from app.models.sku import SkuConfig
 from app.models.suggestion import Suggestion, SuggestionItem
 from app.tasks.jobs import JobContext
@@ -236,22 +236,8 @@ def _config_snapshot(config: GlobalConfig) -> dict[str, Any]:
 
 
 async def _load_commodity_id_map(db: AsyncSession, skus: list[str]) -> dict[str, str | None]:
-    """每个 commodity_sku 取任意一个 commodity_id。"""
-    rows = (
-        await db.execute(
-            select(ProductListing.commodity_sku, ProductListing.commodity_id)
-            .where(ProductListing.commodity_sku.in_(skus))
-            .where(ProductListing.commodity_id.is_not(None))
-            .where(ProductListing.is_matched.is_(True))
-            .where(ProductListing.online_status == "active")
-            .order_by(ProductListing.commodity_sku, ProductListing.commodity_id)
-        )
-    ).all()
-    result: dict[str, str | None] = dict.fromkeys(skus)
-    for sku, cid in rows:
-        if result.get(sku) is None and cid:
-            result[sku] = cid
-    return result
+    """Resolve commodity IDs using the shared fallback strategy."""
+    return await resolve_commodity_id_map(db, skus)
 
 
 async def _persist_suggestion(

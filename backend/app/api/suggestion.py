@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.api.deps import db_session, get_current_session
+from app.core.commodity_id import refresh_suggestion_item_pushability
 from app.core.exceptions import ConflictError, NotFound, PushBlockedError, ValidationFailed
 from app.core.query import escape_like
 from app.core.timezone import BEIJING, now_beijing
@@ -289,6 +290,8 @@ async def push_items(
     if len(items) != len(req.item_ids):
         raise NotFound("部分条目不存在")
 
+    await refresh_suggestion_item_pushability(db, items)
+
     blocked = [it.id for it in items if it.push_blocker]
     if blocked:
         raise PushBlockedError(
@@ -365,6 +368,7 @@ async def _build_detail(db: AsyncSession, sug: Suggestion) -> SuggestionDetailOu
             .order_by(SuggestionItem.urgent.desc(), SuggestionItem.id)
         )
     ).scalars().all()
+    await refresh_suggestion_item_pushability(db, items)
 
     sku_codes = [it.commodity_sku for it in items]
     name_map: dict[str, tuple[str | None, str | None]] = {}

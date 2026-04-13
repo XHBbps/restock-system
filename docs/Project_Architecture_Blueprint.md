@@ -114,7 +114,7 @@
 
 **并发控制**：通过 `pg_advisory_xact_lock(7429001)` 事务级咨询锁（`runner.py:58-61`），防止并发引擎覆盖彼此。
 
-**持久化**：一次完整计算作为原子事务 → 旧的 draft/partial 建议归档 → 新建 Suggestion + SuggestionItem[] 批量 INSERT。
+**持久化**：一次完整计算作为原子事务 → 旧的 draft/partial 建议归档 → 新建 Suggestion + SuggestionItem[] 批量 INSERT；写入前会按 `commodity_sku` / `seller_sku` 分层回退解析 `commodity_id`，尽量减少初始 `blocked` 条目。
 
 **快照特性**：`velocity_snapshot`、`sale_days_snapshot`、`global_config_snapshot` 均存入 JSONB 字段，支持历史追溯；其中 `global_config_snapshot` 会记录生成时的 `restock_regions`，用于说明当次建议有哪些国家订单参与了计算。
 
@@ -449,7 +449,7 @@ api/suggestion.py: push_items() → enqueue_task("push_saihu", dedupe="push_saih
 Worker 执行 pushback/purchase.py
   │
   ├─▶ 加载 GlobalConfig.default_purchase_warehouse_id
-  ├─▶ 检查所有条目都有 commodity_id（否则 PushBlockedError）
+  ├─▶ API 层先自动重查并补齐缺失 commodity_id；仍缺失时才抛出 PushBlockedError
   ├─▶ 构造 saihu_items = [{commodityId, num}]
   │
   ▼

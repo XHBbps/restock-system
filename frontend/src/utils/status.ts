@@ -22,7 +22,7 @@ const suggestionPushStatusMap: Record<string, StatusMeta> = {
   pending: { label: '待推送', tagType: 'warning' },
   pushed: { label: '已推送', tagType: 'success' },
   push_failed: { label: '推送失败', tagType: 'danger' },
-  blocked: { label: '待推送', tagType: 'warning' },
+  blocked: { label: '待处理', tagType: 'info' },
 }
 
 const syncStatusMap: Record<string, StatusMeta> = {
