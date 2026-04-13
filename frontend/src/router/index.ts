@@ -20,7 +20,6 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/components/AppLayout.vue'),
     redirect: '/workspace',
     children: [
-      // --- HOME ---
       {
         path: 'workspace',
         name: 'workspace',
@@ -28,7 +27,6 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '信息总览', section: 'HOME' },
       },
 
-      // --- RESTOCK ---
       {
         path: 'restock/current',
         name: 'suggestion-list',
@@ -49,7 +47,6 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '建议详情', section: 'RESTOCK' },
       },
 
-      // --- DATA ---
       {
         path: 'data/shops',
         name: 'data-shops',
@@ -87,7 +84,6 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '出库记录', section: 'DATA' },
       },
 
-      // --- SETTINGS ---
       {
         path: 'settings/sync',
         name: 'sync-console',
@@ -127,7 +123,7 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/PerformanceMonitorView.vue'),
         meta: { title: '性能监控', section: 'SETTINGS' },
       },
-      // --- Legacy redirects ---
+
       { path: 'sync', redirect: '/settings/sync' },
       { path: 'sync/manual', redirect: '/settings/sync' },
       { path: 'sync/auto', redirect: '/settings/sync' },
@@ -148,7 +144,6 @@ const routes: RouteRecordRaw[] = [
       { path: 'troubleshooting/performance', redirect: '/settings/performance' },
       { path: 'ops/sync', redirect: '/settings/sync' },
 
-      // --- Not found ---
       {
         path: ':pathMatch(.*)*',
         name: 'not-found',
