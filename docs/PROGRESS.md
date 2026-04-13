@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-13（同步任务进度可观测增强）
+> 最近更新：2026-04-13（补货区域接入全局参数与补货计算）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -56,8 +56,9 @@
   4. `step4_total` — 总采购量（扣减国内库存 + 缓冲天数）
   5. `step5_warehouse_split` — 按邮编规则分配到具体仓库
   6. `step6_timing` — 建议采购日 / 紧急标志
+- **补货区域过滤**：全局参数 `restock_regions` 支持按国家多选；为空数组时表示全部国家参与计算，配置后仅这些国家的订单会参与 `step1_velocity` 销量统计和 `step5_warehouse_split` 的国家订单分仓
 - **并发保护**：`pg_advisory_xact_lock(7429001)` 事务级锁，阻止并发引擎覆盖彼此
-- **快照追溯**：`velocity_snapshot`、`sale_days_snapshot`、`global_config_snapshot` 存入 JSONB 字段
+- **快照追溯**：`velocity_snapshot`、`sale_days_snapshot`、`global_config_snapshot` 存入 JSONB 字段；其中 `global_config_snapshot` 会记录 `restock_regions`
 
 ### 2.4 补货建议管理
 
@@ -83,6 +84,7 @@
 - **数据加载模式**：所有数据页统一使用"一次拉全量 + 前端筛选 + 本地分页"，`page_size=5000`
 - **筛选控件高度统一**：`PageSectionCard` 的 `section-actions` 强制所有控件 32px 高度
 - **订单状态中文映射**：`DataOrdersView.vue` 添加 `ORDER_STATUS_LABEL`（已发货 / 部分发货 / 未发货 / 待处理 / 已取消）
+- **全局参数页补货区域配置**：`GlobalConfigView.vue` 新增“补货区域”多选，选项复用 `COUNTRY_OPTIONS`，保存前变更检测与配置变更提示已纳入 `restock_regions`
 
 ### 2.6 数据管理
 
@@ -111,6 +113,14 @@
 ---
 
 ## 3. 近期重大变更（2026-04-10 ~ 2026-04-13）
+
+### 3.21 补货区域接入全局参数与引擎过滤（2026-04-13）
+- `backend/app/models/global_config.py`、`backend/alembic/versions/20260414_1500_add_restock_regions_to_global_config.py` 为 `global_config` 新增 `restock_regions` JSONB 字段，默认值为 `[]`；`backend/app/main.py` 启动初始化时同步补齐默认配置
+- `backend/app/core/restock_regions.py` 统一处理补货区域的规范化与可用国家集合解析；`backend/app/schemas/config.py` 复用该逻辑，对输入执行去空、去重、转大写和 2 位国家码校验
+- `backend/app/engine/runner.py` 在生成建议前解析 `restock_regions`，并把允许国家集合传入 `step1_velocity` 与 `step5_warehouse_split`；`restock_regions=[]` 明确表示“全部国家参与计算”
+- `backend/app/engine/runner.py` 写入的 `global_config_snapshot` 新增 `restock_regions`；历史建议不回填，仅后续新生成建议携带该快照
+- `frontend/src/views/GlobalConfigView.vue` 保持原有 `PageSectionCard + el-form` 风格，在全局参数页新增“补货区域”多选控件；保存 payload、未保存变更检测和“建议重新生成补货建议单”提示均已覆盖该字段
+- **测试**：新增/更新 `backend/tests/unit/test_config_schema.py`、`backend/tests/unit/test_engine_step1.py`、`backend/tests/unit/test_engine_step5.py`、`backend/tests/unit/test_engine_runner.py`、`backend/tests/integration/test_config_api.py`、`frontend/src/views/__tests__/GlobalConfigView.test.ts`，覆盖参数校验、SQL 过滤、引擎透传与前端交互
 
 ### 3.20 同步任务进度可观测增强（2026-04-13）
 - `backend/app/sync/order_detail.py` 将 `sync_order_detail` / `refetch_order_detail` 的进度文案统一为“已完成 X / 失败 Y / 总数 N”，按当前目标集合精确回写，不增加额外赛狐请求
@@ -228,7 +238,7 @@
 
 ### 3.5 配置变更影响提示
 
-- **全局参数**保存后：若 `target_days` / `buffer_days` / `lead_time_days` 任一变更，前端警告"建议重新生成补货建议单"
+- **全局参数**保存后：若 `target_days` / `buffer_days` / `lead_time_days` / `restock_regions` 任一变更，前端警告"建议重新生成补货建议单"
 - **仓库国家**修改后：前端警告 + 同步更新库存表
 - **邮编规则**变更：不加提示（仅影响仓库分配展示，不影响采购量）
 
@@ -294,7 +304,7 @@
 
 ### 4.1 后端
 
-- `cd backend && .\.venv\Scripts\python.exe -m pytest`：**117 passed, 2 skipped**（集成测试需要 TEST_DATABASE_URL）
+- `cd backend && .\.venv\Scripts\python.exe -m pytest -p no:cacheprovider`：**213 passed, 8 skipped**
 - 关键测试：
   - `tests/unit/test_engine_step1.py` ~ `test_engine_step6.py`
   - `tests/unit/test_zipcode_matcher.py`
@@ -307,9 +317,9 @@
 
 ### 4.2 前端
 
-- `cd frontend && npx vue-tsc --noEmit`：类型检查通过
-- `cd frontend && npx vite build`：构建成功（~10 秒）
-- `cd frontend && npm run test`：Vitest 通过
+- `cd frontend && cmd /c npx vue-tsc --noEmit`：类型检查通过
+- `cd frontend && cmd /c npm run test`：Vitest 通过
+- `cd frontend && powershell -Command "cmd /c npm run build"`：构建成功
 
 ### 4.3 SKU 配置初始化
 

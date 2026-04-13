@@ -15,7 +15,7 @@
 1. **纯异步 I/O**：后端从 Web 层（FastAPI）到数据库层（asyncpg）全链路 async/await，避免阻塞
 2. **数据库即队列**：自研 TaskRun 表替代 Celery/Redis，减少部署复杂度
 3. **进程内编排**：Worker、Scheduler、Reaper 与 FastAPI 在同一 Python 进程中运行（可通过环境变量分离）
-4. **快照即历史**：补货建议生成时快照输入（velocity、sale_days、配置），已生成的建议单不会因配置变更而改动
+4. **快照即历史**：补货建议生成时快照输入（velocity、sale_days、配置，含 `restock_regions`），已生成的建议单不会因配置变更而改动
 5. **批量优先于迭代**：引擎和同步层尽量批量加载，避免 N+1 查询
 6. **前端本地分页**：数据页一次拉取全量，前端做筛选和分页（内部用户 1-5 人，数据量有限）
 
@@ -105,18 +105,18 @@
 
 | Step | 模块 | 输入 | 输出 | 说明 |
 |---|---|---|---|---|
-| 1 | `step1_velocity.py` | 近 30 天订单 | `velocity[sku][country]` | 加权日均销量：7日×0.5 + 14日×0.3 + 30日×0.2 |
+| 1 | `step1_velocity.py` | 近 30 天订单 | `velocity[sku][country]` | 加权日均销量：7日×0.5 + 14日×0.3 + 30日×0.2；若 `global_config.restock_regions` 非空，则仅统计这些国家的订单 |
 | 2 | `step2_sale_days.py` | velocity + 海外库存 + 在途 | `sale_days[sku][country]`, `inventory[sku][country]` | 可售天数 = 库存总和 / velocity；`load_in_transit` 基于已推送未归档的建议条目 |
 | 3 | `step3_country_qty.py` | velocity + inventory + target_days | `country_qty[sku][country]` | `max(target × v − 库存, 0)`，纯函数无 DB |
 | 4 | `step4_total.py` | country_qty + velocity + 国内库存 + buffer_days | `total_qty[sku]` | 汇总各国补货量 + 缓冲天数 − 国内库存 |
-| 5 | `step5_warehouse_split.py` | country_qty + 订单邮编 + 邮编规则 + 国家仓库映射 | `warehouse_breakdown[country][wh_id]` | 按邮编规则分配到具体仓库，无订单时均分；**2026-04-11 起**同优先级 tied 均分：`match_warehouses()` 返回首批同 priority 命中列表，qty 按 `1/N` 均分（先过滤不可用仓再定 N） |
+| 5 | `step5_warehouse_split.py` | country_qty + 订单邮编 + 邮编规则 + 国家仓库映射 | `warehouse_breakdown[country][wh_id]` | 按邮编规则分配到具体仓库，无订单时均分；若配置了 `global_config.restock_regions`，仅消费这些国家的订单明细作为分仓依据；**2026-04-11 起**同优先级 tied 均分：`match_warehouses()` 返回首批同 priority 命中列表，qty 按 `1/N` 均分（先过滤不可用仓再定 N） |
 | 6 | `step6_timing.py` | sale_days + lead_time | `t_purchase[country]`, `urgent` | 计算建议采购日，判断紧急标志 |
 
 **并发控制**：通过 `pg_advisory_xact_lock(7429001)` 事务级咨询锁（`runner.py:58-61`），防止并发引擎覆盖彼此。
 
 **持久化**：一次完整计算作为原子事务 → 旧的 draft/partial 建议归档 → 新建 Suggestion + SuggestionItem[] 批量 INSERT。
 
-**快照特性**：`velocity_snapshot`、`sale_days_snapshot`、`global_config_snapshot` 均存入 JSONB 字段，支持历史追溯。
+**快照特性**：`velocity_snapshot`、`sale_days_snapshot`、`global_config_snapshot` 均存入 JSONB 字段，支持历史追溯；其中 `global_config_snapshot` 会记录生成时的 `restock_regions`，用于说明当次建议有哪些国家订单参与了计算。
 
 ### 3.2 数据同步层（app/sync）
 
@@ -496,7 +496,7 @@ Step 3: country_qty 计算时已把已推送量视为库存一部分
 
 | 表 | 职责 | 关键约束 |
 |---|---|---|
-| `global_config` | 全局配置单行表 | `CHECK id=1` |
+| `global_config` | 全局配置单行表；包含 `target_days`、`buffer_days`、`lead_time_days`、`calc_cron`、`scheduler_enabled`、`restock_regions` 等参数，其中 `restock_regions=[]` 表示全部国家参与补货计算 | `CHECK id=1` |
 | `sku_config` | SKU 级覆盖配置（enabled, lead_time_days）；商品同步/初始化会为全部 SKU 建立配置，但仅 active + matched 的 SKU 自动启用 | PK `commodity_sku` |
 | `warehouse` | 仓库主数据（type, country, replenish_site） | `type IN (-1,0,1,2,3)` |
 | `shop` | 店铺（同步自赛狐） | — |
@@ -532,7 +532,7 @@ Step 3: country_qty 计算时已把已推送量视为库存一部分
 - `ix_task_run_lease`：Reaper 扫描过期任务加速
 - `ix_suggestion_item_urgent`：仅索引紧急条目
 
-**JSONB 字段**：`country_breakdown`、`warehouse_breakdown`、`t_purchase`、`velocity_snapshot`、`sale_days_snapshot`、`global_config_snapshot`、`allocation_snapshot`、`payload`。当前仅整体读取，不查 JSONB 内部字段，无需 GIN 索引。
+**JSONB 字段**：`country_breakdown`、`warehouse_breakdown`、`t_purchase`、`velocity_snapshot`、`sale_days_snapshot`、`global_config_snapshot`、`allocation_snapshot`、`payload`。其中 `global_config_snapshot` 会保留 `restock_regions` 等配置快照。当前仅整体读取，不查 JSONB 内部字段，无需 GIN 索引。
 
 ### 6.3 迁移管理
 
