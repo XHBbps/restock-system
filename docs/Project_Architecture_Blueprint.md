@@ -701,7 +701,7 @@ PROCESS_ENABLE_SCHEDULER=true
    - 在 `src/views/data/` 新建 `DataXxxView.vue`
    - 使用 `PageSectionCard` + `#actions` slot 放筛选
    - 用"加载全量 + filteredRows + pagedRows" 模式
-   - 用 `formatShortTime` / `warehouseTypeLabel` 等共享工具
+   - 用 `formatShortTime`、`formatUpdateTime`、`warehouseTypeLabel` 等共享工具；其中数据页列表里的“更新时间”统一使用 `formatUpdateTime` 输出 `YYYY-MM-DD HH:mm:ss`
 4. **路由**：在 `src/router/index.ts` 添加路由
 5. **导航**：在 `src/config/navigation.ts` 添加菜单项
 
