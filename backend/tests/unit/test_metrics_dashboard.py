@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import app.api.metrics as metrics_module
 from app.api.metrics import get_dashboard_overview
 
 
@@ -52,20 +53,47 @@ class _FakeDb:
 async def test_dashboard_returns_empty_risk_distribution_without_active_suggestion() -> None:
     db = _FakeDb(
         [
-            _ScalarOneResult(12),
-            _ScalarOneOrNoneResult(SimpleNamespace(target_days=60, lead_time_days=50)),
+            _ScalarsResult(["SKU-1", "SKU-2", "SKU-3"]),
+            _ScalarOneOrNoneResult(
+                SimpleNamespace(target_days=60, lead_time_days=50, restock_regions=[])
+            ),
             _ScalarOneOrNoneResult(None),
         ]
     )
 
-    result = await get_dashboard_overview(db=db, _={})  # type: ignore[arg-type]
+    async def _fake_run_step1(*_args, **_kwargs):
+        return {
+            "SKU-1": {"US": 1.0},
+            "SKU-2": {"US": 1.0},
+            "SKU-3": {"US": 1.0},
+        }
 
-    assert result.enabled_sku_count == 12
+    async def _fake_run_step2(*_args, **_kwargs):
+        return (
+            {
+                "SKU-1": {"US": 10.0},
+                "SKU-2": {"US": 35.0},
+                "SKU-3": {"US": 70.0},
+            },
+            {},
+        )
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(metrics_module, "run_step1", _fake_run_step1)
+    monkeypatch.setattr(metrics_module, "run_step2", _fake_run_step2)
+
+    try:
+        result = await get_dashboard_overview(db=db, _={})  # type: ignore[arg-type]
+    finally:
+        monkeypatch.undo()
+
+    assert result.enabled_sku_count == 3
     assert result.target_days == 60
     assert result.lead_time_days == 50
     assert result.suggestion_id is None
+    assert result.urgent_count == 2
     assert result.warning_count == 0
-    assert result.safe_count == 0
+    assert result.safe_count == 1
     assert result.risk_country_count == 0
     assert result.country_risk_distribution == []
     assert result.country_restock_distribution == []
@@ -126,8 +154,10 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
     ]
     db = _FakeDb(
         [
-            _ScalarOneResult(4),
-            _ScalarOneOrNoneResult(SimpleNamespace(target_days=60, lead_time_days=20)),
+            _ScalarsResult(["SKU-1", "SKU-2", "SKU-3", "SKU-7"]),
+            _ScalarOneOrNoneResult(
+                SimpleNamespace(target_days=60, lead_time_days=20, restock_regions=[])
+            ),
             _ScalarOneOrNoneResult(SimpleNamespace(id=9, status="draft")),
             _ScalarsResult(items),
             _RowsResult(
@@ -139,13 +169,39 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
         ]
     )
 
-    result = await get_dashboard_overview(db=db, _={})  # type: ignore[arg-type]
+    async def _fake_run_step1(*_args, **_kwargs):
+        return {
+            "SKU-1": {"US": 1.0},
+            "SKU-2": {"US": 1.0},
+            "SKU-3": {"US": 1.0},
+            "SKU-7": {"US": 1.0},
+        }
+
+    async def _fake_run_step2(*_args, **_kwargs):
+        return (
+            {
+                "SKU-1": {"US": 10.0},
+                "SKU-2": {"US": 30.0},
+                "SKU-3": {"US": 60.0},
+                "SKU-7": {"US": 90.0},
+            },
+            {},
+        )
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(metrics_module, "run_step1", _fake_run_step1)
+    monkeypatch.setattr(metrics_module, "run_step2", _fake_run_step2)
+
+    try:
+        result = await get_dashboard_overview(db=db, _={})  # type: ignore[arg-type]
+    finally:
+        monkeypatch.undo()
 
     assert result.suggestion_id == 9
     assert result.pushed_count == 1
-    assert result.urgent_count == 3
+    assert result.urgent_count == 1
     assert result.warning_count == 1
-    assert result.safe_count == 1
+    assert result.safe_count == 2
     assert result.risk_country_count == 3
     assert result.lead_time_days == 20
     assert result.target_days == 60

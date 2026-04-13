@@ -6,17 +6,17 @@
       <DashboardStatCard
         title="紧急 SKU"
         :value="data?.urgent_count ?? 0"
-        :hint="`低于提前期 ${leadTimeDays} 天`"
+        :hint="`全部启用 SKU 中低于提前期 ${leadTimeDays} 天`"
       />
       <DashboardStatCard
         title="临近补货"
         :value="data?.warning_count ?? 0"
-        hint="未低于提前期，且低于目标天数"
+        hint="全部启用 SKU 中未低于提前期，且低于目标天数"
       />
       <DashboardStatCard
         title="安全 SKU"
         :value="data?.safe_count ?? 0"
-        :hint="`不少于 ${targetDays} 天`"
+        :hint="`全部启用 SKU 中不少于 ${targetDays} 天`"
       />
       <DashboardStatCard
         title="覆盖国家"
@@ -36,38 +36,40 @@
 
     <section class="bottom-grid">
       <DataTableCard title="急需补货 SKU">
-        <template v-if="data && data.top_urgent_skus.length > 0">
-          <div class="urgent-list">
-            <div class="urgent-header">
-              <span class="urgent-col-product">商品信息</span>
-              <span class="urgent-col-countries">需求分布</span>
-              <span class="urgent-col-qty">可售天数</span>
+        <div class="urgent-card-content">
+          <template v-if="data && data.top_urgent_skus.length > 0">
+            <div class="urgent-list">
+              <div class="urgent-header">
+                <span class="urgent-col-product">商品信息</span>
+                <span class="urgent-col-countries">需求分布</span>
+                <span class="urgent-col-qty">可售天数</span>
+              </div>
+              <div v-for="item in data.top_urgent_skus" :key="item.commodity_sku" class="urgent-item">
+                <el-tooltip
+                  placement="top-start"
+                  :content="item.commodity_name || item.commodity_sku"
+                  :show-after="300"
+                >
+                  <div class="urgent-col-product">
+                    <SkuCard :sku="item.commodity_sku" :name="item.commodity_name" :image="item.main_image" />
+                  </div>
+                </el-tooltip>
+                <el-tooltip
+                  placement="top"
+                  :content="Object.entries(item.country_breakdown).map(([c, q]) => `${c}:${q}`).join('  ')"
+                >
+                  <div class="urgent-col-countries">
+                    <el-tag v-for="(qty, country) in item.country_breakdown" :key="country" size="small">
+                      {{ country }}:{{ qty }}
+                    </el-tag>
+                  </div>
+                </el-tooltip>
+                <div class="urgent-col-qty">{{ item.min_sale_days }}天</div>
+              </div>
             </div>
-            <div v-for="item in data.top_urgent_skus" :key="item.commodity_sku" class="urgent-item">
-              <el-tooltip
-                placement="top-start"
-                :content="item.commodity_name || item.commodity_sku"
-                :show-after="300"
-              >
-                <div class="urgent-col-product">
-                  <SkuCard :sku="item.commodity_sku" :name="item.commodity_name" :image="item.main_image" />
-                </div>
-              </el-tooltip>
-              <el-tooltip
-                placement="top"
-                :content="Object.entries(item.country_breakdown).map(([c, q]) => `${c}:${q}`).join('  ')"
-              >
-                <div class="urgent-col-countries">
-                  <el-tag v-for="(qty, country) in item.country_breakdown" :key="country" size="small">
-                    {{ country }}:{{ qty }}
-                  </el-tag>
-                </div>
-              </el-tooltip>
-              <div class="urgent-col-qty">{{ item.min_sale_days }}天</div>
-            </div>
-          </div>
-        </template>
-        <el-empty v-else description="暂无急需补货项" :image-size="72" />
+          </template>
+          <el-empty v-else description="暂无急需补货项" :image-size="72" />
+        </div>
       </DataTableCard>
 
       <DataTableCard title="补货概览">
@@ -280,12 +282,33 @@ onMounted(load)
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: $space-4;
+
+  :deep(.data-table-card) {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+
+  :deep(.data-table-card .el-card__body) {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+}
+
+.urgent-card-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .urgent-list {
   display: flex;
   flex-direction: column;
-  max-height: 400px;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
@@ -365,9 +388,22 @@ onMounted(load)
 }
 
 .right-card-content {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: $space-4;
+
+  :deep(.dashboard-chart-card) {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+
+  :deep(.dashboard-chart-card .el-card__body) {
+    flex: 1;
+    min-height: 0;
+  }
 }
 
 .suggestion-progress {

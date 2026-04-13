@@ -333,7 +333,7 @@ client.interceptors.response.use(undefined, (error) => {
 
 `suggestion.ts` 当前负责建议单相关读写：列表查询、详情读取、条目编辑、推送采购单，以及历史记录页使用的 `DELETE /api/suggestions/{id}` 删除接口；删除仅允许作用于未推送建议单。
 
-`dashboard.ts` 当前消费 `/api/metrics/dashboard`，用于信息总览页展示顶部风险卡片、左侧“各国缺货风险分布”和右侧“补货量国家分布”。其中风险分布基于当前 `draft/partial` 建议单快照的 `sale_days_snapshot`，按全局 `lead_time_days`、`target_days` 分桶为“紧急 / 临近补货 / 安全”；右侧国家分布则汇总当前建议单全部条目的 `country_breakdown`。
+`dashboard.ts` 当前消费 `/api/metrics/dashboard`，用于信息总览页展示顶部风险卡片、左侧“各国缺货风险分布”和右侧“补货量国家分布”。其中顶部风险卡片基于全部启用 SKU 的最小可售天数，按全局 `lead_time_days`、`target_days` 分桶为“紧急 / 临近补货 / 安全”；左侧风险分布仍基于当前 `draft/partial` 建议单快照的 `sale_days_snapshot`；右侧国家分布则汇总当前建议单全部条目的 `country_breakdown`。
 
 ### 4.5 数据流模式
 
@@ -388,7 +388,7 @@ async function reload() {
 - `ApiMonitorView`、`PerformanceMonitorView`、`sync/FailedApiCallTable` 只消费该工具，不在页面内各自维护映射表，避免图表、表格、tooltip 口径漂移
 
 **信息总览页口径**：
-- `WorkspaceView` 首行卡片展示当前建议单的风险概览：`urgent_count`、`warning_count`、`safe_count` 按 SKU 最小可售天数相对全局阈值分桶，`risk_country_count` 表示风险分布中出现的国家数
+- `WorkspaceView` 首行卡片展示全部启用 SKU 的风险概览：`urgent_count`、`warning_count`、`safe_count` 按 SKU 最小可售天数相对全局阈值分桶，`risk_country_count` 表示当前建议单风险分布中出现的国家数
 - 左图使用分组柱状图展示各国缺货风险分布，统计对象是当前建议单快照中存在该国家 `sale_days_snapshot` 的 SKU 数量，而不是实时库存平均值
 - 右图继续使用饼图，但数据改为 `country_restock_distribution`，即当前建议单全部条目的 `country_breakdown` 汇总，用于展示实际建议补货量的国家分布
 
