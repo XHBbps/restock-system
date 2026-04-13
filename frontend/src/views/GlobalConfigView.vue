@@ -7,63 +7,89 @@
     <div class="config-sections">
       <div class="config-section">
         <div class="section-label">补货参数</div>
-      <el-form :model="form" label-width="180px" style="max-width: 560px">
-        <el-form-item label="国内中心仓周转天数">
-          <el-input-number v-model="form.buffer_days" :min="1" :max="365" />
-        </el-form-item>
-        <el-form-item label="海外仓目标库存天数">
-          <el-input-number v-model="form.target_days" :min="1" :max="365" />
-        </el-form-item>
-        <el-form-item label="默认采购提前期(天)">
-          <el-input-number v-model="form.lead_time_days" :min="0" :max="365" />
-        </el-form-item>
-        <el-form-item label="默认采购主仓 ID">
-          <el-input v-model="form.default_purchase_warehouse_id" placeholder="外部仓库 ID" />
-        </el-form-item>
-      </el-form>
+        <el-form :model="form" label-width="180px" style="max-width: 560px">
+          <el-form-item label="国内中心仓周转天数">
+            <el-input-number v-model="form.buffer_days" :min="1" :max="365" />
+          </el-form-item>
+          <el-form-item label="海外仓目标库存天数">
+            <el-input-number v-model="form.target_days" :min="1" :max="365" />
+          </el-form-item>
+          <el-form-item label="默认采购提前期">
+            <el-input-number v-model="form.lead_time_days" :min="0" :max="365" />
+          </el-form-item>
+          <el-form-item label="补货区域">
+            <el-select
+              v-model="form.restock_regions"
+              class="full-width-control"
+              multiple
+              collapse-tags
+              collapse-tags-tooltip
+              filterable
+              clearable
+              placeholder="未选择时默认全部国家参与计算"
+            >
+              <el-option
+                v-for="option in COUNTRY_OPTIONS"
+                :key="option.code"
+                :label="option.label"
+                :value="option.code"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="默认采购主仓 ID">
+            <el-input
+              v-model="form.default_purchase_warehouse_id"
+              placeholder="外部仓库 ID"
+            />
+          </el-form-item>
+        </el-form>
       </div>
 
       <div class="config-section">
         <div class="section-label">同步设置</div>
-      <el-form :model="form" label-width="180px" style="max-width: 560px">
-        <el-form-item label="同步间隔(分钟)">
-          <el-input-number v-model="form.sync_interval_minutes" :min="5" :max="1440" />
-        </el-form-item>
-        <el-form-item label="店铺同步模式">
-          <el-radio-group v-model="form.shop_sync_mode">
-            <el-radio-button value="all">全量</el-radio-button>
-            <el-radio-button value="specific">指定店铺</el-radio-button>
-          </el-radio-group>
-        </el-form-item>
-      </el-form>
+        <el-form :model="form" label-width="180px" style="max-width: 560px">
+          <el-form-item label="同步间隔(分钟)">
+            <el-input-number v-model="form.sync_interval_minutes" :min="5" :max="1440" />
+          </el-form-item>
+          <el-form-item label="店铺同步模式">
+            <el-radio-group v-model="form.shop_sync_mode">
+              <el-radio-button value="all">全量</el-radio-button>
+              <el-radio-button value="specific">指定店铺</el-radio-button>
+            </el-radio-group>
+          </el-form-item>
+        </el-form>
       </div>
 
       <div class="config-section">
         <div class="section-label">补货计算</div>
-      <el-form :model="form" label-width="180px" style="max-width: 560px">
-        <el-form-item label="自动计算">
-          <el-switch v-model="form.calc_enabled" />
-        </el-form-item>
-        <el-form-item v-if="form.calc_enabled" label="自动计算时间">
-          <div class="cron-inline">
-            <el-select v-model="selectedCronPreset" class="cron-select" @change="onCronPresetChange">
-              <el-option
-                v-for="preset in cronPresets"
-                :key="preset.value"
-                :label="preset.label"
-                :value="preset.value"
+        <el-form :model="form" label-width="180px" style="max-width: 560px">
+          <el-form-item label="自动计算">
+            <el-switch v-model="form.calc_enabled" />
+          </el-form-item>
+          <el-form-item v-if="form.calc_enabled" label="自动计算时间">
+            <div class="cron-inline">
+              <el-select
+                v-model="selectedCronPreset"
+                class="cron-select"
+                @change="onCronPresetChange"
+              >
+                <el-option
+                  v-for="preset in cronPresets"
+                  :key="preset.value"
+                  :label="preset.label"
+                  :value="preset.value"
+                />
+              </el-select>
+              <el-input
+                v-if="selectedCronPreset === '__custom__'"
+                v-model="customCron"
+                class="cron-input"
+                placeholder="如: 30 6 1,15 * *"
+                @input="onCustomCronInput"
               />
-            </el-select>
-            <el-input
-              v-if="selectedCronPreset === '__custom__'"
-              v-model="customCron"
-              class="cron-input"
-              placeholder="如: 30 6 1,15 (分 时 日 月 周)"
-              @input="onCustomCronInput"
-            />
-          </div>
-        </el-form-item>
-      </el-form>
+            </div>
+          </el-form-item>
+        </el-form>
       </div>
     </div>
   </PageSectionCard>
@@ -73,14 +99,23 @@
 import { getGlobalConfig, patchGlobalConfig, type GlobalConfig } from '@/api/config'
 import PageSectionCard from '@/components/PageSectionCard.vue'
 import { getActionErrorMessage } from '@/utils/apiError'
+import { COUNTRY_OPTIONS } from '@/utils/countries'
 import { ElMessage } from 'element-plus'
 import { onMounted, ref } from 'vue'
 
 const form = ref<GlobalConfig | null>(null)
 const saving = ref(false)
 
-// 记录影响补货计算的参数原始值，用于保存后比较
-let savedCalcParams = { target_days: 0, buffer_days: 0, lead_time_days: 0 }
+let savedCalcParams = {
+  target_days: 0,
+  buffer_days: 0,
+  lead_time_days: 0,
+  restock_regions: [] as string[],
+}
+
+function sameRestockRegions(left: string[], right: string[]): boolean {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
 
 function snapshotCalcParams(): void {
   if (!form.value) return
@@ -88,6 +123,7 @@ function snapshotCalcParams(): void {
     target_days: form.value.target_days,
     buffer_days: form.value.buffer_days,
     lead_time_days: form.value.lead_time_days,
+    restock_regions: [...form.value.restock_regions],
   }
 }
 
@@ -96,7 +132,8 @@ function calcParamsChanged(): boolean {
   return (
     form.value.target_days !== savedCalcParams.target_days ||
     form.value.buffer_days !== savedCalcParams.buffer_days ||
-    form.value.lead_time_days !== savedCalcParams.lead_time_days
+    form.value.lead_time_days !== savedCalcParams.lead_time_days ||
+    !sameRestockRegions(form.value.restock_regions, savedCalcParams.restock_regions)
   )
 }
 
@@ -115,7 +152,7 @@ const customCron = ref('')
 
 function initCronState(): void {
   if (!form.value) return
-  const match = cronPresets.find((p) => p.value === form.value!.calc_cron)
+  const match = cronPresets.find((preset) => preset.value === form.value?.calc_cron)
   if (match && match.value !== '__custom__') {
     selectedCronPreset.value = match.value
   } else {
@@ -124,19 +161,18 @@ function initCronState(): void {
   }
 }
 
-function onCronPresetChange(val: string): void {
+function onCronPresetChange(value: string): void {
   if (!form.value) return
-  if (val === '__custom__') {
+  if (value === '__custom__') {
     customCron.value = form.value.calc_cron || ''
-  } else {
-    form.value.calc_cron = val
+    return
   }
+  form.value.calc_cron = value
 }
 
-function onCustomCronInput(val: string): void {
-  if (form.value) {
-    form.value.calc_cron = val
-  }
+function onCustomCronInput(value: string): void {
+  if (!form.value) return
+  form.value.calc_cron = value
 }
 
 onMounted(async () => {
@@ -156,7 +192,8 @@ async function save(): Promise<void> {
     ElMessage.success('已保存')
     if (changed) {
       ElMessage.warning({
-        message: '补货参数已变更（目标天数/周转天数/提前期），建议重新生成补货建议单。',
+        message:
+          '补货参数已变更（目标天数、周转天数、提前期、补货区域），建议重新生成补货建议单。',
         duration: 5000,
       })
     }
@@ -182,7 +219,6 @@ async function save(): Promise<void> {
   color: $color-text-primary;
 }
 
-// Force label and input on same horizontal line
 :deep(.el-form-item) {
   align-items: center;
   margin-bottom: $space-4;
@@ -211,5 +247,9 @@ async function save(): Promise<void> {
 
 .cron-input {
   flex: 1;
+}
+
+.full-width-control {
+  width: 100%;
 }
 </style>

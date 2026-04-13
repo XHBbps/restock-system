@@ -6,6 +6,7 @@ export interface GlobalConfig {
   buffer_days: number
   target_days: number
   lead_time_days: number
+  restock_regions: string[]
   sync_interval_minutes: number
   calc_cron: string
   calc_enabled: boolean
