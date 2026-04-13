@@ -81,7 +81,7 @@ const routes: RouteRecordRaw[] = [
         path: 'data/out-records',
         name: 'data-out-records',
         component: () => import('@/views/data/DataOutRecordsView.vue'),
-        meta: { title: '出库记录', section: 'DATA' },
+        meta: { title: '出库', section: 'DATA' },
       },
 
       {

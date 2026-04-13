@@ -1,5 +1,5 @@
 <template>
-  <PageSectionCard title="出库记录">
+  <PageSectionCard title="出库">
     <template #actions>
       <el-input
         v-model="filters.out_warehouse_no"
@@ -45,8 +45,8 @@
           <div class="expand-panel">
             <div class="expand-title">出库单明细（{{ row.items.length }} 项）</div>
             <el-table :data="row.items" size="small">
-              <el-table-column label="商品id" prop="commodityId" min-width="160" show-overflow-tooltip />
-              <el-table-column label="商品sku" prop="commoditySku" min-width="160" show-overflow-tooltip />
+              <el-table-column label="商品SKU" prop="commoditySku" min-width="180" show-overflow-tooltip />
+              <el-table-column label="商品ID" prop="commodityId" min-width="160" show-overflow-tooltip />
               <el-table-column label="可用数" prop="goods" width="120" align="right" sortable show-overflow-tooltip />
               <el-table-column label="采购单价" prop="perPurchase" width="140" align="right" show-overflow-tooltip>
                 <template #default="{ row: item }">
