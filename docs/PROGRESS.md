@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-13（信息总览改为各国缺货风险分布）
+> 最近更新：2026-04-13（信息总览图表与风险卡片口径调整）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -85,7 +85,7 @@
 - **筛选控件高度统一**：`PageSectionCard` 的 `section-actions` 强制所有控件 32px 高度
 - **订单状态中文映射**：`DataOrdersView.vue` 添加 `ORDER_STATUS_LABEL`（已发货 / 部分发货 / 未发货 / 待处理 / 已取消）
 - **全局参数页补货区域配置**：`GlobalConfigView.vue` 新增“补货区域”多选，选项复用 `COUNTRY_OPTIONS`，保存前变更检测与配置变更提示已纳入 `restock_regions`
-- **信息总览风险图**：`WorkspaceView.vue` 左侧图表改为“各国缺货风险分布”，按当前建议单快照把各国 SKU 分为“紧急 / 临近补货 / 安全”三类堆叠展示；右侧继续保留“补货量国家分布”
+- **信息总览风险图**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按当前建议单快照把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行统计卡片调整为风险概览，右侧“补货量国家分布”改为基于当前建议单全部条目的 `country_breakdown` 汇总
 
 ### 2.6 数据管理
 
@@ -115,10 +115,16 @@
 
 ## 3. 近期重大变更（2026-04-10 ~ 2026-04-13）
 
+### 3.23 信息总览图表与风险卡片口径调整（2026-04-13）
+- `backend/app/api/metrics.py` 为 dashboard overview 新增 `warning_count`、`safe_count`、`risk_country_count` 和 `country_restock_distribution`，其中右侧“补货量国家分布”改为汇总当前最新 `draft/partial` 建议单全部条目的 `country_breakdown`
+- `frontend/src/api/dashboard.ts` 同步扩展 `DashboardOverview` 类型；`frontend/src/views/WorkspaceView.vue` 将首行卡片改为“紧急 SKU / 临近补货 / 安全 SKU / 覆盖国家”，左侧风险图从堆叠柱状图调整为分组柱状图
+- 右侧“补货量国家分布”继续保留饼图样式，但数据源不再限制为前 10 个紧急 SKU，因此当前建议单中存在补货量的国家都会参与展示
+- **测试**：更新 `backend/tests/unit/test_metrics_dashboard.py` 与 `frontend/src/views/__tests__/WorkspaceView.test.ts`，覆盖新增汇总字段、当前建议单国家补货量分布和前端图表/卡片渲染
+
 ### 3.22 信息总览改为各国缺货风险分布（2026-04-13）
 - `backend/app/api/metrics.py` 将 dashboard overview 从“各国平均可售天数”调整为“各国缺货风险分布”，按当前最新 `draft/partial` 建议单的 `sale_days_snapshot` 基于全局 `lead_time_days`、`target_days` 分桶，返回各国 `urgent_count` / `warning_count` / `safe_count`
 - `frontend/src/api/dashboard.ts` 同步更新 `DashboardOverview` 类型，新增 `lead_time_days` 和 `country_risk_distribution`，移除旧的 `country_stock_days` 口径
-- `frontend/src/views/WorkspaceView.vue` 左侧图表替换为堆叠柱状图，tooltip 明确展示“紧急 / 临近补货 / 安全”数量及全局阈值；右侧“补货量国家分布”饼图继续保留
+- `frontend/src/views/WorkspaceView.vue` 左侧图表替换为风险分布图，tooltip 明确展示“紧急 / 临近补货 / 安全”数量及全局阈值；右侧“补货量国家分布”饼图继续保留
 - **测试**：新增 `backend/tests/unit/test_metrics_dashboard.py` 与 `frontend/src/views/__tests__/WorkspaceView.test.ts`，覆盖风险分桶、dashboard 返回结构和前端图表渲染
 
 ### 3.21 补货区域接入全局参数与引擎过滤（2026-04-13）
