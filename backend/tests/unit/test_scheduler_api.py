@@ -162,7 +162,7 @@ async def test_refetch_order_detail_returns_empty_when_no_targets(monkeypatch) -
     monkeypatch.setattr(sync_api_module, "enqueue_task", enqueue)
 
     result = await sync_api_module.refetch_order_detail(
-        sync_api_module.OrderDetailRefetchIn(days=7, limit=50, shop_id=None),
+        sync_api_module.OrderDetailRefetchIn(days=7, shop_id=None),
         db=_FakeDb(),  # type: ignore[arg-type]
         _={},
     )
@@ -170,7 +170,6 @@ async def test_refetch_order_detail_returns_empty_when_no_targets(monkeypatch) -
     assert result.task_id is None
     assert result.matched_count == 0
     assert result.queued_count == 0
-    assert result.truncated is False
     assert result.active_job_name is None
     assert result.active_trigger_source is None
 
@@ -198,7 +197,7 @@ async def test_refetch_order_detail_reuses_active_conflict_task(monkeypatch, job
     monkeypatch.setattr(sync_api_module, "enqueue_task", pytest.fail)
 
     result = await sync_api_module.refetch_order_detail(
-        sync_api_module.OrderDetailRefetchIn(days=7, limit=50, shop_id=None),
+        sync_api_module.OrderDetailRefetchIn(days=7, shop_id=None),
         db=_FakeDb(),  # type: ignore[arg-type]
         _={},
     )
@@ -207,13 +206,12 @@ async def test_refetch_order_detail_reuses_active_conflict_task(monkeypatch, job
     assert result.existing is True
     assert result.matched_count == 0
     assert result.queued_count == 0
-    assert result.truncated is False
     assert result.active_job_name == job_name
     assert result.active_trigger_source == trigger_source
 
 
 @pytest.mark.asyncio
-async def test_refetch_order_detail_enqueues_trimmed_targets(monkeypatch) -> None:
+async def test_refetch_order_detail_enqueues_all_targets(monkeypatch) -> None:
     import app.api.sync as sync_api_module
 
     class _FakeDb:
@@ -235,11 +233,11 @@ async def test_refetch_order_detail_enqueues_trimmed_targets(monkeypatch) -> Non
         assert dedupe_key == sync_api_module.REFETCH_JOB_NAME
         assert payload == {
             "days": 7,
-            "limit": 2,
             "shop_id": "shop-1",
             "targets": [
                 {"shop_id": "shop-1", "amazon_order_id": "order-1"},
                 {"shop_id": "shop-2", "amazon_order_id": "order-2"},
+                {"shop_id": "shop-3", "amazon_order_id": "order-3"},
             ],
         }
         assert priority == 100
@@ -250,15 +248,14 @@ async def test_refetch_order_detail_enqueues_trimmed_targets(monkeypatch) -> Non
     monkeypatch.setattr(sync_api_module, "enqueue_task", fake_enqueue_task)
 
     result = await sync_api_module.refetch_order_detail(
-        sync_api_module.OrderDetailRefetchIn(days=7, limit=2, shop_id="shop-1"),
+        sync_api_module.OrderDetailRefetchIn(days=7, shop_id="shop-1"),
         db=_FakeDb(),  # type: ignore[arg-type]
         _={},
     )
 
     assert result.task_id == 99
     assert result.existing is False
-    assert result.matched_count == 2
-    assert result.queued_count == 2
-    assert result.truncated is True
+    assert result.matched_count == 3
+    assert result.queued_count == 3
     assert result.active_job_name is None
     assert result.active_trigger_source is None

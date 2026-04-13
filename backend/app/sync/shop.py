@@ -1,8 +1,4 @@
-"""店铺列表同步(手动触发)。
-
-调用 /api/shop/pageList.json,UPSERT 到本地 shop 表。
-保留所有 status 的店铺供 UI 显示,由前端按 status='0' 过滤可勾选项。
-"""
+"""店铺列表同步。"""
 
 from typing import Any
 
@@ -28,8 +24,16 @@ async def sync_shop_job(ctx: JobContext) -> None:
 
     count = 0
     try:
+        async def _report_page(page_no: int, total_page: int, rows_count: int) -> None:
+            if total_page <= 0:
+                return
+            await ctx.progress(
+                total_steps=total_page,
+                step_detail=f"第 {page_no} / {total_page} 页，当前页 {rows_count} 条，已处理 {count} 条",
+            )
+
         async with async_session_factory() as db:
-            async for raw in list_shops():
+            async for raw in list_shops(on_page=_report_page):
                 await _upsert_shop(db, raw)
                 count += 1
             await db.commit()
@@ -58,7 +62,6 @@ async def _upsert_shop(db, raw: dict[str, Any]) -> None:
         "last_sync_at": now_beijing(),
     }
     stmt = pg_insert(Shop).values(**values)
-    # 不覆盖 sync_enabled(用户手动维护)
     stmt = stmt.on_conflict_do_update(
         index_elements=["id"],
         set_={

@@ -21,7 +21,6 @@ class SchedulerToggleIn(BaseModel):
 
 class OrderDetailRefetchIn(BaseModel):
     days: int = Field(default=7, ge=1)
-    limit: int = Field(default=500, ge=1, le=500)
     shop_id: str | None = None
 
 
@@ -30,6 +29,5 @@ class OrderDetailRefetchOut(BaseModel):
     existing: bool = False
     matched_count: int
     queued_count: int
-    truncated: bool = False
     active_job_name: str | None = None
     active_trigger_source: str | None = None

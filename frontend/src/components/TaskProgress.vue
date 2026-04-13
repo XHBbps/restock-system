@@ -11,8 +11,8 @@
 
     <el-progress
       v-if="!isTerminal"
-      :percentage="indeterminatePercent"
-      :indeterminate="true"
+      :percentage="progressPercent ?? indeterminatePercent"
+      :indeterminate="progressPercent === null"
       :show-text="false"
     />
 
@@ -32,6 +32,35 @@ const taskStore = useTaskStore()
 
 const task = computed(() => (props.taskId ? taskStore.tasksById[props.taskId] : null))
 const isTerminal = computed(() => (task.value ? taskStore.isTerminal(task.value) : false))
+
+function normalizePercentage(current: number, total: number): number | null {
+  if (!Number.isFinite(current) || !Number.isFinite(total) || total <= 0) return null
+  const ratio = Math.min(Math.max(current / total, 0), 1)
+  return Math.round(ratio * 100)
+}
+
+function parseProgressDetail(stepDetail: string | null | undefined): number | null {
+  if (!stepDetail) return null
+
+  const countMatch = stepDetail.match(/已完成\s+(\d+)\s*\/\s*失败\s+(\d+)\s*\/\s*总数\s+(\d+)/)
+  if (countMatch) {
+    const completed = Number.parseInt(countMatch[1], 10)
+    const failed = Number.parseInt(countMatch[2], 10)
+    const total = Number.parseInt(countMatch[3], 10)
+    return normalizePercentage(completed + failed, total)
+  }
+
+  const pageMatch = stepDetail.match(/第\s+(\d+)\s*\/\s*(\d+)\s*(?:页|步)/)
+  if (pageMatch) {
+    const current = Number.parseInt(pageMatch[1], 10)
+    const total = Number.parseInt(pageMatch[2], 10)
+    return normalizePercentage(current, total)
+  }
+
+  return null
+}
+
+const progressPercent = computed(() => parseProgressDetail(task.value?.step_detail))
 
 const indeterminatePercent = computed(() => {
   if (!task.value?.total_steps || !task.value.current_step) return 50

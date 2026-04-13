@@ -1,8 +1,6 @@
 """库存明细同步。
-
-仅写入 inventory_snapshot_latest 的 available + reserved。
-**跳过 stockWait 字段** -- 在途由 sync_out_records 独立维护
-(spec FR-017 + analyze U1 修订)。
+仅写入 `inventory_snapshot_latest` 的 `available + reserved`。
+`stockWait` 由 `sync_out_records` 独立维护。
 """
 
 from typing import Any
@@ -34,12 +32,18 @@ async def sync_inventory_job(ctx: JobContext) -> None:
     try:
         async with async_session_factory() as db:
             warehouse_country_map = await _load_warehouse_countries(db)
-            async for raw in list_inventory_items():
+
+            async def _report_page(page_no: int, total_page: int, rows_count: int) -> None:
+                if total_page <= 0:
+                    return
+                await ctx.progress(
+                    total_steps=total_page,
+                    step_detail=f"第 {page_no} / {total_page} 页，当前页 {rows_count} 条，已处理 {count} 条",
+                )
+
+            async for raw in list_inventory_items(on_page=_report_page):
                 await _upsert_inventory(db, raw, warehouse_country_map)
                 count += 1
-                if count % 100 == 0:
-                    await db.commit()
-                    await ctx.progress(step_detail=f"已处理 {count} 条")
             await db.commit()
 
         async with async_session_factory() as db:
@@ -67,12 +71,10 @@ async def _upsert_inventory(
     if not commodity_sku or not warehouse_id:
         return
     if warehouse_id not in warehouse_country_map:
-        # 仓库尚未同步入库,跳过
         return
 
     available = _to_int(raw.get("stockAvailable"), 0)
     reserved = _to_int(raw.get("stockOccupy"), 0)
-    # **故意不读 stockWait** -- 在途由 sync_out_records 维护
 
     values = {
         "commodity_sku": commodity_sku,

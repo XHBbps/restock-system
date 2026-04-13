@@ -17,7 +17,6 @@ describe('api/sync', () => {
         active_trigger_source: null,
         matched_count: 20,
         queued_count: 20,
-        truncated: false,
       },
     })
 

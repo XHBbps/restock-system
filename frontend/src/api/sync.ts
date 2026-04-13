@@ -26,7 +26,6 @@ export async function setSchedulerStatus(enabled: boolean): Promise<SchedulerSta
 
 export interface OrderDetailRefetchPayload {
   days: number
-  limit?: number
   shop_id?: string
 }
 
@@ -37,7 +36,6 @@ export interface OrderDetailRefetchResult {
   active_trigger_source?: 'scheduler' | 'manual' | null
   matched_count: number
   queued_count: number
-  truncated: boolean
 }
 
 export async function refetchOrderDetail(

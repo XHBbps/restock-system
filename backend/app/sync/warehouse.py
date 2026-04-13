@@ -1,8 +1,4 @@
-"""仓库列表同步。
-
-新仓库自动入库(country=None,UI 标记"待指定国家")。
-已存在仓库更新 name/type/replenish_site_raw,**不覆盖采购员维护的 country**。
-"""
+"""仓库列表同步。"""
 
 from typing import Any
 
@@ -29,8 +25,16 @@ async def sync_warehouse_job(ctx: JobContext) -> None:
 
     count = 0
     try:
+        async def _report_page(page_no: int, total_page: int, rows_count: int) -> None:
+            if total_page <= 0:
+                return
+            await ctx.progress(
+                total_steps=total_page,
+                step_detail=f"第 {page_no} / {total_page} 页，当前页 {rows_count} 条，已处理 {count} 条",
+            )
+
         async with async_session_factory() as db:
-            async for raw in list_warehouses():
+            async for raw in list_warehouses(on_page=_report_page):
                 await _upsert_warehouse(db, raw)
                 count += 1
             await db.commit()
@@ -61,7 +65,6 @@ async def _upsert_warehouse(db, raw: dict[str, Any]) -> None:
     }
 
     stmt = pg_insert(Warehouse).values(**values)
-    # 注意:country 不覆盖已有值
     stmt = stmt.on_conflict_do_update(
         index_elements=["id"],
         set_={

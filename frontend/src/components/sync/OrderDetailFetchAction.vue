@@ -57,10 +57,7 @@ async function submit(): Promise<void> {
       return
     }
 
-    const message = result.truncated
-      ? `详情获取任务已入队，共 ${result.queued_count} 条，命中数量超过上限，已按上限处理`
-      : `详情获取任务已入队，共 ${result.queued_count} 条`
-    ElMessage.success(message)
+    ElMessage.success(`详情获取任务已入队，共 ${result.queued_count} 条`)
   } catch (err) {
     ElMessage.error(getActionErrorMessage(err, '详情获取触发失败'))
   } finally {

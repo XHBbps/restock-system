@@ -1,12 +1,4 @@
-"""订单列表同步。
-
-策略(spec FR-021):
-- dateType=updateDateTime 捕获状态变化(发货/取消/退款)
-- dateStart = sync_state.last_success_at - 5min(首次回填使用 30 天窗口)
-- order_header 按 (shop_id, amazon_order_id) UPSERT
-- order_item 按 (order_id, order_item_id) UPSERT
-- 时间字段经站点时区转 Asia/Shanghai
-"""
+"""订单列表同步。"""
 
 from datetime import datetime, timedelta
 from typing import Any
@@ -28,9 +20,7 @@ from app.tasks.jobs import JobContext, register
 logger = get_logger(__name__)
 JOB_NAME = "sync_order_list"
 
-# 首次回填窗口
 INITIAL_BACKFILL_DAYS = 30
-# 增量同步重叠
 DEFAULT_OVERLAP_MINUTES = 5
 
 
@@ -43,30 +33,44 @@ async def sync_order_list_job(ctx: JobContext) -> None:
         shop_ids = await _resolve_shop_ids(db)
 
     logger.info("sync_order_list_window", start=date_start, end=date_end, shops=len(shop_ids or []))
+    if shop_ids == []:
+        async with async_session_factory() as db:
+            await mark_sync_success(db, JOB_NAME, started)
+        logger.info("sync_order_list_skipped_no_enabled_shops", start=date_start, end=date_end)
+        await ctx.progress(current_step="完成", step_detail="未启用任何店铺，跳过同步 0 / 0")
+        return
+
     order_count = 0
     item_count = 0
     try:
+        async def _report_page(page_no: int, total_page: int, rows_count: int) -> None:
+            if total_page <= 0:
+                return
+            await ctx.progress(
+                total_steps=total_page,
+                step_detail=(
+                    f"第 {page_no} / {total_page} 页，当前页 {rows_count} 单，"
+                    f"已处理 {order_count} 单 / {item_count} 行"
+                ),
+            )
+
         async with async_session_factory() as db:
             async for raw in list_orders(
                 date_start=date_start.strftime("%Y-%m-%d %H:%M:%S"),
                 date_end=date_end.strftime("%Y-%m-%d %H:%M:%S"),
                 date_type="updateDateTime",
                 shop_ids=shop_ids,
+                on_page=_report_page,
             ):
                 ic = await _upsert_order(db, raw)
                 order_count += 1
                 item_count += ic
-                if order_count % 50 == 0:
-                    await db.commit()
-                    await ctx.progress(step_detail=f"已处理 {order_count} 单 / {item_count} 行")
             await db.commit()
 
         async with async_session_factory() as db:
             await mark_sync_success(db, JOB_NAME, started)
         logger.info("sync_order_list_done", orders=order_count, items=item_count)
-        await ctx.progress(
-            current_step="完成", step_detail=f"订单 {order_count} / 明细 {item_count}"
-        )
+        await ctx.progress(current_step="完成", step_detail=f"订单 {order_count} / 明细 {item_count}")
     except Exception as exc:
         async with async_session_factory() as db:
             await mark_sync_failed(db, JOB_NAME, str(exc))
@@ -137,15 +141,14 @@ async def _upsert_order(db: AsyncSession, raw: dict[str, Any]) -> int:
         "refund_status": str(raw.get("refundStatus") or "") or None,
         "last_sync_at": now_beijing(),
     }
-    stmt = pg_insert(OrderHeader).values(**header_values).returning(OrderHeader.id)
+    header_stmt = pg_insert(OrderHeader).values(**header_values).returning(OrderHeader.id)
     update_set = {k: v for k, v in header_values.items() if k not in ("shop_id", "amazon_order_id")}
-    stmt = stmt.on_conflict_do_update(
+    header_stmt = header_stmt.on_conflict_do_update(
         constraint="uq_order_header_key",
         set_=update_set,
     )
-    order_id = (await db.execute(stmt)).scalar_one()
+    order_id = (await db.execute(header_stmt)).scalar_one()
 
-    # P1-3: UPSERT 替代 delete-then-insert,避免中间状态数据丢失
     items_to_insert: list[dict[str, Any]] = []
     seen_item_ids: list[str] = []
     for raw_item in raw.get("orderItemVoList") or []:
@@ -170,22 +173,21 @@ async def _upsert_order(db: AsyncSession, raw: dict[str, Any]) -> int:
             }
         )
     if items_to_insert:
-        stmt = pg_insert(OrderItem).values(items_to_insert)
-        stmt = stmt.on_conflict_do_update(
+        item_stmt = pg_insert(OrderItem).values(items_to_insert)
+        item_stmt = item_stmt.on_conflict_do_update(
             index_elements=["order_id", "order_item_id"],
             set_={
-                "commodity_sku": stmt.excluded.commodity_sku,
-                "seller_sku": stmt.excluded.seller_sku,
-                "quantity_ordered": stmt.excluded.quantity_ordered,
-                "quantity_shipped": stmt.excluded.quantity_shipped,
-                "quantity_unfulfillable": stmt.excluded.quantity_unfulfillable,
-                "refund_num": stmt.excluded.refund_num,
-                "item_price_currency": stmt.excluded.item_price_currency,
-                "item_price_amount": stmt.excluded.item_price_amount,
+                "commodity_sku": item_stmt.excluded.commodity_sku,
+                "seller_sku": item_stmt.excluded.seller_sku,
+                "quantity_ordered": item_stmt.excluded.quantity_ordered,
+                "quantity_shipped": item_stmt.excluded.quantity_shipped,
+                "quantity_unfulfillable": item_stmt.excluded.quantity_unfulfillable,
+                "refund_num": item_stmt.excluded.refund_num,
+                "item_price_currency": item_stmt.excluded.item_price_currency,
+                "item_price_amount": item_stmt.excluded.item_price_amount,
             },
         )
-        await db.execute(stmt)
-    # 清理本次 API 响应中不再存在的旧 items
+        await db.execute(item_stmt)
     if seen_item_ids:
         await db.execute(
             delete(OrderItem).where(

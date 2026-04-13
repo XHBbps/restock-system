@@ -77,6 +77,9 @@ async def test_sync_order_detail_job_marks_failure_when_any_fetch_fails(monkeypa
     assert len(failed_calls) == 1
     assert failed_calls[0][0] == order_detail_module.JOB_NAME
     assert "failed=1" in failed_calls[0][1]
+    assert ctx.events[0] == ("订单详情同步", None, 1)
+    assert ctx.events[1] == (None, "已完成 0 / 失败 0 / 总数 1", 1)
+    assert ctx.events[2] == (None, "已完成 0 / 失败 1 / 总数 1", 1)
 
 
 @pytest.mark.asyncio
@@ -124,3 +127,6 @@ async def test_refetch_order_detail_job_fetches_payload_targets(monkeypatch) -> 
         ("shop-2", "order-2"),
     ]
     assert success_calls == [(order_detail_module.REFETCH_JOB_NAME, started)]
+    assert ctx.events[0] == ("订单详情获取", None, 2)
+    assert ctx.events[1] == (None, "已完成 0 / 失败 0 / 总数 2", 2)
+    assert ctx.events[2] == (None, "已完成 2 / 失败 0 / 总数 2", 2)

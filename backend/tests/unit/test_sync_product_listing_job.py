@@ -71,7 +71,7 @@ async def test_sync_product_listing_job_fetches_unfiltered_rows(monkeypatch) -> 
         [_FakeDb(), _FakeSchemaDb(_nullable_schema_rows()), _FakeDb(), _FakeDb()]
     )
     started = datetime(2026, 4, 13, 23, 0, 0)
-    call_args: list[tuple[bool, bool]] = []
+    call_args: list[tuple[bool, bool, bool]] = []
     upserted: list[dict[str, object]] = []
     created_counts: list[int] = []
 
@@ -81,8 +81,10 @@ async def test_sync_product_listing_job_fetches_unfiltered_rows(monkeypatch) -> 
     async def _fake_mark_sync_success(_db, _job_name: str, _started: datetime) -> None:
         return None
 
-    async def _fake_list_product_listings(*, only_matched: bool, only_active: bool):
-        call_args.append((only_matched, only_active))
+    async def _fake_list_product_listings(*, only_matched: bool, only_active: bool, on_page=None):
+        call_args.append((only_matched, only_active, on_page is not None))
+        if on_page is not None:
+            await on_page(1, 3, 1)
         yield {"shopId": "shop-1", "marketplaceId": "US", "sku": "SELLER-1"}
 
     async def _fake_upsert_listing(_db, raw: dict[str, object]) -> None:
@@ -106,9 +108,11 @@ async def test_sync_product_listing_job_fetches_unfiltered_rows(monkeypatch) -> 
     ctx = _FakeContext()
     await product_listing_module.sync_product_listing_job(ctx)  # type: ignore[arg-type]
 
-    assert call_args == [(False, False)]
+    assert call_args == [(False, False, True)]
     assert len(upserted) == 1
     assert created_counts == [1]
+    assert ctx.events[0] == ("开始同步在线产品信息", None, 1)
+    assert ctx.events[1] == (None, "第 1 / 3 页，当前页 1 条，已处理 0 条", 3)
 
 
 @pytest.mark.asyncio
@@ -144,7 +148,7 @@ async def test_sync_product_listing_job_fails_fast_on_legacy_schema(monkeypatch)
     async def _fake_schema_check(_db) -> None:
         raise ValidationFailed("schema drift: run `alembic upgrade head`")
 
-    async def _fake_list_product_listings(*, only_matched: bool, only_active: bool):
+    async def _fake_list_product_listings(*, only_matched: bool, only_active: bool, on_page=None):
         nonlocal called
         called = True
         yield {"shopId": "shop-1", "marketplaceId": "US", "sku": "SELLER-1"}

@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-13（订单页“详情获取”组件化与订单详情抓取并发收口）
+> 最近更新：2026-04-13（同步任务进度可观测增强）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -45,7 +45,7 @@
   - 03:30 `sync_warehouse`
   - 02:00 `daily_archive`
   - 默认 08:00 `calc_engine`（可配置，`calc_enabled` 控制）
-- **订单详情同步与详情获取**：`sync_order_detail` 当前按 2 QPS / 2 并发保守抓取；订单页提供右侧独立“详情获取”组件，仅提供天数选择与触发按钮；手动触发会优先复用活跃的 `refetch_order_detail`、`sync_order_detail` 或 `sync_all` 任务，避免并发重复抓取
+- **订单详情同步与详情获取**：`sync_order_detail` 当前按 2 QPS / 2 并发保守抓取；订单页提供右侧独立“详情获取”组件，仅提供天数选择与触发按钮；手动触发会优先复用活跃的 `refetch_order_detail`、`sync_order_detail` 或 `sync_all` 任务，避免并发重复抓取，且不再对手动详情获取施加单次数量上限；任务执行中会按“已完成 X / 失败 Y / 总数 N”持续回写精确进度
 
 ### 2.3 补货计算引擎
 
@@ -98,7 +98,7 @@
 - **`task_run` 表**：dedupe_key 去重（partial unique index）、priority 调度、lease 心跳
 - **Worker** 2 秒轮询 + 30 秒心跳 + 2 分钟租约
 - **Reaper** 60 秒扫描过期任务
-- **任务进度实时写入**：`current_step` / `step_detail` / `total_steps`，前端 `TaskProgress` 轮询展示
+- **任务进度实时写入**：`current_step` / `step_detail` / `total_steps`，前端 `TaskProgress` 轮询展示；订单详情任务按条数精确展示，店铺/仓库/商品/库存/订单/出库等分页同步任务按赛狐返回 `totalPage` 展示页级百分比，不额外增加预扫描请求
 - **SKIPPED 状态**：调度器尝试重复入队活跃任务时创建审计记录
 
 ### 2.8 认证与安全
@@ -112,6 +112,12 @@
 
 ## 3. 近期重大变更（2026-04-10 ~ 2026-04-13）
 
+### 3.20 同步任务进度可观测增强（2026-04-13）
+- `backend/app/sync/order_detail.py` 将 `sync_order_detail` / `refetch_order_detail` 的进度文案统一为“已完成 X / 失败 Y / 总数 N”，按当前目标集合精确回写，不增加额外赛狐请求
+- `backend/app/saihu/endpoints/shop.py`、`warehouse.py`、`product_listing.py`、`inventory.py`、`order_list.py`、`out_records.py` 为分页迭代器补充页元信息回调；对应 `sync_*` 任务在不额外预扫的前提下，直接复用赛狐返回的 `totalPage` 输出“第 P / N 页”进度
+- `frontend/src/components/TaskProgress.vue` 新增对“按条数”和“按页数/步骤”两类进度文案的解析，可在已有任务轮询接口上直接展示确定型百分比，无法解析时仍回退为不确定进度条
+- **测试**：补充 `backend/tests/unit/test_sync_order_detail_job.py`、`backend/tests/unit/test_sync_product_listing_job.py`、`backend/tests/unit/test_sync_order_list.py` 与 `frontend/src/components/TaskProgress.test.ts`，覆盖精确进度、分页进度与前端回退逻辑
+
 ### 3.19 出库记录字段补齐（2026-04-13）
 - `backend/app/sync/out_records.py` 在同步赛狐其他出库记录时，额外落库 `warehouseId`、`updateTime`、`type`、`typeName`，并为明细落库 `commodityId`、`perPurchase`
 - `backend/alembic/versions/20260414_1300_extend_in_transit_out_record_fields.py` 为 `in_transit_record` / `in_transit_item` 补齐上述展示字段，支撑数据页直接展示源字段含义
@@ -121,10 +127,10 @@
 
 ### 3.18 订单详情条件批量获取（2026-04-13）
 
-- `backend/app/api/sync.py` 的 `POST /api/sync/order-detail/refetch` 改为订单详情抓取统一入口：若存在活跃的 `refetch_order_detail`、`sync_order_detail` 或 `sync_all`，则直接返回现有任务供前端复用进度；否则再按回溯天数筛选“订单主表已存在但本地缺少详情”的订单并创建后台任务
+- `backend/app/api/sync.py` 的 `POST /api/sync/order-detail/refetch` 改为订单详情抓取统一入口：若存在活跃的 `refetch_order_detail`、`sync_order_detail` 或 `sync_all`，则直接返回现有任务供前端复用进度；否则再按回溯天数筛选“订单主表已存在但本地缺少详情”的全部订单并创建后台任务，不再做 500 条截断
 - `backend/app/sync/order_detail.py` 的 `refetch_order_detail` 继续绕过 `order_detail_fetch_log` 的已记录过滤，直接消费接口层筛出的订单集合，但仍复用现有详情抓取、失败分类、限流与落库逻辑
 - `frontend/src/components/sync/OrderDetailFetchAction.vue` 将订单页入口封装为右侧独立“详情获取”组件；`frontend/src/views/data/DataOrdersView.vue` 只负责承接任务进度和列表刷新
-- **测试**：补充 `backend/tests/unit/test_scheduler_api.py`、`frontend/src/components/sync/OrderDetailFetchAction.test.ts` 与 `frontend/src/api/__tests__/sync.test.ts`，覆盖活跃任务复用、详情获取入口提示、手工触发 payload 与空命中不建任务
+- **测试**：补充 `backend/tests/unit/test_scheduler_api.py`、`frontend/src/components/sync/OrderDetailFetchAction.test.ts` 与 `frontend/src/api/__tests__/sync.test.ts`，覆盖活跃任务复用、详情获取入口提示、手工触发 payload、空命中不建任务与取消手动数量上限后的全量入队
 
 ### 3.17 监控名称中文化（2026-04-13）
 - `frontend/src/utils/monitoring.ts` 新增统一名称映射：赛狐接口 `endpoint`、性能监控 `request/resource` 名称统一转为中文含义，并保留原始路径用于 tooltip 排障

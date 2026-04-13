@@ -28,20 +28,34 @@ async def sync_out_records_job(ctx: JobContext) -> None:
 
     record_count = 0
     item_count = 0
+    total_steps = 2
     try:
+        async def _report_page(page_no: int, total_page: int, rows_count: int) -> None:
+            nonlocal total_steps
+            if total_page <= 0:
+                return
+            total_steps = total_page + 1
+            await ctx.progress(
+                total_steps=total_steps,
+                step_detail=(
+                    f"第 {page_no} / {total_page} 页，当前页 {rows_count} 单，"
+                    f"已处理 {record_count} 单 / {item_count} 行"
+                ),
+            )
+
         async with async_session_factory() as db:
             warehouse_country_map = await _load_warehouse_countries(db)
-            async for raw in list_in_transit_records():
+            async for raw in list_in_transit_records(on_page=_report_page):
                 ic = await _upsert_out_record(db, raw, warehouse_country_map, sync_start_time)
                 record_count += 1
                 item_count += ic
-                if record_count % 50 == 0:
-                    await db.commit()
-                    await ctx.progress(step_detail=f"已处理 {record_count} 单 / {item_count} 行")
             await db.commit()
 
-        # 老化处理:last_seen_at < sync_start_time 且 is_in_transit=true -> 标记 false
-        await ctx.progress(current_step="老化标签消失的记录")
+        await ctx.progress(
+            current_step="老化标签消失的记录",
+            total_steps=total_steps,
+            step_detail=f"第 {total_steps} / {total_steps} 步，处理老化记录",
+        )
         aged = await _age_out_records(sync_start_time)
 
         async with async_session_factory() as db:
@@ -115,9 +129,6 @@ async def _upsert_out_record(
     )
     await db.execute(stmt)
 
-    # P1-3 审查结论: InTransitItem 无自然唯一约束(同 record 可含重复 SKU),
-    # 保留 delete+insert 模式。delete 和 insert 在同一个 db session 内,
-    # 只有 batch commit(每 50 条)时才提交,所以单条记录的 delete+insert 是原子的。
     await db.execute(delete(InTransitItem).where(InTransitItem.saihu_out_record_id == record_id))
 
     items: list[dict[str, Any]] = []

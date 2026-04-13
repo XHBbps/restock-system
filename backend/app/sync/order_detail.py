@@ -52,7 +52,9 @@ async def _run_fetch_job(
 ) -> None:
     import asyncio
 
-    await ctx.progress(current_step=step_label, total_steps=1)
+    total_targets = len(targets)
+    total_steps = total_targets or None
+    await ctx.progress(current_step=step_label, total_steps=total_steps)
     async with async_session_factory() as db:
         started = await mark_sync_running(db, job_name)
 
@@ -93,18 +95,25 @@ async def _run_fetch_job(
                 return False
 
     try:
-        await ctx.progress(step_detail=f"待处理 {len(targets)} 条")
+        await ctx.progress(
+            step_detail=f"已完成 0 / 失败 0 / 总数 {total_targets}",
+            total_steps=total_steps,
+        )
 
         for index in range(0, len(targets), CONCURRENCY):
             batch = targets[index : index + CONCURRENCY]
-            results = await asyncio.gather(*[_fetch_one(shop_id, amazon_order_id) for shop_id, amazon_order_id in batch])
+            results = await asyncio.gather(
+                *[_fetch_one(shop_id, amazon_order_id) for shop_id, amazon_order_id in batch]
+            )
             for ok in results:
                 if ok:
                     fetched += 1
                 else:
                     failed += 1
-            if (fetched + failed) % 20 == 0:
-                await ctx.progress(step_detail=f"已完成 {fetched} / 失败 {failed}")
+            await ctx.progress(
+                step_detail=f"已完成 {fetched} / 失败 {failed} / 总数 {total_targets}",
+                total_steps=total_steps,
+            )
 
         if failed:
             raise RuntimeError(f"{step_label}存在失败: success={fetched}, failed={failed}")
@@ -161,7 +170,7 @@ async def find_refetch_targets(
     db: AsyncSession,
     *,
     days: int,
-    limit: int,
+    limit: int | None = None,
     shop_id: str | None = None,
 ) -> list[tuple[str, str]]:
     matched_subq = _matched_listing_subquery()
@@ -188,10 +197,11 @@ async def find_refetch_targets(
         .where(OrderHeader.purchase_date >= cutoff)
         .distinct()
         .order_by(OrderHeader.purchase_date.desc())
-        .limit(limit)
     )
     if shop_id:
         stmt = stmt.where(OrderHeader.shop_id == shop_id)
+    if limit is not None:
+        stmt = stmt.limit(limit)
 
     rows = (await db.execute(stmt)).all()
     return [(row[0], row[1]) for row in rows]

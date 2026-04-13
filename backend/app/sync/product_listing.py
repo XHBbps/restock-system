@@ -31,13 +31,23 @@ async def sync_product_listing_job(ctx: JobContext) -> None:
     try:
         async with async_session_factory() as db:
             await _ensure_product_listing_schema_compatible(db)
+
+        async def _report_page(page_no: int, total_page: int, rows_count: int) -> None:
+            if total_page <= 0:
+                return
+            await ctx.progress(
+                total_steps=total_page,
+                step_detail=f"第 {page_no} / {total_page} 页，当前页 {rows_count} 条，已处理 {inserted} 条",
+            )
+
         async with async_session_factory() as db:
-            async for raw in list_product_listings(only_matched=False, only_active=False):
+            async for raw in list_product_listings(
+                only_matched=False,
+                only_active=False,
+                on_page=_report_page,
+            ):
                 await _upsert_listing(db, raw)
                 inserted += 1
-                if inserted % 50 == 0:
-                    await db.commit()
-                    await ctx.progress(step_detail=f"已处理 {inserted} 条")
             created_sku_configs = await _backfill_sku_configs_from_synced_listings(db)
             await db.commit()
 

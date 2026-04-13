@@ -126,19 +126,15 @@ async def refetch_order_detail(
             existing=True,
             matched_count=0,
             queued_count=0,
-            truncated=False,
             active_job_name=active_task.job_name,
             active_trigger_source=active_task.trigger_source,
         )
 
-    raw_targets = await find_refetch_targets(
+    targets = await find_refetch_targets(
         db,
         days=days,
-        limit=payload.limit + 1,
         shop_id=payload.shop_id,
     )
-    truncated = len(raw_targets) > payload.limit
-    targets = raw_targets[: payload.limit]
     matched_count = len(targets)
 
     if matched_count == 0:
@@ -147,7 +143,6 @@ async def refetch_order_detail(
             existing=False,
             matched_count=0,
             queued_count=0,
-            truncated=False,
             active_job_name=None,
             active_trigger_source=None,
         )
@@ -159,7 +154,6 @@ async def refetch_order_detail(
         dedupe_key=REFETCH_JOB_NAME,
         payload={
             "days": days,
-            "limit": payload.limit,
             "shop_id": payload.shop_id,
             "targets": serialize_refetch_targets(targets),
         },
@@ -169,7 +163,6 @@ async def refetch_order_detail(
         existing=existing,
         matched_count=matched_count,
         queued_count=0 if existing else matched_count,
-        truncated=truncated,
         active_job_name=REFETCH_JOB_NAME if existing else None,
         active_trigger_source="manual" if existing else None,
     )

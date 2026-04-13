@@ -28,8 +28,7 @@ describe('OrderDetailFetchAction', () => {
       active_job_name: null,
       active_trigger_source: null,
       matched_count: 20,
-      queued_count: 20,
-      truncated: false
+      queued_count: 20
     })
     const success = vi.spyOn(ElMessage, 'success').mockImplementation(vi.fn())
 
@@ -64,8 +63,7 @@ describe('OrderDetailFetchAction', () => {
       active_job_name: 'sync_order_detail',
       active_trigger_source: 'scheduler',
       matched_count: 0,
-      queued_count: 0,
-      truncated: false
+      queued_count: 0
     })
     const warning = vi.spyOn(ElMessage, 'warning').mockImplementation(vi.fn())
 
