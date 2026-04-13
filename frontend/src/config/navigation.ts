@@ -75,7 +75,7 @@ export const navigationGroups: NavGroup[] = [
         items: [
           { to: '/data/orders', label: '订单', icon: ShoppingCart },
           { to: '/data/inventory', label: '库存', icon: Boxes },
-          { to: '/data/out-records', label: '出库记录', icon: PackageOpen },
+          { to: '/data/out-records', label: '出库', icon: PackageOpen },
         ],
       },
     ],

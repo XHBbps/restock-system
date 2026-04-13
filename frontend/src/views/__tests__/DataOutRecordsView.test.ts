@@ -118,7 +118,7 @@ describe('DataOutRecordsView', () => {
     )
   })
 
-  it('renders the updated page title and table labels', async () => {
+  it('renders the updated page title and detail columns', async () => {
     mockListOutRecords.mockResolvedValue(buildResponse())
 
     const { default: View } = await import('../data/DataOutRecordsView.vue')
@@ -126,7 +126,7 @@ describe('DataOutRecordsView', () => {
     await flushPromises()
 
     const html = wrapper.html()
-    expect(html).toContain('出库记录')
+    expect(html).toContain('出库')
     expect(html).toContain('出库单id')
     expect(html).toContain('出库仓库id')
     expect(html).toContain('更新时间')
@@ -135,9 +135,12 @@ describe('DataOutRecordsView', () => {
 
     const source = readFileSync('src/views/data/DataOutRecordsView.vue', 'utf-8')
     expect(source).toContain('出库单号')
-    expect(source).toContain('商品id')
-    expect(source).toContain('商品sku')
+    expect(source).toContain('商品SKU')
+    expect(source).toContain('商品ID')
     expect(source).toContain('可用数')
     expect(source).toContain('采购单价')
+    expect(source.indexOf('商品SKU')).toBeLessThan(source.indexOf('商品ID'))
+    expect(source.indexOf('商品ID')).toBeLessThan(source.indexOf('可用数'))
+    expect(source.indexOf('可用数')).toBeLessThan(source.indexOf('采购单价'))
   })
 })

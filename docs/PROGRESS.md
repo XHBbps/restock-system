@@ -96,7 +96,7 @@
 - **数据页 page_size 上限放宽**：所有 `/api/data/*` 端点的 `le=5000`（原 200），支持一次拉全量
 - **建议单列表 page_size 上限**：`/api/suggestions` 的 `le=5000`
 - **筛选项统一**：店铺/仓库/订单/库存/出库/补货发起 7 个页面的筛选项布局和高度一致
-- **出库记录页**：原“其他出库（在途观测）”改名为“出库记录”；主表展示出库单id、出库仓库id、更新时间、同步时间、出库单类型、状态，明细展示商品id、商品sku、可用数、采购单价；同步时间复用 `lastSeenAt`，状态统一按 `is_in_transit` 映射为“在途 / 完结”
+- **出库页**：原“其他出库（在途观测）”改名为“出库”；主表展示出库单id、出库仓库id、更新时间、同步时间、出库单类型、状态，明细按“商品SKU、商品ID、可用数、采购单价”顺序展示；同步时间复用 `lastSeenAt`，状态统一按 `is_in_transit` 映射为“在途 / 完结”
 
 ### 2.7 任务队列系统
 
@@ -124,7 +124,7 @@
 - **测试**：新增 `frontend/src/views/__tests__/HistoryView.test.ts`，并扩展 `backend/tests/unit/test_suggestion_patch.py` 覆盖删除接口允许/拒绝场景
 
 ### 3.24 同步时间展示统一（2026-04-13）
-- `frontend/src/utils/format.ts` 将 `formatUpdateTime` 统一为 `YYYY-MM-DD HH:mm`，用于数据页“同步时间”和出库记录“更新时间/同步时间”展示；对应 `frontend/src/utils/format.test.ts` 同步更新断言
+- `frontend/src/utils/format.ts` 将 `formatUpdateTime` 统一为 `YYYY-MM-DD HH:mm`，用于数据页“同步时间”和出库页“更新时间/同步时间”展示；对应 `frontend/src/utils/format.test.ts` 同步更新断言
 - `frontend/src/views/data/DataProductsView.vue`、`DataShopsView.vue`、`DataWarehousesView.vue`、`DataInventoryView.vue` 将列表列名从“更新时间”统一调整为“同步时间”，保持原有页面结构和视觉样式不变
 - `frontend/src/views/data/DataOutRecordsView.vue` 保留主表“更新时间”，新增基于 `lastSeenAt` 的“同步时间”列，并重新分配主表列宽，使长字段更宽、短字段更紧凑
 - **测试**：更新 `frontend/src/views/__tests__/DataTimeLabels.test.ts` 与 `frontend/src/views/__tests__/DataOutRecordsView.test.ts`，覆盖统一命名和出库记录双时间列渲染
@@ -159,7 +159,7 @@
 - `backend/app/sync/out_records.py` 在同步赛狐其他出库记录时，额外落库 `warehouseId`、`updateTime`、`type`、`typeName`，并为明细落库 `commodityId`、`perPurchase`
 - `backend/alembic/versions/20260414_1300_extend_in_transit_out_record_fields.py` 为 `in_transit_record` / `in_transit_item` 补齐上述展示字段，支撑数据页直接展示源字段含义
 - `backend/app/api/data.py`、`backend/app/schemas/data.py` 与 `frontend/src/api/data.ts` 补齐对应 DTO；出库记录列表默认按 `updateTime desc` 返回，并支持按出库仓库id、更新时间、出库单类型排序
-- `frontend/src/views/data/DataOutRecordsView.vue` 将页面标题改为“出库记录”，主表和明细表按最新业务口径展示字段，状态标签统一为“在途 / 完结”
+- `frontend/src/views/data/DataOutRecordsView.vue` 将页面标题改为“出库”，主表和明细表按最新业务口径展示字段，状态标签统一为“在途 / 完结”
 - **测试**：补充 `backend/tests/unit/test_sync_out_records_job.py`、`backend/tests/unit/test_data_out_records_api.py` 与 `frontend/src/views/__tests__/DataOutRecordsView.test.ts`，覆盖同步落库、列表排序和页面默认请求/字段渲染
 
 ### 3.18 订单详情条件批量获取（2026-04-13）
