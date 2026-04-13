@@ -101,3 +101,7 @@ export async function pushItems(
   )
   return data
 }
+
+export async function deleteSuggestion(suggestionId: number): Promise<void> {
+  await client.delete(`/api/suggestions/${suggestionId}`)
+}

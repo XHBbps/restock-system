@@ -331,6 +331,8 @@ client.interceptors.response.use(undefined, (error) => {
 
 **按领域拆分**：`auth.ts` / `data.ts` / `suggestion.ts` / `config.ts` / `monitor.ts` / `sync.ts` / `task.ts` / `dashboard.ts`。每个文件导出类型定义和异步函数。
 
+`suggestion.ts` 当前负责建议单相关读写：列表查询、详情读取、条目编辑、推送采购单，以及历史记录页使用的 `DELETE /api/suggestions/{id}` 删除接口；删除仅允许作用于未推送建议单。
+
 `dashboard.ts` 当前消费 `/api/metrics/dashboard`，用于信息总览页展示顶部风险卡片、左侧“各国缺货风险分布”和右侧“补货量国家分布”。其中风险分布基于当前 `draft/partial` 建议单快照的 `sale_days_snapshot`，按全局 `lead_time_days`、`target_days` 分桶为“紧急 / 临近补货 / 安全”；右侧国家分布则汇总当前建议单全部条目的 `country_breakdown`。
 
 ### 4.5 数据流模式
