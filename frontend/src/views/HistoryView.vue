@@ -61,6 +61,7 @@
             <el-button link type="primary" @click="goDetail(row.id)">详情</el-button>
             <el-button
               v-if="canDelete(row)"
+              class="delete-action"
               link
               type="danger"
               @click="remove(row)"
@@ -197,6 +198,15 @@ watch([() => rows.value.length, pageSize], () => {
   display: inline-flex;
   align-items: center;
   gap: $space-2;
+}
+
+.delete-action {
+  color: $color-danger;
+}
+
+.delete-action:hover,
+.delete-action:focus-visible {
+  color: $color-danger;
 }
 </style>
 
