@@ -1,9 +1,11 @@
 import client from './client'
 
-export interface CountryStockDays {
+export interface CountryRiskDistribution {
   country: string
-  avg_sale_days: number
-  sku_count: number
+  urgent_count: number
+  warning_count: number
+  safe_count: number
+  total_count: number
 }
 
 export interface UrgentSkuItem {
@@ -22,8 +24,9 @@ export interface DashboardOverview {
   urgent_count: number
   suggestion_id: number | null
   suggestion_status: string | null
+  lead_time_days: number
   target_days: number
-  country_stock_days: CountryStockDays[]
+  country_risk_distribution: CountryRiskDistribution[]
   top_urgent_skus: UrgentSkuItem[]
 }
 

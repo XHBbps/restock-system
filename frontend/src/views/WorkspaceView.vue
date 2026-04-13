@@ -3,10 +3,7 @@
     <DashboardPageHeader title="信息总览" />
 
     <section class="stats-grid">
-      <DashboardStatCard
-        title="启用 SKU"
-        :value="data?.enabled_sku_count ?? 0"
-      />
+      <DashboardStatCard title="启用 SKU" :value="data?.enabled_sku_count ?? 0" />
       <DashboardStatCard
         title="当前建议条目"
         :value="data?.suggestion_id != null ? data.suggestion_item_count : '-'"
@@ -15,18 +12,15 @@
         title="已推送"
         :value="data?.suggestion_id != null ? `${data.pushed_count} / ${data.suggestion_item_count}` : '-'"
       />
-      <DashboardStatCard
-        title="紧急补货"
-        :value="data?.urgent_count ?? 0"
-      />
+      <DashboardStatCard title="紧急补货" :value="data?.urgent_count ?? 0" />
     </section>
 
     <section class="chart-section">
       <DashboardChartCard
-        title="各国库存天数 vs 目标天数"
-        :option="stockDaysChartOption"
-        :empty="!data || data.country_stock_days.length === 0"
-        empty-text="暂无补货计算数据"
+        title="各国缺货风险分布"
+        :option="riskDistributionChartOption"
+        :empty="!data || data.country_risk_distribution.length === 0"
+        empty-text="暂无补货风险数据"
       />
     </section>
 
@@ -63,7 +57,7 @@
             </div>
           </div>
         </template>
-        <el-empty v-else description="暂无紧急补货" :image-size="72" />
+        <el-empty v-else description="暂无紧急补货项" :image-size="72" />
       </DataTableCard>
 
       <DataTableCard title="补货概览">
@@ -77,7 +71,7 @@
               <el-button link type="primary" @click="go('/restock/current')">查看详情</el-button>
             </div>
             <el-progress
-              :percentage="data.suggestion_item_count > 0 ? Math.round(data.pushed_count / data.suggestion_item_count * 100) : 0"
+              :percentage="data.suggestion_item_count > 0 ? Math.round((data.pushed_count / data.suggestion_item_count) * 100) : 0"
               :stroke-width="10"
             />
             <span class="progress-text">已推送 {{ data.pushed_count }} / 总计 {{ data.suggestion_item_count }}</span>
@@ -99,17 +93,24 @@
 </template>
 
 <script setup lang="ts">
+import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import type { EChartsCoreOption } from 'echarts/core'
+
 import { getDashboardOverview, type DashboardOverview } from '@/api/dashboard'
+import SkuCard from '@/components/SkuCard.vue'
 import DashboardChartCard from '@/components/dashboard/DashboardChartCard.vue'
 import DashboardPageHeader from '@/components/dashboard/DashboardPageHeader.vue'
 import DashboardStatCard from '@/components/dashboard/DashboardStatCard.vue'
 import DataTableCard from '@/components/dashboard/DataTableCard.vue'
-import SkuCard from '@/components/SkuCard.vue'
-import { getSuggestionStatusMeta } from '@/utils/status'
 import { getCountryLabel } from '@/utils/countries'
-import type { EChartsCoreOption } from 'echarts/core'
-import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { getSuggestionStatusMeta } from '@/utils/status'
+
+const RISK_COLORS = {
+  urgent: '#dc2626',
+  warning: '#d97706',
+  safe: '#16a34a',
+}
 
 const router = useRouter()
 const data = ref<DashboardOverview | null>(null)
@@ -120,15 +121,44 @@ const suggestionStatus = computed(() =>
     : { label: '暂无', tagType: 'info' as const },
 )
 
-const stockDaysChartOption = computed<EChartsCoreOption>(() => {
-  const items = data.value?.country_stock_days ?? []
-  const target = data.value?.target_days ?? 60
+const riskDistributionChartOption = computed<EChartsCoreOption>(() => {
+  const items = data.value?.country_risk_distribution ?? []
+  const targetDays = data.value?.target_days ?? 60
+  const leadTimeDays = data.value?.lead_time_days ?? 50
 
   return {
-    grid: { left: 24, right: 24, top: 24, bottom: 24, containLabel: true },
+    grid: { left: 24, right: 24, top: 36, bottom: 24, containLabel: true },
+    legend: {
+      top: 0,
+      icon: 'roundRect',
+      itemWidth: 10,
+      itemHeight: 10,
+      textStyle: { color: '#71717a' },
+    },
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'shadow' },
+      formatter(
+        params: Array<{
+          seriesName: string
+          value: number
+          axisValue: string
+          dataIndex?: number
+        }>,
+      ) {
+        const item = items[params[0]?.dataIndex ?? -1]
+        if (!item) return ''
+        const lines = [
+          item.country ? getCountryLabel(item.country) : params[0]?.axisValue ?? '',
+          `紧急：${item.urgent_count}`,
+          `临近补货：${item.warning_count}`,
+          `安全：${item.safe_count}`,
+          `总计：${item.total_count}`,
+          `提前期阈值：${leadTimeDays} 天`,
+          `目标天数：${targetDays} 天`,
+        ]
+        return lines.join('<br/>')
+      },
     },
     xAxis: {
       type: 'category',
@@ -138,32 +168,34 @@ const stockDaysChartOption = computed<EChartsCoreOption>(() => {
     },
     yAxis: {
       type: 'value',
-      name: '天数',
+      name: 'SKU 数',
       axisLabel: { color: '#71717a' },
       splitLine: { lineStyle: { color: '#f4f4f5' } },
     },
     series: [
       {
+        name: '紧急',
         type: 'bar',
-        data: items.map((item) => ({
-          value: item.avg_sale_days,
-          itemStyle: {
-            color: item.avg_sale_days >= target ? '#16a34a' : '#ea580c',
-            borderRadius: [6, 6, 0, 0],
-          },
-        })),
+        stack: 'risk',
         barWidth: 32,
-        markLine: {
-          silent: true,
-          symbol: 'none',
-          lineStyle: { type: 'dashed', color: '#dc2626' },
-          label: {
-            formatter: `目标: ${target}天`,
-            position: 'insideEndTop',
-            color: '#dc2626',
-          },
-          data: [{ yAxis: target }],
-        },
+        itemStyle: { color: RISK_COLORS.urgent, borderRadius: [6, 6, 0, 0] },
+        data: items.map((item) => item.urgent_count),
+      },
+      {
+        name: '临近补货',
+        type: 'bar',
+        stack: 'risk',
+        barWidth: 32,
+        itemStyle: { color: RISK_COLORS.warning },
+        data: items.map((item) => item.warning_count),
+      },
+      {
+        name: '安全',
+        type: 'bar',
+        stack: 'risk',
+        barWidth: 32,
+        itemStyle: { color: RISK_COLORS.safe },
+        data: items.map((item) => item.safe_count),
       },
     ],
   }
@@ -171,28 +203,33 @@ const stockDaysChartOption = computed<EChartsCoreOption>(() => {
 
 const countryDistChartOption = computed<EChartsCoreOption>(() => {
   if (!data.value?.top_urgent_skus.length) return {}
+
   const totals: Record<string, number> = {}
   for (const item of data.value.top_urgent_skus) {
     for (const [country, qty] of Object.entries(item.country_breakdown)) {
       totals[country] = (totals[country] || 0) + qty
     }
   }
+
   const sorted = Object.entries(totals).sort((a, b) => b[1] - a[1])
   const colors = ['#18181b', '#3b82f6', '#16a34a', '#d97706', '#dc2626', '#8b5cf6', '#06b6d4', '#ec4899']
+
   return {
     tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
     legend: { bottom: 0, icon: 'circle', textStyle: { color: '#71717a' } },
-    series: [{
-      type: 'pie',
-      radius: ['45%', '70%'],
-      itemStyle: { borderColor: '#ffffff', borderWidth: 3 },
-      label: { formatter: '{b}\n{d}%', color: '#09090b', fontSize: 11 },
-      data: sorted.map(([country, qty], i) => ({
-        name: country,
-        value: qty,
-        itemStyle: { color: colors[i % colors.length] },
-      })),
-    }],
+    series: [
+      {
+        type: 'pie',
+        radius: ['45%', '70%'],
+        itemStyle: { borderColor: '#ffffff', borderWidth: 3 },
+        label: { formatter: '{b}\n{d}%', color: '#09090b', fontSize: 11 },
+        data: sorted.map(([country, qty], index) => ({
+          name: country,
+          value: qty,
+          itemStyle: { color: colors[index % colors.length] },
+        })),
+      },
+    ],
   }
 })
 
@@ -261,16 +298,6 @@ onMounted(load)
 
   &:hover::-webkit-scrollbar-thumb {
     background: $color-border-default;
-  }
-}
-
-.urgent-item {
-  padding-bottom: $space-3;
-  border-bottom: 1px solid $color-border-default;
-
-  &:last-child {
-    border-bottom: none;
-    padding-bottom: 0;
   }
 }
 
