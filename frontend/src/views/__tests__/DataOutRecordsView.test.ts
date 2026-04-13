@@ -130,6 +130,7 @@ describe('DataOutRecordsView', () => {
     expect(html).toContain('出库单id')
     expect(html).toContain('出库仓库id')
     expect(html).toContain('更新时间')
+    expect(html).toContain('同步时间')
     expect(html).toContain('出库单类型')
 
     const source = readFileSync('src/views/data/DataOutRecordsView.vue', 'utf-8')

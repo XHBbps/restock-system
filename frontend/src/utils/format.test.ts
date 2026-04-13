@@ -11,8 +11,8 @@ describe('time format helpers', () => {
     expect(formatDateTime('2026-04-14T10:11:12')).toBe('2026-04-14 10:11')
   })
 
-  it('formats unified update times with second precision', () => {
-    expect(formatUpdateTime('2026-04-14T10:11:12')).toBe('2026-04-14 10:11:12')
+  it('formats unified update times with minute precision', () => {
+    expect(formatUpdateTime('2026-04-14T10:11:12')).toBe('2026-04-14 10:11')
     expect(formatUpdateTime(null)).toBe('-')
   })
 

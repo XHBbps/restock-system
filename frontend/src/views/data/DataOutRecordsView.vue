@@ -33,7 +33,13 @@
       </el-select>
     </template>
 
-    <el-table v-loading="loading" :data="pagedRows" row-key="saihuOutRecordId" @sort-change="handleSortChange">
+    <el-table
+      v-loading="loading"
+      :data="pagedRows"
+      row-key="saihuOutRecordId"
+      table-layout="fixed"
+      @sort-change="handleSortChange"
+    >
       <el-table-column type="expand">
         <template #default="{ row }">
           <div class="expand-panel">
@@ -56,23 +62,28 @@
           </div>
         </template>
       </el-table-column>
-      <el-table-column label="出库单id" prop="saihuOutRecordId" min-width="180" sortable="custom" show-overflow-tooltip />
-      <el-table-column label="出库仓库id" prop="warehouseId" min-width="160" sortable="custom" show-overflow-tooltip>
+      <el-table-column label="出库单id" prop="saihuOutRecordId" min-width="220" sortable="custom" show-overflow-tooltip />
+      <el-table-column label="出库仓库id" prop="warehouseId" min-width="180" sortable="custom" show-overflow-tooltip>
         <template #default="{ row }">
           <span class="mono">{{ row.warehouseId || '-' }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="更新时间" prop="updateTime" width="168" sortable="custom" show-overflow-tooltip>
+      <el-table-column label="更新时间" prop="updateTime" width="160" sortable="custom" show-overflow-tooltip>
         <template #default="{ row }">
           <span class="muted mono">{{ formatUpdateTime(row.updateTime) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="出库单类型" prop="typeName" min-width="180" sortable="custom" show-overflow-tooltip>
+      <el-table-column label="同步时间" prop="lastSeenAt" width="160" sortable="custom" show-overflow-tooltip>
+        <template #default="{ row }">
+          <span class="muted mono">{{ formatUpdateTime(row.lastSeenAt) }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="出库单类型" prop="typeName" min-width="220" sortable="custom" show-overflow-tooltip>
         <template #default="{ row }">
           <span>{{ row.typeName || '-' }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="状态" prop="status" width="100" sortable="custom">
+      <el-table-column label="状态" prop="status" width="96" sortable="custom">
         <template #default="{ row }">
           <el-tag :type="getOutRecordTransitStatusMeta(row.isInTransit).tagType" size="small">
             {{ getOutRecordTransitStatusMeta(row.isInTransit).label }}

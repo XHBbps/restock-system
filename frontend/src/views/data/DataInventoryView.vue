@@ -33,7 +33,7 @@
               </el-table-column>
               <el-table-column label="可用库存" prop="stockAvailable" width="120" align="right" />
               <el-table-column label="占用库存" prop="stockOccupy" width="120" align="right" />
-              <el-table-column label="更新时间" width="168">
+              <el-table-column label="同步时间" width="168">
                 <template #default="{ row: item }">
                   <span class="muted mono">{{ formatUpdateTime(item.updatedAt) }}</span>
                 </template>
