@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 
+import { readFileSync } from 'node:fs'
+
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -99,9 +101,9 @@ describe('WorkspaceView', () => {
     const wrapper = shallowMount(View, { global: { stubs: STUBS } })
     await flushPromises()
 
-    expect(wrapper.text()).toContain('紧急 SKU:2|低于提前期 20 天')
-    expect(wrapper.text()).toContain('临近补货:3|未低于提前期，且低于目标天数')
-    expect(wrapper.text()).toContain('安全 SKU:4|不少于 60 天')
+    expect(wrapper.text()).toContain('紧急 SKU:2|全部启用 SKU 中低于提前期 20 天')
+    expect(wrapper.text()).toContain('临近补货:3|全部启用 SKU 中未低于提前期，且低于目标天数')
+    expect(wrapper.text()).toContain('安全 SKU:4|全部启用 SKU 中不少于 60 天')
     expect(wrapper.text()).toContain('覆盖国家:3|基于当前建议单快照')
 
     const chartCards = wrapper.findAllComponents(DashboardChartCardStub)
@@ -169,5 +171,18 @@ describe('WorkspaceView', () => {
     expect(mockPush).toHaveBeenNthCalledWith(1, '/restock/current')
     expect(mockPush).toHaveBeenNthCalledWith(2, '/restock/current')
     expect(mockPush).toHaveBeenNthCalledWith(3, '/restock/current')
+  })
+
+  it('uses a stretch container for the urgent sku list instead of a fixed max height', async () => {
+    mockGetDashboardOverview.mockResolvedValue(makeOverview())
+
+    const { default: View } = await import('../WorkspaceView.vue')
+    shallowMount(View, { global: { stubs: STUBS } })
+    await flushPromises()
+
+    const source = readFileSync('src/views/WorkspaceView.vue', 'utf-8')
+    expect(source).toContain('class="urgent-card-content"')
+    expect(source).toContain('.urgent-card-content')
+    expect(source).not.toContain('max-height: 400px')
   })
 })

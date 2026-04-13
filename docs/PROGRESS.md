@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-13（建议单商品ID自动补齐与推送状态口径修复）
+> 最近更新：2026-04-13（信息总览安全SKU口径与列表布局优化）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -116,6 +116,11 @@
 ---
 
 ## 3. 近期重大变更（2026-04-10 ~ 2026-04-13）
+
+### 3.29 信息总览安全 SKU 口径与列表布局优化（2026-04-13）
+- `backend/app/api/metrics.py` 调整 dashboard overview 首行风险卡片口径：`urgent_count`、`warning_count`、`safe_count` 改为基于全部启用 SKU 的最小可售天数统计，其中 `< lead_time_days` 记为“紧急”，`>= lead_time_days 且 < target_days` 记为“临近补货”，`>= target_days` 记为“安全”；下方“各国缺货风险分布”“补货量国家分布”仍保持基于当前最新 `draft/partial` 建议单
+- `frontend/src/views/WorkspaceView.vue` 同步更新首行卡片提示文案，明确说明风险卡片统计对象为“全部启用 SKU”；同时移除“急需补货 SKU”卡片的固定高度，改为与右侧“补货概览”卡片等高拉伸，滚动区域占满可用内容区
+- **测试**：更新 `backend/tests/unit/test_metrics_dashboard.py` 与 `frontend/src/views/__tests__/WorkspaceView.test.ts`，覆盖全部启用 SKU 风险分桶口径和急需列表拉伸布局
 
 ### 3.28 建议单商品ID自动补齐与推送状态口径修复（2026-04-13）
 - `backend/app/core/commodity_id.py` 新增 SKU -> `commodity_id` 解析与建议条目推送可用性修复逻辑，按 `commodity_sku` / `seller_sku` 分层回退匹配；`backend/app/engine/runner.py` 复用该解析逻辑，生成建议单时尽量直接补齐 `commodity_id`

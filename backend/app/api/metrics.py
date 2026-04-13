@@ -13,7 +13,10 @@ from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import db_session, get_current_session
+from app.core.restock_regions import resolve_allowed_restock_regions
 from app.core.timezone import now_beijing
+from app.engine.step1_velocity import run_step1
+from app.engine.step2_sale_days import run_step2
 from app.models.api_call_log import ApiCallLog
 from app.models.task_run import TaskRun
 
@@ -111,10 +114,15 @@ async def get_dashboard_overview(
     from app.models.sku import SkuConfig
     from app.models.suggestion import Suggestion, SuggestionItem
 
-    # 1. Enabled SKU count
-    enabled_sku_count = (
-        await db.execute(select(func.count()).where(SkuConfig.enabled.is_(True)))
-    ).scalar_one()
+    # 1. Enabled SKU list
+    enabled_skus = (
+        await db.execute(
+            select(SkuConfig.commodity_sku)
+            .where(SkuConfig.enabled.is_(True))
+            .order_by(SkuConfig.commodity_sku)
+        )
+    ).scalars().all()
+    enabled_sku_count = len(enabled_skus)
 
     # 2. Global config target_days
     config = (
@@ -122,6 +130,39 @@ async def get_dashboard_overview(
     ).scalar_one_or_none()
     target_days = config.target_days if config else 60
     lead_time_days = config.lead_time_days if config else 50
+    allowed_countries = resolve_allowed_restock_regions(config.restock_regions if config else [])
+
+    def _min_sale_days(snapshot: dict[str, Any] | None) -> float | None:
+        if not snapshot:
+            return None
+        vals = [float(v) for v in snapshot.values() if isinstance(v, (int, float))]
+        return min(vals) if vals else None
+
+    velocity = (
+        await run_step1(
+            db,
+            enabled_skus,
+            now_beijing().date(),
+            allowed_countries=allowed_countries,
+        )
+        if enabled_skus
+        else {}
+    )
+    all_sale_days, _ = await run_step2(db, velocity, enabled_skus) if enabled_skus else ({}, {})
+
+    urgent_count = 0
+    warning_count = 0
+    safe_count = 0
+    for sku in enabled_skus:
+        min_days = _min_sale_days(all_sale_days.get(sku))
+        if min_days is None:
+            continue
+        if min_days < lead_time_days:
+            urgent_count += 1
+        elif min_days < target_days:
+            warning_count += 1
+        else:
+            safe_count += 1
 
     # 3. Current suggestion (latest draft or partial)
     suggestion = (
@@ -135,12 +176,12 @@ async def get_dashboard_overview(
 
     if not suggestion:
         return DashboardOverview(
-            enabled_sku_count=int(enabled_sku_count or 0),
+            enabled_sku_count=enabled_sku_count,
             suggestion_item_count=0,
             pushed_count=0,
-            urgent_count=0,
-            warning_count=0,
-            safe_count=0,
+            urgent_count=urgent_count,
+            warning_count=warning_count,
+            safe_count=safe_count,
             risk_country_count=0,
             suggestion_id=None,
             suggestion_status=None,
@@ -163,26 +204,6 @@ async def get_dashboard_overview(
     )
 
     pushed_count = sum(1 for it in items if it.push_status == "pushed")
-
-    def _min_sale_days(it: SuggestionItem) -> float | None:
-        if not it.sale_days_snapshot:
-            return None
-        vals = [float(v) for v in it.sale_days_snapshot.values() if isinstance(v, (int, float))]
-        return min(vals) if vals else None
-
-    urgent_count = 0
-    warning_count = 0
-    safe_count = 0
-    for item in items:
-        min_days = _min_sale_days(item)
-        if min_days is None:
-            continue
-        if min_days < lead_time_days:
-            urgent_count += 1
-        elif min_days < target_days:
-            warning_count += 1
-        else:
-            safe_count += 1
 
     # 5. Aggregate country-level risk buckets from sale_days snapshots.
     country_risk_counts: dict[str, dict[str, int]] = {}
@@ -235,7 +256,11 @@ async def get_dashboard_overview(
 
     urgent_items = sorted(
         [it for it in items if it.urgent],
-        key=lambda item: _min_sale_days(item) if _min_sale_days(item) is not None else 0.0,
+        key=lambda item: (
+            _min_sale_days(item.sale_days_snapshot)
+            if _min_sale_days(item.sale_days_snapshot) is not None
+            else 0.0
+        ),
     )[:10]
 
     # Batch-load product names and images for urgent SKUs
@@ -261,14 +286,14 @@ async def get_dashboard_overview(
             commodity_name=(name_map.get(it.commodity_sku) or (None, None))[0],
             main_image=(name_map.get(it.commodity_sku) or (None, None))[1],
             total_qty=it.total_qty,
-            min_sale_days=round(_min_sale_days(it) or 0.0, 1),
+            min_sale_days=round(_min_sale_days(it.sale_days_snapshot) or 0.0, 1),
             country_breakdown={k: int(v) for k, v in (it.country_breakdown or {}).items()},
         )
         for it in urgent_items
     ]
 
     return DashboardOverview(
-        enabled_sku_count=int(enabled_sku_count or 0),
+        enabled_sku_count=enabled_sku_count,
         suggestion_item_count=len(items),
         pushed_count=pushed_count,
         urgent_count=urgent_count,
