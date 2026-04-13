@@ -331,6 +331,8 @@ client.interceptors.response.use(undefined, (error) => {
 
 **按领域拆分**：`auth.ts` / `data.ts` / `suggestion.ts` / `config.ts` / `monitor.ts` / `sync.ts` / `task.ts` / `dashboard.ts`。每个文件导出类型定义和异步函数。
 
+`dashboard.ts` 当前消费 `/api/metrics/dashboard`，用于信息总览页展示顶部统计卡片、左侧“各国缺货风险分布”和右侧“补货量国家分布”。其中风险分布基于当前 `draft/partial` 建议单快照的 `sale_days_snapshot`，按全局 `lead_time_days`、`target_days` 分桶为“紧急 / 临近补货 / 安全”。
+
 ### 4.5 数据流模式
 
 **统一的"加载全量 + 前端筛选 + 本地分页"模式**：
@@ -382,6 +384,10 @@ async function reload() {
 **前端监控命名约定**：
 - `src/utils/monitoring.ts` 统一负责监控页的名称展示口径，包括赛狐接口 `endpoint`、性能监控 `request/resource` 名称中文化，以及 tooltip 中保留原始路径
 - `ApiMonitorView`、`PerformanceMonitorView`、`sync/FailedApiCallTable` 只消费该工具，不在页面内各自维护映射表，避免图表、表格、tooltip 口径漂移
+
+**信息总览页口径**：
+- `WorkspaceView` 左图使用堆叠柱状图展示各国缺货风险分布，统计对象是当前建议单快照中存在该国家 `sale_days_snapshot` 的 SKU 数量，而不是实时库存平均值
+- 右图继续展示 `top_urgent_skus` 的 `country_breakdown` 汇总，用于快速查看当前急需补货量的国家分布
 
 ---
 
