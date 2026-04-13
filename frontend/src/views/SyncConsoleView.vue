@@ -1,8 +1,6 @@
 <template>
   <div class="sync-console-view">
-    <DashboardPageHeader
-      title="数据同步"
-    >
+    <DashboardPageHeader title="数据同步">
       <template #meta>
         <el-tag :type="schedulerStatus?.enabled ? 'success' : 'warning'">
           {{ schedulerStatus?.enabled ? '调度器已开启' : '调度器已关闭' }}
@@ -17,12 +15,12 @@
       <DashboardStatCard
         title="自动任务数"
         :value="autoSyncDefinitions.length"
-        hint="调度器统一托管的自动同步任务"
+        hint="由调度器统一托管的自动同步任务"
       />
       <DashboardStatCard
         title="手动任务数"
-        :value="manualSyncActions.length"
-        hint="可人工触发的同步任务"
+        :value="manualTaskCount"
+        hint="可人工触发的同步任务与订单详情补拉任务"
       />
     </section>
 
@@ -94,14 +92,56 @@
       </div>
     </DashboardSection>
 
+    <DataTableCard title="订单详情补拉">
+      <template #toolbar>
+        <span class="refetch-hint">只补拉已匹配 SKU 且本地缺少详情的订单，任务会走后台队列执行。</span>
+      </template>
+
+      <div class="refetch-panel">
+        <el-form :model="refetchForm" inline label-width="auto" class="refetch-form">
+          <el-form-item label="回溯天数">
+            <el-input-number v-model="refetchForm.days" :min="1" :max="365" />
+          </el-form-item>
+          <el-form-item label="店铺">
+            <el-select
+              v-model="refetchForm.shop_id"
+              placeholder="全部店铺"
+              clearable
+              filterable
+              style="width: 220px"
+            >
+              <el-option
+                v-for="shop in shopOptions"
+                :key="shop.id"
+                :label="`${shop.name}（${shop.id}）`"
+                :value="shop.id"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="数量上限">
+            <el-input-number v-model="refetchForm.limit" :min="1" :max="500" />
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" :loading="refetchLoading" @click="submitOrderDetailRefetch">
+              提交补拉
+            </el-button>
+          </el-form-item>
+        </el-form>
+      </div>
+    </DataTableCard>
+
     <TaskProgress v-if="currentTaskId" :task-id="currentTaskId" @terminal="onTaskDone" />
   </div>
 </template>
 
 <script setup lang="ts">
-import client from '@/api/client'
-import { listSyncState, type SyncStateRow } from '@/api/data'
-import { getSchedulerStatus, setSchedulerStatus, type SchedulerStatus } from '@/api/sync'
+import { listDataShops, listSyncState, type DataShop, type SyncStateRow } from '@/api/data'
+import {
+  getSchedulerStatus,
+  refetchOrderDetail,
+  setSchedulerStatus,
+  type SchedulerStatus,
+} from '@/api/sync'
 import type { TaskRun } from '@/api/task'
 import DataTableCard from '@/components/dashboard/DataTableCard.vue'
 import DashboardChartCard from '@/components/dashboard/DashboardChartCard.vue'
@@ -112,12 +152,8 @@ import TaskProgress from '@/components/TaskProgress.vue'
 import SchedulerControlPanel from '@/components/sync/SchedulerControlPanel.vue'
 import SyncTaskCard from '@/components/sync/SyncTaskCard.vue'
 import SyncTaskHeroCard from '@/components/sync/SyncTaskHeroCard.vue'
-import {
-  autoSyncDefinitions,
-  manualSyncActions,
-  syncJobLabelMap,
-  type SyncActionDefinition,
-} from '@/config/sync'
+import { autoSyncDefinitions, manualSyncActions, type SyncActionDefinition, syncJobLabelMap } from '@/config/sync'
+import client from '@/api/client'
 import { getActionErrorMessage } from '@/utils/apiError'
 import { formatDetailTime } from '@/utils/format'
 import { getSyncStatusMeta } from '@/utils/status'
@@ -138,8 +174,17 @@ const schedulerStatus = ref<SchedulerStatus | null>(null)
 const schedulerLoading = ref(false)
 const schedulerToggleLoading = ref(false)
 const syncState = ref<SyncStateRow[]>([])
+const shopOptions = ref<DataShop[]>([])
 const currentTaskId = ref<number | null>(null)
 const loadingActions = reactive<Record<string, boolean>>({})
+const refetchLoading = ref(false)
+const refetchForm = reactive({
+  days: 7,
+  shop_id: '',
+  limit: 500,
+})
+
+const manualTaskCount = computed(() => manualSyncActions.length + 1)
 
 function getActionMeta(action: SyncActionDefinition) {
   const row = syncState.value.find((item) => item.job_name === action.jobName)
@@ -206,9 +251,7 @@ const nextRunChartOption = computed<EChartsCoreOption>(() => ({
   series: [
     {
       type: 'bar',
-      data: autoScheduleRows.value.map((item) =>
-        Math.max(dayjs(item.next_run_time).diff(dayjs(), 'minute'), 0),
-      ),
+      data: autoScheduleRows.value.map((item) => Math.max(dayjs(item.next_run_time).diff(dayjs(), 'minute'), 0)),
       barWidth: 16,
       itemStyle: { color: '#18181b', borderRadius: [0, 6, 6, 0] },
     },
@@ -241,8 +284,13 @@ async function loadSyncState(): Promise<void> {
   syncState.value = await listSyncState()
 }
 
+async function loadShopOptions(): Promise<void> {
+  const resp = await listDataShops()
+  shopOptions.value = [...resp.items].sort((a, b) => a.id.localeCompare(b.id))
+}
+
 async function reloadAll(): Promise<void> {
-  await Promise.allSettled([loadScheduler(), loadSyncState()])
+  await Promise.allSettled([loadScheduler(), loadSyncState(), loadShopOptions()])
 }
 
 async function trigger(action: SyncActionDefinition): Promise<void> {
@@ -259,6 +307,36 @@ async function trigger(action: SyncActionDefinition): Promise<void> {
     ElMessage.error(getActionErrorMessage(error, '同步任务触发失败。'))
   } finally {
     loadingActions[action.key] = false
+  }
+}
+
+async function submitOrderDetailRefetch(): Promise<void> {
+  refetchLoading.value = true
+  try {
+    const result = await refetchOrderDetail({
+      days: refetchForm.days,
+      limit: refetchForm.limit,
+      shop_id: refetchForm.shop_id || undefined,
+    })
+    if (!result.task_id) {
+      ElMessage.success('当前条件下没有需要补拉的订单。')
+      return
+    }
+
+    currentTaskId.value = result.task_id
+    if (result.existing) {
+      ElMessage.warning('已有订单详情补拉任务在运行，当前复用现有任务进度。')
+      return
+    }
+
+    const message = result.truncated
+      ? `订单详情补拉任务已入队，共 ${result.queued_count} 条，命中数量超过上限，已按上限处理。`
+      : `订单详情补拉任务已入队，共 ${result.queued_count} 条。`
+    ElMessage.success(message)
+  } catch (error) {
+    ElMessage.error(getActionErrorMessage(error, '订单详情补拉触发失败。'))
+  } finally {
+    refetchLoading.value = false
   }
 }
 
@@ -300,9 +378,22 @@ onMounted(reloadAll)
   gap: $space-4;
 }
 
-.readonly-hint {
+.readonly-hint,
+.refetch-hint {
   color: $color-text-secondary;
   font-size: $font-size-xs;
+}
+
+.refetch-panel {
+  display: flex;
+  flex-direction: column;
+  gap: $space-3;
+}
+
+.refetch-form {
+  display: flex;
+  flex-wrap: wrap;
+  row-gap: $space-2;
 }
 
 @media (max-width: 1280px) {

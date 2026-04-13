@@ -140,3 +140,75 @@ async def test_set_scheduler_status_stops_scheduler(monkeypatch) -> None:
 
     assert fake_db.committed is True
     assert result.enabled is False
+
+
+@pytest.mark.asyncio
+async def test_refetch_order_detail_returns_empty_when_no_targets(monkeypatch) -> None:
+    import app.api.sync as sync_api_module
+
+    class _FakeDb:
+        pass
+
+    async def fake_find_refetch_targets(*_args, **_kwargs):
+        return []
+
+    enqueue = pytest.fail
+    monkeypatch.setattr(sync_api_module, "find_refetch_targets", fake_find_refetch_targets)
+    monkeypatch.setattr(sync_api_module, "enqueue_task", enqueue)
+
+    result = await sync_api_module.refetch_order_detail(
+        sync_api_module.OrderDetailRefetchIn(days=7, limit=50, shop_id=None),
+        db=_FakeDb(),  # type: ignore[arg-type]
+        _={},
+    )
+
+    assert result.task_id is None
+    assert result.matched_count == 0
+    assert result.queued_count == 0
+    assert result.truncated is False
+
+
+@pytest.mark.asyncio
+async def test_refetch_order_detail_enqueues_trimmed_targets(monkeypatch) -> None:
+    import app.api.sync as sync_api_module
+
+    class _FakeDb:
+        pass
+
+    async def fake_find_refetch_targets(*_args, **_kwargs):
+        return [
+            ("shop-1", "order-1"),
+            ("shop-2", "order-2"),
+            ("shop-3", "order-3"),
+        ]
+
+    async def fake_enqueue_task(_db, *, job_name, trigger_source, dedupe_key=None, payload=None, priority=100):
+        assert job_name == sync_api_module.REFETCH_JOB_NAME
+        assert trigger_source == "manual"
+        assert dedupe_key == sync_api_module.REFETCH_JOB_NAME
+        assert payload == {
+            "days": 7,
+            "limit": 2,
+            "shop_id": "shop-1",
+            "targets": [
+                {"shop_id": "shop-1", "amazon_order_id": "order-1"},
+                {"shop_id": "shop-2", "amazon_order_id": "order-2"},
+            ],
+        }
+        assert priority == 100
+        return 99, False
+
+    monkeypatch.setattr(sync_api_module, "find_refetch_targets", fake_find_refetch_targets)
+    monkeypatch.setattr(sync_api_module, "enqueue_task", fake_enqueue_task)
+
+    result = await sync_api_module.refetch_order_detail(
+        sync_api_module.OrderDetailRefetchIn(days=7, limit=2, shop_id="shop-1"),
+        db=_FakeDb(),  # type: ignore[arg-type]
+        _={},
+    )
+
+    assert result.task_id == 99
+    assert result.existing is False
+    assert result.matched_count == 2
+    assert result.queued_count == 2
+    assert result.truncated is True

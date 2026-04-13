@@ -8,7 +8,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import db_session, get_current_session
 from app.models.global_config import GlobalConfig
-from app.schemas.sync import SchedulerStatusOut, SchedulerToggleIn
+from app.schemas.sync import (
+    OrderDetailRefetchIn,
+    OrderDetailRefetchOut,
+    SchedulerStatusOut,
+    SchedulerToggleIn,
+)
+from app.sync.order_detail import (
+    DEFAULT_REFETCH_DAYS,
+    REFETCH_JOB_NAME,
+    find_refetch_targets,
+    serialize_refetch_targets,
+)
 from app.tasks.queue import enqueue_task
 from app.tasks.scheduler import reload_scheduler, scheduler_status
 
@@ -74,6 +85,53 @@ async def sync_warehouse(
     _: dict[str, Any] = Depends(get_current_session),
 ) -> dict[str, Any]:
     return await _enqueue(db, "sync_warehouse")
+
+
+@router.post("/sync/order-detail/refetch", response_model=OrderDetailRefetchOut)
+async def refetch_order_detail(
+    payload: OrderDetailRefetchIn,
+    db: AsyncSession = Depends(db_session),
+    _: dict[str, Any] = Depends(get_current_session),
+) -> OrderDetailRefetchOut:
+    days = payload.days or DEFAULT_REFETCH_DAYS
+    raw_targets = await find_refetch_targets(
+        db,
+        days=days,
+        limit=payload.limit + 1,
+        shop_id=payload.shop_id,
+    )
+    truncated = len(raw_targets) > payload.limit
+    targets = raw_targets[: payload.limit]
+    matched_count = len(targets)
+
+    if matched_count == 0:
+        return OrderDetailRefetchOut(
+            task_id=None,
+            existing=False,
+            matched_count=0,
+            queued_count=0,
+            truncated=False,
+        )
+
+    task_id, existing = await enqueue_task(
+        db,
+        job_name=REFETCH_JOB_NAME,
+        trigger_source="manual",
+        dedupe_key=REFETCH_JOB_NAME,
+        payload={
+            "days": days,
+            "limit": payload.limit,
+            "shop_id": payload.shop_id,
+            "targets": serialize_refetch_targets(targets),
+        },
+    )
+    return OrderDetailRefetchOut(
+        task_id=task_id,
+        existing=existing,
+        matched_count=matched_count,
+        queued_count=0 if existing else matched_count,
+        truncated=truncated,
+    )
 
 
 @router.get("/sync/scheduler", response_model=SchedulerStatusOut)

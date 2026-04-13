@@ -143,6 +143,8 @@ async def sync_inventory_job(ctx: JobContext) -> None:
 
 **状态追踪**：每个 job 在 `sync_state` 表中维护最后运行时间、状态、错误信息。
 
+**订单详情补拉**：除自动 `sync_order_detail` 外，`POST /api/sync/order-detail/refetch` 还支持按“最近 N 天 + 店铺 + 数量上限”批量筛选本地缺少详情的订单，创建 `refetch_order_detail` TaskRun 后台任务；该任务绕过 `order_detail_fetch_log` 的去重过滤，但继续复用既有失败分类、2 QPS / 2 并发抓取与落库逻辑。
+
 ### 3.3 任务队列系统（app/tasks）
 
 **核心表**：`task_run`
@@ -499,7 +501,7 @@ Step 3: country_qty 计算时已把已推送量视为库存一部分
 | `order_header` | 订单头 | `purchase_date DESC` 索引 |
 | `order_item` | 订单行（含 quantity_shipped, refund_num） | — |
 | `order_detail` | 订单详情（含地址） | — |
-| `order_detail_fetch_log` | 详情拉取日志（防重复拉取） | — |
+| `order_detail_fetch_log` | 详情拉取日志（自动同步防重复拉取；人工补拉可绕过） | — |
 | `inventory_snapshot_latest` | 当前库存快照 | 唯一键 `(commodity_sku, warehouse_id)` |
 | `in_transit_record` / `in_transit_item` | 其他出库记录（赛狐同步） | — |
 | `zipcode_rule` | 邮编 → 仓库分配规则 | `operator_enum` CHECK 约束；`operator String(10)`，`compare_value String(200)` |

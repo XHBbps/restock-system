@@ -22,6 +22,7 @@ VALID_JOB_NAMES = {
     "sync_out_records",
     "sync_order_list",
     "sync_order_detail",
+    "refetch_order_detail",
     "sync_shop",
     "sync_all",
     "calc_engine",

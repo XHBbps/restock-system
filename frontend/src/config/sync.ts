@@ -11,6 +11,9 @@ export interface AutoSyncDefinition {
   cadence: string
 }
 
+export const ORDER_DETAIL_REFETCH_JOB_NAME = 'refetch_order_detail'
+export const ORDER_DETAIL_REFETCH_LABEL = '订单详情补拉'
+
 export const manualSyncActions: SyncActionDefinition[] = [
   {
     key: 'sync_all',
@@ -104,6 +107,7 @@ export const syncJobLabelMap = Object.fromEntries(
   [
     ...manualSyncActions.map((item) => [item.jobName, item.label]),
     ...autoSyncDefinitions.map((item) => [item.jobName, item.label]),
+    [ORDER_DETAIL_REFETCH_JOB_NAME, ORDER_DETAIL_REFETCH_LABEL],
     ['calc_engine', replenishmentAction.label],
     ['daily_archive', '每日归档'],
   ] as const,

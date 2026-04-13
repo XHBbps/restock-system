@@ -45,7 +45,7 @@
   - 03:30 `sync_warehouse`
   - 02:00 `daily_archive`
   - 默认 08:00 `calc_engine`（可配置，`calc_enabled` 控制）
-- **订单详情并发拉取**：`sync_order_detail` 支持 3 个并发（与 `/api/order/detailByOrderId.json` 的 3 QPS 限额对齐）
+- **订单详情同步与补拉**：`sync_order_detail` 当前按 2 QPS / 2 并发保守抓取；同步控制台新增“订单详情补拉”，支持按最近 N 天、店铺、数量上限批量补拉本地缺少详情的订单，任务走 TaskRun 后台执行
 
 ### 2.3 补货计算引擎
 
@@ -110,6 +110,13 @@
 ---
 
 ## 3. 近期重大变更（2026-04-10 ~ 2026-04-13）
+
+### 3.18 订单详情条件批量补拉（2026-04-13）
+
+- `backend/app/api/sync.py` 新增 `POST /api/sync/order-detail/refetch`，支持按回溯天数、店铺、数量上限筛选“订单主表已存在但本地缺少详情”的订单并创建后台补拉任务
+- `backend/app/sync/order_detail.py` 新增 `refetch_order_detail` job：人工补拉绕过 `order_detail_fetch_log` 的已记录过滤，直接消费接口层筛出的订单集合，但仍复用现有详情抓取、失败分类、限流与落库逻辑
+- `frontend/src/views/SyncConsoleView.vue` 在同步控制台新增“订单详情补拉”表单，提交后复用现有 `TaskProgress` 轮询查看执行结果
+- **测试**：补充 `backend/tests/unit/test_scheduler_api.py`、`backend/tests/unit/test_sync_order_detail_job.py` 与 `frontend/src/api/__tests__/sync.test.ts`，覆盖空命中不建任务、补拉任务入队 payload、手工补拉消费目标集合与前端 API 调用
 
 ### 3.17 监控名称中文化（2026-04-13）
 - `frontend/src/utils/monitoring.ts` 新增统一名称映射：赛狐接口 `endpoint`、性能监控 `request/resource` 名称统一转为中文含义，并保留原始路径用于 tooltip 排障

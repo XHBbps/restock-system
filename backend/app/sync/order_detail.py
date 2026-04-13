@@ -1,13 +1,6 @@
-"""Incremental sync for order details.
+"""Incremental sync and manual refetch for order details."""
 
-Strategy:
-- Fetch details only for orders related to matched SKUs
-- Skip orders already recorded in ``order_detail_fetch_log``
-- Respect the endpoint's low QPS limit
-
-Current business rule:
-- Address fields from Saihu order detail are not used and are stored as null
-"""
+from datetime import timedelta
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -25,33 +18,43 @@ from app.tasks.jobs import JobContext, register
 
 logger = get_logger(__name__)
 JOB_NAME = "sync_order_detail"
+REFETCH_JOB_NAME = "refetch_order_detail"
 MAX_PER_RUN = 500
-
-
-CONCURRENCY = 3  # 与 rate_limit 中 order_detail 的 QPS 一致
+DEFAULT_REFETCH_DAYS = 7
+CONCURRENCY = 2
 
 
 def _is_permanent_saihu_error(exc: BaseException) -> bool:
-    """Classify whether ``exc`` should be recorded as a permanent fetch failure.
+    """Return whether a fetch error should be recorded as permanent."""
 
-    Only :class:`SaihuBizError` represents real business-level errors (invalid
-    order id, closed shop, malformed response, etc.) that will never succeed
-    on retry. Rate-limited / network / auth-expired errors bubble up only
-    after the client-level tenacity budget is exhausted but a later run may
-    still succeed, so they must NOT be written to ``order_detail_fetch_log``.
-    Any other exception type is also treated as transient and left for the
-    next run (matches historical behavior for non-Saihu errors).
-    """
     return isinstance(exc, SaihuBizError)
 
 
 @register(JOB_NAME)
 async def sync_order_detail_job(ctx: JobContext) -> None:
+    async with async_session_factory() as db:
+        targets = await _find_pending_orders(db, MAX_PER_RUN)
+    await _run_fetch_job(ctx, job_name=JOB_NAME, targets=targets, step_label="订单详情同步")
+
+
+@register(REFETCH_JOB_NAME)
+async def refetch_order_detail_job(ctx: JobContext) -> None:
+    targets = _extract_refetch_targets(ctx.payload)
+    await _run_fetch_job(ctx, job_name=REFETCH_JOB_NAME, targets=targets, step_label="订单详情补拉")
+
+
+async def _run_fetch_job(
+    ctx: JobContext,
+    *,
+    job_name: str,
+    targets: list[tuple[str, str]],
+    step_label: str,
+) -> None:
     import asyncio
 
-    await ctx.progress(current_step="同步订单详情", total_steps=1)
+    await ctx.progress(current_step=step_label, total_steps=1)
     async with async_session_factory() as db:
-        started = await mark_sync_running(db, JOB_NAME)
+        started = await mark_sync_running(db, job_name)
 
     fetched = 0
     failed = 0
@@ -67,25 +70,22 @@ async def sync_order_detail_job(ctx: JobContext) -> None:
                 return True
             except Exception as exc:
                 if _is_permanent_saihu_error(exc):
-                    # Only SaihuBizError reaches here — record as permanent so
-                    # _find_pending_orders will skip this order on future runs.
-                    assert isinstance(exc, SaihuBizError)  # narrows type for _log_fetch_failure
+                    assert isinstance(exc, SaihuBizError)
                     async with async_session_factory() as db:
                         await _log_fetch_failure(db, shop_id, amazon_order_id, exc)
                         await db.commit()
                     logger.warning(
                         "order_detail_fetch_permanent_failure",
+                        job_name=job_name,
                         shop_id=shop_id,
                         amazon_order_id=amazon_order_id,
                         saihu_code=exc.code,
                         error=str(exc),
                     )
                 else:
-                    # Transient: rate limited, network, auth expired, or non-Saihu
-                    # exception. Don't persist — next sync run will pick this order
-                    # up again via _find_pending_orders.
                     logger.warning(
                         "order_detail_fetch_transient_failure",
+                        job_name=job_name,
                         shop_id=shop_id,
                         amazon_order_id=amazon_order_id,
                         error=str(exc),
@@ -93,41 +93,43 @@ async def sync_order_detail_job(ctx: JobContext) -> None:
                 return False
 
     try:
-        async with async_session_factory() as db:
-            targets = await _find_pending_orders(db, MAX_PER_RUN)
-            await ctx.progress(step_detail=f"待拉取 {len(targets)} 条")
+        await ctx.progress(step_detail=f"待处理 {len(targets)} 条")
 
-        # 分批并发，每批 CONCURRENCY 个
-        for i in range(0, len(targets), CONCURRENCY):
-            batch = targets[i : i + CONCURRENCY]
-            results = await asyncio.gather(
-                *[_fetch_one(sid, oid) for sid, oid in batch]
-            )
+        for index in range(0, len(targets), CONCURRENCY):
+            batch = targets[index : index + CONCURRENCY]
+            results = await asyncio.gather(*[_fetch_one(shop_id, amazon_order_id) for shop_id, amazon_order_id in batch])
             for ok in results:
                 if ok:
                     fetched += 1
                 else:
                     failed += 1
             if (fetched + failed) % 20 == 0:
-                await ctx.progress(step_detail=f"已拉 {fetched} / 失败 {failed}")
+                await ctx.progress(step_detail=f"已完成 {fetched} / 失败 {failed}")
+
+        if failed:
+            raise RuntimeError(f"{step_label}存在失败: success={fetched}, failed={failed}")
 
         async with async_session_factory() as db:
-            await mark_sync_success(db, JOB_NAME, started)
-        logger.info("sync_order_detail_done", fetched=fetched, failed=failed)
+            await mark_sync_success(db, job_name, started)
+        logger.info("order_detail_fetch_job_done", job_name=job_name, fetched=fetched, failed=failed)
         await ctx.progress(current_step="完成", step_detail=f"成功 {fetched} / 失败 {failed}")
     except Exception as exc:
         async with async_session_factory() as db:
-            await mark_sync_failed(db, JOB_NAME, str(exc))
+            await mark_sync_failed(db, job_name, str(exc))
         raise
 
 
-async def _find_pending_orders(db: AsyncSession, limit: int) -> list[tuple[str, str]]:
-    matched_subq = (
+def _matched_listing_subquery():
+    return (
         select(ProductListing.shop_id, ProductListing.seller_sku)
         .where(ProductListing.is_matched.is_(True))
         .where(ProductListing.seller_sku.is_not(None))
         .subquery()
     )
+
+
+async def _find_pending_orders(db: AsyncSession, limit: int) -> list[tuple[str, str]]:
+    matched_subq = _matched_listing_subquery()
 
     stmt = (
         select(
@@ -152,7 +154,71 @@ async def _find_pending_orders(db: AsyncSession, limit: int) -> list[tuple[str, 
         .limit(limit)
     )
     rows = (await db.execute(stmt)).all()
-    return [(r[0], r[1]) for r in rows]
+    return [(row[0], row[1]) for row in rows]
+
+
+async def find_refetch_targets(
+    db: AsyncSession,
+    *,
+    days: int,
+    limit: int,
+    shop_id: str | None = None,
+) -> list[tuple[str, str]]:
+    matched_subq = _matched_listing_subquery()
+    cutoff = now_beijing() - timedelta(days=days)
+
+    stmt = (
+        select(
+            OrderHeader.shop_id,
+            OrderHeader.amazon_order_id,
+            OrderHeader.purchase_date,
+        )
+        .join(OrderItem, OrderItem.order_id == OrderHeader.id)
+        .join(
+            matched_subq,
+            (matched_subq.c.shop_id == OrderHeader.shop_id)
+            & (matched_subq.c.seller_sku == OrderItem.seller_sku),
+        )
+        .outerjoin(
+            OrderDetail,
+            (OrderDetail.shop_id == OrderHeader.shop_id)
+            & (OrderDetail.amazon_order_id == OrderHeader.amazon_order_id),
+        )
+        .where(OrderDetail.amazon_order_id.is_(None))
+        .where(OrderHeader.purchase_date >= cutoff)
+        .distinct()
+        .order_by(OrderHeader.purchase_date.desc())
+        .limit(limit)
+    )
+    if shop_id:
+        stmt = stmt.where(OrderHeader.shop_id == shop_id)
+
+    rows = (await db.execute(stmt)).all()
+    return [(row[0], row[1]) for row in rows]
+
+
+def serialize_refetch_targets(targets: list[tuple[str, str]]) -> list[dict[str, str]]:
+    return [
+        {"shop_id": shop_id, "amazon_order_id": amazon_order_id}
+        for shop_id, amazon_order_id in targets
+    ]
+
+
+def _extract_refetch_targets(payload: dict[str, object]) -> list[tuple[str, str]]:
+    raw_targets = payload.get("targets")
+    if not isinstance(raw_targets, list):
+        raise RuntimeError("订单详情补拉任务缺少 targets")
+
+    targets: list[tuple[str, str]] = []
+    for item in raw_targets:
+        if not isinstance(item, dict):
+            raise RuntimeError("订单详情补拉任务 targets 格式错误")
+        shop_id = item.get("shop_id")
+        amazon_order_id = item.get("amazon_order_id")
+        if not isinstance(shop_id, str) or not isinstance(amazon_order_id, str):
+            raise RuntimeError("订单详情补拉任务 targets 缺少订单主键")
+        targets.append((shop_id, amazon_order_id))
+    return targets
 
 
 def _sanitize_detail_country(detail: dict[str, object]) -> str | None:

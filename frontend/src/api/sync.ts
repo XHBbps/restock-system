@@ -23,3 +23,24 @@ export async function setSchedulerStatus(enabled: boolean): Promise<SchedulerSta
   const { data } = await client.post<SchedulerStatus>('/api/sync/scheduler', { enabled })
   return data
 }
+
+export interface OrderDetailRefetchPayload {
+  days: number
+  limit: number
+  shop_id?: string
+}
+
+export interface OrderDetailRefetchResult {
+  task_id: number | null
+  existing: boolean
+  matched_count: number
+  queued_count: number
+  truncated: boolean
+}
+
+export async function refetchOrderDetail(
+  payload: OrderDetailRefetchPayload
+): Promise<OrderDetailRefetchResult> {
+  const { data } = await client.post<OrderDetailRefetchResult>('/api/sync/order-detail/refetch', payload)
+  return data
+}

@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class SchedulerJobOut(BaseModel):
@@ -17,3 +17,17 @@ class SchedulerStatusOut(BaseModel):
 
 class SchedulerToggleIn(BaseModel):
     enabled: bool
+
+
+class OrderDetailRefetchIn(BaseModel):
+    days: int = Field(default=7, ge=1)
+    limit: int = Field(default=500, ge=1, le=500)
+    shop_id: str | None = None
+
+
+class OrderDetailRefetchOut(BaseModel):
+    task_id: int | None = None
+    existing: bool = False
+    matched_count: int
+    queued_count: int
+    truncated: bool = False
