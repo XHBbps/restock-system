@@ -11,7 +11,14 @@
         </div>
       </div>
     </template>
-    <BaseChart :option="option" :empty="empty" :empty-text="emptyText" />
+    <div :class="['dashboard-chart-card__content', { 'has-footer': !!$slots.footer }]">
+      <div class="dashboard-chart-card__chart">
+        <BaseChart :option="option" :empty="empty" :empty-text="emptyText" />
+      </div>
+      <div v-if="$slots.footer && !empty" class="dashboard-chart-card__footer">
+        <slot name="footer" />
+      </div>
+    </div>
   </el-card>
 </template>
 
@@ -30,6 +37,10 @@ defineProps<{
 </script>
 
 <style lang="scss" scoped>
+.dashboard-chart-card {
+  height: 100%;
+}
+
 .dashboard-chart-card__header {
   display: flex;
   justify-content: space-between;
@@ -53,5 +64,34 @@ defineProps<{
   gap: $space-3;
   align-items: center;
   flex-wrap: wrap;
+}
+
+.dashboard-chart-card__content {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.dashboard-chart-card__content.has-footer {
+  display: grid;
+  grid-template-rows: minmax(0, 2fr) minmax(0, 1fr);
+  gap: $space-3;
+}
+
+.dashboard-chart-card__chart {
+  min-height: 0;
+
+  :deep(.base-chart),
+  :deep(.base-chart__canvas) {
+    height: 100%;
+    min-height: 0;
+  }
+}
+
+.dashboard-chart-card__footer {
+  min-height: 0;
+  padding-top: $space-2;
+  border-top: 1px solid $color-border-default;
 }
 </style>

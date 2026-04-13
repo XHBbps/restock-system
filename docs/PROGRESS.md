@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-13（信息总览安全SKU口径与列表布局优化）
+> 最近更新：2026-04-13（信息总览国家分布图例布局优化）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -116,6 +116,11 @@
 ---
 
 ## 3. 近期重大变更（2026-04-10 ~ 2026-04-13）
+
+### 3.30 信息总览国家分布图例布局优化（2026-04-13）
+- `frontend/src/components/dashboard/DashboardChartCard.vue` 支持图表区下方附加自定义 footer 区域；当存在 footer 时，卡片内容按约 2:1 的纵向比例分配给图表和底部补充信息区
+- `frontend/src/views/WorkspaceView.vue` 将“补货量国家分布”从 ECharts 内置 legend 调整为卡片底部自定义图例，环形图稳定展示在上部约 2/3 区域，底部图例位于下部约 1/3 区域并支持自动换行
+- **测试**：更新 `frontend/src/views/__tests__/WorkspaceView.test.ts`，覆盖国家分布图关闭内置 legend、渲染底部自定义图例和相关布局约束
 
 ### 3.29 信息总览安全 SKU 口径与列表布局优化（2026-04-13）
 - `backend/app/api/metrics.py` 调整 dashboard overview 首行风险卡片口径：`urgent_count`、`warning_count`、`safe_count` 改为基于全部启用 SKU 的最小可售天数统计，其中 `< lead_time_days` 记为“紧急”，`>= lead_time_days 且 < target_days` 记为“临近补货”，`>= target_days` 记为“安全”；下方“各国缺货风险分布”“补货量国家分布”仍保持基于当前最新 `draft/partial` 建议单

@@ -285,6 +285,8 @@ src/
 └── main.ts
 ```
 
+`components/dashboard/` 中的 `DashboardChartCard` 当前除标准图表卡片外，还支持在图表下方渲染自定义 footer 区域，用于信息总览页这类“上图下图例”布局。
+
 ### 4.2 设计系统
 
 **基于 shadcn/ui Zinc 主题**，在 `src/styles/tokens.scss` 中定义：
