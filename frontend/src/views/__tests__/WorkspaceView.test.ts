@@ -39,7 +39,6 @@ const STUBS = {
   SkuCard: true,
   ElTooltip: { template: '<div><slot /></div>' },
   ElTag: { template: '<span><slot /></span>' },
-  ElButton: { template: '<button><slot /></button>' },
   ElProgress: true,
   ElEmpty: { props: ['description'], template: '<div class="empty">{{ description }}</div>' },
 }
@@ -147,5 +146,28 @@ describe('WorkspaceView', () => {
       { name: 'JP - 日本', value: 6, itemStyle: expect.any(Object) },
       { name: 'CA - 加拿大', value: 5, itemStyle: expect.any(Object) },
     ])
+  })
+
+  it('makes the suggestion progress block clickable without a separate detail button', async () => {
+    mockGetDashboardOverview.mockResolvedValue(makeOverview())
+
+    const { default: View } = await import('../WorkspaceView.vue')
+    const wrapper = shallowMount(View, { global: { stubs: STUBS } })
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('查看详情')
+
+    const suggestionProgress = wrapper.find('.suggestion-progress')
+    expect(suggestionProgress.exists()).toBe(true)
+    expect(suggestionProgress.attributes('role')).toBe('button')
+    expect(suggestionProgress.attributes('tabindex')).toBe('0')
+
+    await suggestionProgress.trigger('click')
+    await suggestionProgress.trigger('keydown.enter')
+    await suggestionProgress.trigger('keydown.space')
+
+    expect(mockPush).toHaveBeenNthCalledWith(1, '/restock/current')
+    expect(mockPush).toHaveBeenNthCalledWith(2, '/restock/current')
+    expect(mockPush).toHaveBeenNthCalledWith(3, '/restock/current')
   })
 })
