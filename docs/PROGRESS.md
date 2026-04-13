@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-13（信息总览图表与风险卡片口径调整）
+> 最近更新：2026-04-13（同步时间展示统一）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -94,7 +94,7 @@
 - **数据页 page_size 上限放宽**：所有 `/api/data/*` 端点的 `le=5000`（原 200），支持一次拉全量
 - **建议单列表 page_size 上限**：`/api/suggestions` 的 `le=5000`
 - **筛选项统一**：店铺/仓库/订单/库存/出库/补货发起 7 个页面的筛选项布局和高度一致
-- **出库记录页**：原“其他出库（在途观测）”改名为“出库记录”；主表展示出库单id、出库仓库id、更新时间、出库单类型、状态，明细展示商品id、商品sku、可用数、采购单价；状态统一按 `is_in_transit` 映射为“在途 / 完结”
+- **出库记录页**：原“其他出库（在途观测）”改名为“出库记录”；主表展示出库单id、出库仓库id、更新时间、同步时间、出库单类型、状态，明细展示商品id、商品sku、可用数、采购单价；同步时间复用 `lastSeenAt`，状态统一按 `is_in_transit` 映射为“在途 / 完结”
 
 ### 2.7 任务队列系统
 
@@ -114,6 +114,12 @@
 ---
 
 ## 3. 近期重大变更（2026-04-10 ~ 2026-04-13）
+
+### 3.24 同步时间展示统一（2026-04-13）
+- `frontend/src/utils/format.ts` 将 `formatUpdateTime` 统一为 `YYYY-MM-DD HH:mm`，用于数据页“同步时间”和出库记录“更新时间/同步时间”展示；对应 `frontend/src/utils/format.test.ts` 同步更新断言
+- `frontend/src/views/data/DataProductsView.vue`、`DataShopsView.vue`、`DataWarehousesView.vue`、`DataInventoryView.vue` 将列表列名从“更新时间”统一调整为“同步时间”，保持原有页面结构和视觉样式不变
+- `frontend/src/views/data/DataOutRecordsView.vue` 保留主表“更新时间”，新增基于 `lastSeenAt` 的“同步时间”列，并重新分配主表列宽，使长字段更宽、短字段更紧凑
+- **测试**：更新 `frontend/src/views/__tests__/DataTimeLabels.test.ts` 与 `frontend/src/views/__tests__/DataOutRecordsView.test.ts`，覆盖统一命名和出库记录双时间列渲染
 
 ### 3.23 信息总览图表与风险卡片口径调整（2026-04-13）
 - `backend/app/api/metrics.py` 为 dashboard overview 新增 `warning_count`、`safe_count`、`risk_country_count` 和 `country_restock_distribution`，其中右侧“补货量国家分布”改为汇总当前最新 `draft/partial` 建议单全部条目的 `country_breakdown`
