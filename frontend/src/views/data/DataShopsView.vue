@@ -57,7 +57,7 @@
           <span v-else class="muted">-</span>
         </template>
       </el-table-column>
-      <el-table-column label="更新时间" width="168">
+      <el-table-column label="同步时间" width="168">
         <template #default="{ row }">
           <span class="muted mono">{{ row.lastSyncAt ? formatUpdateTime(row.lastSyncAt) : '-' }}</span>
         </template>

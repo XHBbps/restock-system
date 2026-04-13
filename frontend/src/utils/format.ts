@@ -12,10 +12,10 @@ export function formatDateTime(value?: string | null): string {
   return dayjs(value).format('YYYY-MM-DD HH:mm')
 }
 
-/** YYYY-MM-DD HH:mm:ss — 用于数据页“更新时间”统一展示 */
+/** YYYY-MM-DD HH:mm — 用于数据页“同步时间”/“更新时间”统一展示 */
 export function formatUpdateTime(value?: string | null): string {
   if (!value) return '-'
-  return dayjs(value).format('YYYY-MM-DD HH:mm:ss')
+  return dayjs(value).format('YYYY-MM-DD HH:mm')
 }
 
 /** MM-DD HH:mm:ss — 用于监控/同步日志的精确时间 */

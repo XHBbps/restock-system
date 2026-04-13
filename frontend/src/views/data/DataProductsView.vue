@@ -42,7 +42,7 @@
                   </el-tag>
                 </template>
               </el-table-column>
-              <el-table-column label="更新时间" width="168">
+              <el-table-column label="同步时间" width="168">
                 <template #default="{ row: listing }">
                   <span class="muted mono">{{ formatUpdateTime(listing.last_sync_at) }}</span>
                 </template>
