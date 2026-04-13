@@ -21,6 +21,7 @@ from sqlalchemy import insert, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
+from app.core.restock_regions import resolve_allowed_restock_regions
 from app.core.timezone import now_beijing
 from app.db.session import async_session_factory
 from app.engine.step1_velocity import run_step1
@@ -62,6 +63,7 @@ async def run_engine(ctx: JobContext, *, triggered_by: str = "scheduler") -> int
         # 加载全局配置
         config = (await db.execute(select(GlobalConfig).where(GlobalConfig.id == 1))).scalar_one()
         global_snapshot = _config_snapshot(config)
+        allowed_countries = resolve_allowed_restock_regions(config.restock_regions)
 
         # P1-1: 配置正值校验,防止静默产出错误结果
         if config.target_days <= 0:
@@ -98,7 +100,12 @@ async def run_engine(ctx: JobContext, *, triggered_by: str = "scheduler") -> int
             step_detail=f"启用 SKU 数 {len(sku_list)}",
             total_steps=7,
         )
-        velocity = await run_step1(db, sku_list, today)
+        velocity = await run_step1(
+            db,
+            sku_list,
+            today,
+            allowed_countries=allowed_countries,
+        )
 
         await ctx.progress(current_step="Step 2: 计算 sale_days")
         sale_days, inventory = await run_step2(db, velocity, sku_list)
@@ -114,7 +121,12 @@ async def run_engine(ctx: JobContext, *, triggered_by: str = "scheduler") -> int
         zipcode_rules = await load_zipcode_rules(db)
 
         # * 一次性批量加载所有 SKU 近 30 天订单,避免 N+1(宪法 V)
-        all_orders = await load_all_sku_country_orders(db, sku_list, today)
+        all_orders = await load_all_sku_country_orders(
+            db,
+            sku_list,
+            today,
+            allowed_countries=allowed_countries,
+        )
 
         # 加载 commodity_id 映射(取每个 sku 任一 listing 的 commodity_id)
         commodity_id_map = await _load_commodity_id_map(db, sku_list)

@@ -72,6 +72,7 @@ async def load_all_sku_country_orders(
     db: AsyncSession,
     commodity_skus: list[str],
     today: date,
+    allowed_countries: set[str] | None = None,
 ) -> dict[tuple[str, str], list[tuple[str | None, int]]]:
     """批量加载所有指定 SKU 近 30 天订单,按 (sku, country) 分组返回。
 
@@ -104,6 +105,8 @@ async def load_all_sku_country_orders(
         .where(OrderHeader.purchase_date < end_dt)
         .where(OrderHeader.order_status.in_(("Shipped", "PartiallyShipped")))
     )
+    if allowed_countries is not None:
+        stmt = stmt.where(OrderHeader.country_code.in_(sorted(allowed_countries)))
     rows = (await db.execute(stmt)).all()
 
     grouped: dict[tuple[str, str], list[tuple[str | None, int]]] = {}

@@ -1,6 +1,15 @@
 """Step 5 仓内分配单元测试:真实分布 + 零数据兜底。"""
 
-from app.engine.step5_warehouse_split import explain_country_qty_split, split_country_qty
+from datetime import date
+from types import SimpleNamespace
+
+import pytest
+
+from app.engine.step5_warehouse_split import (
+    explain_country_qty_split,
+    load_all_sku_country_orders,
+    split_country_qty,
+)
 from app.engine.zipcode_matcher import ZipcodeRule
 
 
@@ -329,3 +338,27 @@ def test_four_warehouse_ceil_regression_sum_equals_country_qty() -> None:
         country_warehouses=["WH-A", "WH-B", "WH-C", "WH-D"],
     )
     assert sum(result.values()) == 5
+
+
+class _FakeDb:
+    def __init__(self) -> None:
+        self.executed = []
+
+    async def execute(self, stmt):
+        self.executed.append(stmt)
+        return SimpleNamespace(all=lambda: [])
+
+
+@pytest.mark.asyncio
+async def test_load_all_sku_country_orders_applies_allowed_country_filter() -> None:
+    db = _FakeDb()
+
+    await load_all_sku_country_orders(
+        db,
+        commodity_skus=["sku-A"],
+        today=date(2026, 4, 8),
+        allowed_countries={"US", "GB"},
+    )
+
+    compiled_sql = str(db.executed[0])
+    assert "order_header.country_code IN" in compiled_sql

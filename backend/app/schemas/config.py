@@ -5,24 +5,7 @@ from typing import Literal
 from apscheduler.triggers.cron import CronTrigger
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
-
-def normalize_restock_regions(value: list[str] | None) -> list[str]:
-    if value is None:
-        return []
-
-    normalized: list[str] = []
-    seen: set[str] = set()
-    for item in value:
-        code = str(item or "").strip().upper()
-        if not code:
-            continue
-        if len(code) != 2 or not code.isalpha():
-            raise ValueError(f"补货区域国家码无效: {item}")
-        if code in seen:
-            continue
-        seen.add(code)
-        normalized.append(code)
-    return normalized
+from app.core.restock_regions import normalize_restock_regions
 
 
 # ==================== Global Config ====================

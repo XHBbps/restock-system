@@ -15,9 +15,10 @@ a live Postgres connection.
 
 from __future__ import annotations
 
+from datetime import date
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -196,6 +197,57 @@ async def test_run_engine_no_enabled_skus_returns_none() -> None:
     assert any(
         call.get("current_step") == "完成" for call in ctx.progress_calls
     )
+
+
+@pytest.mark.asyncio
+async def test_run_engine_forwards_restock_regions_to_step_loaders() -> None:
+    config = _make_config(restock_regions=["US", "GB"])
+    db = _FakeDb(
+        [
+            None,
+            _ScalarResult(config),
+            _ScalarResult([("SKU-001", None)]),
+        ]
+    )
+    factory = _FakeSessionFactory(db)
+    ctx = _FakeContext()
+
+    mocked_run_step1 = AsyncMock(return_value={"SKU-001": {"US": 1.0}})
+    mocked_run_step2 = AsyncMock(
+        return_value=(
+            {"SKU-001": {"US": 3.0}},
+            {"SKU-001": {"US": {"available": 0, "reserved": 0, "in_transit": 0, "total": 0}}},
+        )
+    )
+    mocked_load_local_inventory = AsyncMock(return_value={})
+    mocked_load_country_warehouses = AsyncMock(return_value={"US": ["WH-US"]})
+    mocked_load_zipcode_rules = AsyncMock(return_value=[])
+    mocked_load_all_orders = AsyncMock(return_value={("SKU-001", "US"): []})
+    mocked_load_commodity_ids = AsyncMock(return_value={"SKU-001": "CID-001"})
+    mocked_persist = AsyncMock(return_value=123)
+
+    with (
+        patch("app.engine.runner.async_session_factory", factory),
+        patch("app.engine.runner.run_step1", mocked_run_step1),
+        patch("app.engine.runner.run_step2", mocked_run_step2),
+        patch("app.engine.runner.load_local_inventory", mocked_load_local_inventory),
+        patch("app.engine.runner.load_country_warehouses", mocked_load_country_warehouses),
+        patch("app.engine.runner.load_zipcode_rules", mocked_load_zipcode_rules),
+        patch("app.engine.runner.load_all_sku_country_orders", mocked_load_all_orders),
+        patch("app.engine.runner._load_commodity_id_map", mocked_load_commodity_ids),
+        patch("app.engine.runner.compute_country_qty", return_value={"SKU-001": {"US": 8}}),
+        patch("app.engine.runner.compute_total", return_value=8),
+        patch(
+            "app.engine.runner.compute_timing_for_sku",
+            return_value=SimpleNamespace(t_purchase={"US": date(2026, 4, 8)}, urgent=False),
+        ),
+        patch("app.engine.runner._persist_suggestion", mocked_persist),
+    ):
+        result = await run_engine(ctx)  # type: ignore[arg-type]
+
+    assert result == 123
+    assert mocked_run_step1.await_args.kwargs["allowed_countries"] == {"US", "GB"}
+    assert mocked_load_all_orders.await_args.kwargs["allowed_countries"] == {"US", "GB"}
 
 
 def test_engine_run_advisory_lock_key_is_stable() -> None:

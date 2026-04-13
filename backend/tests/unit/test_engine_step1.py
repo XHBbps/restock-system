@@ -1,11 +1,15 @@
 """Step 1 velocity 单元测试:日期分桶 + effective 公式 + 边界。"""
 
 from datetime import date, timedelta
+from types import SimpleNamespace
+
+import pytest
 
 from app.engine.step1_velocity import (
     aggregate_velocity_from_items,
     compute_velocity,
     is_in_window,
+    load_velocity_inputs,
 )
 
 
@@ -90,3 +94,27 @@ def test_aggregate_multi_country() -> None:
 
 def test_aggregate_empty() -> None:
     assert aggregate_velocity_from_items([], date(2026, 4, 8)) == {}
+
+
+class _FakeDb:
+    def __init__(self) -> None:
+        self.executed = []
+
+    async def execute(self, stmt):
+        self.executed.append(stmt)
+        return SimpleNamespace(all=lambda: [])
+
+
+@pytest.mark.asyncio
+async def test_load_velocity_inputs_applies_allowed_country_filter() -> None:
+    db = _FakeDb()
+
+    await load_velocity_inputs(
+        db,
+        commodity_skus=["sku-A"],
+        today=date(2026, 4, 8),
+        allowed_countries={"US", "GB"},
+    )
+
+    compiled_sql = str(db.executed[0])
+    assert "order_header.country_code IN" in compiled_sql

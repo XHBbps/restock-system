@@ -74,6 +74,7 @@ async def load_velocity_inputs(
     *,
     commodity_skus: list[str] | None,
     today: date,
+    allowed_countries: set[str] | None = None,
 ) -> list[tuple[str, str, date, int, int]]:
     """从数据库加载 Step 1 计算所需的订单明细行。"""
     yesterday = today - timedelta(days=1)
@@ -98,6 +99,8 @@ async def load_velocity_inputs(
     )
     if commodity_skus is not None:
         stmt = stmt.where(OrderItem.commodity_sku.in_(commodity_skus))
+    if allowed_countries is not None:
+        stmt = stmt.where(OrderHeader.country_code.in_(sorted(allowed_countries)))
 
     rows = (await db.execute(stmt)).all()
     return [(r[0], r[1], r[2], r[3] or 0, r[4] or 0) for r in rows]
@@ -107,6 +110,12 @@ async def run_step1(
     db: AsyncSession,
     commodity_skus: list[str] | None,
     today: date,
+    allowed_countries: set[str] | None = None,
 ) -> dict[str, dict[str, float]]:
-    items = await load_velocity_inputs(db, commodity_skus=commodity_skus, today=today)
+    items = await load_velocity_inputs(
+        db,
+        commodity_skus=commodity_skus,
+        today=today,
+        allowed_countries=allowed_countries,
+    )
     return aggregate_velocity_from_items(items, today)
