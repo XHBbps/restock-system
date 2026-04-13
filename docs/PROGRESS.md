@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-12（全链路 Review 修复 — 28 项发现，Phase 1-3 已完成）
+> 最近更新：2026-04-13（监控名称中文化：同步日志 / 接口监控 / 性能监控）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -55,16 +55,15 @@
   3. `step3_country_qty` — 各国补货量
   4. `step4_total` — 总采购量（扣减国内库存 + 缓冲天数）
   5. `step5_warehouse_split` — 按邮编规则分配到具体仓库
-  6. `step6_timing` — 建议采购日 / 发货日 / 紧急标志
+  6. `step6_timing` — 建议采购日 / 紧急标志
 - **并发保护**：`pg_advisory_xact_lock(7429001)` 事务级锁，阻止并发引擎覆盖彼此
-- **在途去重**：`load_in_transit` 基于已推送（未归档）建议条目的 `country_breakdown`，避免生成新建议时重复补货（近 90 天窗口）
 - **快照追溯**：`velocity_snapshot`、`sale_days_snapshot`、`global_config_snapshot` 存入 JSONB 字段
 
 ### 2.4 补货建议管理
 
 - **建议单**：`draft/partial/pushed/archived/error` 状态流转
 - **跨页选择**：补货发起页的 `selectedIds` 数组跨分页保持，支持全选筛选后的所有条目
-- **编辑校验**：仅当同时提交 `total_qty` 和 `country_breakdown` 时才做一致性校验
+- **编辑校验**：建议详情支持编辑 `total_qty` / `country_breakdown` / `warehouse_breakdown` / `t_purchase`；国家补货量不要求与总采购量一致，已配置仓库时仓内分量之和必须等于国家补货量；正补货量国家未显式填写 `t_purchase` 时后端默认当天
 - **推送到赛狐**：`pushback/purchase.py` 合并选中条目生成采购单，失败自动重试
 - **去重**：同一 suggestion 同时只有一个 push 任务（`dedupe_key="push_saihu#<id>"`）
 
@@ -77,6 +76,7 @@
   - `frontend/src/utils/countries.ts` — 国家代码映射
   - `frontend/src/utils/status.ts` — 状态元数据
   - `frontend/src/utils/tableSort.ts` — 排序工具
+  - `frontend/src/utils/monitoring.ts` — 监控页名称映射、分位点工具和任务反馈文案
 - **Dashboard 复用组件**：
   - `DashboardPageHeader` / `DashboardStatCard` / `DashboardSection` / `DashboardChartCard` / `DataTableCard`
   - `BaseChart`（ECharts 封装）
@@ -109,7 +109,18 @@
 
 ---
 
-## 3. 近期重大变更（2026-04-10 ~ 2026-04-12）
+## 3. 近期重大变更（2026-04-10 ~ 2026-04-13）
+
+### 3.17 监控名称中文化（2026-04-13）
+- `frontend/src/utils/monitoring.ts` 新增统一名称映射：赛狐接口 `endpoint`、性能监控 `request/resource` 名称统一转为中文含义，并保留原始路径用于 tooltip 排障
+- `frontend/src/views/ApiMonitorView.vue` 与 `frontend/src/components/sync/FailedApiCallTable.vue` 改为在“接口监控”和“同步日志”中主显示中文接口名称，图表 tooltip 同步展示中文名和原始接口
+- `frontend/src/views/PerformanceMonitorView.vue` 改为将“请求名称”“资源名称”按内部接口、页面导航、Vite 资源、静态资源分组中文化展示，同时保持按原始路径聚合，避免不同资源因中文重名被错误合并
+
+### 3.16 全链路 Review 修复收尾（2026-04-13）
+- `backend/app/sync/product_listing.py` 改为拉取全量 listing（不再强制 `match=true` + `onlineStatus=active`）；本地 `product_listing` 允许保存未匹配行，并用 `is_matched` 标识；引擎读取 `commodity_id` 时继续只消费 active + matched 的行
+- `backend/app/sync/product_listing.py` 在商品同步落库后会自动补齐缺失的 `sku_config` 行；商品页可看到全部 SKU，但仅 `is_matched=true && online_status=active` 的 SKU 会被自动置为 `enabled=true` 进入引擎，其余 SKU 默认创建为禁用态
+- `frontend/src/views/data/DataProductsView.vue` 改为通过统一状态映射判断 listing `online_status`；商品页现在按大小写无关方式识别 `active`，不会再把后端已标准化为小写的在售商品误显示成“不在售”
+- `SuggestionDetailView` 改为支持编辑 `total_qty`、国家补货量、仓库拆分、采购时间；移除发货时间，国家补货量不再要求与总采购量一致，仓内分量仍需对齐国家补货量
 
 ### 3.15 全链路 Review 修复（2026-04-12）
 
@@ -210,9 +221,8 @@
 
 ### 3.7 引擎逻辑修复
 
-- **H4 一致性校验**：仅当同时提交 `total_qty` 和 `country_breakdown` 时才校验
+- **H4 编辑口径修正**：`total_qty` 与 `country_breakdown` 脱钩，国家补货量不再要求与总采购量一致；正补货量国家缺少 `t_purchase` 时由后端默认当天
 - **step3**：返回类型从 `tuple[dict, dict]` 简化为 `dict[str, dict[str, int]]`
-- **load_in_transit 启用**：从 stub 改为实际查询已推送建议
 
 ### 3.8 赛狐订单详情接口特殊限流
 

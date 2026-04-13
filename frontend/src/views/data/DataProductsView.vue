@@ -35,10 +35,10 @@
               <el-table-column label="在售状态" width="100" align="center">
                 <template #default="{ row: listing }">
                   <el-tag
-                    :type="listing.online_status === 'Active' ? 'success' : 'info'"
+                    :type="getListingOnlineStatusMeta(listing.online_status).tagType"
                     size="small"
                   >
-                    {{ listing.online_status === 'Active' ? '在售' : '不在售' }}
+                    {{ getListingOnlineStatusMeta(listing.online_status).label }}
                   </el-tag>
                 </template>
               </el-table-column>
@@ -88,6 +88,7 @@ import PageSectionCard from '@/components/PageSectionCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
 import { normalizeSwitchValue } from '@/utils/element'
 import { formatShortTime } from '@/utils/format'
+import { getListingOnlineStatusMeta } from '@/utils/status'
 import { getActionErrorMessage } from '@/utils/apiError'
 import { ElMessage } from 'element-plus'
 import { computed, onMounted, reactive, ref, watch } from 'vue'

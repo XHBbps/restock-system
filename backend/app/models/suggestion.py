@@ -89,7 +89,6 @@ class SuggestionItem(Base):
     warehouse_breakdown: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     allocation_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     t_purchase: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    t_ship: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     # 可追溯快照
     velocity_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     sale_days_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
@@ -99,7 +98,7 @@ class SuggestionItem(Base):
     # 推送相关
     push_blocker: Mapped[str | None] = mapped_column(String(50), nullable=True)
     push_status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
-    saihu_po_number: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    saihu_po_number: Mapped[str | None] = mapped_column(String(255), nullable=True)
     push_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     push_attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     pushed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

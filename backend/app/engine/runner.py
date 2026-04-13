@@ -186,7 +186,6 @@ async def run_engine(ctx: JobContext, *, triggered_by: str = "scheduler") -> int
                     "warehouse_breakdown": warehouse_breakdown,
                     "allocation_snapshot": allocation_snapshot,
                     "t_purchase": {c: d.isoformat() for c, d in timing.t_purchase.items()},
-                    "t_ship": {c: d.isoformat() for c, d in timing.t_ship.items()},
                     "velocity_snapshot": velocity.get(sku, {}),
                     "sale_days_snapshot": sale_days.get(sku, {}),
                     "urgent": timing.urgent,
@@ -230,6 +229,8 @@ async def _load_commodity_id_map(db: AsyncSession, skus: list[str]) -> dict[str,
             select(ProductListing.commodity_sku, ProductListing.commodity_id)
             .where(ProductListing.commodity_sku.in_(skus))
             .where(ProductListing.commodity_id.is_not(None))
+            .where(ProductListing.is_matched.is_(True))
+            .where(ProductListing.online_status == "active")
             .order_by(ProductListing.commodity_sku, ProductListing.commodity_id)
         )
     ).all()

@@ -219,6 +219,24 @@ async def test_load_commodity_id_map_maps_sku_to_first_id() -> None:
 
 
 @pytest.mark.asyncio
+async def test_load_commodity_id_map_ignores_inactive_or_unmatched_rows() -> None:
+    rows = [
+        ("SKU-A", "C999"),  # fake execute result only returns rows that survived SQL filters
+        ("SKU-B", "C010"),
+    ]
+    db = _FakeDb([SimpleNamespace(all=lambda: rows)])
+
+    result = await _load_commodity_id_map(db, ["SKU-A", "SKU-B"])  # type: ignore[arg-type]
+
+    assert result["SKU-A"] == "C999"
+    assert result["SKU-B"] == "C010"
+
+    compiled_sql = str(db.executed[0]).lower()
+    assert "product_listing.is_matched is true" in compiled_sql
+    assert "product_listing.online_status = :online_status_1" in compiled_sql
+
+
+@pytest.mark.asyncio
 async def test_load_commodity_id_map_unknown_skus_map_to_none() -> None:
     """_load_commodity_id_map returns None for SKUs with no product listing."""
     db = _FakeDb([SimpleNamespace(all=lambda: [])])

@@ -190,8 +190,8 @@ class DataShopListOut(BaseModel):
 # ==================== 在线产品信息 ====================
 class DataProductListing(SaihuLikeModel):
     id: int
-    commodity_sku: str
-    commodity_id: str
+    commodity_sku: str | None = None
+    commodity_id: str | None = None
     commodity_name: str | None = None
     main_image: str | None = None
     shop_id: str

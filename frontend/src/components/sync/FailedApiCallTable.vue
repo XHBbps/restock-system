@@ -4,7 +4,11 @@
       <template #default="{ row }">{{ formatTime(row.called_at) }}</template>
     </el-table-column>
     <el-table-column label="接口名称" min-width="220">
-      <template #default="{ row }">{{ row.endpoint }}</template>
+      <template #default="{ row }">
+        <span :title="getEndpointDisplay(row.endpoint).raw">
+          {{ getEndpointDisplay(row.endpoint).label }}
+        </span>
+      </template>
     </el-table-column>
     <el-table-column label="耗时(ms)" prop="duration_ms" width="100" align="right" />
     <el-table-column label="HTTP 状态" prop="http_status" width="100" align="center" />
@@ -24,6 +28,7 @@
 
 <script setup lang="ts">
 import dayjs from 'dayjs'
+import { formatMonitorEndpoint } from '@/utils/monitoring'
 
 defineProps<{
   rows: Array<{
@@ -44,5 +49,9 @@ defineEmits<{
 
 function formatTime(value: string): string {
   return dayjs(value).format('MM-DD HH:mm:ss')
+}
+
+function getEndpointDisplay(endpoint: string) {
+  return formatMonitorEndpoint(endpoint)
 }
 </script>

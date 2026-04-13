@@ -1,4 +1,4 @@
-"""建议单 REST API(对应 contracts/suggestion.yaml)。"""
+"""Suggestion REST API."""
 
 from datetime import date as date_type
 from datetime import datetime, timedelta
@@ -13,11 +13,7 @@ from app.api.deps import db_session, get_current_session
 from app.core.exceptions import ConflictError, NotFound, PushBlockedError, ValidationFailed
 from app.core.query import escape_like
 from app.core.timezone import BEIJING, now_beijing
-from app.engine.step6_timing import (
-    has_urgent_purchase,
-    missing_timing_countries,
-    positive_qty_countries,
-)
+from app.engine.step6_timing import has_urgent_purchase, positive_qty_countries
 from app.models.product_listing import ProductListing
 from app.models.suggestion import Suggestion, SuggestionItem
 from app.schemas.suggestion import (
@@ -105,7 +101,6 @@ async def list_suggestions(
             < datetime.combine(date_to + timedelta(days=1), datetime.min.time(), tzinfo=BEIJING)
         )
     if sku:
-        # 用 EXISTS 子查询匹配 sku
         subq = (
             select(SuggestionItem.suggestion_id)
             .where(SuggestionItem.commodity_sku.ilike(f"%{escape_like(sku)}%", escape="\\"))
@@ -118,7 +113,7 @@ async def list_suggestions(
     total = (await db.execute(count_stmt)).scalar_one()
     rows = (await db.execute(base.offset((page - 1) * page_size).limit(page_size))).scalars().all()
     return SuggestionListOut(
-        items=[SuggestionOut.model_validate(r) for r in rows],
+        items=[SuggestionOut.model_validate(row) for row in rows],
         total=int(total or 0),
     )
 
@@ -137,7 +132,7 @@ async def get_current_suggestion(
         )
     ).scalar_one_or_none()
     if row is None:
-        raise NotFound("当前没有活跃的建议单")
+        raise NotFound("当前没有活动的建议单")
     return await _build_detail(db, row)
 
 
@@ -163,7 +158,6 @@ async def patch_item(
     db: AsyncSession = Depends(db_session),
     _: dict[str, Any] = Depends(get_current_session),
 ) -> SuggestionItemOut:
-    # N1: load parent suggestion first to enforce editable state
     parent = (
         await db.execute(select(Suggestion).where(Suggestion.id == suggestion_id))
     ).scalar_one_or_none()
@@ -185,24 +179,48 @@ async def patch_item(
     if item.push_status == "pushed":
         raise ValidationFailed("已推送的明细不可编辑")
 
-    # 非负校验
     if patch.country_breakdown is not None:
-        for v in patch.country_breakdown.values():
-            if v < 0:
+        for value in patch.country_breakdown.values():
+            if value < 0:
                 raise ValidationFailed("country_breakdown 包含负数")
     if patch.warehouse_breakdown is not None:
         for inner in patch.warehouse_breakdown.values():
-            for v in inner.values():
-                if v < 0:
+            for value in inner.values():
+                if value < 0:
                     raise ValidationFailed("warehouse_breakdown 包含负数")
 
-    # H4:total_qty 与 country_breakdown 一致性(仅当两者同时提交时校验)
-    if (
-        patch.total_qty is not None
-        and patch.country_breakdown is not None
-        and sum(patch.country_breakdown.values()) != patch.total_qty
-    ):
-        raise ValidationFailed("country_breakdown 之和与 total_qty 不一致")
+    effective_country_breakdown = (
+        patch.country_breakdown
+        if patch.country_breakdown is not None
+        else (item.country_breakdown or {})
+    )
+    effective_warehouse_breakdown = (
+        patch.warehouse_breakdown
+        if patch.warehouse_breakdown is not None
+        else (item.warehouse_breakdown or {})
+    )
+    effective_t_purchase = dict(item.t_purchase or {})
+    if patch.t_purchase is not None:
+        effective_t_purchase.update(patch.t_purchase)
+
+    today = now_beijing().date()
+    today_iso = today.isoformat()
+    for country in positive_qty_countries(effective_country_breakdown):
+        effective_t_purchase.setdefault(country, today_iso)
+
+    from datetime import date as _date
+
+    for country, value in effective_t_purchase.items():
+        if isinstance(value, str):
+            try:
+                _date.fromisoformat(value)
+            except (ValueError, TypeError) as exc:
+                raise ValidationFailed(f"t_purchase[{country}] 包含无效日期: {exc}") from exc
+
+    for country in positive_qty_countries(effective_country_breakdown):
+        warehouse_values = list((effective_warehouse_breakdown.get(country) or {}).values())
+        if warehouse_values and sum(warehouse_values) != effective_country_breakdown[country]:
+            raise ValidationFailed(f"{country} 的 warehouse_breakdown 之和与 country_breakdown 不一致")
 
     updates: dict[str, Any] = {}
     if patch.total_qty is not None:
@@ -213,41 +231,12 @@ async def patch_item(
         updates["warehouse_breakdown"] = patch.warehouse_breakdown
     if patch.country_breakdown is not None or patch.warehouse_breakdown is not None:
         updates["allocation_snapshot"] = None
-    if patch.t_purchase is not None:
-        updates["t_purchase"] = patch.t_purchase
-    if patch.t_ship is not None:
-        updates["t_ship"] = patch.t_ship
+    if patch.t_purchase is not None or any(
+        country not in (item.t_purchase or {})
+        for country in positive_qty_countries(effective_country_breakdown)
+    ):
+        updates["t_purchase"] = effective_t_purchase
 
-    effective_country_breakdown = (
-        patch.country_breakdown
-        if patch.country_breakdown is not None
-        else (item.country_breakdown or {})
-    )
-    effective_t_purchase = (
-        patch.t_purchase if patch.t_purchase is not None else (item.t_purchase or {})
-    )
-    effective_t_ship = patch.t_ship if patch.t_ship is not None else (item.t_ship or {})
-
-    missing_purchase = missing_timing_countries(effective_country_breakdown, effective_t_purchase)
-    if missing_purchase:
-        raise ValidationFailed(f"以下采购国家缺少 t_purchase: {', '.join(missing_purchase)}")
-
-    missing_ship = missing_timing_countries(effective_country_breakdown, effective_t_ship)
-    if missing_ship:
-        raise ValidationFailed(f"以下采购国家缺少 t_ship: {', '.join(missing_ship)}")
-
-    # API 输入层日期格式校验(parse_purchase_date 对引擎侧容错,但 API 输入应严格)
-    from datetime import date as _date
-
-    for field_name, field_dict in [("t_purchase", effective_t_purchase), ("t_ship", effective_t_ship)]:
-        for country, d in field_dict.items():
-            if isinstance(d, str):
-                try:
-                    _date.fromisoformat(d)
-                except (ValueError, TypeError) as exc:
-                    raise ValidationFailed(f"{field_name}[{country}] 包含无效日期: {exc}") from exc
-
-    # H3:重新计算 urgent(与 engine/step6_timing 共享同一规则)
     if (
         patch.t_purchase is not None
         or patch.total_qty is not None
@@ -255,14 +244,12 @@ async def patch_item(
     ):
         updates["urgent"] = has_urgent_purchase(
             effective_t_purchase,
-            today=now_beijing().date(),
+            today=today,
             countries=positive_qty_countries(effective_country_breakdown),
         )
 
     if updates:
-        await db.execute(
-            update(SuggestionItem).where(SuggestionItem.id == item_id).values(**updates)
-        )
+        await db.execute(update(SuggestionItem).where(SuggestionItem.id == item_id).values(**updates))
         await db.refresh(item)
 
     return await _enrich_item(db, item)
@@ -281,7 +268,7 @@ async def push_items(
     if sug is None:
         raise NotFound(f"建议单 {suggestion_id} 不存在")
     if sug.status not in ("draft", "partial"):
-        raise ConflictError(f"建议单状态为 {sug.status},不可推送")
+        raise ConflictError(f"建议单状态为 {sug.status}, 不可推送")
 
     items = (
         (
@@ -304,8 +291,19 @@ async def push_items(
             f"以下条目带有 push_blocker,无法推送: {blocked}",
             detail={"blocked_item_ids": blocked},
         )
+    zero_qty = [it.id for it in items if (it.total_qty or 0) <= 0]
+    if zero_qty:
+        raise PushBlockedError(
+            f"以下条目 total_qty<=0,无法推送: {zero_qty}",
+            detail={"zero_qty_item_ids": zero_qty},
+        )
+    already_pushed = [it.id for it in items if it.push_status == "pushed"]
+    if already_pushed:
+        raise ConflictError(
+            f"以下条目已推送,不可重复推送: {already_pushed}",
+            detail={"already_pushed_item_ids": already_pushed},
+        )
 
-    # 入队 push_saihu 任务
     task_id, existing = await enqueue_task(
         db,
         job_name="push_saihu",
@@ -337,14 +335,7 @@ async def archive_suggestion(
     return None
 
 
-# ==================== helpers ====================
 async def _build_detail(db: AsyncSession, sug: Suggestion) -> SuggestionDetailOut:
-    """加载建议单详情。
-
-    一次性批量 JOIN `product_listing` 拉取 commodity_name / main_image,
-    避免按条目逐个查询(N+1)。同时不使用进程级缓存--确保同步后
-    的 listing 更新能立即在 UI 反映。
-    """
     items = (
         (
             await db.execute(
@@ -357,7 +348,6 @@ async def _build_detail(db: AsyncSession, sug: Suggestion) -> SuggestionDetailOu
         .all()
     )
 
-    # 批量加载本批次涉及的 commodity_sku 对应的产品展示信息
     sku_codes = [it.commodity_sku for it in items]
     name_map: dict[str, tuple[str | None, str | None]] = {}
     if sku_codes:
@@ -371,7 +361,6 @@ async def _build_detail(db: AsyncSession, sug: Suggestion) -> SuggestionDetailOu
             )
         ).all()
         for sku, name, image in rows:
-            # 同一 sku 可能有多条 listing(不同店铺/站点),取第一个命中
             if sku not in name_map:
                 name_map[sku] = (name, image)
 
@@ -392,7 +381,6 @@ async def _build_detail(db: AsyncSession, sug: Suggestion) -> SuggestionDetailOu
 
 
 async def _enrich_item(db: AsyncSession, item: SuggestionItem) -> SuggestionItemOut:
-    """单条目 enrich(用于 PATCH 返回值)。"""
     row = (
         await db.execute(
             select(ProductListing.commodity_name, ProductListing.main_image)

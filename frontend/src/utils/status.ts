@@ -57,3 +57,12 @@ export function getSyncStatusMeta(status: string | null | undefined): StatusMeta
 export function getShopStatusMeta(status: string): StatusMeta {
   return shopStatusMap[status] || fallbackMeta('未知状态')
 }
+
+export function getListingOnlineStatusMeta(status: string | null | undefined): StatusMeta {
+  const normalized = String(status || '').trim().toLowerCase()
+  if (!normalized) return fallbackMeta('未知')
+  if (normalized === 'active') {
+    return { label: '在售', tagType: 'success' }
+  }
+  return { label: '不在售', tagType: 'info' }
+}

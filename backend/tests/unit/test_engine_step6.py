@@ -1,4 +1,4 @@
-"""Step 6 timing 单元测试:缺失 sale_days 语义 + urgent 共用规则。"""
+"""Unit tests for step6 purchase timing helpers."""
 
 from datetime import date
 
@@ -19,7 +19,6 @@ def test_compute_timing_basic_non_urgent() -> None:
         today=today,
     )
 
-    assert result.t_ship["US"] == date(2026, 4, 19)
     assert result.t_purchase["US"] == date(2026, 4, 14)
     assert result.urgent is False
 
@@ -35,7 +34,6 @@ def test_missing_sale_days_means_immediate_purchase() -> None:
     )
 
     assert result.t_purchase["US"] == today
-    assert result.t_ship["US"] == date(2026, 4, 16)
     assert result.urgent is True
 
 
@@ -69,11 +67,8 @@ def test_has_urgent_purchase_keeps_empty_country_set_empty() -> None:
 
 
 def test_parse_purchase_date_invalid_format_returns_today():
-    """P1-7: 非 ISO 格式不应崩溃,保守返回 today。"""
-    from app.engine.step6_timing import has_urgent_purchase
-
     result = has_urgent_purchase(
         {"US": "not-a-date"},
         today=date(2026, 4, 12),
     )
-    assert result is True  # 格式错误 → 视为紧急
+    assert result is True

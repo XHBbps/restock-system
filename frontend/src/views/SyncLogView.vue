@@ -19,7 +19,7 @@
       title="同步任务状态分布"
       description="查看当前同步面板最近一次执行结果的整体分布。"
       :option="syncStatusChartOption"
-      :empty="syncState.length === 0"
+      :empty="syncStatusChartData.length === 0"
       empty-text="暂无同步状态数据"
     />
 
@@ -78,6 +78,12 @@ import type { EChartsCoreOption } from 'echarts/core'
 import { ElMessage } from 'element-plus'
 import { computed, onMounted, ref } from 'vue'
 
+type SyncChartDatum = {
+  name: string
+  value: number
+  color: string
+}
+
 const syncState = ref<SyncStateRow[]>([])
 const overview = ref<ApiCallsOverview | null>(null)
 const recentCalls = ref<RecentCall[]>([])
@@ -89,9 +95,9 @@ const syncStatePageSize = ref(10)
 const recentPage = ref(1)
 const recentPageSize = ref(10)
 
-const failedSyncCount = computed(() => syncState.value.filter((r) => r.last_status === 'failed').length)
+const failedSyncCount = computed(() => syncState.value.filter((row) => row.last_status === 'failed').length)
 const failedCallCount = computed(() =>
-  (overview.value?.endpoints || []).reduce((sum, ep) => sum + ep.failed_count, 0),
+  (overview.value?.endpoints || []).reduce((sum, endpoint) => sum + endpoint.failed_count, 0),
 )
 
 const pagedSyncState = computed(() => {
@@ -104,27 +110,54 @@ const pagedRecentCalls = computed(() => {
   return recentCalls.value.slice(start, start + recentPageSize.value)
 })
 
-const syncStatusChartOption = computed<EChartsCoreOption>(() => {
+const syncStatusChartData = computed<SyncChartDatum[]>(() => {
   const counts = syncState.value.reduce<Record<string, number>>((acc, item) => {
     const key = item.last_status || 'idle'
     acc[key] = (acc[key] || 0) + 1
     return acc
   }, {})
+  return [
+    { name: '成功', value: (counts.success || 0) + (counts.completed || 0), color: '#16a34a' },
+    { name: '失败', value: counts.failed || 0, color: '#dc2626' },
+    { name: '执行中', value: counts.running || 0, color: '#d97706' },
+    { name: '未执行', value: counts.idle || 0, color: '#a1a1aa' },
+  ].filter((item) => item.value > 0)
+})
+
+const syncStatusChartOption = computed<EChartsCoreOption>(() => {
   return {
-    tooltip: { trigger: 'item' },
-    legend: { bottom: 0, icon: 'circle', textStyle: { color: '#71717a' } },
+    tooltip: {
+      trigger: 'item',
+      formatter(params: unknown) {
+        const item = params as { name?: string; value?: number; percent?: number }
+        return [
+          `<div>${item.name ?? '-'}</div>`,
+          `<div>数量：${item.value ?? 0}</div>`,
+          `<div>占比：${item.percent ?? 0}%</div>`,
+        ].join('')
+      },
+    },
+    legend: {
+      bottom: 8,
+      icon: 'circle',
+      textStyle: { color: '#71717a' },
+    },
     series: [
       {
         type: 'pie',
-        radius: ['52%', '78%'],
+        radius: ['46%', '72%'],
+        center: ['50%', '38%'],
         itemStyle: { borderColor: '#ffffff', borderWidth: 4 },
-        label: { formatter: '{b}\n{c}', color: '#09090b', fontSize: 12 },
-        data: [
-          { name: '成功', value: (counts.success || 0) + (counts.completed || 0), itemStyle: { color: '#16a34a' } },
-          { name: '失败', value: counts.failed || 0, itemStyle: { color: '#dc2626' } },
-          { name: '执行中', value: counts.running || 0, itemStyle: { color: '#d97706' } },
-          { name: '未执行', value: counts.idle || 0, itemStyle: { color: '#a1a1aa' } },
-        ].filter((item) => item.value > 0),
+        label: {
+          color: '#09090b',
+          fontSize: 12,
+          formatter: '{b}\n{c}',
+        },
+        data: syncStatusChartData.value.map((item) => ({
+          name: item.name,
+          value: item.value,
+          itemStyle: { color: item.color },
+        })),
       },
     ],
   }

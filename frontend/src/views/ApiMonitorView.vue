@@ -46,7 +46,9 @@
         <el-table v-loading="loadingOverview" :data="pagedEndpointRows" table-layout="fixed" empty-text="暂无接口聚合数据" @sort-change="handleEndpointSortChange">
           <el-table-column label="接口名称" prop="endpoint" min-width="220" sortable="custom" show-overflow-tooltip>
             <template #default="{ row }">
-              <span class="endpoint-name">{{ row.endpoint }}</span>
+              <span class="endpoint-name" :title="getEndpointDisplay(row.endpoint).raw">
+                {{ getEndpointDisplay(row.endpoint).label }}
+              </span>
             </template>
           </el-table-column>
           <el-table-column label="总调用数" prop="total_calls" width="110" align="right" sortable="custom" />
@@ -79,7 +81,9 @@
           </el-table-column>
           <el-table-column label="接口名称" min-width="220" show-overflow-tooltip>
             <template #default="{ row }">
-              <span class="endpoint-name">{{ row.endpoint }}</span>
+              <span class="endpoint-name" :title="getEndpointDisplay(row.endpoint).raw">
+                {{ getEndpointDisplay(row.endpoint).label }}
+              </span>
             </template>
           </el-table-column>
           <el-table-column label="耗时(ms)" width="100" align="right">
@@ -128,7 +132,7 @@ import DataTableCard from '@/components/dashboard/DataTableCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
 import TaskProgress from '@/components/TaskProgress.vue'
 import type { TaskRun } from '@/api/task'
-import { getTaskTerminalFeedback } from '@/utils/monitoring'
+import { formatMonitorEndpoint, getTaskTerminalFeedback } from '@/utils/monitoring'
 import { formatDetailTime, clampPage } from '@/utils/format'
 import {
   applyLocalSort,
@@ -166,7 +170,7 @@ const sortedEndpointRows = computed(() =>
     endpointRows.value,
     endpointSortState.value,
     {
-      endpoint: (left, right) => compareText(left.endpoint, right.endpoint),
+      endpoint: (left, right) => compareText(getEndpointDisplay(left.endpoint).label, getEndpointDisplay(right.endpoint).label),
       total_calls: (left, right) => compareNumber(left.total_calls, right.total_calls),
       success_count: (left, right) => compareNumber(left.success_count, right.success_count),
       failed_count: (left, right) => compareNumber(left.failed_count, right.failed_count),
@@ -216,9 +220,11 @@ const callCountChartOption = computed<EChartsCoreOption>(() => ({
       const point = (Array.isArray(params) ? params[0] : params) as { dataIndex?: number }
       const row = topCallRows.value[point.dataIndex ?? 0]
       if (!row) return ''
+      const endpoint = getEndpointDisplay(row.endpoint)
 
       return [
-        `<div>${row.endpoint}</div>`,
+        `<div>${endpoint.label}</div>`,
+        endpoint.raw !== endpoint.label ? `<div>原始接口：${endpoint.raw}</div>` : '',
         `<div>总调用数：${row.total_calls}</div>`,
         `<div>成功数：${row.success_count}</div>`,
         `<div>失败数：${row.failed_count}</div>`,
@@ -233,7 +239,7 @@ const callCountChartOption = computed<EChartsCoreOption>(() => ({
   },
   yAxis: {
     type: 'category',
-    data: topCallRows.value.map((item) => item.endpoint),
+    data: topCallRows.value.map((item) => getEndpointDisplay(item.endpoint).label),
     axisLabel: {
       color: '#71717a',
       width: 150,
@@ -263,9 +269,11 @@ const failedCountChartOption = computed<EChartsCoreOption>(() => ({
       const point = (Array.isArray(params) ? params[0] : params) as { dataIndex?: number }
       const row = failedRows.value[point.dataIndex ?? 0]
       if (!row) return ''
+      const endpoint = getEndpointDisplay(row.endpoint)
 
       return [
-        `<div>${row.endpoint}</div>`,
+        `<div>${endpoint.label}</div>`,
+        endpoint.raw !== endpoint.label ? `<div>原始接口：${endpoint.raw}</div>` : '',
         `<div>失败数：${row.failed_count}</div>`,
         `<div>总调用数：${row.total_calls}</div>`,
         `<div>最近错误：${row.last_error || '-'}</div>`,
@@ -279,7 +287,7 @@ const failedCountChartOption = computed<EChartsCoreOption>(() => ({
   },
   yAxis: {
     type: 'category',
-    data: failedRows.value.map((item) => item.endpoint),
+    data: failedRows.value.map((item) => getEndpointDisplay(item.endpoint).label),
     axisLabel: {
       color: '#71717a',
       width: 150,
@@ -301,6 +309,10 @@ const failedCountChartOption = computed<EChartsCoreOption>(() => ({
 
 function formatDuration(value?: number | null): string {
   return typeof value === 'number' ? value.toFixed(0) : '-'
+}
+
+function getEndpointDisplay(endpoint: string) {
+  return formatMonitorEndpoint(endpoint)
 }
 
 async function loadOverview(): Promise<void> {

@@ -38,7 +38,7 @@
         <el-table :data="pagedResourceRows" table-layout="fixed" empty-text="暂无请求聚合数据">
           <el-table-column label="请求名称" min-width="260" show-overflow-tooltip>
             <template #default="{ row }">
-              <span class="resource-name">{{ row.label }}</span>
+              <span class="resource-name" :title="row.raw">{{ row.label }}</span>
             </template>
           </el-table-column>
           <el-table-column label="请求次数" prop="count" width="100" align="right" />
@@ -59,7 +59,9 @@
         <el-table :data="pagedSlowResources" table-layout="fixed" empty-text="暂无慢资源明细">
           <el-table-column label="资源名称" min-width="280" show-overflow-tooltip>
             <template #default="{ row }">
-              <span class="resource-name">{{ normalizeName(row.name) }}</span>
+              <span class="resource-name" :title="getResourceDisplay(row.name, row.initiatorType).raw">
+                {{ getResourceDisplay(row.name, row.initiatorType).label }}
+              </span>
             </template>
           </el-table-column>
           <el-table-column label="类型" width="120" show-overflow-tooltip>
@@ -91,11 +93,12 @@ import DashboardStatCard from '@/components/dashboard/DashboardStatCard.vue'
 import DataTableCard from '@/components/dashboard/DataTableCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
 import { clampPage } from '@/utils/format'
-import { getPercentileIndex } from '@/utils/monitoring'
+import { formatPerformanceResourceName, getPercentileIndex, normalizeMonitorResourceName } from '@/utils/monitoring'
 import type { EChartsCoreOption } from 'echarts/core'
 import { computed, onMounted, ref, watch } from 'vue'
 
 interface ResourceAggregateRow {
+  raw: string
   label: string
   count: number
   avgMs: string
@@ -155,21 +158,23 @@ const resourceRows = computed<ResourceAggregateRow[]>(() => {
   const groups = new Map<string, number[]>()
 
   for (const item of resources.value) {
-    const label = normalizeName(item.name)
-    const list = groups.get(label) || []
+    const raw = normalizeMonitorResourceName(item.name)
+    const list = groups.get(raw) || []
     list.push(item.duration)
-    groups.set(label, list)
+    groups.set(raw, list)
   }
 
   return [...groups.entries()]
-    .map(([label, values]) => {
+    .map(([raw, values]) => {
       if (values.length === 0) return null
       const sorted = [...values].sort((left, right) => left - right)
       const total = values.reduce((sum, value) => sum + value, 0)
       const p95Index = getPercentileIndex(sorted.length, 0.95)
+      const display = formatPerformanceResourceName(raw)
 
       return {
-        label,
+        raw,
+        label: display.label,
         count: values.length,
         avgMs: (total / values.length).toFixed(2),
         p95Ms: sorted[p95Index].toFixed(2),
@@ -240,6 +245,7 @@ const aggregateChartOption = computed<EChartsCoreOption>(() => ({
 
       return [
         `<div>${row.label}</div>`,
+        row.raw !== row.label ? `<div>原始路径：${row.raw}</div>` : '',
         `<div>平均耗时：${row.avgMs} ms</div>`,
         `<div>请求次数：${row.count}</div>`,
         `<div>P95：${row.p95Ms} ms</div>`,
@@ -286,11 +292,12 @@ const resourceTypeChartOption = computed<EChartsCoreOption>(() => ({
       ].join('')
     },
   },
-  legend: { bottom: 0, icon: 'circle', textStyle: { color: '#71717a' } },
+  legend: { bottom: 8, icon: 'circle', textStyle: { color: '#71717a' } },
   series: [
     {
       type: 'pie',
-      radius: ['48%', '76%'],
+      radius: ['46%', '72%'],
+      center: ['50%', '38%'],
       itemStyle: {
         borderColor: '#ffffff',
         borderWidth: 4,
@@ -311,17 +318,12 @@ const resourceTypeChartOption = computed<EChartsCoreOption>(() => ({
   ],
 }))
 
-function normalizeName(name: string): string {
-  try {
-    const url = new URL(name)
-    return `${url.pathname}${url.search}` || name
-  } catch {
-    return name
-  }
-}
-
 function formatInitiatorType(value?: string | null): string {
   return RESOURCE_TYPE_LABELS[(value || 'other').toLowerCase()] || value || '其他'
+}
+
+function getResourceDisplay(name: string, initiatorType?: string | null) {
+  return formatPerformanceResourceName(name, initiatorType)
 }
 
 function refresh(): void {

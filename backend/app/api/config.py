@@ -77,20 +77,30 @@ def _warehouse_out_from_row(row: Any) -> WarehouseOut:
 
 
 async def init_sku_configs_from_listings(db: AsyncSession) -> int:
-    sku_codes = (
+    sku_rows = (
         (
             await db.execute(
-                select(ProductListing.commodity_sku)
-                .distinct()
+                select(
+                    ProductListing.commodity_sku,
+                    ProductListing.is_matched,
+                    ProductListing.online_status,
+                )
                 .where(ProductListing.commodity_sku.is_not(None))
                 .order_by(ProductListing.commodity_sku)
             )
         )
-        .scalars()
         .all()
     )
-    if not sku_codes:
+    if not sku_rows:
         return 0
+    sku_enabled_map: dict[str, bool] = {}
+    for commodity_sku, is_matched, online_status in sku_rows:
+        if commodity_sku is None:
+            continue
+        sku_enabled_map[commodity_sku] = sku_enabled_map.get(commodity_sku, False) or (
+            bool(is_matched) and str(online_status or "").strip().lower() == "active"
+        )
+    sku_codes = sorted(sku_enabled_map)
 
     existing_codes = set(
         (
@@ -107,7 +117,7 @@ async def init_sku_configs_from_listings(db: AsyncSession) -> int:
 
     await db.execute(
         pg_insert(SkuConfig).values(
-            [{"commodity_sku": code, "enabled": True} for code in missing_codes]
+            [{"commodity_sku": code, "enabled": sku_enabled_map[code]} for code in missing_codes]
         )
     )
     await db.commit()

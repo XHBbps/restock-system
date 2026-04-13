@@ -26,8 +26,8 @@ class ProductListing(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
 
-    commodity_sku: Mapped[str] = mapped_column(String(100), nullable=False)
-    commodity_id: Mapped[str] = mapped_column(String(50), nullable=False)
+    commodity_sku: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    commodity_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     shop_id: Mapped[str] = mapped_column(String(50), nullable=False)
     marketplace_id: Mapped[str] = mapped_column(String(10), nullable=False)
     seller_sku: Mapped[str | None] = mapped_column(String(100), nullable=True)

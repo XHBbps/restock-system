@@ -110,7 +110,7 @@
 | 3 | `step3_country_qty.py` | velocity + inventory + target_days | `country_qty[sku][country]` | `max(target × v − 库存, 0)`，纯函数无 DB |
 | 4 | `step4_total.py` | country_qty + velocity + 国内库存 + buffer_days | `total_qty[sku]` | 汇总各国补货量 + 缓冲天数 − 国内库存 |
 | 5 | `step5_warehouse_split.py` | country_qty + 订单邮编 + 邮编规则 + 国家仓库映射 | `warehouse_breakdown[country][wh_id]` | 按邮编规则分配到具体仓库，无订单时均分；**2026-04-11 起**同优先级 tied 均分：`match_warehouses()` 返回首批同 priority 命中列表，qty 按 `1/N` 均分（先过滤不可用仓再定 N） |
-| 6 | `step6_timing.py` | sale_days + lead_time | `t_purchase[country]`, `t_ship[country]`, `urgent` | 计算建议采购日和发货日，判断紧急标志 |
+| 6 | `step6_timing.py` | sale_days + lead_time | `t_purchase[country]`, `urgent` | 计算建议采购日，判断紧急标志 |
 
 **并发控制**：通过 `pg_advisory_xact_lock(7429001)` 事务级咨询锁（`runner.py:58-61`），防止并发引擎覆盖彼此。
 
@@ -275,7 +275,7 @@ src/
 ├── api/             # API 客户端（每个领域一个文件）
 ├── stores/          # Pinia 状态（auth / sidebar / task）
 ├── router/          # 路由 + 鉴权守卫
-├── utils/           # 工具函数（format / tableSort / countries / warehouse / status / ...）
+├── utils/           # 工具函数（format / tableSort / countries / warehouse / status / monitoring / ...）
 ├── styles/          # 设计系统（tokens.scss + element-overrides.scss）
 ├── config/          # 导航配置
 └── main.ts
@@ -374,6 +374,10 @@ async function reload() {
 | `TablePaginationBar` | 分页条，v-model 绑定 currentPage 和 pageSize | 所有数据表格 |
 | `TaskProgress` | 长任务进度展示，自动轮询 `/api/tasks/{id}` | 引擎生成、推送、同步 |
 
+**前端监控命名约定**：
+- `src/utils/monitoring.ts` 统一负责监控页的名称展示口径，包括赛狐接口 `endpoint`、性能监控 `request/resource` 名称中文化，以及 tooltip 中保留原始路径
+- `ApiMonitorView`、`PerformanceMonitorView`、`sync/FailedApiCallTable` 只消费该工具，不在页面内各自维护映射表，避免图表、表格、tooltip 口径漂移
+
 ---
 
 ## 5. 数据流程示例
@@ -405,7 +409,7 @@ runner.run_engine(ctx, "manual")
   ├─▶ Step 3: compute_country_qty() → country_qty
   ├─▶ Step 4: compute_total() → total_qty（按 SKU 循环）
   ├─▶ Step 5: explain_country_qty_split() → warehouse_breakdown
-  ├─▶ Step 6: compute_timing_for_sku() → t_purchase, t_ship, urgent
+  ├─▶ Step 6: compute_timing_for_sku() → t_purchase, urgent
   ├─▶ _archive_active()：旧 draft/partial 归档
   └─▶ INSERT Suggestion + SuggestionItem[]（批量）
   │
@@ -488,7 +492,7 @@ Step 3: country_qty 计算时已把已推送量视为库存一部分
 | 表 | 职责 | 关键约束 |
 |---|---|---|
 | `global_config` | 全局配置单行表 | `CHECK id=1` |
-| `sku_config` | SKU 级覆盖配置（enabled, lead_time_days） | PK `commodity_sku` |
+| `sku_config` | SKU 级覆盖配置（enabled, lead_time_days）；商品同步/初始化会为全部 SKU 建立配置，但仅 active + matched 的 SKU 自动启用 | PK `commodity_sku` |
 | `warehouse` | 仓库主数据（type, country, replenish_site） | `type IN (-1,0,1,2,3)` |
 | `shop` | 店铺（同步自赛狐） | — |
 | `product_listing` | 在线商品列表（店铺 × 站点粒度） | 索引 `(commodity_sku, marketplace_id)` |
@@ -523,7 +527,7 @@ Step 3: country_qty 计算时已把已推送量视为库存一部分
 - `ix_task_run_lease`：Reaper 扫描过期任务加速
 - `ix_suggestion_item_urgent`：仅索引紧急条目
 
-**JSONB 字段**：`country_breakdown`、`warehouse_breakdown`、`t_purchase`、`t_ship`、`velocity_snapshot`、`sale_days_snapshot`、`global_config_snapshot`、`allocation_snapshot`、`payload`。当前仅整体读取，不查 JSONB 内部字段，无需 GIN 索引。
+**JSONB 字段**：`country_breakdown`、`warehouse_breakdown`、`t_purchase`、`velocity_snapshot`、`sale_days_snapshot`、`global_config_snapshot`、`allocation_snapshot`、`payload`。当前仅整体读取，不查 JSONB 内部字段，无需 GIN 索引。
 
 ### 6.3 迁移管理
 
