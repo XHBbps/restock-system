@@ -2,6 +2,14 @@
   <PageSectionCard title="出库记录">
     <template #actions>
       <el-input
+        v-model="filters.out_warehouse_no"
+        placeholder="出库单号"
+        clearable
+        style="width: 200px"
+        @keyup.enter="reload"
+        @clear="reload"
+      />
+      <el-input
         v-model="filters.sku"
         placeholder="商品 SKU"
         clearable
@@ -100,6 +108,7 @@ const pageSize = ref(50)
 const loading = ref(false)
 const sortState = ref<SortState>({ prop: 'updateTime', order: 'desc' })
 const filters = reactive({
+  out_warehouse_no: '',
   sku: '',
   country: '',
   is_in_transit: true as boolean | undefined,
@@ -114,6 +123,7 @@ async function reload(): Promise<void> {
   loading.value = true
   try {
     const resp = await listOutRecords({
+      out_warehouse_no: filters.out_warehouse_no || undefined,
       sku: filters.sku || undefined,
       country: filters.country || undefined,
       is_in_transit: filters.is_in_transit,
@@ -141,7 +151,7 @@ function handleSortChange({ prop, order }: SortChangeEvent): void {
 }
 
 watch(
-  () => [filters.sku, filters.country, filters.is_in_transit],
+  () => [filters.out_warehouse_no, filters.sku, filters.country, filters.is_in_transit],
   () => {
     page.value = 1
   },

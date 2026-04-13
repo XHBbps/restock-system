@@ -519,6 +519,7 @@ async def list_out_records(
     is_in_transit: bool | None = Query(default=True),
     country: str | None = Query(default=None),
     sku: str | None = Query(default=None),
+    out_warehouse_no: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=5000),
     sort_by: str | None = Query(default=None),
@@ -539,6 +540,13 @@ async def list_out_records(
         )
         base = base.where(
             InTransitRecord.saihu_out_record_id.in_(select(sub.c.saihu_out_record_id))
+        )
+    if out_warehouse_no:
+        base = base.where(
+            InTransitRecord.out_warehouse_no.ilike(
+                f"%{escape_like(out_warehouse_no)}%",
+                escape="\\",
+            )
         )
 
     base = _apply_out_record_sort(base, sort_by, sort_order)

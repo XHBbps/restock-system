@@ -132,6 +132,7 @@ export async function listOutRecords(params: {
   is_in_transit?: boolean
   country?: string
   sku?: string
+  out_warehouse_no?: string
   page?: number
   page_size?: number
   sort_by?: string
