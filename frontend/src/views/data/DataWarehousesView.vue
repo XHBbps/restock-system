@@ -88,9 +88,9 @@
             </el-select>
           </template>
         </el-table-column>
-        <el-table-column label="最近同步" width="140">
+        <el-table-column label="更新时间" width="168">
           <template #default="{ row }">
-            <span class="muted mono">{{ formatShortTime(row.lastSyncAt) }}</span>
+            <span class="muted mono">{{ formatUpdateTime(row.lastSyncAt) }}</span>
           </template>
         </el-table-column>
       </el-table>
@@ -112,7 +112,7 @@ import { listDataWarehouses, type DataWarehouse } from '@/api/data'
 import PageSectionCard from '@/components/PageSectionCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
 import TaskProgress from '@/components/TaskProgress.vue'
-import { formatShortTime, clampPage } from '@/utils/format'
+import { formatUpdateTime, clampPage } from '@/utils/format'
 import { warehouseTypeLabel, warehouseTypeTag } from '@/utils/warehouse'
 import { COUNTRY_OPTIONS } from '@/utils/countries'
 import {

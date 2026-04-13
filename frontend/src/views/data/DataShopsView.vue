@@ -57,9 +57,9 @@
           <span v-else class="muted">-</span>
         </template>
       </el-table-column>
-      <el-table-column label="最近同步" width="120">
+      <el-table-column label="更新时间" width="168">
         <template #default="{ row }">
-          <span class="muted mono">{{ row.lastSyncAt ? formatShortTime(row.lastSyncAt) : '-' }}</span>
+          <span class="muted mono">{{ row.lastSyncAt ? formatUpdateTime(row.lastSyncAt) : '-' }}</span>
         </template>
       </el-table-column>
     </el-table>
@@ -81,7 +81,7 @@ import PageSectionCard from '@/components/PageSectionCard.vue'
 import StatusTag from '@/components/StatusTag.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
 import TaskProgress from '@/components/TaskProgress.vue'
-import { formatShortTime } from '@/utils/format'
+import { formatUpdateTime } from '@/utils/format'
 import { normalizeSwitchValue } from '@/utils/element'
 import { getShopStatusMeta } from '@/utils/status'
 import { getActionErrorMessage } from '@/utils/apiError'

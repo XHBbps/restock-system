@@ -42,9 +42,9 @@
                   </el-tag>
                 </template>
               </el-table-column>
-              <el-table-column label="最后同步" width="140">
+              <el-table-column label="更新时间" width="168">
                 <template #default="{ row: listing }">
-                  <span class="muted mono">{{ formatShortTime(listing.last_sync_at) }}</span>
+                  <span class="muted mono">{{ formatUpdateTime(listing.last_sync_at) }}</span>
                 </template>
               </el-table-column>
             </el-table>
@@ -87,7 +87,7 @@ import SkuCard from '@/components/SkuCard.vue'
 import PageSectionCard from '@/components/PageSectionCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
 import { normalizeSwitchValue } from '@/utils/element'
-import { formatShortTime } from '@/utils/format'
+import { formatUpdateTime } from '@/utils/format'
 import { getListingOnlineStatusMeta } from '@/utils/status'
 import { getActionErrorMessage } from '@/utils/apiError'
 import { ElMessage } from 'element-plus'

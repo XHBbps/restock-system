@@ -64,7 +64,7 @@
       </el-table-column>
       <el-table-column label="更新时间" prop="updateTime" width="168" sortable="custom" show-overflow-tooltip>
         <template #default="{ row }">
-          <span class="muted mono">{{ formatShortTime(row.updateTime) }}</span>
+          <span class="muted mono">{{ formatUpdateTime(row.updateTime) }}</span>
         </template>
       </el-table-column>
       <el-table-column label="出库单类型" prop="typeName" min-width="180" sortable="custom" show-overflow-tooltip>
@@ -96,7 +96,7 @@ import PageSectionCard from '@/components/PageSectionCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
 import { getActionErrorMessage } from '@/utils/apiError'
 import { COUNTRY_OPTIONS } from '@/utils/countries'
-import { formatShortTime } from '@/utils/format'
+import { formatShortTime, formatUpdateTime } from '@/utils/format'
 import { getOutRecordTransitStatusMeta } from '@/utils/status'
 import { normalizeSortOrder, type SortChangeEvent, type SortState } from '@/utils/tableSort'
 import { ElMessage } from 'element-plus'

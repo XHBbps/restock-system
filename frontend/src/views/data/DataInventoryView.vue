@@ -33,9 +33,9 @@
               </el-table-column>
               <el-table-column label="可用库存" prop="stockAvailable" width="120" align="right" />
               <el-table-column label="占用库存" prop="stockOccupy" width="120" align="right" />
-              <el-table-column label="更新时间" width="160">
+              <el-table-column label="更新时间" width="168">
                 <template #default="{ row: item }">
-                  <span class="muted mono">{{ formatShortTime(item.updatedAt) }}</span>
+                  <span class="muted mono">{{ formatUpdateTime(item.updatedAt) }}</span>
                 </template>
               </el-table-column>
             </el-table>
@@ -77,7 +77,7 @@
 <script setup lang="ts">
 import { listInventory, type DataInventoryItem } from '@/api/data'
 import { COUNTRY_OPTIONS } from '@/utils/countries'
-import { formatShortTime } from '@/utils/format'
+import { formatUpdateTime } from '@/utils/format'
 import { warehouseTypeLabel } from '@/utils/warehouse'
 import PageSectionCard from '@/components/PageSectionCard.vue'
 import SkuCard from '@/components/SkuCard.vue'
