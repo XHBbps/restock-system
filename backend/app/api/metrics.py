@@ -20,10 +20,12 @@ from app.models.task_run import TaskRun
 # --------------- Dashboard schemas ---------------
 
 
-class CountryStockDays(BaseModel):
+class CountryRiskDistribution(BaseModel):
     country: str
-    avg_sale_days: float
-    sku_count: int
+    urgent_count: int
+    warning_count: int
+    safe_count: int
+    total_count: int
 
 
 class UrgentSkuItem(BaseModel):
@@ -42,8 +44,9 @@ class DashboardOverview(BaseModel):
     urgent_count: int
     suggestion_id: int | None
     suggestion_status: str | None
+    lead_time_days: int
     target_days: int
-    country_stock_days: list[CountryStockDays]
+    country_risk_distribution: list[CountryRiskDistribution]
     top_urgent_skus: list[UrgentSkuItem]
 
 
@@ -109,6 +112,7 @@ async def get_dashboard_overview(
         await db.execute(select(GlobalConfig).where(GlobalConfig.id == 1))
     ).scalar_one_or_none()
     target_days = config.target_days if config else 60
+    lead_time_days = config.lead_time_days if config else 50
 
     # 3. Current suggestion (latest draft or partial)
     suggestion = (
@@ -128,8 +132,9 @@ async def get_dashboard_overview(
             urgent_count=0,
             suggestion_id=None,
             suggestion_status=None,
+            lead_time_days=lead_time_days,
             target_days=target_days,
-            country_stock_days=[],
+            country_risk_distribution=[],
             top_urgent_skus=[],
         )
 
@@ -147,25 +152,38 @@ async def get_dashboard_overview(
     pushed_count = sum(1 for it in items if it.push_status == "pushed")
     urgent_count = sum(1 for it in items if it.urgent)
 
-    # 5. Aggregate sale_days by country from snapshots
-    country_days: dict[str, list[float]] = {}
+    # 5. Aggregate country-level risk buckets from sale_days snapshots.
+    country_risk_counts: dict[str, dict[str, int]] = {}
     for it in items:
         if not it.sale_days_snapshot:
             continue
         for country, days_val in it.sale_days_snapshot.items():
             if isinstance(days_val, (int, float)) and days_val >= 0:
-                country_days.setdefault(country, []).append(float(days_val))
+                counts = country_risk_counts.setdefault(
+                    country,
+                    {"urgent_count": 0, "warning_count": 0, "safe_count": 0},
+                )
+                if float(days_val) < lead_time_days:
+                    counts["urgent_count"] += 1
+                elif float(days_val) < target_days:
+                    counts["warning_count"] += 1
+                else:
+                    counts["safe_count"] += 1
 
-    country_stock_days = sorted(
+    country_risk_distribution = sorted(
         [
-            CountryStockDays(
-                country=c,
-                avg_sale_days=round(sum(vals) / len(vals), 1),
-                sku_count=len(vals),
+            CountryRiskDistribution(
+                country=country,
+                urgent_count=counts["urgent_count"],
+                warning_count=counts["warning_count"],
+                safe_count=counts["safe_count"],
+                total_count=(
+                    counts["urgent_count"] + counts["warning_count"] + counts["safe_count"]
+                ),
             )
-            for c, vals in country_days.items()
+            for country, counts in country_risk_counts.items()
         ],
-        key=lambda x: x.avg_sale_days,
+        key=lambda item: item.country,
     )
 
     # 6. Top 10 urgent SKUs by lowest sale_days (most urgent first)
@@ -218,7 +236,8 @@ async def get_dashboard_overview(
         urgent_count=urgent_count,
         suggestion_id=suggestion.id,
         suggestion_status=suggestion.status,
+        lead_time_days=lead_time_days,
         target_days=target_days,
-        country_stock_days=country_stock_days,
+        country_risk_distribution=country_risk_distribution,
         top_urgent_skus=top_urgent_skus,
     )

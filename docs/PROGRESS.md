@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-13（补货区域接入全局参数与补货计算）
+> 最近更新：2026-04-13（信息总览改为各国缺货风险分布）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -85,6 +85,7 @@
 - **筛选控件高度统一**：`PageSectionCard` 的 `section-actions` 强制所有控件 32px 高度
 - **订单状态中文映射**：`DataOrdersView.vue` 添加 `ORDER_STATUS_LABEL`（已发货 / 部分发货 / 未发货 / 待处理 / 已取消）
 - **全局参数页补货区域配置**：`GlobalConfigView.vue` 新增“补货区域”多选，选项复用 `COUNTRY_OPTIONS`，保存前变更检测与配置变更提示已纳入 `restock_regions`
+- **信息总览风险图**：`WorkspaceView.vue` 左侧图表改为“各国缺货风险分布”，按当前建议单快照把各国 SKU 分为“紧急 / 临近补货 / 安全”三类堆叠展示；右侧继续保留“补货量国家分布”
 
 ### 2.6 数据管理
 
@@ -113,6 +114,12 @@
 ---
 
 ## 3. 近期重大变更（2026-04-10 ~ 2026-04-13）
+
+### 3.22 信息总览改为各国缺货风险分布（2026-04-13）
+- `backend/app/api/metrics.py` 将 dashboard overview 从“各国平均可售天数”调整为“各国缺货风险分布”，按当前最新 `draft/partial` 建议单的 `sale_days_snapshot` 基于全局 `lead_time_days`、`target_days` 分桶，返回各国 `urgent_count` / `warning_count` / `safe_count`
+- `frontend/src/api/dashboard.ts` 同步更新 `DashboardOverview` 类型，新增 `lead_time_days` 和 `country_risk_distribution`，移除旧的 `country_stock_days` 口径
+- `frontend/src/views/WorkspaceView.vue` 左侧图表替换为堆叠柱状图，tooltip 明确展示“紧急 / 临近补货 / 安全”数量及全局阈值；右侧“补货量国家分布”饼图继续保留
+- **测试**：新增 `backend/tests/unit/test_metrics_dashboard.py` 与 `frontend/src/views/__tests__/WorkspaceView.test.ts`，覆盖风险分桶、dashboard 返回结构和前端图表渲染
 
 ### 3.21 补货区域接入全局参数与引擎过滤（2026-04-13）
 - `backend/app/models/global_config.py`、`backend/alembic/versions/20260414_1500_add_restock_regions_to_global_config.py` 为 `global_config` 新增 `restock_regions` JSONB 字段，默认值为 `[]`；`backend/app/main.py` 启动初始化时同步补齐默认配置
