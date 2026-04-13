@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { getListingOnlineStatusMeta } from './status'
+import { getListingOnlineStatusMeta, getOutRecordTransitStatusMeta } from './status'
 
 describe('getListingOnlineStatusMeta', () => {
   it('treats active status case-insensitively as on sale', () => {
@@ -32,6 +32,22 @@ describe('getListingOnlineStatusMeta', () => {
     })
     expect(getListingOnlineStatusMeta(undefined)).toEqual({
       label: '未知',
+      tagType: 'info',
+    })
+  })
+})
+
+describe('getOutRecordTransitStatusMeta', () => {
+  it('maps active in-transit rows to 在途', () => {
+    expect(getOutRecordTransitStatusMeta(true)).toEqual({
+      label: '在途',
+      tagType: 'success',
+    })
+  })
+
+  it('maps inactive rows to 完结', () => {
+    expect(getOutRecordTransitStatusMeta(false)).toEqual({
+      label: '完结',
       tagType: 'info',
     })
   })

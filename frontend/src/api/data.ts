@@ -105,16 +105,22 @@ export async function listInventory(params: {
 
 // ========== 其他出库 ==========
 export interface DataOutRecordItem {
+  commodityId: string | null
   commoditySku: string
   goods: number
+  perPurchase: string | null
 }
 
 export interface DataOutRecord {
   saihuOutRecordId: string
+  warehouseId: string | null
   outWarehouseNo: string | null
   targetWarehouseId: string | null
   targetWarehouseName: string | null
   targetCountry: string | null
+  updateTime: string | null
+  type: number | null
+  typeName: string | null
   remark: string | null
   status: string | null
   isInTransit: boolean

@@ -1,20 +1,27 @@
-﻿<template>
-  <PageSectionCard title="其他出库（在途观测）">
+<template>
+  <PageSectionCard title="出库记录">
     <template #actions>
       <el-input
         v-model="filters.sku"
-        placeholder="commoditySku"
+        placeholder="商品 SKU"
         clearable
         style="width: 200px"
         @keyup.enter="reload"
         @clear="reload"
       />
-      <el-select v-model="filters.country" placeholder="国家" clearable filterable style="width: 140px" @change="reload">
+      <el-select
+        v-model="filters.country"
+        placeholder="国家"
+        clearable
+        filterable
+        style="width: 140px"
+        @change="reload"
+      >
         <el-option v-for="c in COUNTRY_OPTIONS" :key="c.code" :label="c.code" :value="c.code" />
       </el-select>
       <el-select v-model="filters.is_in_transit" placeholder="状态" style="width: 130px" @change="reload">
-        <el-option label="在途中" :value="true" />
-        <el-option label="已消失" :value="false" />
+        <el-option label="在途" :value="true" />
+        <el-option label="完结" :value="false" />
       </el-select>
     </template>
 
@@ -24,48 +31,44 @@
           <div class="expand-panel">
             <div class="expand-title">出库单明细（{{ row.items.length }} 项）</div>
             <el-table :data="row.items" size="small">
-              <el-table-column label="商品 SKU" prop="commoditySku" sortable show-overflow-tooltip />
-              <el-table-column label="商品数量" prop="goods" width="160" align="right" sortable show-overflow-tooltip />
+              <el-table-column label="商品id" prop="commodityId" min-width="160" show-overflow-tooltip />
+              <el-table-column label="商品sku" prop="commoditySku" min-width="160" show-overflow-tooltip />
+              <el-table-column label="可用数" prop="goods" width="120" align="right" sortable show-overflow-tooltip />
+              <el-table-column label="采购单价" prop="perPurchase" width="140" align="right" show-overflow-tooltip>
+                <template #default="{ row: item }">
+                  {{ item.perPurchase ?? '-' }}
+                </template>
+              </el-table-column>
             </el-table>
             <div class="expand-meta">
-              备注：<code>{{ row.remark || '-' }}</code>
+              <span>出库单号：<code>{{ row.outWarehouseNo || '-' }}</code></span>
+              <span>备注：<code>{{ row.remark || '-' }}</code></span>
+              <span>最后观测：<code>{{ formatShortTime(row.lastSeenAt) }}</code></span>
             </div>
           </div>
         </template>
       </el-table-column>
-      <el-table-column label="出库单号" prop="outWarehouseNo" min-width="160" sortable="custom" show-overflow-tooltip />
-      <el-table-column label="外部出库 ID" prop="saihuOutRecordId" width="160" sortable="custom" show-overflow-tooltip />
-      <el-table-column label="目标仓" prop="targetWarehouseName" min-width="200" sortable="custom">
+      <el-table-column label="出库单id" prop="saihuOutRecordId" min-width="180" sortable="custom" show-overflow-tooltip />
+      <el-table-column label="出库仓库id" prop="warehouseId" min-width="160" sortable="custom" show-overflow-tooltip>
         <template #default="{ row }">
-          <div class="meta-stack">
-            <span>{{ row.targetWarehouseName || '-' }}</span>
-            <span class="meta-sub">{{ row.targetWarehouseId || '未知' }}</span>
-          </div>
+          <span class="mono">{{ row.warehouseId || '-' }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="目标国家" prop="targetCountry" width="90" align="center" sortable="custom">
+      <el-table-column label="更新时间" prop="updateTime" width="168" sortable="custom" show-overflow-tooltip>
         <template #default="{ row }">
-          <el-tag v-if="row.targetCountry" size="small">{{ row.targetCountry }}</el-tag>
-          <span v-else class="muted">-</span>
+          <span class="muted mono">{{ formatShortTime(row.updateTime) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="明细数" prop="itemCount" width="90" align="right" sortable="custom" show-overflow-tooltip>
-        <template #default="{ row }">{{ row.items.length }}</template>
-      </el-table-column>
-      <el-table-column label="观测总数" prop="goodsTotal" width="100" align="right" sortable="custom" show-overflow-tooltip>
+      <el-table-column label="出库单类型" prop="typeName" min-width="180" sortable="custom" show-overflow-tooltip>
         <template #default="{ row }">
-          <strong>{{ sumGoods(row) }}</strong>
+          <span>{{ row.typeName || '-' }}</span>
         </template>
       </el-table-column>
       <el-table-column label="状态" prop="status" width="100" sortable="custom">
         <template #default="{ row }">
-          <el-tag v-if="row.isInTransit" type="success" size="small">在途中</el-tag>
-          <el-tag v-else type="info" size="small">已消失</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="最后同步" prop="lastSeenAt" width="160" sortable="custom" show-overflow-tooltip>
-        <template #default="{ row }">
-          <span class="muted mono">{{ formatShortTime(row.lastSeenAt) }}</span>
+          <el-tag :type="getOutRecordTransitStatusMeta(row.isInTransit).tagType" size="small">
+            {{ getOutRecordTransitStatusMeta(row.isInTransit).label }}
+          </el-tag>
         </template>
       </el-table-column>
     </el-table>
@@ -81,28 +84,30 @@
 
 <script setup lang="ts">
 import { listOutRecords, type DataOutRecord } from '@/api/data'
-import { COUNTRY_OPTIONS } from '@/utils/countries'
-import { formatShortTime } from '@/utils/format'
 import PageSectionCard from '@/components/PageSectionCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
-import { normalizeSortOrder, type SortChangeEvent, type SortState } from '@/utils/tableSort'
 import { getActionErrorMessage } from '@/utils/apiError'
+import { COUNTRY_OPTIONS } from '@/utils/countries'
+import { formatShortTime } from '@/utils/format'
+import { getOutRecordTransitStatusMeta } from '@/utils/status'
+import { normalizeSortOrder, type SortChangeEvent, type SortState } from '@/utils/tableSort'
 import { ElMessage } from 'element-plus'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 
 const rows = ref<DataOutRecord[]>([])
 const page = ref(1)
 const pageSize = ref(50)
-const pagedRows = computed(() => {
-  const start = (page.value - 1) * pageSize.value
-  return rows.value.slice(start, start + pageSize.value)
-})
 const loading = ref(false)
-const sortState = ref<SortState>({ prop: 'lastSeenAt', order: 'desc' })
+const sortState = ref<SortState>({ prop: 'updateTime', order: 'desc' })
 const filters = reactive({
   sku: '',
   country: '',
   is_in_transit: true as boolean | undefined,
+})
+
+const pagedRows = computed(() => {
+  const start = (page.value - 1) * pageSize.value
+  return rows.value.slice(start, start + pageSize.value)
 })
 
 async function reload(): Promise<void> {
@@ -126,22 +131,20 @@ async function reload(): Promise<void> {
   }
 }
 
-function sumGoods(row: DataOutRecord): number {
-  return row.items.reduce((sum, it) => sum + it.goods, 0)
-}
-
 function handleSortChange({ prop, order }: SortChangeEvent): void {
   const normalizedOrder = normalizeSortOrder(order)
   sortState.value = normalizedOrder && prop
     ? { prop, order: normalizedOrder }
-    : { prop: 'lastSeenAt', order: 'desc' }
+    : { prop: 'updateTime', order: 'desc' }
   page.value = 1
   void reload()
 }
 
 watch(
   () => [filters.sku, filters.country, filters.is_in_transit],
-  () => { page.value = 1 },
+  () => {
+    page.value = 1
+  },
 )
 
 onMounted(reload)
@@ -155,15 +158,18 @@ onMounted(reload)
 }
 
 .expand-title {
-  font-size: $font-size-xs;
-  color: $color-text-secondary;
-  font-weight: $font-weight-semibold;
-  text-transform: uppercase;
-  letter-spacing: $tracking-wider;
   margin-bottom: $space-2;
+  color: $color-text-secondary;
+  font-size: $font-size-xs;
+  font-weight: $font-weight-semibold;
+  letter-spacing: $tracking-wider;
+  text-transform: uppercase;
 }
 
 .expand-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $space-3;
   margin-top: $space-2;
   font-size: $font-size-xs;
   color: $color-text-secondary;
@@ -175,17 +181,6 @@ onMounted(reload)
   padding: 2px 6px;
   border-radius: $radius-sm;
   border: 1px solid $color-border-default;
-}
-
-.meta-stack {
-  display: flex;
-  flex-direction: column;
-}
-
-.meta-sub {
-  font-size: $font-size-xs;
-  color: $color-text-secondary;
-  font-family: $font-family-mono;
 }
 
 .muted {

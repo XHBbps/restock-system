@@ -1,12 +1,6 @@
-"""其他出库列表(在途数据)同步。
+"""Sync Saihu out-records into local tracking tables."""
 
-实现 spec FR-017a~d:
-- 记录 sync_start_time
-- 拉所有备注含'在途中'的出库单 -> UPSERT in_transit_record (is_in_transit=true, last_seen_at=sync_start_time)
-- 同步结束后:UPDATE in_transit_record SET is_in_transit=false WHERE last_seen_at < sync_start_time
-  -> 表示这些单据的'在途中'标签已消失,自动归零
-"""
-
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from sqlalchemy import delete, select, text
@@ -14,6 +8,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
+from app.core.timezone import parse_saihu_time
 from app.db.session import async_session_factory
 from app.models.in_transit import InTransitItem, InTransitRecord
 from app.models.warehouse import Warehouse
@@ -87,11 +82,15 @@ async def _upsert_out_record(
 
     rec_values = {
         "saihu_out_record_id": record_id,
+        "warehouse_id": _to_optional_text(raw.get("warehouseId")),
         "out_warehouse_no": raw.get("outWarehouseNo"),
         "target_warehouse_id": target_warehouse_id
         if target_warehouse_id in warehouse_country_map
         else None,
         "target_country": target_country,
+        "update_time": parse_saihu_time(raw.get("updateTime")),
+        "type": _to_int(raw.get("type"), default=None),
+        "type_name": _to_optional_text(raw.get("typeName")),
         "remark": raw.get("remark"),
         "status": str(raw.get("status") or "") or None,
         "is_in_transit": True,
@@ -101,9 +100,13 @@ async def _upsert_out_record(
     stmt = stmt.on_conflict_do_update(
         index_elements=["saihu_out_record_id"],
         set_={
+            "warehouse_id": rec_values["warehouse_id"],
             "out_warehouse_no": rec_values["out_warehouse_no"],
             "target_warehouse_id": rec_values["target_warehouse_id"],
             "target_country": rec_values["target_country"],
+            "update_time": rec_values["update_time"],
+            "type": rec_values["type"],
+            "type_name": rec_values["type_name"],
             "remark": rec_values["remark"],
             "status": rec_values["status"],
             "is_in_transit": True,
@@ -128,8 +131,10 @@ async def _upsert_out_record(
         items.append(
             {
                 "saihu_out_record_id": record_id,
+                "commodity_id": _to_optional_text(raw_item.get("commodityId")),
                 "commodity_sku": commodity_sku,
                 "goods": goods,
+                "per_purchase": _to_decimal(raw_item.get("perPurchase")),
             }
         )
     if items:
@@ -158,10 +163,25 @@ async def _age_out_records(sync_start_time) -> int:
         return len(ids)
 
 
-def _to_int(v: Any, default: int = 0) -> int:
+def _to_int(v: Any, default: int | None = 0) -> int | None:
     if v is None or v == "":
         return default
     try:
         return int(float(v))
     except (TypeError, ValueError):
         return default
+
+
+def _to_optional_text(v: Any) -> str | None:
+    value = str(v or "").strip()
+    return value or None
+
+
+def _to_decimal(v: Any) -> Decimal | None:
+    value = _to_optional_text(v)
+    if value is None:
+        return None
+    try:
+        return Decimal(value)
+    except (InvalidOperation, ValueError):
+        return None

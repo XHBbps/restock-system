@@ -220,11 +220,23 @@ def _apply_out_record_sort(stmt, sort_by: str | None, sort_order: str):
     item_count_expr = _out_record_item_count_expr()
     goods_total_expr = _out_record_goods_total_expr()
     sort_map: dict[str, tuple[ColumnElement[object], ...]] = {
+        "warehouseId": (
+            case((InTransitRecord.warehouse_id.is_(None), 1), else_=0),
+            InTransitRecord.warehouse_id,
+        ),
         "outWarehouseNo": (
             case((InTransitRecord.out_warehouse_no.is_(None), 1), else_=0),
             InTransitRecord.out_warehouse_no,
         ),
         "saihuOutRecordId": (InTransitRecord.saihu_out_record_id,),
+        "updateTime": (
+            case((InTransitRecord.update_time.is_(None), 1), else_=0),
+            InTransitRecord.update_time,
+        ),
+        "typeName": (
+            case((InTransitRecord.type_name.is_(None), 1), else_=0),
+            InTransitRecord.type_name,
+        ),
         "targetWarehouseName": (
             case((target_warehouse_name_expr.is_(None), 1), else_=0),
             target_warehouse_name_expr,
@@ -236,11 +248,13 @@ def _apply_out_record_sort(stmt, sort_by: str | None, sort_order: str):
         "itemCount": (item_count_expr,),
         "goodsTotal": (goods_total_expr,),
         "status": (_out_record_status_sort_expr(),),
+        "type": (InTransitRecord.type,),
         "lastSeenAt": (InTransitRecord.last_seen_at,),
     }
-    columns = sort_map.get(sort_by or "", (InTransitRecord.last_seen_at,))
+    columns = sort_map.get(sort_by or "", (InTransitRecord.update_time, InTransitRecord.last_seen_at))
     return stmt.order_by(
         *_apply_direction(columns, sort_order),
+        InTransitRecord.update_time.desc(),
         InTransitRecord.last_seen_at.desc(),
         InTransitRecord.saihu_out_record_id.desc(),
     )
@@ -565,10 +579,14 @@ async def list_out_records(
             DataOutRecord.model_validate(
                 {
                     "saihu_out_record_id": r.saihu_out_record_id,
+                    "warehouse_id": r.warehouse_id,
                     "out_warehouse_no": r.out_warehouse_no,
                     "target_warehouse_id": r.target_warehouse_id,
                     "target_warehouse_name": wh_name_map.get(r.target_warehouse_id or ""),
                     "target_country": r.target_country,
+                    "update_time": r.update_time,
+                    "type": r.type,
+                    "type_name": r.type_name,
                     "remark": r.remark,
                     "status": r.status,
                     "is_in_transit": r.is_in_transit,

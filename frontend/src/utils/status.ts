@@ -66,3 +66,9 @@ export function getListingOnlineStatusMeta(status: string | null | undefined): S
   }
   return { label: '不在售', tagType: 'info' }
 }
+
+export function getOutRecordTransitStatusMeta(isInTransit: boolean): StatusMeta {
+  return isInTransit
+    ? { label: '在途', tagType: 'success' }
+    : { label: '完结', tagType: 'info' }
+}

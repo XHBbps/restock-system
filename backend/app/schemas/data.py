@@ -119,16 +119,22 @@ class DataInventoryListOut(BaseModel):
 
 # ==================== 其他出库列表 ====================
 class DataOutRecordItem(SaihuLikeModel):
+    commodity_id: str | None = None
     commodity_sku: str
-    goods: int  # 在途数
+    goods: int
+    per_purchase: Decimal | None = None
 
 
 class DataOutRecord(SaihuLikeModel):
     saihu_out_record_id: str
+    warehouse_id: str | None = None
     out_warehouse_no: str | None = None
     target_warehouse_id: str | None = None
     target_warehouse_name: str | None = None
     target_country: str | None = None
+    update_time: datetime | None = None
+    type: int | None = None
+    type_name: str | None = None
     remark: str | None = None
     status: str | None = None
     is_in_transit: bool
