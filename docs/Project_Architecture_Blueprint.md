@@ -331,7 +331,7 @@ client.interceptors.response.use(undefined, (error) => {
 
 **按领域拆分**：`auth.ts` / `data.ts` / `suggestion.ts` / `config.ts` / `monitor.ts` / `sync.ts` / `task.ts` / `dashboard.ts`。每个文件导出类型定义和异步函数。
 
-`dashboard.ts` 当前消费 `/api/metrics/dashboard`，用于信息总览页展示顶部统计卡片、左侧“各国缺货风险分布”和右侧“补货量国家分布”。其中风险分布基于当前 `draft/partial` 建议单快照的 `sale_days_snapshot`，按全局 `lead_time_days`、`target_days` 分桶为“紧急 / 临近补货 / 安全”。
+`dashboard.ts` 当前消费 `/api/metrics/dashboard`，用于信息总览页展示顶部风险卡片、左侧“各国缺货风险分布”和右侧“补货量国家分布”。其中风险分布基于当前 `draft/partial` 建议单快照的 `sale_days_snapshot`，按全局 `lead_time_days`、`target_days` 分桶为“紧急 / 临近补货 / 安全”；右侧国家分布则汇总当前建议单全部条目的 `country_breakdown`。
 
 ### 4.5 数据流模式
 
@@ -386,8 +386,9 @@ async function reload() {
 - `ApiMonitorView`、`PerformanceMonitorView`、`sync/FailedApiCallTable` 只消费该工具，不在页面内各自维护映射表，避免图表、表格、tooltip 口径漂移
 
 **信息总览页口径**：
-- `WorkspaceView` 左图使用堆叠柱状图展示各国缺货风险分布，统计对象是当前建议单快照中存在该国家 `sale_days_snapshot` 的 SKU 数量，而不是实时库存平均值
-- 右图继续展示 `top_urgent_skus` 的 `country_breakdown` 汇总，用于快速查看当前急需补货量的国家分布
+- `WorkspaceView` 首行卡片展示当前建议单的风险概览：`urgent_count`、`warning_count`、`safe_count` 按 SKU 最小可售天数相对全局阈值分桶，`risk_country_count` 表示风险分布中出现的国家数
+- 左图使用分组柱状图展示各国缺货风险分布，统计对象是当前建议单快照中存在该国家 `sale_days_snapshot` 的 SKU 数量，而不是实时库存平均值
+- 右图继续使用饼图，但数据改为 `country_restock_distribution`，即当前建议单全部条目的 `country_breakdown` 汇总，用于展示实际建议补货量的国家分布
 
 ---
 

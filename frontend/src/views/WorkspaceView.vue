@@ -3,16 +3,26 @@
     <DashboardPageHeader title="信息总览" />
 
     <section class="stats-grid">
-      <DashboardStatCard title="启用 SKU" :value="data?.enabled_sku_count ?? 0" />
       <DashboardStatCard
-        title="当前建议条目"
-        :value="data?.suggestion_id != null ? data.suggestion_item_count : '-'"
+        title="紧急 SKU"
+        :value="data?.urgent_count ?? 0"
+        :hint="`低于提前期 ${leadTimeDays} 天`"
       />
       <DashboardStatCard
-        title="已推送"
-        :value="data?.suggestion_id != null ? `${data.pushed_count} / ${data.suggestion_item_count}` : '-'"
+        title="临近补货"
+        :value="data?.warning_count ?? 0"
+        hint="未低于提前期，且低于目标天数"
       />
-      <DashboardStatCard title="紧急补货" :value="data?.urgent_count ?? 0" />
+      <DashboardStatCard
+        title="安全 SKU"
+        :value="data?.safe_count ?? 0"
+        :hint="`不少于 ${targetDays} 天`"
+      />
+      <DashboardStatCard
+        title="覆盖国家"
+        :value="data?.risk_country_count ?? 0"
+        hint="基于当前建议单快照"
+      />
     </section>
 
     <section class="chart-section">
@@ -57,7 +67,7 @@
             </div>
           </div>
         </template>
-        <el-empty v-else description="暂无紧急补货项" :image-size="72" />
+        <el-empty v-else description="暂无急需补货项" :image-size="72" />
       </DataTableCard>
 
       <DataTableCard title="补货概览">
@@ -77,15 +87,13 @@
             <span class="progress-text">已推送 {{ data.pushed_count }} / 总计 {{ data.suggestion_item_count }}</span>
           </div>
 
-          <template v-if="data && data.top_urgent_skus.length > 0">
-            <DashboardChartCard
-              title="补货量国家分布"
-              :option="countryDistChartOption"
-              :empty="false"
-              style="box-shadow: none; padding: 0;"
-            />
-          </template>
-          <el-empty v-else-if="!data?.suggestion_id" description="暂无数据" :image-size="72" />
+          <DashboardChartCard
+            title="补货量国家分布"
+            :option="countryDistChartOption"
+            :empty="!data || data.country_restock_distribution.length === 0"
+            empty-text="暂无补货量数据"
+            style="box-shadow: none; padding: 0;"
+          />
         </div>
       </DataTableCard>
     </section>
@@ -112,8 +120,13 @@ const RISK_COLORS = {
   safe: '#16a34a',
 }
 
+const PIE_COLORS = ['#18181b', '#3b82f6', '#16a34a', '#d97706', '#dc2626', '#8b5cf6', '#06b6d4', '#ec4899']
+
 const router = useRouter()
 const data = ref<DashboardOverview | null>(null)
+
+const leadTimeDays = computed(() => data.value?.lead_time_days ?? 50)
+const targetDays = computed(() => data.value?.target_days ?? 60)
 
 const suggestionStatus = computed(() =>
   data.value?.suggestion_status
@@ -123,11 +136,9 @@ const suggestionStatus = computed(() =>
 
 const riskDistributionChartOption = computed<EChartsCoreOption>(() => {
   const items = data.value?.country_risk_distribution ?? []
-  const targetDays = data.value?.target_days ?? 60
-  const leadTimeDays = data.value?.lead_time_days ?? 50
 
   return {
-    grid: { left: 24, right: 24, top: 36, bottom: 24, containLabel: true },
+    grid: { left: 24, right: 24, top: 44, bottom: 24, containLabel: true },
     legend: {
       top: 0,
       icon: 'roundRect',
@@ -140,24 +151,21 @@ const riskDistributionChartOption = computed<EChartsCoreOption>(() => {
       axisPointer: { type: 'shadow' },
       formatter(
         params: Array<{
-          seriesName: string
-          value: number
           axisValue: string
           dataIndex?: number
         }>,
       ) {
         const item = items[params[0]?.dataIndex ?? -1]
         if (!item) return ''
-        const lines = [
+        return [
           item.country ? getCountryLabel(item.country) : params[0]?.axisValue ?? '',
           `紧急：${item.urgent_count}`,
           `临近补货：${item.warning_count}`,
           `安全：${item.safe_count}`,
           `总计：${item.total_count}`,
-          `提前期阈值：${leadTimeDays} 天`,
-          `目标天数：${targetDays} 天`,
-        ]
-        return lines.join('<br/>')
+          `提前期阈值：${leadTimeDays.value} 天`,
+          `目标天数：${targetDays.value} 天`,
+        ].join('<br/>')
       },
     },
     xAxis: {
@@ -176,25 +184,22 @@ const riskDistributionChartOption = computed<EChartsCoreOption>(() => {
       {
         name: '紧急',
         type: 'bar',
-        stack: 'risk',
-        barWidth: 32,
+        barMaxWidth: 18,
         itemStyle: { color: RISK_COLORS.urgent, borderRadius: [6, 6, 0, 0] },
         data: items.map((item) => item.urgent_count),
       },
       {
         name: '临近补货',
         type: 'bar',
-        stack: 'risk',
-        barWidth: 32,
-        itemStyle: { color: RISK_COLORS.warning },
+        barMaxWidth: 18,
+        itemStyle: { color: RISK_COLORS.warning, borderRadius: [6, 6, 0, 0] },
         data: items.map((item) => item.warning_count),
       },
       {
         name: '安全',
         type: 'bar',
-        stack: 'risk',
-        barWidth: 32,
-        itemStyle: { color: RISK_COLORS.safe },
+        barMaxWidth: 18,
+        itemStyle: { color: RISK_COLORS.safe, borderRadius: [6, 6, 0, 0] },
         data: items.map((item) => item.safe_count),
       },
     ],
@@ -202,17 +207,8 @@ const riskDistributionChartOption = computed<EChartsCoreOption>(() => {
 })
 
 const countryDistChartOption = computed<EChartsCoreOption>(() => {
-  if (!data.value?.top_urgent_skus.length) return {}
-
-  const totals: Record<string, number> = {}
-  for (const item of data.value.top_urgent_skus) {
-    for (const [country, qty] of Object.entries(item.country_breakdown)) {
-      totals[country] = (totals[country] || 0) + qty
-    }
-  }
-
-  const sorted = Object.entries(totals).sort((a, b) => b[1] - a[1])
-  const colors = ['#18181b', '#3b82f6', '#16a34a', '#d97706', '#dc2626', '#8b5cf6', '#06b6d4', '#ec4899']
+  const items = data.value?.country_restock_distribution ?? []
+  if (!items.length) return {}
 
   return {
     tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
@@ -223,10 +219,10 @@ const countryDistChartOption = computed<EChartsCoreOption>(() => {
         radius: ['45%', '70%'],
         itemStyle: { borderColor: '#ffffff', borderWidth: 3 },
         label: { formatter: '{b}\n{d}%', color: '#09090b', fontSize: 11 },
-        data: sorted.map(([country, qty], index) => ({
-          name: country,
-          value: qty,
-          itemStyle: { color: colors[index % colors.length] },
+        data: items.map((item, index) => ({
+          name: getCountryLabel(item.country),
+          value: item.total_qty,
+          itemStyle: { color: PIE_COLORS[index % PIE_COLORS.length] },
         })),
       },
     ],
