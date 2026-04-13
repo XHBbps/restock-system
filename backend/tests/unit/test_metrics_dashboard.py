@@ -64,7 +64,11 @@ async def test_dashboard_returns_empty_risk_distribution_without_active_suggesti
     assert result.target_days == 60
     assert result.lead_time_days == 50
     assert result.suggestion_id is None
+    assert result.warning_count == 0
+    assert result.safe_count == 0
+    assert result.risk_country_count == 0
     assert result.country_risk_distribution == []
+    assert result.country_restock_distribution == []
     assert result.top_urgent_skus == []
 
 
@@ -103,6 +107,22 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
             country_breakdown={"US": 3},
             push_status="pending",
         ),
+        SimpleNamespace(
+            commodity_sku="SKU-5",
+            sale_days_snapshot={"US": 25},
+            urgent=False,
+            total_qty=4,
+            country_breakdown={"US": 4},
+            push_status="pending",
+        ),
+        SimpleNamespace(
+            commodity_sku="SKU-6",
+            sale_days_snapshot={"CA": 65},
+            urgent=False,
+            total_qty=6,
+            country_breakdown={"CA": 6, "JP": 2},
+            push_status="pending",
+        ),
     ]
     db = _FakeDb(
         [
@@ -123,7 +143,10 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
 
     assert result.suggestion_id == 9
     assert result.pushed_count == 1
-    assert result.urgent_count == 2
+    assert result.urgent_count == 3
+    assert result.warning_count == 1
+    assert result.safe_count == 1
+    assert result.risk_country_count == 3
     assert result.lead_time_days == 20
     assert result.target_days == 60
     assert [item.model_dump() for item in result.country_risk_distribution] == [
@@ -131,8 +154,8 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
             "country": "CA",
             "urgent_count": 1,
             "warning_count": 0,
-            "safe_count": 1,
-            "total_count": 2,
+            "safe_count": 2,
+            "total_count": 3,
         },
         {
             "country": "JP",
@@ -144,10 +167,15 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
         {
             "country": "US",
             "urgent_count": 1,
-            "warning_count": 1,
+            "warning_count": 2,
             "safe_count": 1,
-            "total_count": 3,
+            "total_count": 4,
         },
+    ]
+    assert [item.model_dump() for item in result.country_restock_distribution] == [
+        {"country": "US", "total_qty": 19},
+        {"country": "CA", "total_qty": 14},
+        {"country": "JP", "total_qty": 7},
     ]
     assert [item.model_dump() for item in result.top_urgent_skus] == [
         {

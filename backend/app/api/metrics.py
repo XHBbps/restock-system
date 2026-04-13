@@ -37,16 +37,25 @@ class UrgentSkuItem(BaseModel):
     country_breakdown: dict[str, int]
 
 
+class CountryRestockDistribution(BaseModel):
+    country: str
+    total_qty: int
+
+
 class DashboardOverview(BaseModel):
     enabled_sku_count: int
     suggestion_item_count: int
     pushed_count: int
     urgent_count: int
+    warning_count: int
+    safe_count: int
+    risk_country_count: int
     suggestion_id: int | None
     suggestion_status: str | None
     lead_time_days: int
     target_days: int
     country_risk_distribution: list[CountryRiskDistribution]
+    country_restock_distribution: list[CountryRestockDistribution]
     top_urgent_skus: list[UrgentSkuItem]
 
 
@@ -130,11 +139,15 @@ async def get_dashboard_overview(
             suggestion_item_count=0,
             pushed_count=0,
             urgent_count=0,
+            warning_count=0,
+            safe_count=0,
+            risk_country_count=0,
             suggestion_id=None,
             suggestion_status=None,
             lead_time_days=lead_time_days,
             target_days=target_days,
             country_risk_distribution=[],
+            country_restock_distribution=[],
             top_urgent_skus=[],
         )
 
@@ -150,11 +163,35 @@ async def get_dashboard_overview(
     )
 
     pushed_count = sum(1 for it in items if it.push_status == "pushed")
-    urgent_count = sum(1 for it in items if it.urgent)
+
+    def _min_sale_days(it: SuggestionItem) -> float | None:
+        if not it.sale_days_snapshot:
+            return None
+        vals = [float(v) for v in it.sale_days_snapshot.values() if isinstance(v, (int, float))]
+        return min(vals) if vals else None
+
+    urgent_count = 0
+    warning_count = 0
+    safe_count = 0
+    for item in items:
+        min_days = _min_sale_days(item)
+        if min_days is None:
+            continue
+        if min_days < lead_time_days:
+            urgent_count += 1
+        elif min_days < target_days:
+            warning_count += 1
+        else:
+            safe_count += 1
 
     # 5. Aggregate country-level risk buckets from sale_days snapshots.
     country_risk_counts: dict[str, dict[str, int]] = {}
+    country_restock_totals: dict[str, int] = {}
     for it in items:
+        for country, qty in (it.country_breakdown or {}).items():
+            if isinstance(qty, (int, float)) and qty > 0:
+                country_restock_totals[country] = country_restock_totals.get(country, 0) + int(qty)
+
         if not it.sale_days_snapshot:
             continue
         for country, days_val in it.sale_days_snapshot.items():
@@ -185,19 +222,20 @@ async def get_dashboard_overview(
         ],
         key=lambda item: item.country,
     )
+    country_restock_distribution = sorted(
+        [
+            CountryRestockDistribution(country=country, total_qty=qty)
+            for country, qty in country_restock_totals.items()
+        ],
+        key=lambda item: (-item.total_qty, item.country),
+    )
 
     # 6. Top 10 urgent SKUs by lowest sale_days (most urgent first)
     from app.models.product_listing import ProductListing
 
-    def _min_sale_days(it: SuggestionItem) -> float:
-        if not it.sale_days_snapshot:
-            return 0.0
-        vals = [float(v) for v in it.sale_days_snapshot.values() if isinstance(v, (int, float))]
-        return min(vals) if vals else 0.0
-
     urgent_items = sorted(
         [it for it in items if it.urgent],
-        key=_min_sale_days,
+        key=lambda item: _min_sale_days(item) if _min_sale_days(item) is not None else 0.0,
     )[:10]
 
     # Batch-load product names and images for urgent SKUs
@@ -223,7 +261,7 @@ async def get_dashboard_overview(
             commodity_name=(name_map.get(it.commodity_sku) or (None, None))[0],
             main_image=(name_map.get(it.commodity_sku) or (None, None))[1],
             total_qty=it.total_qty,
-            min_sale_days=round(_min_sale_days(it), 1),
+            min_sale_days=round(_min_sale_days(it) or 0.0, 1),
             country_breakdown={k: int(v) for k, v in (it.country_breakdown or {}).items()},
         )
         for it in urgent_items
@@ -234,10 +272,14 @@ async def get_dashboard_overview(
         suggestion_item_count=len(items),
         pushed_count=pushed_count,
         urgent_count=urgent_count,
+        warning_count=warning_count,
+        safe_count=safe_count,
+        risk_country_count=len(country_risk_distribution),
         suggestion_id=suggestion.id,
         suggestion_status=suggestion.status,
         lead_time_days=lead_time_days,
         target_days=target_days,
         country_risk_distribution=country_risk_distribution,
+        country_restock_distribution=country_restock_distribution,
         top_urgent_skus=top_urgent_skus,
     )
