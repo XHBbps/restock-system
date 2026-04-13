@@ -15,6 +15,17 @@ def test_global_config_patch_rejects_invalid_cron() -> None:
         GlobalConfigPatch(calc_cron="invalid cron")
 
 
+def test_global_config_patch_normalizes_restock_regions() -> None:
+    patch = GlobalConfigPatch(restock_regions=["us", " GB ", "", "us"])
+
+    assert patch.restock_regions == ["US", "GB"]
+
+
+def test_global_config_patch_rejects_invalid_restock_region() -> None:
+    with pytest.raises(ValidationError, match="补货区域国家码无效"):
+        GlobalConfigPatch(restock_regions=["USA"])
+
+
 def test_zipcode_rule_accepts_string_contains_operator() -> None:
     rule = ZipcodeRuleIn(
         country="UK",

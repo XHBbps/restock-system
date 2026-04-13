@@ -6,11 +6,31 @@ from apscheduler.triggers.cron import CronTrigger
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 
+def normalize_restock_regions(value: list[str] | None) -> list[str]:
+    if value is None:
+        return []
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        code = str(item or "").strip().upper()
+        if not code:
+            continue
+        if len(code) != 2 or not code.isalpha():
+            raise ValueError(f"补货区域国家码无效: {item}")
+        if code in seen:
+            continue
+        seen.add(code)
+        normalized.append(code)
+    return normalized
+
+
 # ==================== Global Config ====================
 class GlobalConfigOut(BaseModel):
     buffer_days: int
     target_days: int
     lead_time_days: int
+    restock_regions: list[str] = Field(default_factory=list)
     sync_interval_minutes: int
     scheduler_enabled: bool
     calc_enabled: bool
@@ -21,11 +41,17 @@ class GlobalConfigOut(BaseModel):
 
     model_config = {"from_attributes": True}
 
+    @field_validator("restock_regions", mode="before")
+    @classmethod
+    def validate_restock_regions(cls, value: list[str] | None) -> list[str]:
+        return normalize_restock_regions(value)
+
 
 class GlobalConfigPatch(BaseModel):
     buffer_days: int | None = Field(default=None, ge=1, le=365)
     target_days: int | None = Field(default=None, ge=1, le=365)
     lead_time_days: int | None = Field(default=None, ge=0, le=365)
+    restock_regions: list[str] | None = None
     sync_interval_minutes: int | None = Field(default=None, ge=5, le=1440)
     scheduler_enabled: bool | None = None
     calc_enabled: bool | None = None
@@ -41,6 +67,13 @@ class GlobalConfigPatch(BaseModel):
             return None
         CronTrigger.from_crontab(value)
         return value
+
+    @field_validator("restock_regions", mode="before")
+    @classmethod
+    def validate_restock_regions(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        return normalize_restock_regions(value)
 
 
 # ==================== SKU Config ====================

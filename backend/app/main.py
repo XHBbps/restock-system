@@ -57,6 +57,7 @@ async def _ensure_global_config() -> None:
             buffer_days=settings.default_buffer_days,
             target_days=settings.default_target_days,
             lead_time_days=settings.default_lead_time_days,
+            restock_regions=[],
             sync_interval_minutes=settings.default_sync_interval_minutes,
             scheduler_enabled=True,
             calc_enabled=True,

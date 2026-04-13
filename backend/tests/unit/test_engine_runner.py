@@ -119,6 +119,7 @@ def _make_config(**overrides: Any) -> SimpleNamespace:
         "buffer_days": 30,
         "target_days": 60,
         "lead_time_days": 50,
+        "restock_regions": [],
         "include_tax": "0",
         "default_purchase_warehouse_id": "WH-001",
         "shop_sync_mode": "all",
@@ -140,6 +141,7 @@ def test_config_snapshot_keys() -> None:
     assert snapshot["buffer_days"] == 30
     assert snapshot["target_days"] == 60
     assert snapshot["lead_time_days"] == 50
+    assert snapshot["restock_regions"] == []
     assert snapshot["include_tax"] == "0"
     assert snapshot["default_purchase_warehouse_id"] == "WH-001"
     assert snapshot["shop_sync_mode"] == "all"
@@ -148,12 +150,18 @@ def test_config_snapshot_keys() -> None:
 
 def test_config_snapshot_overrides() -> None:
     """_config_snapshot reflects non-default values correctly."""
-    config = _make_config(buffer_days=7, target_days=14, lead_time_days=21)
+    config = _make_config(
+        buffer_days=7,
+        target_days=14,
+        lead_time_days=21,
+        restock_regions=["US", "GB"],
+    )
     snapshot = _config_snapshot(config)  # type: ignore[arg-type]
 
     assert snapshot["buffer_days"] == 7
     assert snapshot["target_days"] == 14
     assert snapshot["lead_time_days"] == 21
+    assert snapshot["restock_regions"] == ["US", "GB"]
 
 
 # ---------------------------------------------------------------------------

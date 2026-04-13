@@ -2,7 +2,8 @@
 
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, Integer, SmallInteger, String
+from sqlalchemy import CheckConstraint, DateTime, Integer, SmallInteger, String, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
@@ -25,6 +26,12 @@ class GlobalConfig(Base):
     buffer_days: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
     target_days: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
     lead_time_days: Mapped[int] = mapped_column(Integer, nullable=False, default=50)
+    restock_regions: Mapped[list[str]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=list,
+        server_default=text("'[]'::jsonb"),
+    )
 
     # 调度
     sync_interval_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=60)

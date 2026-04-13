@@ -15,8 +15,8 @@ class _ScalarResult:
 
 
 class _FakeDb:
-    def __init__(self, listing_skus, existing_skus) -> None:
-        self.listing_skus = listing_skus
+    def __init__(self, listing_rows, existing_skus) -> None:
+        self.listing_rows = listing_rows
         self.existing_skus = existing_skus
         self.inserted = []
         self.commits = 0
@@ -25,7 +25,7 @@ class _FakeDb:
         if hasattr(stmt, "column_descriptions") and stmt.column_descriptions:
             entity = stmt.column_descriptions[0].get("entity")
             if entity is ProductListing:
-                return _ScalarResult(self.listing_skus)
+                return _ScalarResult(self.listing_rows)
             if entity is SkuConfig:
                 return _ScalarResult(self.existing_skus)
 
@@ -45,7 +45,11 @@ class _FakeDb:
 
 async def test_init_sku_configs_from_listings_only_inserts_missing() -> None:
     db = _FakeDb(
-        listing_skus=["SKU-001", "SKU-002", "SKU-003"],
+        listing_rows=[
+            ("SKU-001", True, "active"),
+            ("SKU-002", True, "active"),
+            ("SKU-003", True, "active"),
+        ],
         existing_skus=["SKU-002"],
     )
 
@@ -57,7 +61,7 @@ async def test_init_sku_configs_from_listings_only_inserts_missing() -> None:
 
 
 async def test_init_sku_configs_from_listings_returns_zero_when_no_source_data() -> None:
-    db = _FakeDb(listing_skus=[], existing_skus=[])
+    db = _FakeDb(listing_rows=[], existing_skus=[])
 
     created = await init_sku_configs_from_listings(db)  # type: ignore[arg-type]
 

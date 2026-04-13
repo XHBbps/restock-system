@@ -215,6 +215,7 @@ def _config_snapshot(config: GlobalConfig) -> dict[str, Any]:
         "buffer_days": config.buffer_days,
         "target_days": config.target_days,
         "lead_time_days": config.lead_time_days,
+        "restock_regions": list(config.restock_regions or []),
         "include_tax": config.include_tax,
         "default_purchase_warehouse_id": config.default_purchase_warehouse_id,
         "shop_sync_mode": config.shop_sync_mode,

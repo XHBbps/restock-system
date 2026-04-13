@@ -36,6 +36,7 @@ async def seed_global_config(db: AsyncSession, **overrides) -> GlobalConfig:
         "buffer_days": 30,
         "target_days": 60,
         "lead_time_days": 50,
+        "restock_regions": [],
         "sync_interval_minutes": 60,
         "scheduler_enabled": True,
         "calc_enabled": True,
