@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-13（历史记录删除与触发方式中文化）
+> 最近更新：2026-04-13（出库页筛选默认值与清空交互修正）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -116,6 +116,11 @@
 ---
 
 ## 3. 近期重大变更（2026-04-10 ~ 2026-04-13）
+
+### 3.26 出库页筛选默认值与清空交互修正（2026-04-13）
+- `frontend/src/views/data/DataOutRecordsView.vue` 将“状态”筛选默认值从“在途”改为“未筛选”，并为“状态”“国家”两个下拉补齐清空后立即重载列表的交互
+- `backend/app/api/data.py` 将 `GET /api/data/out-records` 的 `is_in_transit` 查询参数默认值改为 `None`，使未传参时返回全部出库记录而不是仅返回在途记录
+- **测试**：更新 `frontend/src/views/__tests__/DataOutRecordsView.test.ts` 与 `backend/tests/unit/test_data_out_records_api.py`，覆盖默认无状态筛选、状态清空和国家清空场景
 
 ### 3.25 历史记录删除与触发方式中文化（2026-04-13）
 - `backend/app/api/suggestion.py` 新增 `DELETE /api/suggestions/{id}`，按建议单维度物理删除 `suggestion` 及级联明细；仅 `draft` / `partial` / `error` / `archived` 允许删除，`pushed` 返回冲突错误

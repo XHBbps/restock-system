@@ -24,10 +24,18 @@
         filterable
         style="width: 140px"
         @change="reload"
+        @clear="reload"
       >
         <el-option v-for="c in COUNTRY_OPTIONS" :key="c.code" :label="c.code" :value="c.code" />
       </el-select>
-      <el-select v-model="filters.is_in_transit" placeholder="状态" style="width: 130px" @change="reload">
+      <el-select
+        v-model="filters.is_in_transit"
+        placeholder="状态"
+        clearable
+        style="width: 130px"
+        @change="reload"
+        @clear="reload"
+      >
         <el-option label="在途" :value="true" />
         <el-option label="完结" :value="false" />
       </el-select>
@@ -122,7 +130,7 @@ const filters = reactive({
   out_warehouse_no: '',
   sku: '',
   country: '',
-  is_in_transit: true as boolean | undefined,
+  is_in_transit: undefined as boolean | undefined,
 })
 
 const pagedRows = computed(() => {

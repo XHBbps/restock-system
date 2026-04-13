@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { defineComponent } from 'vue'
 
 const mockListOutRecords = vi.fn()
 
@@ -34,7 +35,54 @@ const STUBS = {
       />
     `,
   },
-  ElSelect: true,
+  ElSelect: defineComponent({
+    props: {
+      modelValue: {
+        type: [String, Boolean],
+        default: undefined,
+      },
+      placeholder: {
+        type: String,
+        default: '',
+      },
+    },
+    emits: ['update:modelValue', 'change', 'clear'],
+    template: `
+      <div :data-placeholder="placeholder">
+        <button
+          v-if="placeholder === '国家'"
+          type="button"
+          class="country-us"
+          @click="$emit('update:modelValue', 'US'); $emit('change', 'US')"
+        >
+          US
+        </button>
+        <button
+          v-if="placeholder === '状态'"
+          type="button"
+          class="status-true"
+          @click="$emit('update:modelValue', true); $emit('change', true)"
+        >
+          true
+        </button>
+        <button
+          v-if="placeholder === '状态'"
+          type="button"
+          class="status-false"
+          @click="$emit('update:modelValue', false); $emit('change', false)"
+        >
+          false
+        </button>
+        <button
+          type="button"
+          class="select-clear"
+          @click="$emit('update:modelValue', undefined); $emit('clear'); $emit('change', undefined)"
+        >
+          clear
+        </button>
+      </div>
+    `,
+  }),
   ElOption: true,
   ElTag: { template: '<span><slot /></span>' },
   ElTable: { template: '<div><slot /></div>' },
@@ -91,7 +139,7 @@ describe('DataOutRecordsView', () => {
 
     expect(mockListOutRecords).toHaveBeenCalledWith(
       expect.objectContaining({
-        is_in_transit: true,
+        is_in_transit: undefined,
         sort_by: 'updateTime',
         sort_order: 'desc',
       }),
@@ -118,6 +166,56 @@ describe('DataOutRecordsView', () => {
     )
   })
 
+  it('allows selecting and clearing transit status filter', async () => {
+    mockListOutRecords.mockResolvedValue(buildResponse())
+
+    const { default: View } = await import('../data/DataOutRecordsView.vue')
+    const wrapper = shallowMount(View, { global: { stubs: STUBS } })
+    await flushPromises()
+    mockListOutRecords.mockClear()
+
+    await wrapper.find('.status-true').trigger('click')
+    await flushPromises()
+    expect(mockListOutRecords).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        is_in_transit: true,
+      }),
+    )
+
+    await wrapper.find('[data-placeholder="状态"] .select-clear').trigger('click')
+    await flushPromises()
+    expect(mockListOutRecords).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        is_in_transit: undefined,
+      }),
+    )
+  })
+
+  it('allows selecting and clearing country filter', async () => {
+    mockListOutRecords.mockResolvedValue(buildResponse())
+
+    const { default: View } = await import('../data/DataOutRecordsView.vue')
+    const wrapper = shallowMount(View, { global: { stubs: STUBS } })
+    await flushPromises()
+    mockListOutRecords.mockClear()
+
+    await wrapper.find('.country-us').trigger('click')
+    await flushPromises()
+    expect(mockListOutRecords).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        country: 'US',
+      }),
+    )
+
+    await wrapper.find('[data-placeholder="国家"] .select-clear').trigger('click')
+    await flushPromises()
+    expect(mockListOutRecords).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        country: undefined,
+      }),
+    )
+  })
+
   it('renders the updated page title and detail columns', async () => {
     mockListOutRecords.mockResolvedValue(buildResponse())
 
@@ -136,6 +234,7 @@ describe('DataOutRecordsView', () => {
     const source = readFileSync('src/views/data/DataOutRecordsView.vue', 'utf-8')
     expect(source).toContain('出库单号')
     expect(source).toContain('class="detail-table"')
+    expect(source).toContain('clearable')
     expect(source).toContain('商品SKU')
     expect(source).toContain('商品ID')
     expect(source).toContain('可用数')
