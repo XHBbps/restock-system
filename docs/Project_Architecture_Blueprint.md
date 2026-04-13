@@ -143,7 +143,9 @@ async def sync_inventory_job(ctx: JobContext) -> None:
 
 **状态追踪**：每个 job 在 `sync_state` 表中维护最后运行时间、状态、错误信息。
 
-**订单详情补拉**：除自动 `sync_order_detail` 外，订单页还提供“补拉订单详情”入口，前端仅提交回溯天数到 `POST /api/sync/order-detail/refetch`；后端按“最近 N 天 + 默认上限”筛选本地缺少详情的订单，创建 `refetch_order_detail` TaskRun 后台任务。该任务绕过 `order_detail_fetch_log` 的去重过滤，但继续复用既有失败分类、2 QPS / 2 并发抓取与落库逻辑。
+**出库记录同步**：`sync_out_records` 会把赛狐“其他出库”记录同步到 `in_transit_record` / `in_transit_item`，除在途状态观测所需字段外，还保留 `warehouseId`、`updateTime`、`type/typeName`、`commodityId`、`perPurchase`，用于数据页直接展示“出库记录”主表和明细表字段。
+
+**订单详情获取**：除自动 `sync_order_detail` 外，订单页还提供右侧独立“详情获取”组件，前端仅提交回溯天数到 `POST /api/sync/order-detail/refetch`。接口层会先检查活跃的 `refetch_order_detail`、`sync_order_detail`、`sync_all` 任务并直接返回现有 task_id，避免手动触发与定时 / 全量同步并发重复抓取；仅在无冲突时才按“最近 N 天 + 默认上限”筛选本地缺少详情的订单并创建 `refetch_order_detail` TaskRun 后台任务。该任务绕过 `order_detail_fetch_log` 的去重过滤，但继续复用既有失败分类、2 QPS / 2 并发抓取与落库逻辑。
 
 ### 3.3 任务队列系统（app/tasks）
 
@@ -375,6 +377,7 @@ async function reload() {
 | `StatusTag` | 状态标签（基于 StatusMeta 对象） | 所有状态展示 |
 | `TablePaginationBar` | 分页条，v-model 绑定 currentPage 和 pageSize | 所有数据表格 |
 | `TaskProgress` | 长任务进度展示，自动轮询 `/api/tasks/{id}` | 引擎生成、推送、同步 |
+| `sync/OrderDetailFetchAction` | 订单页右侧“详情获取”动作组件，封装回溯天数、触发逻辑与冲突提示 | 订单页 |
 
 **前端监控命名约定**：
 - `src/utils/monitoring.ts` 统一负责监控页的名称展示口径，包括赛狐接口 `endpoint`、性能监控 `request/resource` 名称中文化，以及 tooltip 中保留原始路径
@@ -503,7 +506,7 @@ Step 3: country_qty 计算时已把已推送量视为库存一部分
 | `order_detail` | 订单详情（含地址） | — |
 | `order_detail_fetch_log` | 详情拉取日志（自动同步防重复拉取；人工补拉可绕过） | — |
 | `inventory_snapshot_latest` | 当前库存快照 | 唯一键 `(commodity_sku, warehouse_id)` |
-| `in_transit_record` / `in_transit_item` | 其他出库记录（赛狐同步） | — |
+| `in_transit_record` / `in_transit_item` | 出库记录（赛狐同步）；包含 `warehouseId`、`updateTime`、`type/typeName`、`commodityId`、`perPurchase` 等展示字段 | — |
 | `zipcode_rule` | 邮编 → 仓库分配规则 | `operator_enum` CHECK 约束；`operator String(10)`，`compare_value String(200)` |
 | `suggestion` | 补货建议单头 | `status IN ('draft','partial','pushed','archived','error')` |
 | `suggestion_item` | 补货建议条目 | `push_status IN ('pending','pushed','push_failed','blocked')`，索引 urgent 部分索引 |

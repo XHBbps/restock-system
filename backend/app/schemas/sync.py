@@ -31,3 +31,5 @@ class OrderDetailRefetchOut(BaseModel):
     matched_count: int
     queued_count: int
     truncated: bool = False
+    active_job_name: str | None = None
+    active_trigger_source: str | None = None

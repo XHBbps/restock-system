@@ -40,7 +40,7 @@ async def sync_order_detail_job(ctx: JobContext) -> None:
 @register(REFETCH_JOB_NAME)
 async def refetch_order_detail_job(ctx: JobContext) -> None:
     targets = _extract_refetch_targets(ctx.payload)
-    await _run_fetch_job(ctx, job_name=REFETCH_JOB_NAME, targets=targets, step_label="订单详情补拉")
+    await _run_fetch_job(ctx, job_name=REFETCH_JOB_NAME, targets=targets, step_label="订单详情获取")
 
 
 async def _run_fetch_job(
@@ -207,16 +207,16 @@ def serialize_refetch_targets(targets: list[tuple[str, str]]) -> list[dict[str, 
 def _extract_refetch_targets(payload: dict[str, object]) -> list[tuple[str, str]]:
     raw_targets = payload.get("targets")
     if not isinstance(raw_targets, list):
-        raise RuntimeError("订单详情补拉任务缺少 targets")
+        raise RuntimeError("订单详情获取任务缺少 targets")
 
     targets: list[tuple[str, str]] = []
     for item in raw_targets:
         if not isinstance(item, dict):
-            raise RuntimeError("订单详情补拉任务 targets 格式错误")
+            raise RuntimeError("订单详情获取任务 targets 格式错误")
         shop_id = item.get("shop_id")
         amazon_order_id = item.get("amazon_order_id")
         if not isinstance(shop_id, str) or not isinstance(amazon_order_id, str):
-            raise RuntimeError("订单详情补拉任务 targets 缺少订单主键")
+            raise RuntimeError("订单详情获取任务 targets 缺少订单主键")
         targets.append((shop_id, amazon_order_id))
     return targets
 

@@ -12,7 +12,7 @@ export interface AutoSyncDefinition {
 }
 
 export const ORDER_DETAIL_REFETCH_JOB_NAME = 'refetch_order_detail'
-export const ORDER_DETAIL_REFETCH_LABEL = '订单详情补拉'
+export const ORDER_DETAIL_REFETCH_LABEL = '详情获取'
 
 export const manualSyncActions: SyncActionDefinition[] = [
   {

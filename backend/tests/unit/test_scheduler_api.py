@@ -1,4 +1,5 @@
 from datetime import datetime
+from types import SimpleNamespace
 
 import pytest
 
@@ -149,10 +150,14 @@ async def test_refetch_order_detail_returns_empty_when_no_targets(monkeypatch) -
     class _FakeDb:
         pass
 
+    async def fake_get_active_order_detail_task(_db):
+        return None
+
     async def fake_find_refetch_targets(*_args, **_kwargs):
         return []
 
     enqueue = pytest.fail
+    monkeypatch.setattr(sync_api_module, "_get_active_order_detail_task", fake_get_active_order_detail_task)
     monkeypatch.setattr(sync_api_module, "find_refetch_targets", fake_find_refetch_targets)
     monkeypatch.setattr(sync_api_module, "enqueue_task", enqueue)
 
@@ -166,6 +171,45 @@ async def test_refetch_order_detail_returns_empty_when_no_targets(monkeypatch) -
     assert result.matched_count == 0
     assert result.queued_count == 0
     assert result.truncated is False
+    assert result.active_job_name is None
+    assert result.active_trigger_source is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("job_name", "trigger_source"),
+    [
+        ("refetch_order_detail", "manual"),
+        ("sync_order_detail", "scheduler"),
+        ("sync_all", "manual"),
+    ],
+)
+async def test_refetch_order_detail_reuses_active_conflict_task(monkeypatch, job_name: str, trigger_source: str) -> None:
+    import app.api.sync as sync_api_module
+
+    class _FakeDb:
+        pass
+
+    async def fake_get_active_order_detail_task(_db):
+        return SimpleNamespace(id=88, job_name=job_name, trigger_source=trigger_source)
+
+    monkeypatch.setattr(sync_api_module, "_get_active_order_detail_task", fake_get_active_order_detail_task)
+    monkeypatch.setattr(sync_api_module, "find_refetch_targets", pytest.fail)
+    monkeypatch.setattr(sync_api_module, "enqueue_task", pytest.fail)
+
+    result = await sync_api_module.refetch_order_detail(
+        sync_api_module.OrderDetailRefetchIn(days=7, limit=50, shop_id=None),
+        db=_FakeDb(),  # type: ignore[arg-type]
+        _={},
+    )
+
+    assert result.task_id == 88
+    assert result.existing is True
+    assert result.matched_count == 0
+    assert result.queued_count == 0
+    assert result.truncated is False
+    assert result.active_job_name == job_name
+    assert result.active_trigger_source == trigger_source
 
 
 @pytest.mark.asyncio
@@ -174,6 +218,9 @@ async def test_refetch_order_detail_enqueues_trimmed_targets(monkeypatch) -> Non
 
     class _FakeDb:
         pass
+
+    async def fake_get_active_order_detail_task(_db):
+        return None
 
     async def fake_find_refetch_targets(*_args, **_kwargs):
         return [
@@ -198,6 +245,7 @@ async def test_refetch_order_detail_enqueues_trimmed_targets(monkeypatch) -> Non
         assert priority == 100
         return 99, False
 
+    monkeypatch.setattr(sync_api_module, "_get_active_order_detail_task", fake_get_active_order_detail_task)
     monkeypatch.setattr(sync_api_module, "find_refetch_targets", fake_find_refetch_targets)
     monkeypatch.setattr(sync_api_module, "enqueue_task", fake_enqueue_task)
 
@@ -212,3 +260,5 @@ async def test_refetch_order_detail_enqueues_trimmed_targets(monkeypatch) -> Non
     assert result.matched_count == 2
     assert result.queued_count == 2
     assert result.truncated is True
+    assert result.active_job_name is None
+    assert result.active_trigger_source is None

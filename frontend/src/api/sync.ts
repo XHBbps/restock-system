@@ -33,6 +33,8 @@ export interface OrderDetailRefetchPayload {
 export interface OrderDetailRefetchResult {
   task_id: number | null
   existing: boolean
+  active_job_name?: string | null
+  active_trigger_source?: 'scheduler' | 'manual' | null
   matched_count: number
   queued_count: number
   truncated: boolean

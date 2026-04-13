@@ -3,11 +3,12 @@
 from typing import Any
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import update
+from sqlalchemy import case, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import db_session, get_current_session
 from app.models.global_config import GlobalConfig
+from app.models.task_run import TaskRun
 from app.schemas.sync import (
     OrderDetailRefetchIn,
     OrderDetailRefetchOut,
@@ -24,11 +25,35 @@ from app.tasks.queue import enqueue_task
 from app.tasks.scheduler import reload_scheduler, scheduler_status
 
 router = APIRouter(prefix="/api", tags=["sync"])
+ORDER_DETAIL_ACTIVE_JOB_NAMES = (REFETCH_JOB_NAME, "sync_order_detail", "sync_all")
+ORDER_DETAIL_ACTIVE_JOB_PRIORITY = {
+    REFETCH_JOB_NAME: 0,
+    "sync_order_detail": 1,
+    "sync_all": 2,
+}
 
 
 async def _enqueue(db: AsyncSession, job_name: str) -> dict[str, Any]:
     task_id, existing = await enqueue_task(db, job_name=job_name, trigger_source="manual")
     return {"task_id": task_id, "existing": existing}
+
+
+async def _get_active_order_detail_task(db: AsyncSession) -> TaskRun | None:
+    priority_order = case(
+        *[
+            (TaskRun.job_name == job_name, priority)
+            for job_name, priority in ORDER_DETAIL_ACTIVE_JOB_PRIORITY.items()
+        ],
+        else_=999,
+    )
+    result = await db.execute(
+        select(TaskRun)
+        .where(TaskRun.status.in_(("pending", "running")))
+        .where(TaskRun.job_name.in_(ORDER_DETAIL_ACTIVE_JOB_NAMES))
+        .order_by(priority_order.asc(), TaskRun.id.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
 
 
 @router.post("/sync/all")
@@ -94,6 +119,18 @@ async def refetch_order_detail(
     _: dict[str, Any] = Depends(get_current_session),
 ) -> OrderDetailRefetchOut:
     days = payload.days or DEFAULT_REFETCH_DAYS
+    active_task = await _get_active_order_detail_task(db)
+    if active_task is not None:
+        return OrderDetailRefetchOut(
+            task_id=active_task.id,
+            existing=True,
+            matched_count=0,
+            queued_count=0,
+            truncated=False,
+            active_job_name=active_task.job_name,
+            active_trigger_source=active_task.trigger_source,
+        )
+
     raw_targets = await find_refetch_targets(
         db,
         days=days,
@@ -111,6 +148,8 @@ async def refetch_order_detail(
             matched_count=0,
             queued_count=0,
             truncated=False,
+            active_job_name=None,
+            active_trigger_source=None,
         )
 
     task_id, existing = await enqueue_task(
@@ -131,6 +170,8 @@ async def refetch_order_detail(
         matched_count=matched_count,
         queued_count=0 if existing else matched_count,
         truncated=truncated,
+        active_job_name=REFETCH_JOB_NAME if existing else None,
+        active_trigger_source="manual" if existing else None,
     )
 
 

@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-13（监控名称中文化：同步日志 / 接口监控 / 性能监控）
+> 最近更新：2026-04-13（订单页“详情获取”组件化与订单详情抓取并发收口）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -45,7 +45,7 @@
   - 03:30 `sync_warehouse`
   - 02:00 `daily_archive`
   - 默认 08:00 `calc_engine`（可配置，`calc_enabled` 控制）
-- **订单详情同步与补拉**：`sync_order_detail` 当前按 2 QPS / 2 并发保守抓取；订单页新增“补拉订单详情”入口，仅提供天数选择与触发按钮，任务走 TaskRun 后台执行
+- **订单详情同步与详情获取**：`sync_order_detail` 当前按 2 QPS / 2 并发保守抓取；订单页提供右侧独立“详情获取”组件，仅提供天数选择与触发按钮；手动触发会优先复用活跃的 `refetch_order_detail`、`sync_order_detail` 或 `sync_all` 任务，避免并发重复抓取
 
 ### 2.3 补货计算引擎
 
@@ -91,6 +91,7 @@
 - **数据页 page_size 上限放宽**：所有 `/api/data/*` 端点的 `le=5000`（原 200），支持一次拉全量
 - **建议单列表 page_size 上限**：`/api/suggestions` 的 `le=5000`
 - **筛选项统一**：店铺/仓库/订单/库存/出库/补货发起 7 个页面的筛选项布局和高度一致
+- **出库记录页**：原“其他出库（在途观测）”改名为“出库记录”；主表展示出库单id、出库仓库id、更新时间、出库单类型、状态，明细展示商品id、商品sku、可用数、采购单价；状态统一按 `is_in_transit` 映射为“在途 / 完结”
 
 ### 2.7 任务队列系统
 
@@ -111,12 +112,19 @@
 
 ## 3. 近期重大变更（2026-04-10 ~ 2026-04-13）
 
-### 3.18 订单详情条件批量补拉（2026-04-13）
+### 3.19 出库记录字段补齐（2026-04-13）
+- `backend/app/sync/out_records.py` 在同步赛狐其他出库记录时，额外落库 `warehouseId`、`updateTime`、`type`、`typeName`，并为明细落库 `commodityId`、`perPurchase`
+- `backend/alembic/versions/20260414_1300_extend_in_transit_out_record_fields.py` 为 `in_transit_record` / `in_transit_item` 补齐上述展示字段，支撑数据页直接展示源字段含义
+- `backend/app/api/data.py`、`backend/app/schemas/data.py` 与 `frontend/src/api/data.ts` 补齐对应 DTO；出库记录列表默认按 `updateTime desc` 返回，并支持按出库仓库id、更新时间、出库单类型排序
+- `frontend/src/views/data/DataOutRecordsView.vue` 将页面标题改为“出库记录”，主表和明细表按最新业务口径展示字段，状态标签统一为“在途 / 完结”
+- **测试**：补充 `backend/tests/unit/test_sync_out_records_job.py`、`backend/tests/unit/test_data_out_records_api.py` 与 `frontend/src/views/__tests__/DataOutRecordsView.test.ts`，覆盖同步落库、列表排序和页面默认请求/字段渲染
 
-- `backend/app/api/sync.py` 新增 `POST /api/sync/order-detail/refetch`，支持按回溯天数、店铺、数量上限筛选“订单主表已存在但本地缺少详情”的订单并创建后台补拉任务
-- `backend/app/sync/order_detail.py` 新增 `refetch_order_detail` job：人工补拉绕过 `order_detail_fetch_log` 的已记录过滤，直接消费接口层筛出的订单集合，但仍复用现有详情抓取、失败分类、限流与落库逻辑
-- `frontend/src/views/data/DataOrdersView.vue` 在订单页操作区新增“天数 + 补拉订单详情”入口；`frontend/src/views/SyncConsoleView.vue` 移除该表单，提交后仍复用现有 `TaskProgress` 轮询查看执行结果
-- **测试**：补充 `backend/tests/unit/test_scheduler_api.py`、`backend/tests/unit/test_sync_order_detail_job.py` 与 `frontend/src/api/__tests__/sync.test.ts`，覆盖空命中不建任务、补拉任务入队 payload、手工补拉消费目标集合与前端 API 调用
+### 3.18 订单详情条件批量获取（2026-04-13）
+
+- `backend/app/api/sync.py` 的 `POST /api/sync/order-detail/refetch` 改为订单详情抓取统一入口：若存在活跃的 `refetch_order_detail`、`sync_order_detail` 或 `sync_all`，则直接返回现有任务供前端复用进度；否则再按回溯天数筛选“订单主表已存在但本地缺少详情”的订单并创建后台任务
+- `backend/app/sync/order_detail.py` 的 `refetch_order_detail` 继续绕过 `order_detail_fetch_log` 的已记录过滤，直接消费接口层筛出的订单集合，但仍复用现有详情抓取、失败分类、限流与落库逻辑
+- `frontend/src/components/sync/OrderDetailFetchAction.vue` 将订单页入口封装为右侧独立“详情获取”组件；`frontend/src/views/data/DataOrdersView.vue` 只负责承接任务进度和列表刷新
+- **测试**：补充 `backend/tests/unit/test_scheduler_api.py`、`frontend/src/components/sync/OrderDetailFetchAction.test.ts` 与 `frontend/src/api/__tests__/sync.test.ts`，覆盖活跃任务复用、详情获取入口提示、手工触发 payload 与空命中不建任务
 
 ### 3.17 监控名称中文化（2026-04-13）
 - `frontend/src/utils/monitoring.ts` 新增统一名称映射：赛狐接口 `endpoint`、性能监控 `request/resource` 名称统一转为中文含义，并保留原始路径用于 tooltip 排障

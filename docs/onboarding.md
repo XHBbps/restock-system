@@ -287,11 +287,13 @@ Conventional Commits：
 | `@/components/SkuCard` | 商品展示 |
 | `@/components/StatusTag` | 状态标签 |
 | `@/components/TaskProgress` | 长任务进度展示 |
+| `@/components/sync/OrderDetailFetchAction` | 订单页“详情获取”动作组件，统一封装回溯天数、触发逻辑与任务冲突提示 |
 | `@/utils/format` | `formatShortTime` / `formatDateTime` / `formatDetailTime` / `clampPage` |
 | `@/utils/warehouse` | `warehouseTypeLabel` / `warehouseTypeTag` |
 | `@/utils/countries` | `COUNTRY_OPTIONS` 国家下拉选项 |
 | `@/utils/status` | 状态元数据映射 |
 | `@/utils/tableSort` | 本地排序工具 |
+| `@/utils/monitoring` | 监控名称映射（接口/资源中文化）、分位点工具、任务反馈文案 |
 
 **数据页模式**（所有列表页必须遵循）：
 
