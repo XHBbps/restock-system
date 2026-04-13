@@ -24,6 +24,7 @@ async def create_purchase_order(
     items: list[dict[str, Any]],
     include_tax: str = "0",
     action: str = "1",
+    custom_purchase_no: str | None = None,
     remark: str | None = None,
 ) -> list[dict[str, Any]]:
     """创建采购单。
@@ -42,11 +43,13 @@ async def create_purchase_order(
         "includeTax": include_tax,
         "items": items,
     }
+    if custom_purchase_no:
+        body["customPurchaseNo"] = custom_purchase_no
     if remark:
         body["remark"] = remark
 
     client = get_saihu_client()
-    result = await client.post(ENDPOINT, body)
+    result = await client.post(ENDPOINT, body, retry_network_errors=False)
     data = result.get("data") or []
     if not isinstance(data, list):
         return [data]

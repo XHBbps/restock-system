@@ -46,8 +46,8 @@ def generate_sign(
 
 
 def make_nonce() -> str:
-    """每次请求生成的随机 nonce。"""
-    return secrets.token_hex(8)
+    """每次请求生成纯数字 nonce，符合赛狐实际校验规则。"""
+    return f"{secrets.randbelow(10**16):016d}"
 
 
 def make_timestamp_ms() -> str:

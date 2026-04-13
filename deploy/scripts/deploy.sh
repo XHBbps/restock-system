@@ -16,7 +16,8 @@ echo "[deploy] previous SHA: $PREV_SHA"
 rollback_on_failure() {
     local exit_code=$?
     if [[ $exit_code -ne 0 ]]; then
-        echo "[deploy] FAILED with exit code $exit_code — triggering rollback to $PREV_SHA" >&2
+        echo "[deploy] FAILED with exit code $exit_code; rolling application services back to $PREV_SHA" >&2
+        echo "[deploy] NOTE: database rollback is not automatic. Restore the latest backup before re-running migrations if schema changes were applied." >&2
         "$ROLLBACK_SCRIPT" "$PREV_SHA" || echo "[deploy] WARNING: rollback itself failed" >&2
     fi
     exit $exit_code
@@ -49,6 +50,6 @@ docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" build backend frontend
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d backend worker scheduler frontend caddy
 "$SCRIPT_DIR/smoke_check.sh"
 
-# Disable rollback trap on success
+# Disable rollback trap on success.
 trap - EXIT
-echo "[deploy] success — new revision $(cd "$REPO_DIR" && git rev-parse HEAD) live"
+echo "[deploy] success; new revision $(cd "$REPO_DIR" && git rev-parse HEAD) live"

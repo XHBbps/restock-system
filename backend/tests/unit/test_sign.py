@@ -12,7 +12,7 @@
     57bcbd213461d47e99e9b781c11f3fb37937127824272a30b95ddb5cbfea881e
 """
 
-from app.saihu.sign import generate_sign
+from app.saihu.sign import generate_sign, make_nonce
 
 
 def test_generate_sign_matches_official_fixture() -> None:
@@ -57,3 +57,13 @@ def test_generate_sign_different_nonce_different_output() -> None:
     s1 = generate_sign(nonce="111", **base)  # type: ignore[arg-type]
     s2 = generate_sign(nonce="999", **base)  # type: ignore[arg-type]
     assert s1 != s2
+
+
+def test_make_nonce_is_numeric_and_fixed_width() -> None:
+    nonce = make_nonce()
+    assert len(nonce) == 16
+    assert nonce.isdigit()
+
+
+def test_make_nonce_changes_between_calls() -> None:
+    assert make_nonce() != make_nonce()

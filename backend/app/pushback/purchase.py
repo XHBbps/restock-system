@@ -17,7 +17,6 @@ from app.config import get_settings
 from app.core.exceptions import (
     PushBlockedError,
     SaihuAPIError,
-    SaihuNetworkError,
     SaihuRateLimited,
 )
 from app.core.logging import get_logger
@@ -46,6 +45,13 @@ async def push_saihu_job(ctx: JobContext) -> None:
         config = (await db.execute(select(GlobalConfig).where(GlobalConfig.id == 1))).scalar_one()
         if not config.default_purchase_warehouse_id:
             raise ValueError("global_config.default_purchase_warehouse_id 未配置")
+        suggestion = (
+            await db.execute(select(Suggestion).where(Suggestion.id == suggestion_id))
+        ).scalar_one_or_none()
+        if suggestion is None:
+            raise ValueError(f"建议单 {suggestion_id} 不存在")
+        if suggestion.status == "archived":
+            raise PushBlockedError(f"建议单 {suggestion_id} 已归档,不可继续推送")
 
         items = (
             (
@@ -63,10 +69,17 @@ async def push_saihu_job(ctx: JobContext) -> None:
     if not items:
         raise ValueError("未找到选中的建议条目")
 
+    already_pushed = [it.id for it in items if it.push_status == "pushed"]
+    if already_pushed:
+        raise PushBlockedError(f"以下条目已推送,不可重复推送: {already_pushed}")
+
     # 校验全部带 commodity_id(push_blocker 应该已在 API 层过滤)
     blocked = [it.id for it in items if it.push_blocker or not it.commodity_id]
     if blocked:
         raise PushBlockedError(f"以下条目无法推送: {blocked}")
+    zero_qty = [it.id for it in items if (it.total_qty or 0) <= 0]
+    if zero_qty:
+        raise PushBlockedError(f"以下条目 total_qty<=0,无法推送: {zero_qty}")
 
     await ctx.progress(current_step="调用赛狐采购单创建")
 
@@ -74,10 +87,7 @@ async def push_saihu_job(ctx: JobContext) -> None:
     saihu_items = [
         {"commodityId": it.commodity_id, "num": str(it.total_qty)}
         for it in items
-        if it.total_qty > 0  # P2-7: 过滤零数量条目
     ]
-    if not saihu_items:
-        raise ValueError("所有条目的 total_qty 均为 0,无法推送")
 
     success = False
     saihu_response: list[dict[str, Any]] = []
@@ -90,7 +100,7 @@ async def push_saihu_job(ctx: JobContext) -> None:
         async for attempt in AsyncRetrying(
             stop=stop_after_attempt(max(retries, 1)),
             wait=wait_exponential(multiplier=1, min=1, max=10),
-            retry=retry_if_exception_type((SaihuRateLimited, SaihuNetworkError)),
+            retry=retry_if_exception_type((SaihuRateLimited,)),
             reraise=True,
         ):
             with attempt:
@@ -99,6 +109,7 @@ async def push_saihu_job(ctx: JobContext) -> None:
                     items=saihu_items,
                     include_tax=config.include_tax,
                     action="1",
+                    custom_purchase_no=_make_custom_purchase_no(suggestion_id, ctx.task_id),
                 )
                 success = True
     except SaihuAPIError as exc:
@@ -108,10 +119,7 @@ async def push_saihu_job(ctx: JobContext) -> None:
     await ctx.progress(current_step="写回结果")
 
     # 更新 suggestion_item
-    po_number: str | None = None
-    if success and saihu_response:
-        first = saihu_response[0]
-        po_number = first.get("purchaseOrderNo")
+    po_number = _join_purchase_order_numbers(saihu_response) if success else None
 
     pushed_at = now_beijing()
     async with async_session_factory() as db:
@@ -162,6 +170,12 @@ async def push_saihu_job(ctx: JobContext) -> None:
 
 
 async def _refresh_suggestion_counts(db: AsyncSession, suggestion_id: int) -> None:
+    suggestion = (
+        await db.execute(select(Suggestion).where(Suggestion.id == suggestion_id))
+    ).scalar_one_or_none()
+    if suggestion is None:
+        raise ValueError(f"建议单 {suggestion_id} 不存在")
+
     items = (
         (
             await db.execute(
@@ -177,7 +191,9 @@ async def _refresh_suggestion_counts(db: AsyncSession, suggestion_id: int) -> No
     pushed = sum(1 for s in items if s == "pushed")
     failed = sum(1 for s in items if s == "push_failed")
 
-    if pushed == 0:
+    if suggestion.status == "archived":
+        new_status = "archived"
+    elif pushed == 0:
         new_status = "draft"
     elif pushed < total:
         new_status = "partial"
@@ -194,3 +210,22 @@ async def _refresh_suggestion_counts(db: AsyncSession, suggestion_id: int) -> No
             status=new_status,
         )
     )
+
+
+def _join_purchase_order_numbers(rows: list[dict[str, Any]]) -> str | None:
+    numbers: list[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        raw = row.get("purchaseOrderNo")
+        if raw is None:
+            continue
+        value = str(raw).strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        numbers.append(value)
+    return ",".join(numbers) if numbers else None
+
+
+def _make_custom_purchase_no(suggestion_id: int, task_id: int) -> str:
+    return f"RS-{suggestion_id}-{task_id}"

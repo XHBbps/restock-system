@@ -50,7 +50,7 @@ def _compare(left: str, operator: str, right: str, value_type: str) -> bool:
     if operator == "between":
         # between 仅支持数字;prefix 以整数解析(保留前导零语义)
         try:
-            l_num = int(left)
+            left_int = int(left)
         except (TypeError, ValueError):
             return False
         for chunk in right.split(","):
@@ -67,29 +67,29 @@ def _compare(left: str, operator: str, right: str, value_type: str) -> bool:
                 return False
             if lo > hi:
                 return False
-            if lo <= l_num <= hi:
+            if lo <= left_int <= hi:
                 return True
         return False
 
     if value_type == "number":
         try:
-            l_num = float(left)
-            r_num = float(right)
+            left_num = float(left)
+            right_num = float(right)
         except (TypeError, ValueError):
             return False
 
         if operator == "=":
-            return int(l_num) == int(r_num)  # P2-6: 整数比较避免浮点精度
+            return int(left_num) == int(right_num)  # P2-6: 整数比较避免浮点精度
         if operator == "!=":
-            return int(l_num) != int(r_num)
+            return int(left_num) != int(right_num)
         if operator == ">":
-            return l_num > r_num
+            return left_num > right_num
         if operator == ">=":
-            return l_num >= r_num
+            return left_num >= right_num
         if operator == "<":
-            return l_num < r_num
+            return left_num < right_num
         if operator == "<=":
-            return l_num <= r_num
+            return left_num <= right_num
         return False
     else:
         l_str = left

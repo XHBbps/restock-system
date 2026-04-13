@@ -5,7 +5,7 @@ Formula (FR-030):
 
 Current business rule:
 - available + reserved still come from overseas warehouse inventory
-- in_transit comes from pushed (unarchived) suggestion items' country_breakdown
+- in_transit comes from synced active out-records aggregated by ``(sku, country)``
 """
 
 from collections import defaultdict
@@ -13,6 +13,7 @@ from collections import defaultdict
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.in_transit import InTransitItem, InTransitRecord
 from app.models.inventory import InventorySnapshotLatest
 from app.models.warehouse import Warehouse
 
@@ -50,47 +51,27 @@ async def load_in_transit(
     db: AsyncSession,
     commodity_skus: list[str] | None,
 ) -> dict[tuple[str, str], int]:
-    """Load in-transit quantities from recently pushed (unarchived) suggestion items.
-
-    Already-pushed suggestion items represent planned replenishment that hasn't
-    arrived yet. Their country_breakdown quantities are treated as in-transit
-    stock to prevent the engine from generating duplicate suggestions.
-
-    Only considers suggestions created within the last 90 days to avoid
-    accumulating unbounded historical data.
-    """
-    from datetime import timedelta
-
-    from app.core.timezone import now_beijing
-    from app.models.suggestion import Suggestion, SuggestionItem
-
-    # 海运通常 30-45 天,90 天覆盖绝大多数正常物流周期。
-    # 超过 90 天未到货通常意味着物流异常(丢件),不算在途反而正确。
-    cutoff = now_beijing() - timedelta(days=90)
-
+    """Load in-transit quantities from synced active out-record tables."""
     stmt = (
         select(
-            SuggestionItem.commodity_sku,
-            SuggestionItem.country_breakdown,
+            InTransitItem.commodity_sku,
+            InTransitRecord.target_country,
+            func.sum(InTransitItem.goods).label("goods_total"),
         )
-        .join(Suggestion, Suggestion.id == SuggestionItem.suggestion_id)
-        .where(SuggestionItem.push_status == "pushed")
-        .where(Suggestion.status != "archived")
-        .where(Suggestion.created_at >= cutoff)
+        .join(
+            InTransitRecord,
+            InTransitRecord.saihu_out_record_id == InTransitItem.saihu_out_record_id,
+        )
+        .where(InTransitRecord.is_in_transit.is_(True))
+        .where(InTransitRecord.target_country.is_not(None))
+        .group_by(InTransitItem.commodity_sku, InTransitRecord.target_country)
     )
     if commodity_skus is not None:
-        stmt = stmt.where(SuggestionItem.commodity_sku.in_(commodity_skus))
+        stmt = stmt.where(InTransitItem.commodity_sku.in_(commodity_skus))
 
     rows = (await db.execute(stmt)).all()
 
-    result: dict[tuple[str, str], int] = {}
-    for sku, breakdown in rows:
-        if not breakdown:
-            continue
-        for country, qty in breakdown.items():
-            key = (sku, country)
-            result[key] = result.get(key, 0) + int(qty)
-    return result
+    return {(sku, country): int(goods_total or 0) for sku, country, goods_total in rows}
 
 
 def merge_inventory(

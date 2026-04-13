@@ -63,6 +63,8 @@ class SaihuClient:
         self,
         endpoint_path: str,
         body: dict[str, Any] | None = None,
+        *,
+        retry_network_errors: bool = True,
     ) -> dict[str, Any]:
         """发起一次 POST 业务请求并返回 data 字段。
 
@@ -74,10 +76,15 @@ class SaihuClient:
         body = body or {}
 
         async def _retrying_call() -> dict[str, Any]:
+            retry_types: tuple[type[Exception], ...]
+            if retry_network_errors:
+                retry_types = (SaihuRateLimited, SaihuNetworkError)
+            else:
+                retry_types = (SaihuRateLimited,)
             async for attempt in AsyncRetrying(
                 stop=stop_after_attempt(settings.saihu_max_retries),
                 wait=wait_exponential(multiplier=1, min=1, max=10),
-                retry=retry_if_exception_type((SaihuRateLimited, SaihuNetworkError)),
+                retry=retry_if_exception_type(retry_types),
                 reraise=True,
             ):
                 with attempt:
@@ -144,7 +151,7 @@ class SaihuClient:
                     headers={"Content-Type": "application/json"},
                 )
                 http_status = resp.status_code
-            except (httpx.ConnectError, httpx.ReadTimeout, httpx.WriteTimeout) as exc:
+            except httpx.RequestError as exc:
                 error_type = "network"
                 await self._log(
                     endpoint_path,

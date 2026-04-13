@@ -222,7 +222,7 @@ LOGIN_PASSWORD=你生成的密码
 
 **双层防御**：
 - `backend/app/config.py:82-86` — 启动时 `validate_settings` 校验 `JWT_SECRET != "please_change_me"` 且 `LOGIN_PASSWORD != "please_change_me"`
-- `deploy/scripts/validate_env.sh` — 部署脚本二次校验（`deploy.sh` 会先调用）
+- `deploy/scripts/validate_env.sh` — 部署脚本二次校验（`deploy.sh` 会先调用），会拦截 `.env.example` 中的示例占位值
 
 两层都通过后才能启动。
 
@@ -323,8 +323,8 @@ docker compose -f deploy/docker-compose.yml restart backend
    必填项：`DATABASE_URL` / `SAIHU_CLIENT_ID` / `SAIHU_CLIENT_SECRET` / `LOGIN_PASSWORD` / `JWT_SECRET`
 
 2. **敏感值是否仍为示例值**
-   - `JWT_SECRET` 不能是 `"change-me"` 之类
-   - `LOGIN_PASSWORD` 不能为空
+   - `JWT_SECRET` 不能是 `generate_with_openssl_rand_base64_32`
+   - `LOGIN_PASSWORD` 不能是 `please_change_me` 或 `your_initial_login_password`
 
 3. **数据库连接可达**（见 3.1）
 

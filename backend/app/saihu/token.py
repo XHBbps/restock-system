@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 import httpx
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from app.config import get_settings
 from app.core.exceptions import SaihuAPIError
@@ -112,13 +113,28 @@ class TokenManager:
             "grant_type": "client_credentials",
         }
         logger.info("saihu_token_refresh_start")
-        async with httpx.AsyncClient(timeout=settings.saihu_request_timeout_seconds) as client:
-            resp = await client.get(url, params=params)
+        try:
+            async for attempt in AsyncRetrying(
+                stop=stop_after_attempt(settings.saihu_max_retries),
+                wait=wait_exponential(multiplier=1, min=1, max=10),
+                retry=retry_if_exception_type(httpx.RequestError),
+                reraise=True,
+            ):
+                with attempt:
+                    async with httpx.AsyncClient(
+                        timeout=settings.saihu_request_timeout_seconds
+                    ) as client:
+                        resp = await client.get(url, params=params)
+        except httpx.RequestError as exc:
+            raise SaihuAPIError(f"获取 access_token 网络错误: {exc}", endpoint="oauth_token") from exc
         if resp.status_code != 200:
             raise SaihuAPIError(
                 f"获取 access_token HTTP 失败: {resp.status_code}", endpoint="oauth_token"
             )
-        body = resp.json()
+        try:
+            body = resp.json()
+        except ValueError as exc:
+            raise SaihuAPIError("获取 access_token 返回非 JSON", endpoint="oauth_token") from exc
         if body.get("code") != 0:
             raise SaihuAPIError(
                 f"获取 access_token 业务错误: {body.get('msg')}",

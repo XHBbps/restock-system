@@ -12,9 +12,10 @@
 from collections import defaultdict
 from time import time
 
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
+from starlette.types import ASGIApp
 
 # 不限流的路径前缀
 _EXEMPT_PATHS = ("/healthz", "/readyz")
@@ -25,7 +26,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     def __init__(
         self,
-        app,  # type: ignore[no-untyped-def]
+        app: ASGIApp,
         max_requests: int = 60,
         window_seconds: int = 60,
     ) -> None:
@@ -34,7 +35,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.window_seconds = window_seconds
         self._requests: dict[str, list[float]] = defaultdict(list)
 
-    async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
         path = request.url.path
         if any(path.startswith(p) for p in _EXEMPT_PATHS):
             return await call_next(request)

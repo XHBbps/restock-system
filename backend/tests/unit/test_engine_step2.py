@@ -1,6 +1,26 @@
 """Unit tests for Step 2 sale_days."""
 
-from app.engine.step2_sale_days import compute_sale_days, merge_inventory
+import pytest
+
+from app.engine.step2_sale_days import compute_sale_days, load_in_transit, merge_inventory
+
+
+class _RowsResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def all(self):
+        return list(self._rows)
+
+
+class _FakeDb:
+    def __init__(self, rows):
+        self.rows = rows
+        self.statements = []
+
+    async def execute(self, stmt):
+        self.statements.append(stmt)
+        return _RowsResult(self.rows)
 
 
 def test_merge_inventory_keeps_zero_transit_by_default() -> None:
@@ -55,3 +75,26 @@ def test_compute_sale_days_does_not_create_inventory_only_country() -> None:
     )
 
     assert sale_days == {"sku-A": {"US": 2.0}}
+
+
+@pytest.mark.asyncio
+async def test_load_in_transit_reads_synced_tables_and_aggregates_goods() -> None:
+    db = _FakeDb(
+        [
+            ("sku-A", "US", 12),
+            ("sku-A", "JP", 5),
+            ("sku-B", "US", 8),
+        ]
+    )
+
+    result = await load_in_transit(db, ["sku-A", "sku-B"])
+
+    assert result == {
+        ("sku-A", "US"): 12,
+        ("sku-A", "JP"): 5,
+        ("sku-B", "US"): 8,
+    }
+    compiled_sql = str(db.statements[0])
+    assert "in_transit_item" in compiled_sql
+    assert "in_transit_record" in compiled_sql
+    assert "suggestion_item" not in compiled_sql

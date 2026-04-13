@@ -41,7 +41,7 @@ if [[ "${JWT_SECRET}" == "generate_with_openssl_rand_base64_32" ]]; then
     exit 1
 fi
 
-if [[ "${LOGIN_PASSWORD}" == "please_change_me" ]]; then
+if [[ "${LOGIN_PASSWORD}" == "please_change_me" || "${LOGIN_PASSWORD}" == "your_initial_login_password" ]]; then
     echo "LOGIN_PASSWORD is still using the example placeholder" >&2
     exit 1
 fi

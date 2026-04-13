@@ -145,7 +145,7 @@ class ZipcodeRuleIn(BaseModel):
                 )
             if prefix_length is not None:
                 max_value = 10**prefix_length - 1
-                for lo, hi in segments:
+                for _, hi in segments:
                     if hi > max_value:
                         raise ValueError(
                             f"between 上界 {hi} 超出前 {prefix_length} 位最大值 {max_value}"

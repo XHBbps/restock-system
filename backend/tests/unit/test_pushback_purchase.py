@@ -11,7 +11,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.core.exceptions import PushBlockedError, SaihuAPIError
-from app.pushback.purchase import _refresh_suggestion_counts, push_saihu_job
+from app.pushback.purchase import (
+    _join_purchase_order_numbers,
+    _refresh_suggestion_counts,
+    push_saihu_job,
+)
 
 
 class _FakeContext:
@@ -59,6 +63,10 @@ def _make_config(warehouse_id: str = "WH-001") -> SimpleNamespace:
         default_purchase_warehouse_id=warehouse_id,
         include_tax="0",
     )
+
+
+def _make_suggestion(status: str = "draft") -> SimpleNamespace:
+    return SimpleNamespace(id=100, status=status)
 
 
 class _ScalarResult:
@@ -122,6 +130,7 @@ async def test_push_saihu_job_success_path() -> None:
     db1 = _FakeDb(
         [
             _ScalarResult(_make_config()),
+            _ScalarResult(_make_suggestion()),
             _ScalarResult(items),
         ]
     )
@@ -129,6 +138,7 @@ async def test_push_saihu_job_success_path() -> None:
     db2 = _FakeDb(
         [
             None,  # update SuggestionItem
+            _ScalarResult(_make_suggestion()),
             _ScalarResult(["pushed", "pushed"]),  # refresh counts select
             None,  # update Suggestion status
         ]
@@ -150,9 +160,36 @@ async def test_push_saihu_job_success_path() -> None:
     ]
     assert call_kwargs["include_tax"] == "0"
     assert call_kwargs["action"] == "1"
+    assert call_kwargs["custom_purchase_no"] == "RS-100-1"
 
     assert db1.commits == 0
     assert db2.commits == 2
+
+
+def test_join_purchase_order_numbers_handles_multiple_rows() -> None:
+    assert _join_purchase_order_numbers(
+        [
+            {"purchaseOrderNo": "PO-001"},
+            {"purchaseOrderNo": "PO-002"},
+        ]
+    ) == "PO-001,PO-002"
+
+
+def test_join_purchase_order_numbers_dedupes_and_skips_empty_values() -> None:
+    assert _join_purchase_order_numbers(
+        [
+            {"purchaseOrderNo": "PO-001"},
+            {"purchaseOrderNo": " PO-001 "},
+            {"purchaseOrderNo": ""},
+            {},
+        ]
+    ) == "PO-001"
+
+
+def test_make_custom_purchase_no_is_stable_and_compact() -> None:
+    from app.pushback.purchase import _make_custom_purchase_no
+
+    assert _make_custom_purchase_no(100, 1) == "RS-100-1"
 
 
 @pytest.mark.asyncio
@@ -162,6 +199,7 @@ async def test_push_saihu_job_raises_on_blocker() -> None:
     db1 = _FakeDb(
         [
             _ScalarResult(_make_config()),
+            _ScalarResult(_make_suggestion()),
             _ScalarResult([blocked_item]),
         ]
     )
@@ -186,12 +224,14 @@ async def test_push_saihu_job_failure_writes_error() -> None:
     db1 = _FakeDb(
         [
             _ScalarResult(_make_config()),
+            _ScalarResult(_make_suggestion()),
             _ScalarResult(items),
         ]
     )
     db2 = _FakeDb(
         [
             None,  # update SuggestionItem (failed branch)
+            _ScalarResult(_make_suggestion()),
             _ScalarResult(["push_failed"]),  # refresh counts
             None,  # update Suggestion status
         ]
@@ -215,6 +255,44 @@ async def test_push_saihu_job_failure_writes_error() -> None:
 
 
 @pytest.mark.asyncio
+async def test_push_saihu_job_does_not_retry_network_error() -> None:
+    from app.core.exceptions import SaihuNetworkError
+
+    ctx = _FakeContext({"suggestion_id": 100, "item_ids": [1]})
+    items = [_make_item(1)]
+
+    db1 = _FakeDb(
+        [
+            _ScalarResult(_make_config()),
+            _ScalarResult(_make_suggestion()),
+            _ScalarResult(items),
+        ]
+    )
+    db2 = _FakeDb(
+        [
+            None,
+            _ScalarResult(_make_suggestion()),
+            _ScalarResult(["push_failed"]),
+            None,
+        ]
+    )
+    factory = _FakeSessionFactory([db1, db2])
+
+    mock_settings = SimpleNamespace(push_auto_retry_times=3)
+    mock_api = AsyncMock(side_effect=SaihuNetworkError("timeout", endpoint="/api/purchase/create.json"))
+
+    with (
+        patch("app.pushback.purchase.async_session_factory", factory),
+        patch("app.pushback.purchase.create_purchase_order", mock_api),
+        patch("app.pushback.purchase.get_settings", return_value=mock_settings),
+        pytest.raises(SaihuAPIError),
+    ):
+        await push_saihu_job(ctx)  # type: ignore[arg-type]
+
+    mock_api.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_push_saihu_job_rejects_empty_payload() -> None:
     ctx = _FakeContext({})
     with pytest.raises(ValueError, match="suggestion_id 或 item_ids"):
@@ -228,6 +306,7 @@ async def test_push_saihu_job_rejects_empty_payload() -> None:
 async def test_refresh_counts_all_pushed() -> None:
     db = _FakeDb(
         [
+            _ScalarResult(_make_suggestion()),
             _ScalarResult(["pushed", "pushed", "pushed"]),
             None,
         ]
@@ -240,6 +319,7 @@ async def test_refresh_counts_all_pushed() -> None:
 async def test_refresh_counts_none_pushed() -> None:
     db = _FakeDb(
         [
+            _ScalarResult(_make_suggestion()),
             _ScalarResult(["pending", "pending"]),
             None,
         ]
@@ -252,6 +332,7 @@ async def test_refresh_counts_none_pushed() -> None:
 async def test_refresh_counts_partial() -> None:
     db = _FakeDb(
         [
+            _ScalarResult(_make_suggestion()),
             _ScalarResult(["pushed", "push_failed", "pending"]),
             None,
         ]
@@ -262,13 +343,14 @@ async def test_refresh_counts_partial() -> None:
 
 @pytest.mark.asyncio
 async def test_push_saihu_job_rejects_all_zero_qty() -> None:
-    """P2-7: 全部 total_qty=0 时应抛 ValueError,不发送赛狐请求。"""
+    """Reject zero-qty selections before any Saihu request is sent."""
     ctx = _FakeContext({"suggestion_id": 100, "item_ids": [1, 2]})
     items = [_make_item(1, total_qty=0), _make_item(2, total_qty=0)]
 
     db1 = _FakeDb(
         [
             _ScalarResult(_make_config()),
+            _ScalarResult(_make_suggestion()),
             _ScalarResult(items),
         ]
     )
@@ -278,8 +360,92 @@ async def test_push_saihu_job_rejects_all_zero_qty() -> None:
     with (
         patch("app.pushback.purchase.async_session_factory", factory),
         patch("app.pushback.purchase.create_purchase_order", mock_api),
-        pytest.raises(ValueError, match="total_qty 均为 0"),
+        pytest.raises(PushBlockedError, match="total_qty<=0"),
     ):
         await push_saihu_job(ctx)  # type: ignore[arg-type]
 
     mock_api.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_push_saihu_job_rejects_mixed_zero_qty_items() -> None:
+    ctx = _FakeContext({"suggestion_id": 100, "item_ids": [1, 2]})
+    items = [_make_item(1, total_qty=10), _make_item(2, total_qty=0)]
+
+    db1 = _FakeDb(
+        [
+            _ScalarResult(_make_config()),
+            _ScalarResult(_make_suggestion()),
+            _ScalarResult(items),
+        ]
+    )
+    factory = _FakeSessionFactory([db1])
+
+    mock_api = AsyncMock()
+    with (
+        patch("app.pushback.purchase.async_session_factory", factory),
+        patch("app.pushback.purchase.create_purchase_order", mock_api),
+        pytest.raises(PushBlockedError, match="total_qty<=0"),
+    ):
+        await push_saihu_job(ctx)  # type: ignore[arg-type]
+
+    mock_api.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_push_saihu_job_rejects_already_pushed_items() -> None:
+    ctx = _FakeContext({"suggestion_id": 100, "item_ids": [1, 2]})
+    items = [_make_item(1, push_status="pushed"), _make_item(2)]
+    db1 = _FakeDb(
+        [
+            _ScalarResult(_make_config()),
+            _ScalarResult(_make_suggestion()),
+            _ScalarResult(items),
+        ]
+    )
+    factory = _FakeSessionFactory([db1])
+
+    mock_api = AsyncMock()
+    with (
+        patch("app.pushback.purchase.async_session_factory", factory),
+        patch("app.pushback.purchase.create_purchase_order", mock_api),
+        pytest.raises(PushBlockedError, match="已推送"),
+    ):
+        await push_saihu_job(ctx)  # type: ignore[arg-type]
+
+    mock_api.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_push_saihu_job_rejects_archived_suggestion() -> None:
+    ctx = _FakeContext({"suggestion_id": 100, "item_ids": [1]})
+    db1 = _FakeDb(
+        [
+            _ScalarResult(_make_config()),
+            _ScalarResult(_make_suggestion(status="archived")),
+        ]
+    )
+    factory = _FakeSessionFactory([db1])
+
+    mock_api = AsyncMock()
+    with (
+        patch("app.pushback.purchase.async_session_factory", factory),
+        patch("app.pushback.purchase.create_purchase_order", mock_api),
+        pytest.raises(PushBlockedError, match="已归档"),
+    ):
+        await push_saihu_job(ctx)  # type: ignore[arg-type]
+
+    mock_api.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_refresh_counts_preserves_archived_status() -> None:
+    db = _FakeDb(
+        [
+            _ScalarResult(_make_suggestion(status="archived")),
+            _ScalarResult(["pushed", "push_failed"]),
+            None,
+        ]
+    )
+    await _refresh_suggestion_counts(db, 100)  # type: ignore[arg-type]
+    assert len(db._responses) == 0

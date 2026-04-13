@@ -78,6 +78,8 @@ def validate_settings(settings: Settings) -> Settings:
 
     if settings.worker_heartbeat_seconds * 2 >= settings.worker_lease_minutes * 60:
         errors.append("WORKER_HEARTBEAT_SECONDS must be less than WORKER_LEASE_MINUTES*60/2")
+    if settings.push_auto_retry_times < 1:
+        errors.append("PUSH_AUTO_RETRY_TIMES must be >= 1")
 
     if settings.app_env == "production":
         if settings.jwt_secret.strip() == "please_change_me":

@@ -17,8 +17,9 @@ _DEFAULT_RATE = 1
 _DEFAULT_PERIOD = 1.0
 
 # 特定接口的 QPS 覆盖
+# 实际联调中 order_detail 对并发较敏感，当前按 2 QPS 保守放行。
 _ENDPOINT_RATE_OVERRIDES: dict[str, int] = {
-    "/api/order/detailByOrderId.json": 3,
+    "/api/order/detailByOrderId.json": 2,
 }
 
 

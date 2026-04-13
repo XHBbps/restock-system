@@ -121,13 +121,13 @@ bash deploy/scripts/deploy.sh
 
 脚本会依次执行：
 
-1. **校验环境变量** — `deploy/scripts/validate_env.sh` 检查必填项
+1. **校验环境变量** — `deploy/scripts/validate_env.sh` 检查必填项，并拦截 `.env.example` 中的示例占位值（包括 `LOGIN_PASSWORD=your_initial_login_password`）
 2. **数据库备份** — `deploy/scripts/pg_backup.sh` 生成 `deploy/data/backups/<timestamp>.sql.gz`
 3. **拉取/构建镜像** — `docker compose build backend frontend`
 4. **执行迁移** — `docker compose run --rm backend alembic upgrade head`
 5. **滚动更新服务** — `docker compose up -d db backend worker scheduler frontend caddy`
 6. **冒烟检查** — `deploy/scripts/smoke_check.sh` 访问 `/healthz` 和 `/readyz`
-7. **失败自动回滚** — 任何步骤失败触发 `deploy/scripts/rollback.sh`，恢复上一版本
+7. **失败自动回滚** — 任何步骤失败触发 `deploy/scripts/rollback.sh`，仅恢复上一版应用；若迁移已执行，数据库必须通过最近一次备份手动恢复
 
 ### 4.2 手动命令（细粒度操作）
 
@@ -136,7 +136,7 @@ bash deploy/scripts/deploy.sh
 | 仅执行数据库迁移 | `bash deploy/scripts/migrate.sh` |
 | 仅备份数据库 | `bash deploy/scripts/pg_backup.sh` |
 | 从备份恢复 | `bash deploy/scripts/restore_db.sh deploy/data/backups/replenish_20260411_120000.sql.gz` |
-| 回滚到上一版本 | `bash deploy/scripts/rollback.sh` |
+| 回滚到上一版本 | `bash deploy/scripts/rollback.sh <previous-git-sha>` |
 | 查看所有服务状态 | `docker compose -f deploy/docker-compose.yml ps` |
 | 查看单个服务日志 | `docker compose -f deploy/docker-compose.yml logs -f <service>` |
 | 重启单个服务 | `docker compose -f deploy/docker-compose.yml restart <service>` |
@@ -194,7 +194,7 @@ bash deploy/scripts/deploy.sh
 
 **关键原则**：
 - 升级前必做数据库备份（`deploy.sh` 已包含）
-- 迁移失败后**不自动 downgrade**，依靠"恢复备份 + 回退应用版本"
+- 迁移失败后**不自动 downgrade**；标准回滚路径是"恢复最近备份 + 回退应用版本"
 - 灰度能力：通过 scheduler 的 `scheduler_enabled` 开关临时停止定时任务
 
 ---

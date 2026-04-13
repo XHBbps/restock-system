@@ -7,12 +7,19 @@ from app.sync.order_detail import (
     _postal_code_for_routing,
     _sanitize_detail_country,
 )
-from app.sync.product_listing import _normalize_online_status
+from app.sync.product_listing import _infer_is_matched, _normalize_online_status
 
 
 def test_normalize_online_status_lowercases_real_response() -> None:
     assert _normalize_online_status("Active") == "active"
     assert _normalize_online_status(" inActive ") == "inactive"
+
+
+def test_infer_is_matched_requires_both_commodity_fields() -> None:
+    assert _infer_is_matched({"commodityId": "1001", "commoditySku": "SKU-A"}) is True
+    assert _infer_is_matched({"commodityId": "1001", "commoditySku": ""}) is False
+    assert _infer_is_matched({"commodityId": "", "commoditySku": "SKU-A"}) is False
+    assert _infer_is_matched({}) is False
 
 
 def test_sanitize_detail_country_uses_marketplace_id() -> None:
