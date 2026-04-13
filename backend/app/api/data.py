@@ -516,7 +516,7 @@ async def list_inventory(
 # ============================================================
 @router.get("/out-records", response_model=DataOutRecordListOut)
 async def list_out_records(
-    is_in_transit: bool | None = Query(default=True),
+    is_in_transit: bool | None = Query(default=None),
     country: str | None = Query(default=None),
     sku: str | None = Query(default=None),
     out_warehouse_no: str | None = Query(default=None),
