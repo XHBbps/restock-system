@@ -436,17 +436,21 @@ onMounted(load)
 .country-distribution-legend {
   height: 100%;
   min-height: 0;
-  display: flex;
-  flex-wrap: wrap;
-  align-content: flex-start;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, max-content));
+  justify-content: center;
+  align-content: start;
+  justify-items: center;
   gap: $space-2 $space-3;
   overflow-y: auto;
+  padding-inline: $space-2;
 }
 
 .country-distribution-legend__item {
-  max-width: 100%;
+  width: 100%;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: $space-2;
   padding: 6px 10px;
   border-radius: $radius-pill;
@@ -522,12 +526,20 @@ onMounted(load)
   .stats-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .country-distribution-legend {
+    grid-template-columns: repeat(3, minmax(0, max-content));
+  }
 }
 
 @media (max-width: 900px) {
   .stats-grid,
   .bottom-grid {
     grid-template-columns: 1fr;
+  }
+
+  .country-distribution-legend {
+    grid-template-columns: repeat(2, minmax(0, max-content));
   }
 }
 </style>
