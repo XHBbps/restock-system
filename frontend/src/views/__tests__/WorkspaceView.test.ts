@@ -21,7 +21,7 @@ vi.mock('vue-router', () => ({
 const DashboardChartCardStub = {
   name: 'DashboardChartCard',
   props: ['title', 'option', 'empty', 'emptyText'],
-  template: '<div class="dashboard-chart-card-stub"><slot /></div>',
+  template: '<div class="dashboard-chart-card-stub"><slot /><slot name="footer" /></div>',
 }
 
 const STUBS = {
@@ -140,14 +140,23 @@ describe('WorkspaceView', () => {
     expect(rightChart.props('title')).toBe('补货量国家分布')
 
     const option = rightChart.props('option') as {
+      legend: { show: boolean }
       series: Array<{ data: Array<{ name: string; value: number }> }>
     }
 
+    expect(option.legend.show).toBe(false)
     expect(option.series[0].data).toEqual([
       { name: 'US - 美国', value: 10, itemStyle: expect.any(Object) },
       { name: 'JP - 日本', value: 6, itemStyle: expect.any(Object) },
       { name: 'CA - 加拿大', value: 5, itemStyle: expect.any(Object) },
     ])
+
+    const legendItems = wrapper.findAll('.country-distribution-legend__item')
+    expect(legendItems).toHaveLength(3)
+    expect(legendItems[0].text()).toContain('US - 美国')
+    expect(legendItems[0].text()).toContain('10')
+    expect(legendItems[1].text()).toContain('JP - 日本')
+    expect(legendItems[1].text()).toContain('6')
   })
 
   it('makes the suggestion progress block clickable without a separate detail button', async () => {
@@ -184,5 +193,18 @@ describe('WorkspaceView', () => {
     expect(source).toContain('class="urgent-card-content"')
     expect(source).toContain('.urgent-card-content')
     expect(source).not.toContain('max-height: 400px')
+  })
+
+  it('uses a custom wrapping legend for country distribution instead of echarts built-in legend layout', async () => {
+    mockGetDashboardOverview.mockResolvedValue(makeOverview())
+
+    const { default: View } = await import('../WorkspaceView.vue')
+    shallowMount(View, { global: { stubs: STUBS } })
+    await flushPromises()
+
+    const source = readFileSync('src/views/WorkspaceView.vue', 'utf-8')
+    expect(source).toContain('class="country-distribution-legend"')
+    expect(source).toContain('.country-distribution-legend')
+    expect(source).toContain("legend: { show: false }")
   })
 })

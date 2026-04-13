@@ -103,7 +103,24 @@
             :empty="!data || data.country_restock_distribution.length === 0"
             empty-text="暂无补货量数据"
             style="box-shadow: none; padding: 0;"
-          />
+          >
+            <template #footer>
+              <div class="country-distribution-legend" aria-label="补货量国家分布图例">
+                <div
+                  v-for="item in countryDistLegendItems"
+                  :key="item.country"
+                  class="country-distribution-legend__item"
+                >
+                  <span
+                    class="country-distribution-legend__dot"
+                    :style="{ backgroundColor: item.color }"
+                  />
+                  <span class="country-distribution-legend__label">{{ item.label }}</span>
+                  <span class="country-distribution-legend__value">{{ item.totalQty }}</span>
+                </div>
+              </div>
+            </template>
+          </DashboardChartCard>
         </div>
       </DataTableCard>
     </section>
@@ -142,6 +159,15 @@ const suggestionStatus = computed(() =>
   data.value?.suggestion_status
     ? getSuggestionStatusMeta(data.value.suggestion_status)
     : { label: '暂无', tagType: 'info' as const },
+)
+
+const countryDistLegendItems = computed(() =>
+  (data.value?.country_restock_distribution ?? []).map((item, index) => ({
+    country: item.country,
+    label: getCountryLabel(item.country),
+    totalQty: item.total_qty,
+    color: PIE_COLORS[index % PIE_COLORS.length],
+  })),
 )
 
 const riskDistributionChartOption = computed<EChartsCoreOption>(() => {
@@ -222,13 +248,14 @@ const countryDistChartOption = computed<EChartsCoreOption>(() => {
 
   return {
     tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-    legend: { bottom: 0, icon: 'circle', textStyle: { color: '#71717a' } },
+    legend: { show: false },
     series: [
       {
         type: 'pie',
-        radius: ['45%', '70%'],
+        center: ['50%', '50%'],
+        radius: ['46%', '72%'],
         itemStyle: { borderColor: '#ffffff', borderWidth: 3 },
-        label: { formatter: '{b}\n{d}%', color: '#09090b', fontSize: 11 },
+        label: { formatter: '{d}%', color: '#09090b', fontSize: 11 },
         data: items.map((item, index) => ({
           name: getCountryLabel(item.country),
           value: item.total_qty,
@@ -404,6 +431,46 @@ onMounted(load)
     flex: 1;
     min-height: 0;
   }
+}
+
+.country-distribution-legend {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: $space-2 $space-3;
+  overflow-y: auto;
+}
+
+.country-distribution-legend__item {
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: $space-2;
+  padding: 6px 10px;
+  border-radius: $radius-pill;
+  background: $color-bg-subtle;
+}
+
+.country-distribution-legend__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.country-distribution-legend__label {
+  min-width: 0;
+  font-size: $font-size-xs;
+  color: $color-text-primary;
+}
+
+.country-distribution-legend__value {
+  font-size: $font-size-xs;
+  font-weight: $font-weight-medium;
+  color: $color-text-secondary;
+  font-variant-numeric: tabular-nums;
 }
 
 .suggestion-progress {
