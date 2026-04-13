@@ -1,4 +1,4 @@
-"""Unit tests for suggestion API patch/push endpoints."""
+"""Unit tests for suggestion API patch/push/delete endpoints."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from typing import Any
 
 import pytest
 
-from app.api.suggestion import patch_item, push_items
-from app.core.exceptions import ConflictError, PushBlockedError, ValidationFailed
+from app.api.suggestion import delete_suggestion, patch_item, push_items
+from app.core.exceptions import ConflictError, NotFound, PushBlockedError, ValidationFailed
 from app.schemas.suggestion import PushRequest, SuggestionItemPatch
 
 
@@ -189,6 +189,28 @@ async def test_suggestion_push_rejects_zero_qty_items() -> None:
     req = PushRequest(item_ids=[10])
     with pytest.raises(PushBlockedError, match="total_qty<=0"):
         await push_items(req=req, suggestion_id=1, db=db, _={})  # type: ignore[arg-type]
+
+
+async def test_suggestion_delete_rejects_missing_row() -> None:
+    db = _FakeSession([None])
+    with pytest.raises(NotFound, match=r"不存在|NotFound"):
+        await delete_suggestion(suggestion_id=1, db=db, _={})  # type: ignore[arg-type]
+
+
+async def test_suggestion_delete_rejects_pushed_row() -> None:
+    db = _FakeSession([_FakeSuggestion(status="pushed")])
+    with pytest.raises(ConflictError, match=r"pushed|删除"):
+        await delete_suggestion(suggestion_id=1, db=db, _={})  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("status", ["draft", "partial", "error", "archived"])
+async def test_suggestion_delete_allows_non_pushed_rows(status: str) -> None:
+    db = _FakeSession([_FakeSuggestion(status=status), None])
+
+    await delete_suggestion(suggestion_id=1, db=db, _={})  # type: ignore[arg-type]
+
+    delete_stmt = db.executed_statements[-1]
+    assert delete_stmt.table.name == "suggestion"
 
 
 def test_suggestion_item_patch_rejects_negative_country_breakdown():

@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, Path, Query
-from sqlalchemy import Float, case, func, select, update
+from sqlalchemy import Float, case, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -70,7 +70,9 @@ def _apply_suggestion_sort(stmt, sort_by: str | None, sort_order: str):
         ),
     }
     columns = sort_map.get(sort_by or "", (Suggestion.created_at,))
-    ordered_columns = [column.asc() if sort_order == "asc" else column.desc() for column in columns]
+    ordered_columns = [
+        column.asc() if sort_order == "asc" else column.desc() for column in columns
+    ]
     return stmt.order_by(*ordered_columns, Suggestion.created_at.desc(), Suggestion.id.desc())
 
 
@@ -111,7 +113,9 @@ async def list_suggestions(
     base = _apply_suggestion_sort(base, sort_by, sort_order)
     count_stmt = base.with_only_columns(func.count()).order_by(None)
     total = (await db.execute(count_stmt)).scalar_one()
-    rows = (await db.execute(base.offset((page - 1) * page_size).limit(page_size))).scalars().all()
+    rows = (
+        await db.execute(base.offset((page - 1) * page_size).limit(page_size))
+    ).scalars().all()
     return SuggestionListOut(
         items=[SuggestionOut.model_validate(row) for row in rows],
         total=int(total or 0),
@@ -220,7 +224,9 @@ async def patch_item(
     for country in positive_qty_countries(effective_country_breakdown):
         warehouse_values = list((effective_warehouse_breakdown.get(country) or {}).values())
         if warehouse_values and sum(warehouse_values) != effective_country_breakdown[country]:
-            raise ValidationFailed(f"{country} 的 warehouse_breakdown 之和与 country_breakdown 不一致")
+            raise ValidationFailed(
+                f"{country} 的 warehouse_breakdown 之和与 country_breakdown 不一致"
+            )
 
     updates: dict[str, Any] = {}
     if patch.total_qty is not None:
@@ -249,7 +255,9 @@ async def patch_item(
         )
 
     if updates:
-        await db.execute(update(SuggestionItem).where(SuggestionItem.id == item_id).values(**updates))
+        await db.execute(
+            update(SuggestionItem).where(SuggestionItem.id == item_id).values(**updates)
+        )
         await db.refresh(item)
 
     return await _enrich_item(db, item)
@@ -271,17 +279,13 @@ async def push_items(
         raise ConflictError(f"建议单状态为 {sug.status}, 不可推送")
 
     items = (
-        (
-            await db.execute(
-                select(SuggestionItem).where(
-                    SuggestionItem.id.in_(req.item_ids),
-                    SuggestionItem.suggestion_id == suggestion_id,
-                )
+        await db.execute(
+            select(SuggestionItem).where(
+                SuggestionItem.id.in_(req.item_ids),
+                SuggestionItem.suggestion_id == suggestion_id,
             )
         )
-        .scalars()
-        .all()
-    )
+    ).scalars().all()
     if len(items) != len(req.item_ids):
         raise NotFound("部分条目不存在")
 
@@ -335,18 +339,32 @@ async def archive_suggestion(
     return None
 
 
+@router.delete("/{suggestion_id}", status_code=204)
+async def delete_suggestion(
+    suggestion_id: int = Path(..., ge=1),
+    db: AsyncSession = Depends(db_session),
+    _: dict[str, Any] = Depends(get_current_session),
+) -> None:
+    sug = (
+        await db.execute(select(Suggestion).where(Suggestion.id == suggestion_id))
+    ).scalar_one_or_none()
+    if sug is None:
+        raise NotFound(f"建议单 {suggestion_id} 不存在")
+    if sug.status == "pushed":
+        raise ConflictError("已推送的建议单不可删除")
+
+    await db.execute(delete(Suggestion).where(Suggestion.id == suggestion_id))
+    return None
+
+
 async def _build_detail(db: AsyncSession, sug: Suggestion) -> SuggestionDetailOut:
     items = (
-        (
-            await db.execute(
-                select(SuggestionItem)
-                .where(SuggestionItem.suggestion_id == sug.id)
-                .order_by(SuggestionItem.urgent.desc(), SuggestionItem.id)
-            )
+        await db.execute(
+            select(SuggestionItem)
+            .where(SuggestionItem.suggestion_id == sug.id)
+            .order_by(SuggestionItem.urgent.desc(), SuggestionItem.id)
         )
-        .scalars()
-        .all()
-    )
+    ).scalars().all()
 
     sku_codes = [it.commodity_sku for it in items]
     name_map: dict[str, tuple[str | None, str | None]] = {}

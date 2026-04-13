@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-13（同步时间展示统一）
+> 最近更新：2026-04-13（历史记录删除与触发方式中文化）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -65,6 +65,8 @@
 - **建议单**：`draft/partial/pushed/archived/error` 状态流转
 - **跨页选择**：补货发起页的 `selectedIds` 数组跨分页保持，支持全选筛选后的所有条目
 - **编辑校验**：建议详情支持编辑 `total_qty` / `country_breakdown` / `warehouse_breakdown` / `t_purchase`；国家补货量不要求与总采购量一致，已配置仓库时仓内分量之和必须等于国家补货量；正补货量国家未显式填写 `t_purchase` 时后端默认当天
+- **历史记录删除**：历史记录页新增建议单删除入口，允许删除 `draft` / `partial` / `error` / `archived`；`pushed` 建议单保留历史追溯，不允许删除
+- **触发方式中文化**：历史记录页“触发方式”由原始值改为中文展示，当前口径统一为“手动触发 / 自动触发”
 - **推送到赛狐**：`pushback/purchase.py` 合并选中条目生成采购单，失败自动重试
 - **去重**：同一 suggestion 同时只有一个 push 任务（`dedupe_key="push_saihu#<id>"`）
 
@@ -114,6 +116,12 @@
 ---
 
 ## 3. 近期重大变更（2026-04-10 ~ 2026-04-13）
+
+### 3.25 历史记录删除与触发方式中文化（2026-04-13）
+- `backend/app/api/suggestion.py` 新增 `DELETE /api/suggestions/{id}`，按建议单维度物理删除 `suggestion` 及级联明细；仅 `draft` / `partial` / `error` / `archived` 允许删除，`pushed` 返回冲突错误
+- `frontend/src/api/suggestion.ts` 新增 `deleteSuggestion()`；`frontend/src/views/HistoryView.vue` 将筛选顺序调整为“SKU关键字 → 日期筛选 → 状态筛选”，操作列新增红色“删除”，确认框使用项目现有 MessageBox 风格并补充危险操作文案
+- 历史记录页“触发方式”改为中文展示：`manual` 显示“手动触发”，`scheduler` 显示“自动触发”，未知值兜底显示原始文本
+- **测试**：新增 `frontend/src/views/__tests__/HistoryView.test.ts`，并扩展 `backend/tests/unit/test_suggestion_patch.py` 覆盖删除接口允许/拒绝场景
 
 ### 3.24 同步时间展示统一（2026-04-13）
 - `frontend/src/utils/format.ts` 将 `formatUpdateTime` 统一为 `YYYY-MM-DD HH:mm`，用于数据页“同步时间”和出库记录“更新时间/同步时间”展示；对应 `frontend/src/utils/format.test.ts` 同步更新断言
