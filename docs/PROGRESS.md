@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-13（出库页筛选默认值与清空交互修正）
+> 最近更新：2026-04-13（补货发起页推送标签口径收敛）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -116,6 +116,11 @@
 ---
 
 ## 3. 近期重大变更（2026-04-10 ~ 2026-04-13）
+
+### 3.27 补货发起页推送标签口径收敛（2026-04-13）
+- `frontend/src/views/SuggestionListView.vue` 移除商品信息卡片后的推送阻塞标签展示，并将 `blocked` 条目在前端筛选与排序口径中并入“待推送”
+- `frontend/src/utils/status.ts` 将建议条目 `push_status='blocked'` 的展示文案统一为“待推送”，不再向用户暴露“不可推送”标签
+- **测试**：新增 `frontend/src/views/__tests__/SuggestionListView.test.ts`，并更新 `frontend/src/utils/status.test.ts`，覆盖 blocked 并入待推送和商品信息区不再传递 blocker 标签
 
 ### 3.26 出库页筛选默认值与清空交互修正（2026-04-13）
 - `frontend/src/views/data/DataOutRecordsView.vue` 将“状态”筛选默认值从“在途”改为“未筛选”，并为“状态”“国家”两个下拉补齐清空后立即重载列表的交互
