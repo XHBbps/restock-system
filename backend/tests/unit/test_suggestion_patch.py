@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -65,6 +66,7 @@ class _FakeItem:
     def __init__(self, push_status: str = "pending") -> None:
         self.id = 10
         self.suggestion_id = 1
+        self.commodity_id: str | None = "CID-001"
         self.push_status = push_status
         self.push_blocker: str | None = None
         self.total_qty: int = 1
@@ -189,6 +191,31 @@ async def test_suggestion_push_rejects_zero_qty_items() -> None:
     req = PushRequest(item_ids=[10])
     with pytest.raises(PushBlockedError, match="total_qty<=0"):
         await push_items(req=req, suggestion_id=1, db=db, _={})  # type: ignore[arg-type]
+
+
+async def test_suggestion_push_auto_resolves_missing_commodity_id_before_enqueue(monkeypatch) -> None:
+    import app.api.suggestion as suggestion_module
+
+    item = _FakeItem(push_status="blocked")
+    item.commodity_id = None
+    item.push_blocker = "missing_commodity_id"
+    db = _FakeSession([_FakeSuggestion(status="draft"), [item]])
+    req = PushRequest(item_ids=[10])
+
+    async def _fake_refresh(*_args: Any, **_kwargs: Any) -> set[int]:
+        item.commodity_id = "CID-NEW"
+        item.push_blocker = None
+        item.push_status = "pending"
+        return {item.id}
+
+    enqueue_mock = AsyncMock(return_value=(321, False))
+    monkeypatch.setattr(suggestion_module, "refresh_suggestion_item_pushability", _fake_refresh)
+    monkeypatch.setattr(suggestion_module, "enqueue_task", enqueue_mock)
+
+    result = await push_items(req=req, suggestion_id=1, db=db, _={})  # type: ignore[arg-type]
+
+    assert result == {"task_id": 321, "existing": False}
+    enqueue_mock.assert_awaited_once()
 
 
 async def test_suggestion_delete_rejects_missing_row() -> None:

@@ -136,7 +136,7 @@ describe('SuggestionListView', () => {
     vi.clearAllMocks()
   })
 
-  it('treats blocked items as pending in push status filter', async () => {
+  it('keeps blocked items out of the pending filter', async () => {
     mockGetCurrentSuggestion.mockResolvedValue(makeSuggestion())
 
     const { default: View } = await import('../SuggestionListView.vue')
@@ -151,7 +151,25 @@ describe('SuggestionListView', () => {
     vm.filterPushStatus = 'pending'
     await flushPromises()
 
-    expect(vm.filteredItems.map((item) => item.id)).toEqual([1, 2])
+    expect(vm.filteredItems.map((item) => item.id)).toEqual([1])
+  })
+
+  it('supports filtering blocked items separately', async () => {
+    mockGetCurrentSuggestion.mockResolvedValue(makeSuggestion())
+
+    const { default: View } = await import('../SuggestionListView.vue')
+    const wrapper = shallowMount(View, createMountOptions())
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      filterPushStatus: string
+      filteredItems: SuggestionItem[]
+    }
+
+    vm.filterPushStatus = 'blocked'
+    await flushPromises()
+
+    expect(vm.filteredItems.map((item) => item.id)).toEqual([2])
   })
 
   it('does not pass blocker tags through the product card on suggestion list', async () => {
@@ -163,6 +181,6 @@ describe('SuggestionListView', () => {
 
     const source = readFileSync('src/views/SuggestionListView.vue', 'utf-8')
     expect(source).not.toContain(':blocker=')
-    expect(source).not.toContain('value="blocked"')
+    expect(source).toContain('value="blocked"')
   })
 })

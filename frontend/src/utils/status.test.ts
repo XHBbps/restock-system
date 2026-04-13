@@ -54,10 +54,10 @@ describe('getOutRecordTransitStatusMeta', () => {
 })
 
 describe('getSuggestionPushStatusMeta', () => {
-  it('maps blocked rows to the same display meta as pending', () => {
+  it('maps blocked rows to a dedicated display meta', () => {
     expect(getSuggestionPushStatusMeta('blocked')).toEqual({
-      label: '待推送',
-      tagType: 'warning',
+      label: '待处理',
+      tagType: 'info',
     })
   })
 })

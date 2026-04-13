@@ -48,6 +48,8 @@ class _ScalarResult:
         return _ScalarsProxy(self._value)
 
     def all(self) -> list[Any]:
+        if self._value is None:
+            return []
         if isinstance(self._value, list):
             return self._value
         return [self._value]
@@ -305,3 +307,19 @@ async def test_load_commodity_id_map_unknown_skus_map_to_none() -> None:
 
     assert result["SKU-X"] is None
     assert result["SKU-Y"] is None
+
+
+@pytest.mark.asyncio
+async def test_load_commodity_id_map_falls_back_to_seller_sku() -> None:
+    db = _FakeDb(
+        [
+            SimpleNamespace(all=lambda: []),
+            SimpleNamespace(all=lambda: []),
+            SimpleNamespace(all=lambda: []),
+            SimpleNamespace(all=lambda: [("SKU-A", "CID-SELLER")]),
+        ]
+    )
+
+    result = await _load_commodity_id_map(db, ["SKU-A"])  # type: ignore[arg-type]
+
+    assert result["SKU-A"] == "CID-SELLER"
