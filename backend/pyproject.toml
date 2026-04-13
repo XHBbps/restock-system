@@ -1,0 +1,184 @@
+[project]
+name = "restock-backend"
+version = "0.1.0"
+description = "赛狐补货计算工具 - 后端"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    # Web 框架
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+
+    # 数据库
+    "sqlalchemy[asyncio]>=2.0.36",
+    "asyncpg>=0.30.0",
+    "alembic>=1.14.0",
+
+    # 数据校验
+    "pydantic>=2.9.0",
+    "pydantic-settings>=2.6.0",
+
+    # 赛狐 API 客户端
+    "httpx>=0.28.0",
+    "aiolimiter>=1.2.0",
+    "tenacity>=9.0.0",
+
+    # 定时任务
+    "apscheduler>=3.10.4",
+
+    # 日志
+    "structlog>=24.4.0",
+
+    # 安全
+    "PyJWT>=2.9.0",
+    "bcrypt>=4.0.1,<5",
+
+    # 工具
+    "python-dateutil>=2.9.0",
+    "orjson>=3.10.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    # 代码质量
+    "ruff>=0.8.0",
+    "black>=24.10.0",
+    "mypy>=1.13.0",
+
+    # 测试
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=6.0.0",
+    "httpx>=0.28.0",
+    "freezegun>=1.5.0",
+    "pytest-mock>=3.14.0",
+
+    # 类型桩
+    "types-python-dateutil",
+
+    # 提交钩子
+    "pre-commit>=4.0.0",
+    "pip-audit>=2.7.0",
+]
+
+[build-system]
+requires = ["setuptools>=75.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+
+# ==================== Ruff ====================
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+fix = true
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+    "N",   # pep8-naming
+    "SIM", # flake8-simplify
+    "RUF", # ruff-specific
+]
+ignore = [
+    "E501",    # 行长由 black 管
+    "B008",    # FastAPI Depends() 用法
+    "RUF001",  # 中文字符串中的全角标点
+    "RUF002",  # 中文 docstring 中的全角标点
+    "RUF003",  # 中文注释中的全角标点
+]
+
+[tool.ruff.lint.per-file-ignores]
+"alembic/**" = ["E402", "F401"]
+"tests/**" = ["E501"]
+
+# ==================== Black ====================
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+# ==================== mypy ====================
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+show_error_codes = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = [
+    "apscheduler.*",
+    "aiolimiter.*",
+]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = [
+    "asyncpg.*",
+]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = [
+    "app.api.data",
+    "app.api.config",
+    "app.api.suggestion",
+    "app.api.monitor",
+    "app.api.task",
+    "app.api.auth",
+    "app.sync.inventory",
+    "app.sync.out_records",
+    "app.sync.order_list",
+    "app.sync.order_detail",
+    "app.sync.warehouse",
+    "app.sync.shop",
+    "app.tasks.jobs.daily_archive",
+    "app.tasks.queue",
+    "app.tasks.scheduler",
+    "app.saihu.token",
+    "app.saihu.client",
+]
+disable_error_code = [
+    "dict-item",
+    "attr-defined",
+    "arg-type",
+    "no-any-return",
+    "no-untyped-def",
+    "no-untyped-call",
+    "index",
+    "union-attr",
+]
+
+# ==================== Pytest ====================
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+]
+filterwarnings = [
+    "error",
+]

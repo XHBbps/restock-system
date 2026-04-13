@@ -1,0 +1,165 @@
+name: restock
+
+x-backend-env: &backend-env
+  DATABASE_URL: postgresql+asyncpg://postgres:${DB_PASSWORD}@db:5432/replenish
+  APP_ENV: production
+  APP_TIMEZONE: Asia/Shanghai
+  APP_LOG_LEVEL: INFO
+  SAIHU_BASE_URL: https://openapi.sellfox.com
+  SAIHU_CLIENT_ID: ${SAIHU_CLIENT_ID}
+  SAIHU_CLIENT_SECRET: ${SAIHU_CLIENT_SECRET}
+  LOGIN_PASSWORD: ${LOGIN_PASSWORD}
+  JWT_SECRET: ${JWT_SECRET}
+  JWT_EXPIRES_HOURS: 24
+  TZ: Asia/Shanghai
+
+x-backend-build: &backend-build
+  context: ../backend
+  dockerfile: Dockerfile
+
+x-backend-healthcheck: &backend-healthcheck
+  test:
+    [
+      "CMD",
+      "python",
+      "-c",
+      "import urllib.request; urllib.request.urlopen('http://localhost:8000/readyz', timeout=2)",
+    ]
+  interval: 30s
+  timeout: 5s
+  retries: 5
+  start_period: 20s
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: replenish
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      TZ: Asia/Shanghai
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    volumes:
+      - ./data/pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d replenish"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+
+  backend:
+    build: *backend-build
+    restart: unless-stopped
+    environment:
+      <<: *backend-env
+      APP_DOCS_ENABLED: ${APP_DOCS_ENABLED:-false}
+      PROCESS_ENABLE_WORKER: false
+      PROCESS_ENABLE_REAPER: false
+      PROCESS_ENABLE_SCHEDULER: false
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck: *backend-healthcheck
+    networks:
+      - internal
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  worker:
+    build: *backend-build
+    restart: unless-stopped
+    environment:
+      <<: *backend-env
+      APP_DOCS_ENABLED: false
+      PROCESS_ENABLE_WORKER: true
+      PROCESS_ENABLE_REAPER: true
+      PROCESS_ENABLE_SCHEDULER: false
+      DB_POOL_SIZE: 3
+      DB_MAX_OVERFLOW: 2
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck: *backend-healthcheck
+    networks:
+      - internal
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  scheduler:
+    build: *backend-build
+    restart: unless-stopped
+    environment:
+      <<: *backend-env
+      APP_DOCS_ENABLED: false
+      PROCESS_ENABLE_WORKER: false
+      # Reaper 在 worker 和 scheduler 两个容器冗余运行:
+      # 若 worker 容器整体 crash 未恢复,scheduler 的 reaper 仍能回收僵尸任务。
+      # 双 reaper 通过 PostgreSQL 行锁 + 幂等 UPDATE 天然并发安全。
+      PROCESS_ENABLE_REAPER: true
+      PROCESS_ENABLE_SCHEDULER: true
+      DB_POOL_SIZE: 3
+      DB_MAX_OVERFLOW: 2
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck: *backend-healthcheck
+    networks:
+      - internal
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - internal
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./data/caddy:/data
+      - ./data/caddy-config:/config
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    networks:
+      - internal
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+
+networks:
+  internal:
+    driver: bridge

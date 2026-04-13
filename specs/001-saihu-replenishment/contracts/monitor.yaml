@@ -1,0 +1,145 @@
+openapi: 3.0.3
+info:
+  title: Restock System - Monitor API
+  version: 1.0.0
+paths:
+  /api/monitor/api-calls:
+    get:
+      summary: 赛狐接口调用监控
+      security: [{bearer: []}]
+      parameters:
+        - in: query
+          name: endpoint
+          schema: {type: string}
+        - in: query
+          name: hours
+          schema: {type: integer, default: 24}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  endpoints:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        endpoint: {type: string}
+                        total_calls: {type: integer}
+                        success_count: {type: integer}
+                        failed_count: {type: integer}
+                        success_rate: {type: number}
+                        last_called_at: {type: string, format: date-time}
+                        last_status: {type: string}
+                        last_error: {type: string}
+
+  /api/monitor/api-calls/recent:
+    get:
+      summary: 最近赛狐调用记录
+      security: [{bearer: []}]
+      parameters:
+        - in: query
+          name: endpoint
+          schema: {type: string}
+        - in: query
+          name: only_failed
+          schema: {type: boolean, default: false}
+        - in: query
+          name: limit
+          schema: {type: integer, default: 50, maximum: 500}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: {type: integer}
+                    endpoint: {type: string}
+                    called_at: {type: string, format: date-time}
+                    duration_ms: {type: integer}
+                    http_status: {type: integer}
+                    saihu_code: {type: integer}
+                    saihu_msg: {type: string}
+                    error_type: {type: string}
+
+  /api/monitor/api-calls/{id}/retry:
+    post:
+      summary: 重试单次失败调用（入队重新执行对应的任务）
+      security: [{bearer: []}]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: {type: integer}
+      responses:
+        '200':
+          description: 已入队
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  task_id: {type: integer}
+
+  /api/monitor/overstock:
+    get:
+      summary: 积压 SKU 列表
+      security: [{bearer: []}]
+      parameters:
+        - in: query
+          name: show_processed
+          schema: {type: boolean, default: false}
+        - in: query
+          name: country
+          schema: {type: string}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: {type: integer}
+                    commodity_sku: {type: string}
+                    commodity_name: {type: string}
+                    country: {type: string}
+                    warehouse_id: {type: string}
+                    warehouse_name: {type: string}
+                    current_stock: {type: integer}
+                    last_sale_date: {type: string, format: date}
+                    processed_at: {type: string, format: date-time, nullable: true}
+
+  /api/monitor/overstock/{id}/processed:
+    patch:
+      summary: 标记积压记录为已处理
+      security: [{bearer: []}]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: {type: integer}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note: {type: string}
+      responses:
+        '200':
+          description: OK
+
+components:
+  securitySchemes:
+    bearer: {type: http, scheme: bearer, bearerFormat: JWT}

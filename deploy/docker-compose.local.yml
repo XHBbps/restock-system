@@ -1,0 +1,24 @@
+# 本地开发 Docker Compose —— 只跑 Postgres，其他服务用 dev server 本地启动
+# 使用方式:
+#   docker compose -f deploy/docker-compose.local.yml up -d
+#   然后 backend 和 frontend 分别用 uvicorn / vite 启动
+name: restock-local
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: replenish
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: dev_password
+      TZ: Asia/Shanghai
+    ports:
+      - "5432:5432"  # 本地暴露，宿主机直连
+    volumes:
+      - ./data/pg-local:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d replenish"]
+      interval: 5s
+      timeout: 3s
+      retries: 10

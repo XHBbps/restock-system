@@ -31,7 +31,16 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+基于 `.specify/memory/constitution.md` v1.0.0 的合规门禁，逐项核对：
+
+- [ ] **KISS / YAGNI**：方案为当前需求的最简实现，未引入未被需求驱动的抽象、配置项或扩展点
+- [ ] **DRY / 单一职责**：不存在 ≥2 处未提取的重复；函数 ≤50 行、参数 ≤4、文件 ≤500 行、嵌套 ≤3 层
+- [ ] **失败快速 & 关注点分离**：错误在最早可发现位置抛出；UI / 业务 / 数据层边界清晰，跨层只通过明确接口
+- [ ] **代码规范一致性 (NON-NEGOTIABLE)**：命名风格统一、公共接口有类型标注、formatter + linter + type checker 已配置、Conventional Commits
+- [ ] **可观测与可维护**：关键路径规划了结构化日志 / 指标 / 告警；数据库访问避免 N+1；热点数据有缓存策略与 TTL
+- [ ] **性能标准**：Technical Context 的 Performance Goals 已对齐宪法门禁（接口 P95 < 500ms / P99 < 1s、FCP < 1.5s、LCP < 2.5s、单查询 < 100ms、首屏 JS gzip < 250KB、稳态内存 < 70%）
+
+> 任何未通过项 MUST 在下方 Complexity Tracking 中显式论证。
 
 ## Project Structure
 

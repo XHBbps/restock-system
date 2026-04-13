@@ -1,0 +1,57 @@
+# Pre-commit 钩子配置
+# 宪法 NON-NEGOTIABLE: 每次提交必须通过 lint / format / type 检查
+# 安装: pip install pre-commit && pre-commit install
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: \.md$
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+        exclude: \.secrets\.baseline$|package-lock\.json$|tsconfig.*\.json$
+      - id: check-added-large-files
+        args: ["--maxkb=500"]
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: ['--baseline', '.secrets.baseline']
+        exclude: package-lock\.json$|\.secrets\.baseline$
+
+  # 后端 Python
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.0
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+        files: ^backend/
+      - id: ruff-format
+        files: ^backend/
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.13.0
+    hooks:
+      - id: mypy
+        files: ^backend/app/
+        additional_dependencies:
+          - pydantic>=2.9.0
+          - sqlalchemy[asyncio]>=2.0.36
+          - types-python-dateutil
+        args: ["--config-file=backend/pyproject.toml"]
+
+  # 前端 TypeScript / Vue
+  - repo: local
+    hooks:
+      - id: frontend-lint
+        name: frontend eslint + vue-tsc
+        entry: bash -c 'cd frontend && npm run lint && npm run type-check'
+        language: system
+        files: ^frontend/src/.*\.(ts|tsx|vue)$
+        pass_filenames: false

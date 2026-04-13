@@ -1,0 +1,272 @@
+openapi: 3.0.3
+info:
+  title: Restock System - Config API
+  version: 1.0.0
+paths:
+  /api/config/global:
+    get:
+      summary: 获取全局参数
+      security: [{bearer: []}]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GlobalConfig'}
+    patch:
+      summary: 更新全局参数
+      security: [{bearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/GlobalConfig'}
+      responses:
+        '200':
+          description: 已更新
+        '400':
+          description: 参数非法
+
+  /api/config/sku:
+    get:
+      summary: SKU 配置列表
+      security: [{bearer: []}]
+      parameters:
+        - in: query
+          name: enabled
+          schema: {type: boolean}
+        - in: query
+          name: keyword
+          schema: {type: string}
+        - in: query
+          name: page
+          schema: {type: integer, default: 1}
+        - in: query
+          name: page_size
+          schema: {type: integer, default: 50, maximum: 200}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: {$ref: '#/components/schemas/SkuConfig'}
+                  total: {type: integer}
+
+  /api/config/sku/{commodity_sku}:
+    patch:
+      summary: 更新单 SKU 配置
+      security: [{bearer: []}]
+      parameters:
+        - in: path
+          name: commodity_sku
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enabled: {type: boolean}
+                lead_time_days: {type: integer, nullable: true}
+      responses:
+        '200':
+          description: OK
+
+  /api/config/warehouse:
+    get:
+      summary: 仓库列表（含手动维护的国家）
+      security: [{bearer: []}]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Warehouse'}
+
+  /api/config/warehouse/{id}/country:
+    patch:
+      summary: 更新仓库的国家归属
+      security: [{bearer: []}]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [country]
+              properties:
+                country: {type: string, description: ISO 二字码}
+      responses:
+        '200':
+          description: OK
+
+  /api/config/zipcode-rules:
+    get:
+      summary: 邮编规则列表
+      security: [{bearer: []}]
+      parameters:
+        - in: query
+          name: country
+          schema: {type: string}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/ZipcodeRule'}
+    post:
+      summary: 新增邮编规则
+      security: [{bearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ZipcodeRule'}
+      responses:
+        '201':
+          description: 已创建
+
+  /api/config/zipcode-rules/{id}:
+    patch:
+      summary: 更新邮编规则
+      security: [{bearer: []}]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: {type: integer}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ZipcodeRule'}
+      responses:
+        '200':
+          description: OK
+    delete:
+      summary: 删除邮编规则
+      security: [{bearer: []}]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: {type: integer}
+      responses:
+        '204':
+          description: 已删除
+
+  /api/config/shops:
+    get:
+      summary: 店铺列表（缓存）
+      security: [{bearer: []}]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Shop'}
+
+  /api/config/shops/refresh:
+    post:
+      summary: 手动刷新店铺缓存（调用赛狐店铺列表接口）
+      security: [{bearer: []}]
+      responses:
+        '200':
+          description: 已刷新
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count: {type: integer}
+
+  /api/config/shops/{id}:
+    patch:
+      summary: 切换店铺 sync_enabled
+      security: [{bearer: []}]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sync_enabled: {type: boolean}
+      responses:
+        '200':
+          description: OK
+
+components:
+  securitySchemes:
+    bearer: {type: http, scheme: bearer, bearerFormat: JWT}
+  schemas:
+    GlobalConfig:
+      type: object
+      properties:
+        buffer_days: {type: integer, default: 30}
+        target_days: {type: integer, default: 60}
+        lead_time_days: {type: integer, default: 50}
+        sync_interval_minutes: {type: integer, default: 60}
+        calc_cron: {type: string, default: "0 8 * * *"}
+        default_purchase_warehouse_id: {type: string}
+        include_tax: {type: string, enum: ["0","1"]}
+        shop_sync_mode: {type: string, enum: [all, specific]}
+    SkuConfig:
+      type: object
+      properties:
+        commodity_sku: {type: string}
+        enabled: {type: boolean}
+        lead_time_days: {type: integer, nullable: true}
+        commodity_name: {type: string, description: 从 product_listing 拼接}
+        main_image: {type: string}
+    Warehouse:
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        type: {type: integer}
+        country: {type: string, nullable: true}
+        replenish_site_raw: {type: string}
+    ZipcodeRule:
+      type: object
+      properties:
+        id: {type: integer}
+        country: {type: string}
+        prefix_length: {type: integer, minimum: 1, maximum: 10}
+        value_type: {type: string, enum: [number, string]}
+        operator: {type: string, enum: ["=", "!=", ">", ">=", "<", "<="]}
+        compare_value: {type: string}
+        warehouse_id: {type: string}
+        priority: {type: integer}
+    Shop:
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        marketplace_id: {type: string}
+        region: {type: string}
+        status: {type: string}
+        sync_enabled: {type: boolean}

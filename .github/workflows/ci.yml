@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - develop
+      - 001-saihu-replenishment
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Run backend tests with coverage
+        run: python -m pytest --cov --cov-config=.coveragerc --cov-report=term-missing -p no:cacheprovider
+      - name: Run backend lint
+        run: python -m ruff check .
+      - name: Run backend type check
+        run: python -m mypy app
+      - name: Audit backend dependencies
+        run: pip-audit
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Run frontend build
+        run: npm run build
+      - name: Run frontend tests with coverage
+        run: npm run test:coverage
+      - name: Audit frontend dependencies
+        run: npm audit --audit-level=high
