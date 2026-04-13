@@ -135,10 +135,12 @@ describe('DataOutRecordsView', () => {
 
     const source = readFileSync('src/views/data/DataOutRecordsView.vue', 'utf-8')
     expect(source).toContain('出库单号')
+    expect(source).toContain('class="detail-table"')
     expect(source).toContain('商品SKU')
     expect(source).toContain('商品ID')
     expect(source).toContain('可用数')
     expect(source).toContain('采购单价')
+    expect(source).not.toContain('fixed="right"')
     expect(source.indexOf('商品SKU')).toBeLessThan(source.indexOf('商品ID'))
     expect(source.indexOf('商品ID')).toBeLessThan(source.indexOf('可用数'))
     expect(source.indexOf('可用数')).toBeLessThan(source.indexOf('采购单价'))

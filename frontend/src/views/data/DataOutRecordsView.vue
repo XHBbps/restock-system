@@ -44,11 +44,11 @@
         <template #default="{ row }">
           <div class="expand-panel">
             <div class="expand-title">出库单明细（{{ row.items.length }} 项）</div>
-            <el-table :data="row.items" size="small" table-layout="fixed">
-              <el-table-column label="商品SKU" prop="commoditySku" width="180" show-overflow-tooltip />
-              <el-table-column label="商品ID" prop="commodityId" width="150" show-overflow-tooltip />
-              <el-table-column label="可用数" prop="goods" width="120" align="right" sortable show-overflow-tooltip fixed="right" />
-              <el-table-column label="采购单价" prop="perPurchase" width="140" align="right" show-overflow-tooltip fixed="right">
+            <el-table :data="row.items" size="small" class="detail-table" table-layout="auto">
+              <el-table-column label="商品SKU" prop="commoditySku" min-width="240" show-overflow-tooltip />
+              <el-table-column label="商品ID" prop="commodityId" min-width="180" show-overflow-tooltip />
+              <el-table-column label="可用数" prop="goods" width="120" align="right" sortable show-overflow-tooltip />
+              <el-table-column label="采购单价" prop="perPurchase" width="140" align="right" show-overflow-tooltip>
                 <template #default="{ row: item }">
                   {{ item.perPurchase ?? '-' }}
                 </template>
@@ -202,6 +202,18 @@ onMounted(reload)
   padding: 2px 6px;
   border-radius: $radius-sm;
   border: 1px solid $color-border-default;
+}
+
+.detail-table {
+  width: 100%;
+}
+
+.detail-table :deep(.el-table__inner-wrapper),
+.detail-table :deep(.el-scrollbar__view),
+.detail-table :deep(.el-table__header),
+.detail-table :deep(.el-table__body),
+.detail-table :deep(table) {
+  width: 100% !important;
 }
 
 .muted {
