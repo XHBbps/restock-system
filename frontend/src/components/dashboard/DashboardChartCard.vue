@@ -12,7 +12,7 @@
       </div>
     </template>
     <div :class="['dashboard-chart-card__content', { 'has-footer': !!$slots.footer }]">
-      <div class="dashboard-chart-card__chart">
+      <div :class="['dashboard-chart-card__chart', { 'has-footer': !!$slots.footer }]">
         <BaseChart :option="option" :empty="empty" :empty-text="emptyText" />
       </div>
       <div v-if="$slots.footer && !empty" class="dashboard-chart-card__footer">
@@ -81,7 +81,9 @@ defineProps<{
 
 .dashboard-chart-card__chart {
   min-height: 0;
+}
 
+.dashboard-chart-card__chart.has-footer {
   :deep(.base-chart),
   :deep(.base-chart__canvas) {
     height: 100%;

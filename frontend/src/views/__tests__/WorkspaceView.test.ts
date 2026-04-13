@@ -206,5 +206,13 @@ describe('WorkspaceView', () => {
     expect(source).toContain('class="country-distribution-legend"')
     expect(source).toContain('.country-distribution-legend')
     expect(source).toContain("legend: { show: false }")
+    expect(source).toContain('grid-template-columns: repeat(4, minmax(0, max-content))')
+    expect(source).toContain('justify-content: center')
+  })
+
+  it('keeps footer-specific chart height rules out of regular chart cards so the risk chart can render', () => {
+    const source = readFileSync('src/components/dashboard/DashboardChartCard.vue', 'utf-8')
+    expect(source).toContain("['dashboard-chart-card__chart', { 'has-footer': !!$slots.footer }]")
+    expect(source).toContain('.dashboard-chart-card__chart.has-footer')
   })
 })

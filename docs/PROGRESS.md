@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-13（信息总览国家分布图例布局优化）
+> 最近更新：2026-04-13（信息总览图例换行与风险图显示修复）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -116,6 +116,11 @@
 ---
 
 ## 3. 近期重大变更（2026-04-10 ~ 2026-04-13）
+
+### 3.31 信息总览图例换行与风险图显示修复（2026-04-13）
+- `frontend/src/components/dashboard/DashboardChartCard.vue` 将图表撑满高度的样式约束收敛到“存在 footer 的卡片”场景，避免普通图表卡片被错误压缩，恢复“各国缺货风险分布”正常显示
+- `frontend/src/views/WorkspaceView.vue` 将“补货量国家分布”底部图例改为固定四列居中布局，按每行 4 个国家换行；窄屏下按现有响应式规则降为 3 列 / 2 列，保持整体居中
+- **测试**：更新 `frontend/src/views/__tests__/WorkspaceView.test.ts`，覆盖国家图例四列居中布局以及 `DashboardChartCard` 的 footer 专用高度约束
 
 ### 3.30 信息总览国家分布图例布局优化（2026-04-13）
 - `frontend/src/components/dashboard/DashboardChartCard.vue` 支持图表区下方附加自定义 footer 区域；当存在 footer 时，卡片内容按约 2:1 的纵向比例分配给图表和底部补充信息区
