@@ -87,9 +87,10 @@
           <span class="mono">{{ row.warehouseId || '-' }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="目标国家" prop="targetCountry" width="110" sortable="custom" show-overflow-tooltip>
+      <el-table-column label="目标国家" prop="targetCountry" width="110" sortable="custom">
         <template #default="{ row }">
-          <span class="mono">{{ row.targetCountry || '-' }}</span>
+          <el-tag v-if="row.targetCountry" size="small">{{ row.targetCountry }}</el-tag>
+          <span v-else class="muted">-</span>
         </template>
       </el-table-column>
       <el-table-column label="更新时间" prop="updateTime" width="160" sortable="custom" show-overflow-tooltip>
@@ -102,9 +103,10 @@
           <span class="muted mono">{{ formatUpdateTime(row.lastSeenAt) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="出库单类型" prop="typeName" min-width="220" sortable="custom" show-overflow-tooltip>
+      <el-table-column label="出库单类型" prop="typeName" min-width="220" sortable="custom">
         <template #default="{ row }">
-          <span>{{ row.typeName || '-' }}</span>
+          <el-tag v-if="row.typeName" type="info" size="small">{{ row.typeName }}</el-tag>
+          <span v-else class="muted">-</span>
         </template>
       </el-table-column>
       <el-table-column label="状态" prop="status" width="96" sortable="custom">
