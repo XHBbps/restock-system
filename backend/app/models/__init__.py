@@ -11,11 +11,15 @@ from app.models.in_transit import InTransitItem, InTransitRecord
 from app.models.inventory import InventorySnapshotHistory, InventorySnapshotLatest
 from app.models.login_attempt import LoginAttempt
 from app.models.order import OrderDetail, OrderDetailFetchLog, OrderHeader, OrderItem
+from app.models.permission import Permission
 from app.models.product_listing import ProductListing
+from app.models.role import Role
+from app.models.role_permission import RolePermission
 from app.models.shop import Shop
 from app.models.sku import SkuConfig
 from app.models.suggestion import Suggestion, SuggestionItem
 from app.models.sync_state import SyncState
+from app.models.sys_user import SysUser
 from app.models.task_run import TaskRun
 from app.models.warehouse import Warehouse
 from app.models.zipcode_rule import ZipcodeRule
@@ -34,12 +38,16 @@ __all__ = [
     "OrderDetailFetchLog",
     "OrderHeader",
     "OrderItem",
+    "Permission",
     "ProductListing",
+    "Role",
+    "RolePermission",
     "Shop",
     "SkuConfig",
     "Suggestion",
     "SuggestionItem",
     "SyncState",
+    "SysUser",
     "TaskRun",
     "Warehouse",
     "ZipcodeRule",
