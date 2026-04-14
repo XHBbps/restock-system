@@ -208,6 +208,7 @@ CREATE INDEX ix_task_run_lease
 - **Heartbeat**：每 30 秒延长 `lease_expires_at`，约束 `heartbeat × 2 < lease_minutes × 60`
 
 **进度追踪**：`TaskRun.current_step / step_detail / total_steps` 由 worker 在执行中写入，前端 `TaskProgress` 组件轮询 `/api/tasks/{id}`。`sync_order_detail` / `refetch_order_detail` 直接按目标订单数回写精确进度；店铺、仓库、商品、库存、订单、出库等分页同步任务则复用赛狐分页响应里的 `totalPage` 输出“第 P / N 页”进度，不额外发起预扫描请求。
+**信息总览快照任务**：`refresh_dashboard_snapshot` 也是标准 TaskRun 任务，复用现有去重、轮询和失败回写机制；它在后台调用 `build_dashboard_payload()` 生成 `dashboard_snapshot` 单例缓存，页面刷新时优先消费该缓存而不是重复现算。
 
 ### 3.4 赛狐集成层（app/saihu）
 
@@ -335,7 +336,7 @@ client.interceptors.response.use(undefined, (error) => {
 
 `suggestion.ts` 当前负责建议单相关读写：列表查询、详情读取、条目编辑、推送采购单，以及历史记录页使用的 `DELETE /api/suggestions/{id}` 删除接口；删除仅允许作用于未推送建议单。
 
-`dashboard.ts` 当前消费 `/api/metrics/dashboard`，用于信息总览页展示顶部风险卡片、左侧“各国缺货风险分布”和右侧“补货量国家分布”。其中顶部风险卡片基于全部启用 SKU 的最小可售天数，按全局 `lead_time_days`、`target_days` 分桶为“紧急 / 临近补货 / 安全”；左侧风险分布仍基于当前 `draft/partial` 建议单快照的 `sale_days_snapshot`；右侧国家分布则汇总当前建议单全部条目的 `country_breakdown`。
+`dashboard.ts` 当前消费 `GET /api/metrics/dashboard` 和 `POST /api/metrics/dashboard/refresh`。信息总览页默认优先读取 `dashboard_snapshot` 缓存，并在页面头部展示快照状态与同步时间；当缓存缺失时，后端会自动入队 `refresh_dashboard_snapshot` 任务，前端通过 `TaskProgress` 轮询任务进度，也允许手动点击“刷新快照”。缓存 payload 由 `build_dashboard_payload()` 统一生成，其中顶部风险卡片、左侧“各国缺货风险分布”和“急需补货SKU”都基于 SKU+国家维度的实时 `sale_days` 计算结果；右侧国家分布继续汇总当前建议单全部条目的 `country_breakdown`。
 
 ### 4.5 数据流模式
 
@@ -390,9 +391,10 @@ async function reload() {
 - `ApiMonitorView`、`PerformanceMonitorView`、`sync/FailedApiCallTable` 只消费该工具，不在页面内各自维护映射表，避免图表、表格、tooltip 口径漂移
 
 **信息总览页口径**：
-- `WorkspaceView` 首行卡片展示全部启用 SKU 的风险概览：`urgent_count`、`warning_count`、`safe_count` 按 SKU 最小可售天数相对全局阈值分桶，`risk_country_count` 表示当前建议单风险分布中出现的国家数
-- 左图使用分组柱状图展示各国缺货风险分布，统计对象是当前建议单快照中存在该国家 `sale_days_snapshot` 的 SKU 数量，而不是实时库存平均值
-- 右图继续使用饼图，但数据改为 `country_restock_distribution`，即当前建议单全部条目的 `country_breakdown` 汇总，用于展示实际建议补货量的国家分布
+- `WorkspaceView` 首行卡片展示 SKU+国家维度的风险概览：`urgent_count`、`warning_count`、`safe_count` 按国家级 `sale_days` 相对全局 `lead_time_days`、`target_days` 分桶，`risk_country_count` 表示当前快照中进入风险分层的国家数
+- 左图使用分组柱状图展示各国缺货风险分布，统计对象是实时计算后写入 `dashboard_snapshot.payload.country_risk_distribution` 的 SKU+国家数量，而不是当前建议单快照
+- “急需补货SKU”列表同样使用快照中的国家级 `sale_days`，一行只表示一个 SKU 在一个国家上的风险，不再按 SKU 聚合
+- 右图继续使用饼图，数据仍为 `country_restock_distribution`，即当前建议单全部条目的 `country_breakdown` 汇总，用于展示实际建议补货量的国家分布
 
 ---
 
@@ -521,6 +523,7 @@ Step 3: country_qty 计算时已把已推送量视为库存一部分
 | `zipcode_rule` | 邮编 → 仓库分配规则 | `operator_enum` CHECK 约束；`operator String(10)`，`compare_value String(200)` |
 | `suggestion` | 补货建议单头 | `status IN ('draft','partial','pushed','archived','error')` |
 | `suggestion_item` | 补货建议条目 | `push_status IN ('pending','pushed','push_failed','blocked')`，索引 urgent 部分索引 |
+| `dashboard_snapshot` | 信息总览单例快照缓存 | PK `id=1`，保存 payload、刷新状态、时间戳和最近错误 |
 | `task_run` | 任务队列 + 执行日志 | 部分唯一索引 `dedupe_key WHERE status IN ('pending','running')` |
 | `sync_state` | 同步任务状态 | — |
 | `api_call_log` | 赛狐 API 调用日志 | — |

@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-14（信息总览“急需补货SKU”过滤缺失可售天数并统一 `<1天` 展示；信息总览“急需补货SKU”改为按国家显示可售天数；将出库目标国家历史回填并入出库记录同步；清理废弃采购日期兼容层，取消采购日期、紧急规则改为可售天数阈值、在途国家改为备注提取）
+> 最近更新：2026-04-14（信息总览新增快照缓存与手动刷新；首行风险卡片和“各国缺货风险分布”统一为 SKU+国家口径；信息总览“急需补货SKU”过滤缺失可售天数并统一 `<1天` 展示；信息总览“急需补货SKU”改为按国家显示可售天数；将出库目标国家历史回填并入出库记录同步；清理废弃采购日期兼容层，取消采购日期、紧急规则改为可售天数阈值、在途国家改为备注提取）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -45,6 +45,7 @@
   - 03:30 `sync_warehouse`
   - 02:00 `daily_archive`
   - 默认 08:00 `calc_engine`（可配置，`calc_enabled` 控制）
+- **信息总览快照刷新任务**：`refresh_dashboard_snapshot` 通过 TaskRun 入队执行，默认由信息总览页首次无缓存访问自动触发，也支持页面手动“刷新快照”
 - **订单详情同步与详情获取**：`sync_order_detail` 当前按 2 QPS / 2 并发保守抓取；订单页提供右侧独立“详情获取”组件，仅提供天数选择与触发按钮；手动触发会优先复用活跃的 `refetch_order_detail`、`sync_order_detail` 或 `sync_all` 任务，避免并发重复抓取，且不再对手动详情获取施加单次数量上限；任务执行中会按“已完成 X / 失败 Y / 总数 N”持续回写精确进度
 
 ### 2.3 补货计算引擎
@@ -89,6 +90,15 @@
 - **全局参数页补货区域配置**：`GlobalConfigView.vue` 新增“补货区域”多选，选项复用 `COUNTRY_OPTIONS`，保存前变更检测与配置变更提示已纳入 `restock_regions`
 - **信息总览风险图**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按当前建议单快照把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行统计卡片调整为风险概览，右侧“补货量国家分布”改为基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
+- **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存时自动触发 `refresh_dashboard_snapshot`，并提供“刷新快照”按钮与任务进度轮询
+
+### 3.38 信息总览快照缓存与 SKU+国家风险口径统一（2026-04-14）
+- `backend/app/models/dashboard_snapshot.py` 与 `backend/alembic/versions/20260414_2300_add_dashboard_snapshot.py` 新增 `dashboard_snapshot` 单例缓存表，存储信息总览 payload、刷新状态、开始/完成时间和最近一次错误
+- `backend/app/tasks/jobs/dashboard_snapshot.py` 新增 `refresh_dashboard_snapshot` 任务；`backend/app/api/task.py`、`backend/app/main.py` 完成任务注册，信息总览快照改由后台任务生成并写回缓存
+- `backend/app/api/metrics.py` 新增 `build_dashboard_payload()`，把首行风险卡片、左侧“各国缺货风险分布”和“急需补货SKU”统一为 SKU+国家口径的实时计算结果；`GET /api/metrics/dashboard` 改为优先返回缓存快照，缺少缓存时自动入队刷新；新增 `POST /api/metrics/dashboard/refresh`
+- `frontend/src/api/dashboard.ts`、`frontend/src/views/WorkspaceView.vue` 接入快照状态字段、刷新按钮和 `TaskProgress` 轮询；首行卡片文案同步改为“紧急国家商品 / 临近补货国家商品 / 安全国家商品 / 覆盖国家”，右侧“补货量国家分布”继续保持基于当前建议补货单
+- **测试**：新增 `backend/tests/unit/test_metrics_snapshot_api.py`、`backend/tests/unit/test_dashboard_snapshot_job.py`，并更新 `backend/tests/unit/test_metrics_dashboard.py`、`frontend/src/views/__tests__/WorkspaceView.test.ts`，覆盖快照回读、无缓存自动入队、任务写回和前端刷新交互
+- **经验沉淀**：信息总览这类高聚合页面应优先消费快照，以换取稳定口径、可追踪刷新链路和更低的重复计算成本
 
 ### 2.6 数据管理
 
