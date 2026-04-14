@@ -596,8 +596,9 @@ async function handleChangePassword() {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: $font-weight-semibold;
+  line-height: 1;
   flex-shrink: 0;
 }
 

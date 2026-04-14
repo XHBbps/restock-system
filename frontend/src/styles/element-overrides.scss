@@ -249,7 +249,8 @@ body {
     &:hover {
       box-shadow: 0 0 0 1px $color-border-strong inset !important;
     }
-    &.is-focus {
+    &.is-focus,
+    &:focus-within {
       box-shadow:
         0 0 0 2px $color-bg-card inset,
         0 0 0 3px $color-ring inset !important;
