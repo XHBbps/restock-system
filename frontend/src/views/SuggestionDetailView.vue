@@ -285,7 +285,24 @@ function countryRows(item: SuggestionItem): CountryRow[] {
 function hasChanges(item: SuggestionItem): boolean {
   const state = editing[item.id]
   if (!state) return false
-  return JSON.stringify(normalizeEditingState(state)) !== JSON.stringify(snapshotItemState(item))
+  const original = snapshotItemState(item)
+  const current = normalizeEditingState(state)
+  if (current.total_qty !== original.total_qty) return true
+  const currentCountries = Object.keys(current.country_breakdown)
+  const originalCountries = Object.keys(original.country_breakdown)
+  if (currentCountries.length !== originalCountries.length) return true
+  for (const country of currentCountries) {
+    if (current.country_breakdown[country] !== original.country_breakdown[country]) return true
+  }
+  const currentWhCountries = Object.keys(current.warehouse_breakdown)
+  const originalWhCountries = Object.keys(original.warehouse_breakdown)
+  if (currentWhCountries.length !== originalWhCountries.length) return true
+  for (const country of currentWhCountries) {
+    const cw = current.warehouse_breakdown[country]
+    const ow = original.warehouse_breakdown[country]
+    if (JSON.stringify(cw) !== JSON.stringify(ow)) return true
+  }
+  return false
 }
 
 function isEditable(item: SuggestionItem): boolean {
