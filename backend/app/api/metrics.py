@@ -12,7 +12,8 @@ from pydantic import BaseModel
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import db_session, get_current_session
+from app.api.deps import UserContext, db_session, get_current_user, require_permission
+from app.core.permissions import HOME_REFRESH, HOME_VIEW
 from app.core.restock_regions import resolve_allowed_restock_regions
 from app.core.timezone import now_beijing
 from app.engine.step1_velocity import run_step1
@@ -389,7 +390,8 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
 @router.get("", response_class=PlainTextResponse)
 async def metrics(
     db: AsyncSession = Depends(db_session),
-    _: dict[str, Any] = Depends(get_current_session),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(HOME_VIEW)),
 ) -> str:
     # task_run 状态分布
     rows = (await db.execute(select(TaskRun.status, func.count()).group_by(TaskRun.status))).all()
@@ -429,7 +431,8 @@ async def metrics(
 @router.get("/dashboard", response_model=DashboardOverview)
 async def get_dashboard_overview(
     db: AsyncSession = Depends(db_session),
-    _: dict[str, Any] = Depends(get_current_session),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(HOME_VIEW)),
 ) -> DashboardOverview:
     active_task = await _get_active_dashboard_refresh_task(db)
     snapshot = (
@@ -485,7 +488,8 @@ async def get_dashboard_overview(
 @router.post("/dashboard/refresh", response_model=DashboardRefreshOut)
 async def refresh_dashboard_snapshot(
     db: AsyncSession = Depends(db_session),
-    _: dict[str, Any] = Depends(get_current_session),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(HOME_REFRESH)),
 ) -> DashboardRefreshOut:
     task_id, existing = await enqueue_task(
         db,

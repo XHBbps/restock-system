@@ -6,7 +6,8 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import case, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import db_session, get_current_session
+from app.api.deps import UserContext, db_session, get_current_user, require_permission
+from app.core.permissions import RESTOCK_OPERATE, SYNC_OPERATE, SYNC_VIEW
 from app.models.global_config import GlobalConfig
 from app.models.task_run import TaskRun
 from app.schemas.sync import (
@@ -59,7 +60,8 @@ async def _get_active_order_detail_task(db: AsyncSession) -> TaskRun | None:
 @router.post("/sync/all")
 async def sync_all(
     db: AsyncSession = Depends(db_session),
-    _: dict[str, Any] = Depends(get_current_session),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(SYNC_OPERATE)),
 ) -> dict[str, Any]:
     return await _enqueue(db, "sync_all")
 
@@ -67,7 +69,8 @@ async def sync_all(
 @router.post("/sync/shop")
 async def sync_shop(
     db: AsyncSession = Depends(db_session),
-    _: dict[str, Any] = Depends(get_current_session),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(SYNC_OPERATE)),
 ) -> dict[str, Any]:
     return await _enqueue(db, "sync_shop")
 
@@ -75,7 +78,8 @@ async def sync_shop(
 @router.post("/sync/product-listing")
 async def sync_product_listing(
     db: AsyncSession = Depends(db_session),
-    _: dict[str, Any] = Depends(get_current_session),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(SYNC_OPERATE)),
 ) -> dict[str, Any]:
     return await _enqueue(db, "sync_product_listing")
 
@@ -83,7 +87,8 @@ async def sync_product_listing(
 @router.post("/sync/inventory")
 async def sync_inventory(
     db: AsyncSession = Depends(db_session),
-    _: dict[str, Any] = Depends(get_current_session),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(SYNC_OPERATE)),
 ) -> dict[str, Any]:
     return await _enqueue(db, "sync_inventory")
 
@@ -91,7 +96,8 @@ async def sync_inventory(
 @router.post("/sync/out-records")
 async def sync_out_records(
     db: AsyncSession = Depends(db_session),
-    _: dict[str, Any] = Depends(get_current_session),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(SYNC_OPERATE)),
 ) -> dict[str, Any]:
     return await _enqueue(db, "sync_out_records")
 
@@ -99,7 +105,8 @@ async def sync_out_records(
 @router.post("/sync/orders")
 async def sync_orders(
     db: AsyncSession = Depends(db_session),
-    _: dict[str, Any] = Depends(get_current_session),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(SYNC_OPERATE)),
 ) -> dict[str, Any]:
     return await _enqueue(db, "sync_order_list")
 
@@ -107,7 +114,8 @@ async def sync_orders(
 @router.post("/sync/warehouse")
 async def sync_warehouse(
     db: AsyncSession = Depends(db_session),
-    _: dict[str, Any] = Depends(get_current_session),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(SYNC_OPERATE)),
 ) -> dict[str, Any]:
     return await _enqueue(db, "sync_warehouse")
 
@@ -116,7 +124,8 @@ async def sync_warehouse(
 async def refetch_order_detail(
     payload: OrderDetailRefetchIn,
     db: AsyncSession = Depends(db_session),
-    _: dict[str, Any] = Depends(get_current_session),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(SYNC_OPERATE)),
 ) -> OrderDetailRefetchOut:
     days = payload.days or DEFAULT_REFETCH_DAYS
     active_task = await _get_active_order_detail_task(db)
@@ -170,7 +179,8 @@ async def refetch_order_detail(
 
 @router.get("/sync/scheduler", response_model=SchedulerStatusOut)
 async def get_scheduler_status(
-    _: dict[str, Any] = Depends(get_current_session),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(SYNC_VIEW)),
 ) -> SchedulerStatusOut:
     return await scheduler_status()
 
@@ -179,7 +189,8 @@ async def get_scheduler_status(
 async def set_scheduler_status(
     payload: SchedulerToggleIn,
     db: AsyncSession = Depends(db_session),
-    _: dict[str, Any] = Depends(get_current_session),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(SYNC_OPERATE)),
 ) -> SchedulerStatusOut:
     await db.execute(
         update(GlobalConfig).where(GlobalConfig.id == 1).values(scheduler_enabled=payload.enabled)
@@ -191,7 +202,8 @@ async def set_scheduler_status(
 @router.post("/engine/run")
 async def run_engine_now(
     db: AsyncSession = Depends(db_session),
-    _: dict[str, Any] = Depends(get_current_session),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(RESTOCK_OPERATE)),
 ) -> dict[str, Any]:
     task_id, existing = await enqueue_task(
         db,

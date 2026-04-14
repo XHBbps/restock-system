@@ -11,7 +11,7 @@
         </div>
       </template>
       <template #actions>
-        <el-button :loading="refreshSubmitting" @click="handleRefreshClick">刷新快照</el-button>
+        <el-button v-if="auth.hasPermission('home:refresh')" :loading="refreshSubmitting" @click="handleRefreshClick">刷新快照</el-button>
       </template>
     </DashboardPageHeader>
 
@@ -142,6 +142,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import type { EChartsCoreOption } from 'echarts/core'
 import { ElMessage } from 'element-plus'
+import { useAuthStore } from '@/stores/auth'
 
 import {
   getDashboardOverview,
@@ -169,6 +170,7 @@ const RISK_COLORS = {
 const PIE_COLORS = ['#18181b', '#3b82f6', '#16a34a', '#d97706', '#dc2626', '#8b5cf6', '#06b6d4', '#ec4899']
 
 const router = useRouter()
+const auth = useAuthStore()
 const data = ref<DashboardOverview | null>(null)
 const loading = ref(false)
 const refreshSubmitting = ref(false)
