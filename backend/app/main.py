@@ -9,6 +9,7 @@ from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.api import auth as auth_api
+from app.api import auth_users as auth_users_api
 from app.api import config as config_api
 from app.api import data as data_api
 from app.api import metrics as metrics_api
@@ -141,6 +142,7 @@ async def _saihu_exc_handler(_: Request, exc: SaihuAPIError) -> JSONResponse:
 
 
 app.include_router(auth_api.router)
+app.include_router(auth_users_api.router)
 app.include_router(task_api.router)
 app.include_router(suggestion_api.router)
 app.include_router(sync_api.router)
