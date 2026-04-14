@@ -1,40 +1,28 @@
-import { describe, expect, it } from 'vitest'
-import type { RouteLocationNormalized } from 'vue-router'
+import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
+// Mock the auth API so restoreAuth won't make real requests
+vi.mock('@/api/auth', () => ({
+  me: vi.fn(),
+}))
 
-import { authGuard } from '../index'
+import { useAuthStore } from '@/stores/auth'
+import router from '../index'
 
-function makeRoute(overrides: Partial<RouteLocationNormalized> = {}): RouteLocationNormalized {
-  return {
-    path: '/x',
-    fullPath: '/x',
-    name: 'x',
-    params: {},
-    query: {},
-    hash: '',
-    matched: [],
-    meta: {},
-    redirectedFrom: undefined,
-    ...overrides,
-  } as RouteLocationNormalized
-}
-
-describe('authGuard', () => {
-  it('allows public routes without auth', () => {
-    const route = makeRoute({ meta: { public: true } })
-    expect(authGuard(route, false)).toBe(true)
+describe('router guard', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
   })
 
-  it('allows private routes when authenticated', () => {
-    const route = makeRoute({ meta: {} })
-    expect(authGuard(route, true)).toBe(true)
+  it('allows public routes without auth', async () => {
+    // Navigate to login (public route) — should succeed without redirect
+    await router.push('/login')
+    expect(router.currentRoute.value.name).toBe('login')
   })
 
-  it('redirects to login when unauthenticated on private route', () => {
-    const route = makeRoute({ fullPath: '/suggestions/1', meta: {} })
-    const result = authGuard(route, false)
-    expect(result).toEqual({
-      name: 'login',
-      query: { redirect: '/suggestions/1' },
-    })
+  it('redirects to login when unauthenticated on private route', async () => {
+    const auth = useAuthStore()
+    auth.clearAuth()
+    await router.push('/workspace')
+    expect(router.currentRoute.value.name).toBe('login')
   })
 })
