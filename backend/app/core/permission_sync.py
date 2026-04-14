@@ -1,5 +1,6 @@
 """启动时权限注册表同步到 DB。"""
 
+import sqlalchemy.exc
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,8 +19,9 @@ async def sync_permissions(db: AsyncSession) -> None:
             row.code: row
             for row in (await db.execute(select(Permission))).scalars().all()
         }
-    except Exception:
+    except (sqlalchemy.exc.ProgrammingError, sqlalchemy.exc.OperationalError):
         logger.warning("permission_sync_skipped", reason="permission table does not exist yet")
+        await db.rollback()
         return
 
     registry_codes = set()

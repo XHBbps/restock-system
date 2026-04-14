@@ -34,7 +34,7 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
-_ALL_PERMISSIONS = frozenset(ALL_CODES)
+_ALL_PERMISSIONS = ALL_CODES  # ALL_CODES 已是 frozenset，无需再包装
 
 
 async def get_current_user(
@@ -127,11 +127,28 @@ def require_permission(*codes: str):
     return _checker
 
 
+# ── 向后兼容 shim（Task 10 迁移所有路由后删除）──
+
+
+async def get_current_session(
+    authorization: str | None = Header(default=None),
+) -> dict[str, str]:
+    """DEPRECATED: 兼容旧路由，Task 10 后删除。"""
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise Unauthorized("缺少 Authorization Bearer token")
+    token = authorization.split(" ", 1)[1].strip()
+    payload = decode_token(token)
+    if "sub" not in payload:
+        raise Unauthorized("token 缺少 subject")
+    return {"subject": payload["sub"]}
+
+
 __all__ = [
     "Depends",
     "UserContext",
     "db_session",
     "get_current_permissions",
+    "get_current_session",
     "get_current_user",
     "require_permission",
 ]

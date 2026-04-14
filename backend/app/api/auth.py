@@ -295,7 +295,9 @@ async def change_own_password(
 
     new_hash = hash_password(body.new_password)
     await db.execute(
-        update(SysUser).where(SysUser.id == user.id).values(password_hash=new_hash)
+        update(SysUser)
+        .where(SysUser.id == user.id)
+        .values(password_hash=new_hash, perm_version=SysUser.perm_version + 1)
     )
     await db.commit()
 

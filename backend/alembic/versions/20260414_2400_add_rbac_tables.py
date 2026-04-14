@@ -159,6 +159,11 @@ def upgrade() -> None:
         ],
     )
 
+    # 重置序列，避免后续 INSERT 冲突
+    op.execute(sa.text("SELECT setval('role_id_seq', (SELECT COALESCE(MAX(id), 0) FROM role))"))
+    op.execute(sa.text("SELECT setval('sys_user_id_seq', (SELECT COALESCE(MAX(id), 0) FROM sys_user))"))
+    op.execute(sa.text("SELECT setval('permission_id_seq', (SELECT COALESCE(MAX(id), 0) FROM permission))"))
+
     # NOTE: global_config.login_password_hash is DEPRECATED, replaced by sys_user.password_hash
 
 
