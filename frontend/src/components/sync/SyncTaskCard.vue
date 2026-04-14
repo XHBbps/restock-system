@@ -17,7 +17,7 @@
 
     <div class="sync-task-card__actions">
       <slot name="actions">
-        <el-button type="primary" :loading="loading" @click="$emit('run')">执行</el-button>
+        <el-button type="primary" :loading="loading" :disabled="disabled" @click="$emit('run')">执行</el-button>
       </slot>
     </div>
   </el-card>
@@ -39,6 +39,7 @@ defineProps<{
   lastError?: string
   footerHint?: string
   loading?: boolean
+  disabled?: boolean
 }>()
 
 defineEmits<{

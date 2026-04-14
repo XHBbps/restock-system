@@ -11,7 +11,7 @@
         <span>最近成功：{{ lastSuccessAt }}</span>
       </div>
       <div class="sync-hero-card__actions">
-        <el-button type="primary" :loading="loading" @click="$emit('run')">执行全量同步</el-button>
+        <el-button type="primary" :loading="loading" :disabled="disabled" @click="$emit('run')">执行全量同步</el-button>
       </div>
     </div>
     <div v-if="lastError" class="sync-hero-card__error">最近错误：{{ lastError }}</div>
@@ -33,6 +33,7 @@ defineProps<{
   lastSuccessAt: string
   lastError?: string
   loading?: boolean
+  disabled?: boolean
 }>()
 
 defineEmits<{

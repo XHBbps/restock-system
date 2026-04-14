@@ -69,6 +69,7 @@
           :last-success-at="heroAction.lastSuccessAt"
           :last-error="heroAction.lastError"
           :loading="loadingActions[heroAction.action.key] || false"
+          :disabled="!auth.hasPermission('sync:operate')"
           @run="trigger(heroAction.action)"
         />
 
@@ -82,6 +83,7 @@
             :last-success-at="action.lastSuccessAt"
             :last-error="action.lastError"
             :loading="loadingActions[action.action.key] || false"
+            :disabled="!auth.hasPermission('sync:operate')"
             @run="trigger(action.action)"
           />
         </div>
@@ -109,6 +111,7 @@ import client from '@/api/client'
 import { getActionErrorMessage } from '@/utils/apiError'
 import { formatDetailTime } from '@/utils/format'
 import { getSyncStatusMeta } from '@/utils/status'
+import { useAuthStore } from '@/stores/auth'
 import type { EChartsCoreOption } from 'echarts/core'
 import dayjs from 'dayjs'
 import { ElMessage } from 'element-plus'
@@ -122,6 +125,7 @@ interface ActionCardViewModel {
   lastError: string
 }
 
+const auth = useAuthStore()
 const schedulerStatus = ref<SchedulerStatus | null>(null)
 const schedulerLoading = ref(false)
 const schedulerToggleLoading = ref(false)

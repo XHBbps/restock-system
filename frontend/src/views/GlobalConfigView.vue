@@ -1,7 +1,7 @@
 <template>
   <PageSectionCard v-if="form" title="全局参数">
     <template #actions>
-      <el-button type="primary" :loading="saving" @click="save">保存</el-button>
+      <el-button type="primary" :loading="saving" :disabled="!auth.hasPermission('config:edit')" @click="save">保存</el-button>
     </template>
 
     <div class="config-sections">
@@ -100,9 +100,11 @@ import { getGlobalConfig, patchGlobalConfig, type GlobalConfig } from '@/api/con
 import PageSectionCard from '@/components/PageSectionCard.vue'
 import { getActionErrorMessage } from '@/utils/apiError'
 import { COUNTRY_OPTIONS } from '@/utils/countries'
+import { useAuthStore } from '@/stores/auth'
 import { ElMessage } from 'element-plus'
 import { onMounted, ref } from 'vue'
 
+const auth = useAuthStore()
 const form = ref<GlobalConfig | null>(null)
 const saving = ref(false)
 

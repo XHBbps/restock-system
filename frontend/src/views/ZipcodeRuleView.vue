@@ -19,7 +19,7 @@
           :value="option.code"
         />
       </el-select>
-      <el-button type="primary" :disabled="!hasWarehouses" @click="openCreate">新增规则</el-button>
+      <el-button v-if="auth.hasPermission('config:edit')" type="primary" :disabled="!hasWarehouses" @click="openCreate">新增规则</el-button>
     </template>
 
     <div class="rule-toolbar">
@@ -104,8 +104,8 @@
       <el-table-column label="操作" width="160" align="center">
         <template #default="{ row }">
           <div class="row-actions">
-            <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
-            <el-button link type="danger" @click="remove(row)">删除</el-button>
+            <el-button v-if="auth.hasPermission('config:edit')" link type="primary" @click="openEdit(row)">编辑</el-button>
+            <el-button v-if="auth.hasPermission('config:edit')" link type="danger" @click="remove(row)">删除</el-button>
           </div>
         </template>
       </el-table-column>
@@ -242,6 +242,7 @@
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
         <el-button
+          v-if="auth.hasPermission('config:edit')"
           type="primary"
           :loading="saving"
           :disabled="!form.country || !hasSelectableWarehouses"
@@ -277,10 +278,12 @@ import {
   type SortChangeEvent,
   type SortState,
 } from '@/utils/tableSort'
+import { useAuthStore } from '@/stores/auth'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
+const auth = useAuthStore()
 const NUMBER_OPERATORS = [
   { value: '=', label: '等于' },
   { value: '>=', label: '大于等于' },

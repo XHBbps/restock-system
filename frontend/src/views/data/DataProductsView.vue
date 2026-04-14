@@ -62,6 +62,7 @@
         <template #default="{ row }">
           <el-switch
             v-model="row.enabled"
+            :disabled="!auth.hasPermission('data_base:edit')"
             @change="(v: string | number | boolean) => updateEnabled(row, normalizeSwitchValue(v))"
           />
         </template>
@@ -90,9 +91,11 @@ import { normalizeSwitchValue } from '@/utils/element'
 import { formatUpdateTime } from '@/utils/format'
 import { getListingOnlineStatusMeta } from '@/utils/status'
 import { getActionErrorMessage } from '@/utils/apiError'
+import { useAuthStore } from '@/stores/auth'
 import { ElMessage } from 'element-plus'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 
+const auth = useAuthStore()
 const rows = ref<SkuOverviewItem[]>([])
 const page = ref(1)
 const pageSize = ref(50)

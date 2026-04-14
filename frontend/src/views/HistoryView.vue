@@ -60,7 +60,7 @@
           <div class="row-actions">
             <el-button link type="primary" @click="goDetail(row.id)">详情</el-button>
             <el-button
-              v-if="canDelete(row)"
+              v-if="canDelete(row) && auth.hasPermission('history:delete')"
               class="delete-action"
               link
               type="danger"
@@ -90,11 +90,13 @@ import { getSuggestionStatusMeta } from '@/utils/status'
 import { clampPage, formatDateTime } from '@/utils/format'
 import { normalizeSortOrder, type SortChangeEvent, type SortState } from '@/utils/tableSort'
 import { getActionErrorMessage } from '@/utils/apiError'
+import { useAuthStore } from '@/stores/auth'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
+const auth = useAuthStore()
 const rows = ref<Suggestion[]>([])
 const page = ref(1)
 const pageSize = ref(20)

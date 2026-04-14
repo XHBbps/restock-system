@@ -6,7 +6,7 @@
           {{ statusMeta.label }} · {{ suggestion.total_items }} 条
         </el-tag>
         <el-button @click="loadCurrent">刷新</el-button>
-        <el-button type="primary" :loading="generating" @click="triggerEngine">生成补货建议</el-button>
+        <el-button v-if="auth.hasPermission('restock:operate')" type="primary" :loading="generating" @click="triggerEngine">生成补货建议</el-button>
       </template>
 
       <!-- TaskProgress for engine task -->
@@ -20,7 +20,7 @@
         description="当前没有活动建议单，点击上方按钮生成补货建议。"
         :image-size="80"
       >
-        <el-button type="primary" @click="triggerEngine">生成补货建议</el-button>
+        <el-button v-if="auth.hasPermission('restock:operate')" type="primary" @click="triggerEngine">生成补货建议</el-button>
       </el-empty>
 
       <template v-else>
@@ -35,6 +35,7 @@
             </el-select>
           </div>
           <el-button
+            v-if="auth.hasPermission('restock:operate')"
             type="primary"
             :loading="pushing"
             :disabled="selectedIds.length === 0"
@@ -127,12 +128,14 @@ import {
   type SortChangeEvent,
   type SortState,
 } from '@/utils/tableSort'
+import { useAuthStore } from '@/stores/auth'
 import type { TableInstance } from 'element-plus'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
+const auth = useAuthStore()
 const tableRef = ref<TableInstance>()
 const suggestion = ref<SuggestionDetail | null>(null)
 const selectedIds = ref<number[]>([])
