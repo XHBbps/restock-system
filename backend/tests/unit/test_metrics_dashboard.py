@@ -57,6 +57,12 @@ async def test_dashboard_returns_empty_risk_distribution_without_active_suggesti
             _ScalarOneOrNoneResult(
                 SimpleNamespace(target_days=60, lead_time_days=50, restock_regions=[])
             ),
+            _RowsResult(
+                [
+                    ("SKU-1", "Alpha", None),
+                    ("SKU-2", "Beta", "https://img.example/beta.png"),
+                ]
+            ),
             _ScalarOneOrNoneResult(None),
         ]
     )
@@ -94,10 +100,33 @@ async def test_dashboard_returns_empty_risk_distribution_without_active_suggesti
     assert result.urgent_count == 2
     assert result.warning_count == 0
     assert result.safe_count == 1
-    assert result.risk_country_count == 0
-    assert result.country_risk_distribution == []
+    assert result.risk_country_count == 1
+    assert [item.model_dump() for item in result.country_risk_distribution] == [
+        {
+            "country": "US",
+            "urgent_count": 2,
+            "warning_count": 0,
+            "safe_count": 1,
+            "total_count": 3,
+        }
+    ]
     assert result.country_restock_distribution == []
-    assert result.top_urgent_skus == []
+    assert [item.model_dump() for item in result.top_urgent_skus] == [
+        {
+            "commodity_sku": "SKU-1",
+            "commodity_name": "Alpha",
+            "main_image": None,
+            "country": "US",
+            "sale_days": 10.0,
+        },
+        {
+            "commodity_sku": "SKU-2",
+            "commodity_name": "Beta",
+            "main_image": "https://img.example/beta.png",
+            "country": "US",
+            "sale_days": 35.0,
+        },
+    ]
 
 
 @pytest.mark.asyncio
@@ -166,8 +195,6 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
             _ScalarOneOrNoneResult(
                 SimpleNamespace(target_days=60, lead_time_days=20, restock_regions=[])
             ),
-            _ScalarOneOrNoneResult(SimpleNamespace(id=9, status="draft")),
-            _ScalarsResult(items),
             _RowsResult(
                 [
                     ("SKU-1", "Alpha", None),
@@ -175,24 +202,26 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
                     ("SKU-7", "Delta", "https://img.example/delta.png"),
                 ]
             ),
+            _ScalarOneOrNoneResult(SimpleNamespace(id=9, status="draft")),
+            _ScalarsResult(items),
         ]
     )
 
     async def _fake_run_step1(*_args, **_kwargs):
         return {
-            "SKU-1": {"US": 1.0},
-            "SKU-2": {"US": 1.0},
-            "SKU-3": {"US": 1.0},
-            "SKU-7": {"US": 1.0},
+            "SKU-1": {"US": 1.0, "CA": 1.0},
+            "SKU-2": {"US": 1.0, "CA": 1.0},
+            "SKU-3": {"US": 1.0, "JP": 1.0},
+            "SKU-7": {"US": 1.0, "CA": 1.0},
         }
 
     async def _fake_run_step2(*_args, **_kwargs):
         return (
             {
-                "SKU-1": {"US": 10.0},
-                "SKU-2": {"US": 30.0},
-                "SKU-3": {"US": 60.0},
-                "SKU-7": {"US": 90.0},
+                "SKU-1": {"US": 10.0, "CA": 70.0},
+                "SKU-2": {"US": 30.0, "CA": 15.0},
+                "SKU-3": {"US": 60.0, "JP": 19.0},
+                "SKU-7": {"US": 18.0, "CA": 12.0},
             },
             {},
         )
@@ -208,7 +237,7 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
 
     assert result.suggestion_id == 9
     assert result.pushed_count == 1
-    assert result.urgent_count == 1
+    assert result.urgent_count == 5
     assert result.warning_count == 1
     assert result.safe_count == 2
     assert result.risk_country_count == 3
@@ -219,8 +248,8 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
             "country": "CA",
             "urgent_count": 2,
             "warning_count": 0,
-            "safe_count": 2,
-            "total_count": 4,
+            "safe_count": 1,
+            "total_count": 3,
         },
         {
             "country": "JP",
@@ -232,9 +261,9 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
         {
             "country": "US",
             "urgent_count": 2,
-            "warning_count": 2,
+            "warning_count": 1,
             "safe_count": 1,
-            "total_count": 5,
+            "total_count": 4,
         },
     ]
     assert [item.model_dump() for item in result.country_restock_distribution] == [
@@ -256,6 +285,13 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
             "main_image": "https://img.example/delta.png",
             "country": "CA",
             "sale_days": 12.0,
+        },
+        {
+            "commodity_sku": "SKU-2",
+            "commodity_name": None,
+            "main_image": None,
+            "country": "CA",
+            "sale_days": 15.0,
         },
         {
             "commodity_sku": "SKU-7",
