@@ -41,10 +41,14 @@
             <div class="urgent-list">
               <div class="urgent-header">
                 <span class="urgent-col-product">商品信息</span>
-                <span class="urgent-col-countries">需求分布</span>
+                <span class="urgent-col-country">国家</span>
                 <span class="urgent-col-qty">可售天数</span>
               </div>
-              <div v-for="item in data.top_urgent_skus" :key="item.commodity_sku" class="urgent-item">
+              <div
+                v-for="item in data.top_urgent_skus"
+                :key="`${item.commodity_sku}-${item.country}`"
+                class="urgent-item"
+              >
                 <el-tooltip
                   placement="top-start"
                   :content="item.commodity_name || item.commodity_sku"
@@ -54,17 +58,10 @@
                     <SkuCard :sku="item.commodity_sku" :name="item.commodity_name" :image="item.main_image" />
                   </div>
                 </el-tooltip>
-                <el-tooltip
-                  placement="top"
-                  :content="Object.entries(item.country_breakdown).map(([c, q]) => `${c}:${q}`).join('  ')"
-                >
-                  <div class="urgent-col-countries">
-                    <el-tag v-for="(qty, country) in item.country_breakdown" :key="country" size="small">
-                      {{ country }}:{{ qty }}
-                    </el-tag>
-                  </div>
-                </el-tooltip>
-                <div class="urgent-col-qty">{{ item.min_sale_days }}天</div>
+                <div class="urgent-col-country">{{ getCountryLabel(item.country) }}</div>
+                <div class="urgent-col-qty">
+                  {{ item.sale_days == null ? '-' : `${item.sale_days}天` }}
+                </div>
               </div>
             </div>
           </template>
@@ -395,17 +392,16 @@ onMounted(load)
   }
 }
 
-.urgent-col-countries {
-  width: 200px;
+.urgent-col-country {
+  width: 140px;
   flex-shrink: 0;
-  display: flex;
-  flex-wrap: nowrap;
-  gap: 4px;
-  overflow: hidden;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  padding-right: $space-3;
 }
 
 .urgent-col-qty {
-  width: 70px;
+  width: 88px;
   flex-shrink: 0;
   text-align: right;
   font-size: $font-size-sm;

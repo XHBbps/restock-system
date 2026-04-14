@@ -17,9 +17,8 @@ export interface UrgentSkuItem {
   commodity_sku: string
   commodity_name: string | null
   main_image: string | null
-  total_qty: number
-  min_sale_days: number
-  country_breakdown: Record<string, number>
+  country: string
+  sale_days: number | null
 }
 
 export interface DashboardOverview {

@@ -35,9 +35,8 @@ class UrgentSkuItem(BaseModel):
     commodity_sku: str
     commodity_name: str | None = None
     main_image: str | None = None
-    total_qty: int
-    min_sale_days: float
-    country_breakdown: dict[str, int]
+    country: str
+    sale_days: float | None = None
 
 
 class CountryRestockDistribution(BaseModel):
@@ -137,6 +136,12 @@ async def get_dashboard_overview(
             return None
         vals = [float(v) for v in snapshot.values() if isinstance(v, (int, float))]
         return min(vals) if vals else None
+
+    def _country_sale_days(snapshot: dict[str, Any] | None, country: str) -> float | None:
+        if not snapshot:
+            return None
+        raw = snapshot.get(country)
+        return float(raw) if isinstance(raw, (int, float)) else None
 
     velocity = (
         await run_step1(
@@ -251,20 +256,32 @@ async def get_dashboard_overview(
         key=lambda item: (-item.total_qty, item.country),
     )
 
-    # 6. Top 10 urgent SKUs by lowest sale_days (most urgent first)
+    # 6. Top 10 urgent SKU-country rows by country sale_days (most urgent first)
     from app.models.product_listing import ProductListing
 
-    urgent_items = sorted(
-        [it for it in items if it.urgent],
-        key=lambda item: (
-            _min_sale_days(item.sale_days_snapshot)
-            if _min_sale_days(item.sale_days_snapshot) is not None
-            else 0.0
+    urgent_rows: list[tuple[Any, str, float | None]] = []
+    for item in items:
+        if not item.urgent or not item.country_breakdown:
+            continue
+        for country, qty in item.country_breakdown.items():
+            if not isinstance(qty, (int, float)) or qty <= 0:
+                continue
+            sale_days = _country_sale_days(item.sale_days_snapshot, country)
+            if sale_days is not None and sale_days > lead_time_days:
+                continue
+            urgent_rows.append((item, country, sale_days))
+
+    urgent_rows = sorted(
+        urgent_rows,
+        key=lambda row: (
+            row[2] if row[2] is not None else -1.0,
+            row[0].commodity_sku,
+            row[1],
         ),
     )[:10]
 
     # Batch-load product names and images for urgent SKUs
-    urgent_sku_codes = [it.commodity_sku for it in urgent_items]
+    urgent_sku_codes = list(dict.fromkeys(item.commodity_sku for item, _, _ in urgent_rows))
     name_map: dict[str, tuple[str | None, str | None]] = {}
     if urgent_sku_codes:
         listing_rows = (
@@ -282,14 +299,13 @@ async def get_dashboard_overview(
 
     top_urgent_skus = [
         UrgentSkuItem(
-            commodity_sku=it.commodity_sku,
-            commodity_name=(name_map.get(it.commodity_sku) or (None, None))[0],
-            main_image=(name_map.get(it.commodity_sku) or (None, None))[1],
-            total_qty=it.total_qty,
-            min_sale_days=round(_min_sale_days(it.sale_days_snapshot) or 0.0, 1),
-            country_breakdown={k: int(v) for k, v in (it.country_breakdown or {}).items()},
+            commodity_sku=item.commodity_sku,
+            commodity_name=(name_map.get(item.commodity_sku) or (None, None))[0],
+            main_image=(name_map.get(item.commodity_sku) or (None, None))[1],
+            country=country,
+            sale_days=round(sale_days, 1) if sale_days is not None else None,
         )
-        for it in urgent_items
+        for item, country, sale_days in urgent_rows
     ]
 
     return DashboardOverview(

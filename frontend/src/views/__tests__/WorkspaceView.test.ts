@@ -38,7 +38,10 @@ const STUBS = {
     template: '<section><h2>{{ title }}</h2><slot /></section>',
   },
   DashboardChartCard: DashboardChartCardStub,
-  SkuCard: true,
+  SkuCard: {
+    props: ['sku', 'name'],
+    template: '<div class="sku-card-stub">{{ sku }}|{{ name }}</div>',
+  },
   ElTooltip: { template: '<div><slot /></div>' },
   ElTag: { template: '<span><slot /></span>' },
   ElProgress: true,
@@ -72,17 +75,22 @@ function makeOverview(overrides: Partial<DashboardOverview> = {}): DashboardOver
         commodity_sku: 'SKU-1',
         commodity_name: 'Alpha',
         main_image: null,
-        total_qty: 12,
-        min_sale_days: 10,
-        country_breakdown: { US: 7, CA: 5 },
+        country: 'US',
+        sale_days: 10,
+      },
+      {
+        commodity_sku: 'SKU-1',
+        commodity_name: 'Alpha',
+        main_image: null,
+        country: 'CA',
+        sale_days: 15,
       },
       {
         commodity_sku: 'SKU-2',
         commodity_name: 'Beta',
         main_image: null,
-        total_qty: 9,
-        min_sale_days: 18,
-        country_breakdown: { US: 3, JP: 6 },
+        country: 'JP',
+        sale_days: 18,
       },
     ],
     ...overrides,
@@ -125,6 +133,27 @@ describe('WorkspaceView', () => {
     expect(option.series[0].data).toEqual([1, 2])
     expect(option.series[1].data).toEqual([2, 0])
     expect(option.series[2].data).toEqual([3, 1])
+  })
+
+  it('renders urgent sku rows by country-level sale days', async () => {
+    mockGetDashboardOverview.mockResolvedValue(makeOverview())
+
+    const { default: View } = await import('../WorkspaceView.vue')
+    const wrapper = shallowMount(View, { global: { stubs: STUBS } })
+    await flushPromises()
+
+    const source = readFileSync('src/views/WorkspaceView.vue', 'utf-8')
+    expect(source).toContain('<span class="urgent-col-country">国家</span>')
+    expect(source).toContain('item.sale_days == null ? \'-\' : `${item.sale_days}天`')
+
+    const urgentItems = wrapper.findAll('.urgent-item')
+    expect(urgentItems).toHaveLength(3)
+    expect(wrapper.text()).toContain('US - 美国')
+    expect(wrapper.text()).toContain('CA - 加拿大')
+    expect(wrapper.text()).toContain('JP - 日本')
+    expect(wrapper.text()).toContain('10天')
+    expect(wrapper.text()).toContain('15天')
+    expect(wrapper.text()).toContain('18天')
   })
 
   it('renders country distribution chart from current suggestion breakdown', async () => {

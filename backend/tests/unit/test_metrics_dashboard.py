@@ -108,7 +108,7 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
             sale_days_snapshot={"US": 10, "CA": 70},
             urgent=True,
             total_qty=12,
-            country_breakdown={"US": 12},
+            country_breakdown={"US": 12, "CA": 4},
             push_status="pending",
         ),
         SimpleNamespace(
@@ -151,6 +151,14 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
             country_breakdown={"CA": 6, "JP": 2},
             push_status="pending",
         ),
+        SimpleNamespace(
+            commodity_sku="SKU-7",
+            sale_days_snapshot={"US": 18, "CA": 12},
+            urgent=True,
+            total_qty=10,
+            country_breakdown={"US": 4, "CA": 6},
+            push_status="pending",
+        ),
     ]
     db = _FakeDb(
         [
@@ -164,6 +172,7 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
                 [
                     ("SKU-1", "Alpha", None),
                     ("SKU-3", "Gamma", "https://img.example/gamma.png"),
+                    ("SKU-7", "Delta", "https://img.example/delta.png"),
                 ]
             ),
         ]
@@ -208,10 +217,10 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
     assert [item.model_dump() for item in result.country_risk_distribution] == [
         {
             "country": "CA",
-            "urgent_count": 1,
+            "urgent_count": 2,
             "warning_count": 0,
             "safe_count": 2,
-            "total_count": 3,
+            "total_count": 4,
         },
         {
             "country": "JP",
@@ -222,15 +231,15 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
         },
         {
             "country": "US",
-            "urgent_count": 1,
+            "urgent_count": 2,
             "warning_count": 2,
             "safe_count": 1,
-            "total_count": 4,
+            "total_count": 5,
         },
     ]
     assert [item.model_dump() for item in result.country_restock_distribution] == [
-        {"country": "US", "total_qty": 19},
-        {"country": "CA", "total_qty": 14},
+        {"country": "CA", "total_qty": 24},
+        {"country": "US", "total_qty": 23},
         {"country": "JP", "total_qty": 7},
     ]
     assert [item.model_dump() for item in result.top_urgent_skus] == [
@@ -238,16 +247,28 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
             "commodity_sku": "SKU-1",
             "commodity_name": "Alpha",
             "main_image": None,
-            "total_qty": 12,
-            "min_sale_days": 10.0,
-            "country_breakdown": {"US": 12},
+            "country": "US",
+            "sale_days": 10.0,
+        },
+        {
+            "commodity_sku": "SKU-7",
+            "commodity_name": "Delta",
+            "main_image": "https://img.example/delta.png",
+            "country": "CA",
+            "sale_days": 12.0,
+        },
+        {
+            "commodity_sku": "SKU-7",
+            "commodity_name": "Delta",
+            "main_image": "https://img.example/delta.png",
+            "country": "US",
+            "sale_days": 18.0,
         },
         {
             "commodity_sku": "SKU-3",
             "commodity_name": "Gamma",
             "main_image": "https://img.example/gamma.png",
-            "total_qty": 5,
-            "min_sale_days": 19.0,
-            "country_breakdown": {"JP": 5},
+            "country": "JP",
+            "sale_days": 19.0,
         },
     ]

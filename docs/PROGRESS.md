@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-14（将出库目标国家历史回填并入出库记录同步；清理废弃采购日期兼容层，取消采购日期、紧急规则改为可售天数阈值、在途国家改为备注提取）
+> 最近更新：2026-04-14（信息总览“急需补货SKU”改为按国家显示可售天数；将出库目标国家历史回填并入出库记录同步；清理废弃采购日期兼容层，取消采购日期、紧急规则改为可售天数阈值、在途国家改为备注提取）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -88,6 +88,7 @@
 - **订单状态中文映射**：`DataOrdersView.vue` 添加 `ORDER_STATUS_LABEL`（已发货 / 部分发货 / 未发货 / 待处理 / 已取消）
 - **全局参数页补货区域配置**：`GlobalConfigView.vue` 新增“补货区域”多选，选项复用 `COUNTRY_OPTIONS`，保存前变更检测与配置变更提示已纳入 `restock_regions`
 - **信息总览风险图**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按当前建议单快照把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行统计卡片调整为风险概览，右侧“补货量国家分布”改为基于当前建议单全部条目的 `country_breakdown` 汇总
+- **急需补货SKU口径**：信息总览中的“急需补货SKU”改为按“商品信息 / 国家 / 可售天数”逐行展示；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，不再展示按 SKU 聚合后的最小可售天数
 
 ### 2.6 数据管理
 
@@ -118,6 +119,10 @@
 ---
 
 ## 3. 近期重大变更（2026-04-10 ~ 2026-04-14）
+### 3.36 信息总览急需补货SKU按国家拆行（2026-04-14）
+- `backend/app/api/metrics.py` 将 `top_urgent_skus` 从“每个 urgent SKU 一行”改为“每个 urgent SKU 的每个急需国家一行”，返回字段调整为 `commodity_sku / commodity_name / main_image / country / sale_days`
+- `frontend/src/views/WorkspaceView.vue` 将“急需补货SKU”列表表头改为“商品信息 / 国家 / 可售天数”，同一 SKU 可出现多行；可售天数直接展示对应国家的 `sale_days`
+- **测试**：更新 `backend/tests/unit/test_metrics_dashboard.py` 与 `frontend/src/views/__tests__/WorkspaceView.test.ts`，覆盖多国家拆行、国家级可售天数和前端列表渲染
 
 ### 3.35 出库目标国家历史回填并入同步流程（2026-04-14）
 - `backend/app/sync/out_records.py` 将历史 `target_country` 空值回填并入 `sync_out_records` 主流程；每次同步完赛狐出库记录后，都会复用同一套备注解析逻辑补齐历史空值行，但不覆盖已有目标国家
