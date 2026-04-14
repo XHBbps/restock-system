@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-14（信息总览新增快照缓存与手动刷新；首行风险卡片和“各国缺货风险分布”统一为 SKU+国家口径；信息总览“急需补货SKU”过滤缺失可售天数并统一 `<1天` 展示；信息总览“急需补货SKU”改为按国家显示可售天数；将出库目标国家历史回填并入出库记录同步；清理废弃采购日期兼容层，取消采购日期、紧急规则改为可售天数阈值、在途国家改为备注提取）
+> 最近更新：2026-04-14（信息总览新增快照缓存与手动刷新；首行卡片改为“需补货SKU / 无需补货SKU / 覆盖国家”，并兼容旧快照自动刷新；“各国缺货风险分布”继续保持 SKU+国家风险口径；信息总览“急需补货SKU”过滤缺失可售天数并统一 `<1天` 展示；信息总览“急需补货SKU”改为按国家显示可售天数；将出库目标国家历史回填并入出库记录同步；清理废弃采购日期兼容层，取消采购日期、紧急规则改为可售天数阈值、在途国家改为备注提取）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -88,7 +88,7 @@
 - **筛选控件高度统一**：`PageSectionCard` 的 `section-actions` 强制所有控件 32px 高度
 - **订单状态中文映射**：`DataOrdersView.vue` 添加 `ORDER_STATUS_LABEL`（已发货 / 部分发货 / 未发货 / 待处理 / 已取消）
 - **全局参数页补货区域配置**：`GlobalConfigView.vue` 新增“补货区域”多选，选项复用 `COUNTRY_OPTIONS`，保存前变更检测与配置变更提示已纳入 `restock_regions`
-- **信息总览风险图**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按当前建议单快照把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行统计卡片调整为风险概览，右侧“补货量国家分布”改为基于当前建议单全部条目的 `country_breakdown` 汇总
+- **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存时自动触发 `refresh_dashboard_snapshot`，并提供“刷新快照”按钮与任务进度轮询
 
@@ -99,6 +99,11 @@
 - `frontend/src/api/dashboard.ts`、`frontend/src/views/WorkspaceView.vue` 接入快照状态字段、刷新按钮和 `TaskProgress` 轮询；首行卡片文案同步改为“紧急国家商品 / 临近补货国家商品 / 安全国家商品 / 覆盖国家”，右侧“补货量国家分布”继续保持基于当前建议补货单
 - **测试**：新增 `backend/tests/unit/test_metrics_snapshot_api.py`、`backend/tests/unit/test_dashboard_snapshot_job.py`，并更新 `backend/tests/unit/test_metrics_dashboard.py`、`frontend/src/views/__tests__/WorkspaceView.test.ts`，覆盖快照回读、无缓存自动入队、任务写回和前端刷新交互
 - **经验沉淀**：信息总览这类高聚合页面应优先消费快照，以换取稳定口径、可追踪刷新链路和更低的重复计算成本
+
+### 3.39 信息总览首行卡片切换为补货视角（2026-04-14）
+- `backend/app/api/metrics.py` 在 `DashboardOverviewPayload` 中新增 `restock_sku_count`、`no_restock_sku_count`，并在 `build_dashboard_payload()` 中直接复用 `step3_country_qty + step4_total` 的现行规则统计“需补货SKU / 无需补货SKU”；同时 `GET /api/metrics/dashboard` 读取到缺少新字段的旧 `dashboard_snapshot.payload` 时，会先自动入队刷新，再回退到实时重算结果返回，避免旧快照导致接口报错或前端空白
+- `frontend/src/api/dashboard.ts`、`frontend/src/views/WorkspaceView.vue` 将首行卡片改为“需补货SKU / 无需补货SKU / 覆盖国家”，并移除旧的风险说明文案；下方“各国缺货风险分布”“急需补货SKU”“补货量国家分布”保持原有展示逻辑不变
+- **测试**：更新 `backend/tests/unit/test_metrics_dashboard.py`、`backend/tests/unit/test_metrics_snapshot_api.py` 与 `frontend/src/views/__tests__/WorkspaceView.test.ts`，覆盖新字段返回、旧快照兼容刷新和新卡片文案渲染
 
 ### 2.6 数据管理
 

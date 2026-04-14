@@ -19,24 +19,16 @@
 
     <section class="stats-grid">
       <DashboardStatCard
-        title="紧急国家商品"
-        :value="data?.urgent_count ?? 0"
-        :hint="`SKU+国家维度下，可售天数低于提前期 ${leadTimeDays} 天`"
+        title="需补货SKU"
+        :value="data?.restock_sku_count ?? 0"
       />
       <DashboardStatCard
-        title="临近补货国家商品"
-        :value="data?.warning_count ?? 0"
-        :hint="`SKU+国家维度下，可售天数介于 ${leadTimeDays} - ${targetDays} 天`"
-      />
-      <DashboardStatCard
-        title="安全国家商品"
-        :value="data?.safe_count ?? 0"
-        :hint="`SKU+国家维度下，可售天数不少于 ${targetDays} 天`"
+        title="无需补货SKU"
+        :value="data?.no_restock_sku_count ?? 0"
       />
       <DashboardStatCard
         title="覆盖国家"
         :value="data?.risk_country_count ?? 0"
-        hint="当前快照中可计算风险分层的国家数量"
       />
     </section>
 

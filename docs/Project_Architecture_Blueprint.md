@@ -336,7 +336,7 @@ client.interceptors.response.use(undefined, (error) => {
 
 `suggestion.ts` 当前负责建议单相关读写：列表查询、详情读取、条目编辑、推送采购单，以及历史记录页使用的 `DELETE /api/suggestions/{id}` 删除接口；删除仅允许作用于未推送建议单。
 
-`dashboard.ts` 当前消费 `GET /api/metrics/dashboard` 和 `POST /api/metrics/dashboard/refresh`。信息总览页默认优先读取 `dashboard_snapshot` 缓存，并在页面头部展示快照状态与同步时间；当缓存缺失时，后端会自动入队 `refresh_dashboard_snapshot` 任务，前端通过 `TaskProgress` 轮询任务进度，也允许手动点击“刷新快照”。缓存 payload 由 `build_dashboard_payload()` 统一生成，其中顶部风险卡片、左侧“各国缺货风险分布”和“急需补货SKU”都基于 SKU+国家维度的实时 `sale_days` 计算结果；右侧国家分布继续汇总当前建议单全部条目的 `country_breakdown`。
+`dashboard.ts` 当前消费 `GET /api/metrics/dashboard` 和 `POST /api/metrics/dashboard/refresh`。信息总览页默认优先读取 `dashboard_snapshot` 缓存，并在页面头部展示快照状态与同步时间；当缓存缺失时，后端会自动入队 `refresh_dashboard_snapshot` 任务，前端通过 `TaskProgress` 轮询任务进度，也允许手动点击“刷新快照”。缓存 payload 由 `build_dashboard_payload()` 统一生成，其中首行卡片使用 `restock_sku_count`、`no_restock_sku_count`、`risk_country_count` 展示“需补货SKU / 无需补货SKU / 覆盖国家”；左侧“各国缺货风险分布”和“急需补货SKU”继续基于 SKU+国家维度的实时 `sale_days` 计算结果；右侧国家分布继续汇总当前建议单全部条目的 `country_breakdown`。若读取到缺少 `restock_sku_count`、`no_restock_sku_count` 的旧快照，接口会自动触发刷新并回退到实时重算结果，保证新旧快照切换期间页面可用。
 
 ### 4.5 数据流模式
 
@@ -391,7 +391,7 @@ async function reload() {
 - `ApiMonitorView`、`PerformanceMonitorView`、`sync/FailedApiCallTable` 只消费该工具，不在页面内各自维护映射表，避免图表、表格、tooltip 口径漂移
 
 **信息总览页口径**：
-- `WorkspaceView` 首行卡片展示 SKU+国家维度的风险概览：`urgent_count`、`warning_count`、`safe_count` 按国家级 `sale_days` 相对全局 `lead_time_days`、`target_days` 分桶，`risk_country_count` 表示当前快照中进入风险分层的国家数
+- `WorkspaceView` 首行卡片展示补货概览：`restock_sku_count` 为按当前补货引擎口径计算后 `total_qty > 0` 的启用 SKU 数，`no_restock_sku_count` 为其余启用 SKU 数，`risk_country_count` 表示当前快照中进入风险分层的国家数
 - 左图使用分组柱状图展示各国缺货风险分布，统计对象是实时计算后写入 `dashboard_snapshot.payload.country_risk_distribution` 的 SKU+国家数量，而不是当前建议单快照
 - “急需补货SKU”列表同样使用快照中的国家级 `sale_days`，一行只表示一个 SKU 在一个国家上的风险，不再按 SKU 聚合
 - 右图继续使用饼图，数据仍为 `country_restock_distribution`，即当前建议单全部条目的 `country_breakdown` 汇总，用于展示实际建议补货量的国家分布

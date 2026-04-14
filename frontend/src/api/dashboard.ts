@@ -23,6 +23,8 @@ export interface UrgentSkuItem {
 
 export interface DashboardOverview {
   enabled_sku_count: number
+  restock_sku_count: number
+  no_restock_sku_count: number
   suggestion_item_count: number
   pushed_count: number
   urgent_count: number

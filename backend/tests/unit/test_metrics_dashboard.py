@@ -57,6 +57,7 @@ async def test_dashboard_returns_empty_risk_distribution_without_active_suggesti
             _ScalarOneOrNoneResult(
                 SimpleNamespace(target_days=60, lead_time_days=50, restock_regions=[])
             ),
+            _RowsResult([]),
             _RowsResult(
                 [
                     ("SKU-1", "Alpha", None),
@@ -94,6 +95,8 @@ async def test_dashboard_returns_empty_risk_distribution_without_active_suggesti
         monkeypatch.undo()
 
     assert result.enabled_sku_count == 3
+    assert result.restock_sku_count == 3
+    assert result.no_restock_sku_count == 0
     assert result.target_days == 60
     assert result.lead_time_days == 50
     assert result.suggestion_id is None
@@ -195,6 +198,7 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
             _ScalarOneOrNoneResult(
                 SimpleNamespace(target_days=60, lead_time_days=20, restock_regions=[])
             ),
+            _RowsResult([]),
             _RowsResult(
                 [
                     ("SKU-1", "Alpha", None),
@@ -236,6 +240,8 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
         monkeypatch.undo()
 
     assert result.suggestion_id == 9
+    assert result.restock_sku_count == 4
+    assert result.no_restock_sku_count == 0
     assert result.pushed_count == 1
     assert result.urgent_count == 5
     assert result.warning_count == 1

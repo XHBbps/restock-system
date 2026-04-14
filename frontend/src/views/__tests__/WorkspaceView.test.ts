@@ -78,6 +78,8 @@ const STUBS = {
 function makeOverview(overrides: Partial<DashboardOverview> = {}): DashboardOverview {
   return {
     enabled_sku_count: 12,
+    restock_sku_count: 7,
+    no_restock_sku_count: 5,
     suggestion_item_count: 8,
     pushed_count: 3,
     urgent_count: 2,
@@ -139,10 +141,12 @@ describe('WorkspaceView', () => {
     const wrapper = shallowMount(View, { global: { stubs: STUBS } })
     await flushPromises()
 
-    expect(wrapper.text()).toContain('紧急国家商品:2|SKU+国家维度下，可售天数低于提前期 20 天')
-    expect(wrapper.text()).toContain('临近补货国家商品:3|SKU+国家维度下，可售天数介于 20 - 60 天')
-    expect(wrapper.text()).toContain('安全国家商品:4|SKU+国家维度下，可售天数不少于 60 天')
-    expect(wrapper.text()).toContain('覆盖国家:3|当前快照中可计算风险分层的国家数量')
+    expect(wrapper.text()).toContain('需补货SKU:7|')
+    expect(wrapper.text()).toContain('无需补货SKU:5|')
+    expect(wrapper.text()).toContain('覆盖国家:3|')
+    expect(wrapper.text()).not.toContain('可售天数低于提前期')
+    expect(wrapper.text()).not.toContain('可售天数介于')
+    expect(wrapper.text()).not.toContain('可售天数不少于')
     expect(wrapper.text()).toContain('快照已缓存')
     expect(wrapper.text()).toContain('同步时间 2026-04-14 11:30')
 

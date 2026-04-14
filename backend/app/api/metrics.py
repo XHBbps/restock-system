@@ -18,6 +18,7 @@ from app.core.timezone import now_beijing
 from app.engine.step1_velocity import run_step1
 from app.engine.step2_sale_days import run_step2
 from app.engine.step3_country_qty import compute_country_qty
+from app.engine.step4_total import compute_total, load_local_inventory
 from app.models.api_call_log import ApiCallLog
 from app.models.dashboard_snapshot import DashboardSnapshot
 from app.models.product_listing import ProductListing
@@ -50,6 +51,8 @@ class CountryRestockDistribution(BaseModel):
 
 class DashboardOverviewPayload(BaseModel):
     enabled_sku_count: int
+    restock_sku_count: int = 0
+    no_restock_sku_count: int = 0
     suggestion_item_count: int
     pushed_count: int
     urgent_count: int
@@ -195,6 +198,14 @@ async def _build_top_urgent_skus(
     ]
 
 
+def _has_restock_summary_keys(payload: dict[str, Any] | None) -> bool:
+    return bool(
+        payload
+        and "restock_sku_count" in payload
+        and "no_restock_sku_count" in payload
+    )
+
+
 def _empty_dashboard_payload(
     *,
     enabled_sku_count: int,
@@ -203,6 +214,8 @@ def _empty_dashboard_payload(
 ) -> DashboardOverviewPayload:
     return DashboardOverviewPayload(
         enabled_sku_count=enabled_sku_count,
+        restock_sku_count=0,
+        no_restock_sku_count=enabled_sku_count,
         suggestion_item_count=0,
         pushed_count=0,
         urgent_count=0,
@@ -263,6 +276,22 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
     )
     all_sale_days, inventory = await run_step2(db, velocity, enabled_skus) if enabled_skus else ({}, {})
     live_country_qty = compute_country_qty(velocity, inventory, target_days) if enabled_skus else {}
+    local_stock = await load_local_inventory(db, enabled_skus) if enabled_skus else {}
+    restock_sku_count = 0
+    for sku in enabled_skus:
+        sku_country_qty = live_country_qty.get(sku, {})
+        if not sku_country_qty:
+            continue
+        total_qty = compute_total(
+            sku=sku,
+            country_qty_for_sku=sku_country_qty,
+            velocity_for_sku=velocity.get(sku, {}),
+            local_stock_for_sku=local_stock.get(sku),
+            buffer_days=getattr(config, "buffer_days", 15) if config else 15,
+        )
+        if total_qty > 0:
+            restock_sku_count += 1
+    no_restock_sku_count = max(enabled_sku_count - restock_sku_count, 0)
     country_risk_distribution, urgent_count, warning_count, safe_count = (
         _build_country_risk_distribution(
             all_sale_days,
@@ -295,6 +324,8 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
     if not suggestion:
         return DashboardOverviewPayload(
             enabled_sku_count=enabled_sku_count,
+            restock_sku_count=restock_sku_count,
+            no_restock_sku_count=no_restock_sku_count,
             suggestion_item_count=0,
             pushed_count=0,
             urgent_count=urgent_count,
@@ -337,6 +368,8 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
 
     return DashboardOverviewPayload(
         enabled_sku_count=enabled_sku_count,
+        restock_sku_count=restock_sku_count,
+        no_restock_sku_count=no_restock_sku_count,
         suggestion_item_count=len(items),
         pushed_count=pushed_count,
         urgent_count=urgent_count,
@@ -403,13 +436,31 @@ async def get_dashboard_overview(
         await db.execute(select(DashboardSnapshot).where(DashboardSnapshot.id == 1))
     ).scalar_one_or_none()
 
-    if snapshot and snapshot.payload:
+    if snapshot and snapshot.payload and _has_restock_summary_keys(snapshot.payload):
         payload = DashboardOverviewPayload.model_validate(snapshot.payload)
         return DashboardOverview(
             **payload.model_dump(),
             snapshot_status="refreshing" if active_task else "ready",
             snapshot_updated_at=snapshot.refreshed_at or snapshot.updated_at,
             snapshot_task_id=active_task.id if active_task else None,
+        )
+
+    if snapshot and snapshot.payload:
+        task_id = active_task.id if active_task else None
+        if task_id is None:
+            task_id, _ = await enqueue_task(
+                db,
+                job_name=REFRESH_DASHBOARD_JOB_NAME,
+                trigger_source="manual",
+                dedupe_key=REFRESH_DASHBOARD_JOB_NAME,
+                payload={"triggered_by": "dashboard_schema_refresh"},
+            )
+        payload = await build_dashboard_payload(db)
+        return DashboardOverview(
+            **payload.model_dump(),
+            snapshot_status="refreshing",
+            snapshot_updated_at=snapshot.refreshed_at or snapshot.updated_at,
+            snapshot_task_id=task_id,
         )
 
     task_id = active_task.id if active_task else None
