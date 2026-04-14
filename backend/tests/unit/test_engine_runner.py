@@ -23,6 +23,7 @@ import pytest
 
 from app.engine.runner import (
     ENGINE_RUN_ADVISORY_LOCK_KEY,
+    _prepare_suggestion_item_rows,
     _config_snapshot,
     _load_commodity_id_map,
     run_engine,
@@ -164,6 +165,53 @@ def test_config_snapshot_overrides() -> None:
     assert snapshot["target_days"] == 14
     assert snapshot["lead_time_days"] == 21
     assert snapshot["restock_regions"] == ["US", "GB"]
+
+
+def test_prepare_suggestion_item_rows_backfills_legacy_t_purchase() -> None:
+    rows = _prepare_suggestion_item_rows(
+        [
+            {
+                "suggestion_id": 1,
+                "commodity_sku": "SKU-001",
+                "total_qty": 8,
+                "country_breakdown": {"US": 8},
+            }
+        ],
+        {"suggestion_id", "commodity_sku", "total_qty", "country_breakdown", "t_purchase"},
+    )
+
+    assert rows == [
+        {
+            "suggestion_id": 1,
+            "commodity_sku": "SKU-001",
+            "total_qty": 8,
+            "country_breakdown": {"US": 8},
+            "t_purchase": {},
+        }
+    ]
+
+
+def test_prepare_suggestion_item_rows_omits_legacy_t_purchase_when_column_missing() -> None:
+    rows = _prepare_suggestion_item_rows(
+        [
+            {
+                "suggestion_id": 1,
+                "commodity_sku": "SKU-001",
+                "total_qty": 8,
+                "country_breakdown": {"US": 8},
+            }
+        ],
+        {"suggestion_id", "commodity_sku", "total_qty", "country_breakdown"},
+    )
+
+    assert rows == [
+        {
+            "suggestion_id": 1,
+            "commodity_sku": "SKU-001",
+            "total_qty": 8,
+            "country_breakdown": {"US": 8},
+        }
+    ]
 
 
 # ---------------------------------------------------------------------------
