@@ -20,21 +20,17 @@ def verify_password(plain: str, hashed: str) -> bool:
     return bcrypt.checkpw(plain.encode(), hashed.encode())
 
 
-def create_access_token(subject: str = "owner", extra: dict[str, Any] | None = None) -> str:
-    """签发 JWT。
-
-    单用户场景下 subject 固定为 'owner',可在 extra 中放入额外声明。
-    """
+def create_access_token(user_id: int, perm_version: int = 0) -> str:
+    """签发 JWT，payload 包含 user_id (sub) 和 perm_version (pv)。"""
     settings = get_settings()
     now = datetime.now(UTC)
     expires_at = now + timedelta(hours=settings.jwt_expires_hours)
     payload: dict[str, Any] = {
-        "sub": subject,
+        "sub": str(user_id),
+        "pv": perm_version,
         "iat": int(now.timestamp()),
         "exp": int(expires_at.timestamp()),
     }
-    if extra:
-        payload.update(extra)
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
