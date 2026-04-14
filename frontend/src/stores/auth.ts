@@ -69,12 +69,12 @@ export const useAuthStore = defineStore('auth', () => {
 /** Map backend snake_case response to camelCase UserInfo */
 export function _mapUserInfo(raw: Record<string, unknown>): UserInfo {
   return {
-    id: raw.id as number,
-    username: raw.username as string,
-    displayName: (raw.display_name as string) ?? '',
-    roleName: (raw.role_name as string) ?? '',
-    isSuperadmin: (raw.is_superadmin as boolean) ?? false,
-    passwordIsDefault: (raw.password_is_default as boolean) ?? false,
-    permissions: (raw.permissions as string[]) ?? [],
+    id: typeof raw.id === 'number' ? raw.id : 0,
+    username: String(raw.username ?? ''),
+    displayName: String(raw.display_name ?? raw.username ?? ''),
+    roleName: String(raw.role_name ?? ''),
+    isSuperadmin: Boolean(raw.is_superadmin),
+    passwordIsDefault: Boolean(raw.password_is_default),
+    permissions: Array.isArray(raw.permissions) ? raw.permissions : [],
   }
 }
