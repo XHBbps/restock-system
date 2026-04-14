@@ -18,6 +18,7 @@ from app.api import sync as sync_api
 from app.api import task as task_api
 from app.config import get_settings
 from app.core.exceptions import BusinessError, SaihuAPIError
+from app.core.permission_sync import sync_permissions
 from app.core.logging import configure_logging, get_logger
 from app.core.middleware import RequestLoggingMiddleware
 from app.core.rate_limit import RateLimitMiddleware
@@ -78,6 +79,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     configure_logging()
     logger.info("app_starting")
     await _ensure_global_config()
+    async with async_session_factory() as db:
+        await sync_permissions(db)
 
     worker = get_worker()
     reaper = get_reaper()
