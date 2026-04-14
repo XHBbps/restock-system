@@ -9,6 +9,7 @@
 - 对 /healthz、/readyz 探针请求不限流
 """
 
+import ipaddress
 from collections import defaultdict
 from time import time
 
@@ -19,6 +20,13 @@ from starlette.types import ASGIApp
 
 # 不限流的路径前缀
 _EXEMPT_PATHS = ("/healthz", "/readyz")
+
+_TRUSTED_CIDRS = [
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("127.0.0.0/8"),
+]
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -66,12 +74,19 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     @staticmethod
     def _get_client_ip(request: Request) -> str:
-        forwarded = request.headers.get("x-forwarded-for", "").strip()
-        if forwarded:
-            return forwarded.split(",", 1)[0].strip()
-        real_ip = request.headers.get("x-real-ip", "").strip()
-        if real_ip:
-            return real_ip
-        if request.client:
-            return request.client.host
-        return "unknown"
+        peer_ip = request.client.host if request.client else "unknown"
+        try:
+            addr = ipaddress.ip_address(peer_ip)
+            is_trusted = any(addr in cidr for cidr in _TRUSTED_CIDRS)
+        except ValueError:
+            is_trusted = False
+
+        if is_trusted:
+            forwarded = request.headers.get("x-forwarded-for", "").strip()
+            if forwarded:
+                return forwarded.split(",", 1)[0].strip()
+            real_ip = request.headers.get("x-real-ip", "").strip()
+            if real_ip:
+                return real_ip
+
+        return peer_ip

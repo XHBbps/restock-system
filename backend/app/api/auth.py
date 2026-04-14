@@ -1,5 +1,6 @@
 """认证路由。"""
 
+import ipaddress
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, Request
@@ -29,24 +30,37 @@ from app.schemas.auth import (
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 logger = get_logger(__name__)
 
+_TRUSTED_CIDRS = [
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("127.0.0.0/8"),
+]
+
 
 # ── helpers ──────────────────────────────────────────────────
 
 
 def _get_login_source_key(request: Request) -> str:
-    # 注:本函数无条件信任 X-Forwarded-For 首值,依赖 Caddy 反向代理通过
-    # `header_up X-Forwarded-For {remote_host}` **覆盖**(而非 append)原 XFF
-    # (见 deploy/Caddyfile 第 6 行),确保后端看到的是 Caddy 的真实对端 IP 而
-    # 非客户端伪造值。若未来脱离 Caddy 直接暴露 backend,必须引入
-    # TRUSTED_PROXIES 白名单校验 request.client.host 来源。
-    forwarded_for = request.headers.get("x-forwarded-for", "").strip()
-    if forwarded_for:
-        client_ip = forwarded_for.split(",", 1)[0].strip()
+    peer_ip = request.client.host if request.client else "unknown"
+    try:
+        addr = ipaddress.ip_address(peer_ip)
+        is_trusted = any(addr in cidr for cidr in _TRUSTED_CIDRS)
+    except ValueError:
+        is_trusted = False
+
+    if is_trusted:
+        forwarded_for = request.headers.get("x-forwarded-for", "").strip()
+        if forwarded_for:
+            client_ip = forwarded_for.split(",", 1)[0].strip()
+        else:
+            client_ip = request.headers.get("x-real-ip", "").strip()
     else:
-        client_ip = request.headers.get("x-real-ip", "").strip()
-    if not client_ip and request.client is not None:
-        client_ip = request.client.host
-    return f"ip:{client_ip or 'unknown'}"
+        client_ip = peer_ip
+
+    if not client_ip:
+        client_ip = "unknown"
+    return f"ip:{client_ip}"
 
 
 async def _build_user_info(
