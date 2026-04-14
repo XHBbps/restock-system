@@ -36,9 +36,22 @@ export interface DashboardOverview {
   country_risk_distribution: CountryRiskDistribution[]
   country_restock_distribution: CountryRestockDistribution[]
   top_urgent_skus: UrgentSkuItem[]
+  snapshot_status: 'ready' | 'missing' | 'refreshing'
+  snapshot_updated_at: string | null
+  snapshot_task_id: number | null
+}
+
+export interface DashboardRefreshResult {
+  task_id: number
+  existing: boolean
 }
 
 export async function getDashboardOverview(): Promise<DashboardOverview> {
   const { data } = await client.get<DashboardOverview>('/api/metrics/dashboard')
+  return data
+}
+
+export async function refreshDashboardSnapshot(): Promise<DashboardRefreshResult> {
+  const { data } = await client.post<DashboardRefreshResult>('/api/metrics/dashboard/refresh')
   return data
 }

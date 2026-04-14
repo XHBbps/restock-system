@@ -1,27 +1,42 @@
 <template>
   <div class="workspace-view">
-    <DashboardPageHeader title="信息总览" />
+    <DashboardPageHeader
+      title="信息总览"
+      description="左侧风险按 SKU+国家 维度展示缓存快照；右侧补货量分布仍基于当前建议补货单。"
+    >
+      <template #meta>
+        <div class="snapshot-meta">
+          <el-tag :type="snapshotTagType">{{ snapshotStatusLabel }}</el-tag>
+          <span class="snapshot-meta__time">同步时间 {{ snapshotUpdatedText }}</span>
+        </div>
+      </template>
+      <template #actions>
+        <el-button :loading="refreshSubmitting" @click="handleRefreshClick">刷新快照</el-button>
+      </template>
+    </DashboardPageHeader>
+
+    <TaskProgress v-if="currentTaskId" :task-id="currentTaskId" @terminal="onSnapshotTaskDone" />
 
     <section class="stats-grid">
       <DashboardStatCard
-        title="紧急 SKU"
+        title="紧急国家商品"
         :value="data?.urgent_count ?? 0"
-        :hint="`全部启用 SKU 中低于提前期 ${leadTimeDays} 天`"
+        :hint="`SKU+国家维度下，可售天数低于提前期 ${leadTimeDays} 天`"
       />
       <DashboardStatCard
-        title="临近补货"
+        title="临近补货国家商品"
         :value="data?.warning_count ?? 0"
-        hint="全部启用 SKU 中未低于提前期，且低于目标天数"
+        :hint="`SKU+国家维度下，可售天数介于 ${leadTimeDays} - ${targetDays} 天`"
       />
       <DashboardStatCard
-        title="安全 SKU"
+        title="安全国家商品"
         :value="data?.safe_count ?? 0"
-        :hint="`全部启用 SKU 中不少于 ${targetDays} 天`"
+        :hint="`SKU+国家维度下，可售天数不少于 ${targetDays} 天`"
       />
       <DashboardStatCard
         title="覆盖国家"
         :value="data?.risk_country_count ?? 0"
-        hint="基于当前建议单快照"
+        hint="当前快照中可计算风险分层的国家数量"
       />
     </section>
 
@@ -55,13 +70,15 @@
                   :show-after="300"
                 >
                   <div class="urgent-col-product">
-                    <SkuCard :sku="item.commodity_sku" :name="item.commodity_name" :image="item.main_image" />
+                    <SkuCard
+                      :sku="item.commodity_sku"
+                      :name="item.commodity_name"
+                      :image="item.main_image"
+                    />
                   </div>
                 </el-tooltip>
                 <div class="urgent-col-country">{{ getCountryLabel(item.country) }}</div>
-                <div class="urgent-col-qty">
-                  {{ formatSaleDays(item.sale_days) }}
-                </div>
+                <div class="urgent-col-qty">{{ formatSaleDays(item.sale_days) }}</div>
               </div>
             </div>
           </template>
@@ -82,13 +99,17 @@
             @keydown.space.prevent="goToCurrentSuggestion"
           >
             <div class="suggestion-header">
-              <div class="suggestion-meta">
+              <div class="suggestion-meta-block">
                 <strong>#{{ data.suggestion_id }}</strong>
                 <el-tag :type="suggestionStatus.tagType" size="small">{{ suggestionStatus.label }}</el-tag>
               </div>
             </div>
             <el-progress
-              :percentage="data.suggestion_item_count > 0 ? Math.round((data.pushed_count / data.suggestion_item_count) * 100) : 0"
+              :percentage="
+                data.suggestion_item_count > 0
+                  ? Math.round((data.pushed_count / data.suggestion_item_count) * 100)
+                  : 0
+              "
               :stroke-width="10"
             />
             <span class="progress-text">已推送 {{ data.pushed_count }} / 总计 {{ data.suggestion_item_count }}</span>
@@ -98,7 +119,7 @@
             title="补货量国家分布"
             :option="countryDistChartOption"
             :empty="!data || data.country_restock_distribution.length === 0"
-            empty-text="暂无补货量数据"
+            empty-text="当前没有建议补货单"
             style="box-shadow: none; padding: 0;"
           >
             <template #footer>
@@ -128,13 +149,22 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import type { EChartsCoreOption } from 'echarts/core'
+import { ElMessage } from 'element-plus'
 
-import { getDashboardOverview, type DashboardOverview } from '@/api/dashboard'
+import {
+  getDashboardOverview,
+  refreshDashboardSnapshot,
+  type DashboardOverview,
+} from '@/api/dashboard'
+import type { TaskRun } from '@/api/task'
 import SkuCard from '@/components/SkuCard.vue'
+import TaskProgress from '@/components/TaskProgress.vue'
 import DashboardChartCard from '@/components/dashboard/DashboardChartCard.vue'
 import DashboardPageHeader from '@/components/dashboard/DashboardPageHeader.vue'
 import DashboardStatCard from '@/components/dashboard/DashboardStatCard.vue'
 import DataTableCard from '@/components/dashboard/DataTableCard.vue'
+import { getActionErrorMessage } from '@/utils/apiError'
+import { formatUpdateTime } from '@/utils/format'
 import { getCountryLabel } from '@/utils/countries'
 import { getSuggestionStatusMeta } from '@/utils/status'
 
@@ -148,6 +178,9 @@ const PIE_COLORS = ['#18181b', '#3b82f6', '#16a34a', '#d97706', '#dc2626', '#8b5
 
 const router = useRouter()
 const data = ref<DashboardOverview | null>(null)
+const loading = ref(false)
+const refreshSubmitting = ref(false)
+const currentTaskId = ref<number | null>(null)
 
 const leadTimeDays = computed(() => data.value?.lead_time_days ?? 50)
 const targetDays = computed(() => data.value?.target_days ?? 60)
@@ -157,6 +190,20 @@ const suggestionStatus = computed(() =>
     ? getSuggestionStatusMeta(data.value.suggestion_status)
     : { label: '暂无', tagType: 'info' as const },
 )
+
+const snapshotTagType = computed(() => {
+  if (data.value?.snapshot_status === 'refreshing' || currentTaskId.value != null) return 'warning' as const
+  if (data.value?.snapshot_updated_at) return 'success' as const
+  return 'info' as const
+})
+
+const snapshotStatusLabel = computed(() => {
+  if (data.value?.snapshot_status === 'refreshing' || currentTaskId.value != null) return '快照刷新中'
+  if (data.value?.snapshot_updated_at) return '快照已缓存'
+  return '等待生成快照'
+})
+
+const snapshotUpdatedText = computed(() => formatUpdateTime(data.value?.snapshot_updated_at))
 
 const countryDistLegendItems = computed(() =>
   (data.value?.country_restock_distribution ?? []).map((item, index) => ({
@@ -197,7 +244,7 @@ const riskDistributionChartOption = computed<EChartsCoreOption>(() => {
           `安全：${item.safe_count}`,
           `总计：${item.total_count}`,
           `提前期阈值：${leadTimeDays.value} 天`,
-          `目标天数：${targetDays.value} 天`,
+          `目标库存：${targetDays.value} 天`,
         ].join('<br/>')
       },
     },
@@ -209,7 +256,7 @@ const riskDistributionChartOption = computed<EChartsCoreOption>(() => {
     },
     yAxis: {
       type: 'value',
-      name: 'SKU 数',
+      name: 'SKU+国家数',
       axisLabel: { color: '#71717a' },
       splitLine: { lineStyle: { color: '#f4f4f5' } },
     },
@@ -263,12 +310,46 @@ const countryDistChartOption = computed<EChartsCoreOption>(() => {
   }
 })
 
-async function load(): Promise<void> {
+async function loadDashboard(): Promise<void> {
+  loading.value = true
   try {
-    data.value = await getDashboardOverview()
-  } catch {
+    const overview = await getDashboardOverview()
+    data.value = overview
+    currentTaskId.value = overview.snapshot_task_id
+  } catch (error) {
     data.value = null
+    currentTaskId.value = null
+    ElMessage.error(getActionErrorMessage(error, '加载信息总览失败'))
+  } finally {
+    loading.value = false
   }
+}
+
+async function handleRefreshClick(): Promise<void> {
+  refreshSubmitting.value = true
+  try {
+    const result = await refreshDashboardSnapshot()
+    currentTaskId.value = result.task_id
+    if (result.existing) {
+      ElMessage.warning('已有信息总览快照任务在运行，当前复用现有任务进度')
+    } else {
+      ElMessage.success('信息总览快照刷新任务已入队')
+    }
+    await loadDashboard()
+  } catch (error) {
+    ElMessage.error(getActionErrorMessage(error, '信息总览快照刷新失败'))
+  } finally {
+    refreshSubmitting.value = false
+  }
+}
+
+async function onSnapshotTaskDone(task: TaskRun): Promise<void> {
+  if (task.status === 'success') {
+    ElMessage.success('信息总览快照已刷新')
+  } else {
+    ElMessage.error(task.error_msg || '信息总览快照刷新失败，请查看任务状态')
+  }
+  await loadDashboard()
 }
 
 function go(path: string): void {
@@ -286,7 +367,7 @@ function formatSaleDays(value: number | null): string {
   return `${value}天`
 }
 
-onMounted(load)
+onMounted(loadDashboard)
 </script>
 
 <style lang="scss" scoped>
@@ -294,6 +375,19 @@ onMounted(load)
   display: flex;
   flex-direction: column;
   gap: $space-6;
+}
+
+.snapshot-meta {
+  display: flex;
+  align-items: center;
+  gap: $space-3;
+  flex-wrap: wrap;
+}
+
+.snapshot-meta__time {
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  font-variant-numeric: tabular-nums;
 }
 
 .stats-grid {
@@ -512,7 +606,7 @@ onMounted(load)
   align-items: center;
 }
 
-.suggestion-meta {
+.suggestion-meta-block {
   display: flex;
   align-items: center;
   gap: $space-2;
