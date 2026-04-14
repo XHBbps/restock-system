@@ -31,7 +31,7 @@ class InTransitRecord(Base):
     warehouse_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     out_warehouse_no: Mapped[str | None] = mapped_column(String(50), nullable=True)
     target_warehouse_id: Mapped[str | None] = mapped_column(
-        String(50), ForeignKey("warehouse.id"), nullable=True
+        String(50), ForeignKey("warehouse.id", ondelete="SET NULL"), nullable=True
     )
     target_country: Mapped[str | None] = mapped_column(String(2), nullable=True)
     update_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
