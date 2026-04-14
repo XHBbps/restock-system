@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy import case, exists, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import UserContext, db_session, get_current_user, require_permission
+from app.api.deps import UserContext, db_session, db_session_readonly, get_current_user, require_permission
 from app.core.permissions import MONITOR_VIEW, SYNC_OPERATE
 from app.core.exceptions import NotFound
 from app.core.logging import get_logger
@@ -59,7 +59,7 @@ class ApiCallsOverview(BaseModel):
 @router.get("/api-calls", response_model=ApiCallsOverview)
 async def get_api_calls(
     hours: int = Query(default=24, ge=1, le=720),
-    db: AsyncSession = Depends(db_session),
+    db: AsyncSession = Depends(db_session_readonly),
     user: UserContext = Depends(get_current_user),
     _: None = Depends(require_permission(MONITOR_VIEW)),
 ) -> ApiCallsOverview:
@@ -163,7 +163,7 @@ async def get_recent_calls(
     endpoint: str | None = Query(default=None),
     only_failed: bool = Query(default=False),
     limit: int = Query(default=50, ge=1, le=500),
-    db: AsyncSession = Depends(db_session),
+    db: AsyncSession = Depends(db_session_readonly),
     user: UserContext = Depends(get_current_user),
     _: None = Depends(require_permission(MONITOR_VIEW)),
 ) -> list[RecentCallOut]:

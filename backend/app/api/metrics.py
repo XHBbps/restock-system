@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import UserContext, db_session, get_current_user, require_permission
+from app.api.deps import UserContext, db_session, db_session_readonly, get_current_user, require_permission
 from app.core.permissions import HOME_REFRESH, HOME_VIEW
 from app.core.restock_regions import resolve_allowed_restock_regions
 from app.core.timezone import now_beijing
@@ -389,7 +389,7 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
 
 @router.get("", response_class=PlainTextResponse)
 async def metrics(
-    db: AsyncSession = Depends(db_session),
+    db: AsyncSession = Depends(db_session_readonly),
     user: UserContext = Depends(get_current_user),
     _: None = Depends(require_permission(HOME_VIEW)),
 ) -> str:

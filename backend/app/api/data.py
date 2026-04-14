@@ -20,7 +20,7 @@ from sqlalchemy import Float, case, func, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.api.deps import db_session, get_current_session
+from app.api.deps import db_session, db_session_readonly, get_current_session
 from app.core.exceptions import NotFound
 from app.core.query import escape_like
 from app.core.timezone import BEIJING
@@ -276,7 +276,7 @@ async def list_orders(
     page_size: int = Query(default=50, ge=1, le=5000),
     sort_by: str | None = Query(default=None),
     sort_order: str = Query(default="desc", pattern="^(asc|desc)$"),
-    db: AsyncSession = Depends(db_session),
+    db: AsyncSession = Depends(db_session_readonly),
     _: dict[str, Any] = Depends(get_current_session),
 ) -> DataOrderListOut:
     base = select(OrderHeader)
@@ -381,7 +381,7 @@ async def list_orders(
 async def get_order_detail(
     shop_id: str = Path(...),
     amazon_order_id: str = Path(...),
-    db: AsyncSession = Depends(db_session),
+    db: AsyncSession = Depends(db_session_readonly),
     _: dict[str, Any] = Depends(get_current_session),
 ) -> DataOrderDetail:
     header = (
@@ -446,7 +446,7 @@ async def list_inventory(
     page_size: int = Query(default=50, ge=1, le=5000),
     sort_by: str | None = Query(default=None),
     sort_order: str = Query(default="asc", pattern="^(asc|desc)$"),
-    db: AsyncSession = Depends(db_session),
+    db: AsyncSession = Depends(db_session_readonly),
     _: dict[str, Any] = Depends(get_current_session),
 ) -> DataInventoryListOut:
     base = select(
@@ -525,7 +525,7 @@ async def list_out_records(
     page_size: int = Query(default=50, ge=1, le=5000),
     sort_by: str | None = Query(default=None),
     sort_order: str = Query(default="desc", pattern="^(asc|desc)$"),
-    db: AsyncSession = Depends(db_session),
+    db: AsyncSession = Depends(db_session_readonly),
     _: dict[str, Any] = Depends(get_current_session),
 ) -> DataOutRecordListOut:
     base = select(InTransitRecord)
@@ -616,7 +616,7 @@ async def list_out_records(
 async def list_data_warehouses(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=500, ge=1, le=1000),
-    db: AsyncSession = Depends(db_session),
+    db: AsyncSession = Depends(db_session_readonly),
     _: dict[str, Any] = Depends(get_current_session),
 ) -> DataWarehouseListOut:
     stock_subquery = (
@@ -674,7 +674,7 @@ async def list_data_warehouses(
 async def list_data_shops(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=500, ge=1, le=1000),
-    db: AsyncSession = Depends(db_session),
+    db: AsyncSession = Depends(db_session_readonly),
     _: dict[str, Any] = Depends(get_current_session),
 ) -> DataShopListOut:
     total = (await db.execute(select(func.count()).select_from(Shop))).scalar_one()
@@ -707,7 +707,7 @@ async def list_product_listings_data(
     only_active: bool | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=5000),
-    db: AsyncSession = Depends(db_session),
+    db: AsyncSession = Depends(db_session_readonly),
     _: dict[str, Any] = Depends(get_current_session),
 ) -> DataProductListingListOut:
     base = select(ProductListing).order_by(
@@ -744,7 +744,7 @@ async def list_sku_overview(
     enabled: bool | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=5000),
-    db: AsyncSession = Depends(db_session),
+    db: AsyncSession = Depends(db_session_readonly),
     _: dict[str, Any] = Depends(get_current_session),
 ) -> SkuOverviewListOut:
     """Return SKU-level overview: config + aggregated listings, paginated by SKU."""
@@ -824,7 +824,7 @@ async def list_sku_overview(
 # ============================================================
 @router.get("/sync-state", response_model=list[DataSyncStateRow])
 async def list_sync_state(
-    db: AsyncSession = Depends(db_session),
+    db: AsyncSession = Depends(db_session_readonly),
     _: dict[str, Any] = Depends(get_current_session),
 ) -> list[DataSyncStateRow]:
     from app.models.sync_state import SyncState

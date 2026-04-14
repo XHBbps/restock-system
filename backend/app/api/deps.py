@@ -11,7 +11,7 @@ from app.core.exceptions import Forbidden, Unauthorized
 from app.core.permission_cache import perm_cache
 from app.core.permissions import ALL_CODES
 from app.core.security import decode_token
-from app.db.session import get_db
+from app.db.session import get_db, get_db_readonly
 from app.models.permission import Permission
 from app.models.role import Role
 from app.models.role_permission import RolePermission
@@ -31,6 +31,11 @@ class UserContext:
 
 async def db_session() -> AsyncGenerator[AsyncSession, None]:
     async for session in get_db():
+        yield session
+
+
+async def db_session_readonly() -> AsyncGenerator[AsyncSession, None]:
+    async for session in get_db_readonly():
         yield session
 
 
@@ -147,6 +152,7 @@ __all__ = [
     "Depends",
     "UserContext",
     "db_session",
+    "db_session_readonly",
     "get_current_permissions",
     "get_current_session",
     "get_current_user",

@@ -41,3 +41,12 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             raise
         else:
             await session.commit()
+
+
+async def get_db_readonly() -> AsyncGenerator[AsyncSession, None]:
+    """FastAPI Dependency：只读 AsyncSession，不 commit。"""
+    async with async_session_factory() as session:
+        try:
+            yield session
+        finally:
+            await session.rollback()

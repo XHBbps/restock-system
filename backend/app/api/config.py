@@ -7,7 +7,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import db_session, get_current_session
+from app.api.deps import db_session, db_session_readonly, get_current_session
 from app.core.exceptions import ConflictError, NotFound, ValidationFailed
 from app.core.query import escape_like
 from app.models.global_config import GlobalConfig
@@ -129,7 +129,7 @@ async def init_sku_configs_from_listings(db: AsyncSession) -> int:
 # ============================================================
 @router.get("/global", response_model=GlobalConfigOut)
 async def get_global(
-    db: AsyncSession = Depends(db_session),
+    db: AsyncSession = Depends(db_session_readonly),
     _: dict[str, Any] = Depends(get_current_session),
 ) -> GlobalConfigOut:
     row = (await db.execute(select(GlobalConfig).where(GlobalConfig.id == 1))).scalar_one()
@@ -166,7 +166,7 @@ async def list_sku_configs(
     keyword: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
-    db: AsyncSession = Depends(db_session),
+    db: AsyncSession = Depends(db_session_readonly),
     _: dict[str, Any] = Depends(get_current_session),
 ) -> SkuConfigListOut:
     base = select(SkuConfig).order_by(SkuConfig.commodity_sku)
@@ -246,7 +246,7 @@ async def patch_sku_config(
 # ============================================================
 @router.get("/warehouse", response_model=list[WarehouseOut])
 async def list_warehouses(
-    db: AsyncSession = Depends(db_session),
+    db: AsyncSession = Depends(db_session_readonly),
     _: dict[str, Any] = Depends(get_current_session),
 ) -> list[WarehouseOut]:
     rows = (await db.execute(_warehouse_list_stmt())).all()
@@ -288,7 +288,7 @@ async def patch_warehouse_country(
 @router.get("/zipcode-rules", response_model=list[ZipcodeRuleOut])
 async def list_zipcode_rules(
     country: str | None = Query(default=None),
-    db: AsyncSession = Depends(db_session),
+    db: AsyncSession = Depends(db_session_readonly),
     _: dict[str, Any] = Depends(get_current_session),
 ) -> list[ZipcodeRuleOut]:
     base = select(ZipcodeRule).order_by(ZipcodeRule.country, ZipcodeRule.priority)
@@ -380,7 +380,7 @@ async def delete_zipcode_rule(
 # ============================================================
 @router.get("/shops", response_model=list[ShopOut])
 async def list_shops(
-    db: AsyncSession = Depends(db_session),
+    db: AsyncSession = Depends(db_session_readonly),
     _: dict[str, Any] = Depends(get_current_session),
 ) -> list[ShopOut]:
     rows = (await db.execute(select(Shop).order_by(Shop.id))).scalars().all()
