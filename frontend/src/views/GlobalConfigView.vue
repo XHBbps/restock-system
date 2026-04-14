@@ -178,9 +178,13 @@ function onCustomCronInput(value: string): void {
 }
 
 onMounted(async () => {
-  form.value = await getGlobalConfig()
-  snapshotCalcParams()
-  initCronState()
+  try {
+    form.value = await getGlobalConfig()
+    snapshotCalcParams()
+    initCronState()
+  } catch (e) {
+    ElMessage.error(getActionErrorMessage(e, '加载全局配置'))
+  }
 })
 
 async function save(): Promise<void> {

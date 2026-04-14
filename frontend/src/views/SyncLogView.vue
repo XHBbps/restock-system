@@ -164,16 +164,28 @@ const syncStatusChartOption = computed<EChartsCoreOption>(() => {
 })
 
 async function loadSyncState(): Promise<void> {
-  syncState.value = await listSyncState()
+  try {
+    syncState.value = await listSyncState()
+  } catch (e) {
+    ElMessage.error(getActionErrorMessage(e, '加载同步状态'))
+  }
 }
 
 async function loadOverview(): Promise<void> {
-  overview.value = await getApiCallsOverview(24)
+  try {
+    overview.value = await getApiCallsOverview(24)
+  } catch (e) {
+    ElMessage.error(getActionErrorMessage(e, '加载 API 调用概览'))
+  }
 }
 
 async function loadRecentCalls(): Promise<void> {
-  recentPage.value = 1
-  recentCalls.value = await getRecentCalls({ only_failed: onlyFailed.value, limit: 200 })
+  try {
+    recentPage.value = 1
+    recentCalls.value = await getRecentCalls({ only_failed: onlyFailed.value, limit: 200 })
+  } catch (e) {
+    ElMessage.error(getActionErrorMessage(e, '加载最近调用记录'))
+  }
 }
 
 async function reloadAll(): Promise<void> {

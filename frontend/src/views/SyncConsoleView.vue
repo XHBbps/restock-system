@@ -228,7 +228,11 @@ async function toggleScheduler(enabled: boolean): Promise<void> {
 }
 
 async function loadSyncState(): Promise<void> {
-  syncState.value = await listSyncState()
+  try {
+    syncState.value = await listSyncState()
+  } catch (e) {
+    ElMessage.error(getActionErrorMessage(e, '加载同步状态'))
+  }
 }
 
 async function reloadAll(): Promise<void> {
