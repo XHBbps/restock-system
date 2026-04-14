@@ -110,7 +110,7 @@
 </template>
 
 <script setup lang="ts">
-import client from '@/api/client'
+import { runEngine } from '@/api/engine'
 import type { TaskRun } from '@/api/task'
 import { getCurrentSuggestion, pushItems, type SuggestionDetail, type SuggestionItem } from '@/api/suggestion'
 import PageSectionCard from '@/components/PageSectionCard.vue'
@@ -181,7 +181,7 @@ async function loadCurrent(): Promise<void> {
 async function triggerEngine(): Promise<void> {
   generating.value = true
   try {
-    const { data } = await client.post<{ task_id: number; existing?: boolean }>('/api/engine/run')
+    const { data } = await runEngine()
     genTaskId.value = data.task_id
     if (data.existing) {
       ElMessage.warning('已有规则引擎任务在运行，当前复用现有任务进度')
