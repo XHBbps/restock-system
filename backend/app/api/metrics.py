@@ -267,7 +267,9 @@ async def get_dashboard_overview(
             if not isinstance(qty, (int, float)) or qty <= 0:
                 continue
             sale_days = _country_sale_days(item.sale_days_snapshot, country)
-            if sale_days is not None and sale_days > lead_time_days:
+            if sale_days is None:
+                continue
+            if sale_days > lead_time_days:
                 continue
             urgent_rows.append((item, country, sale_days))
 

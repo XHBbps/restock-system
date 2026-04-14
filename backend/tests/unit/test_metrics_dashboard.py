@@ -130,7 +130,7 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
         SimpleNamespace(
             commodity_sku="SKU-4",
             sale_days_snapshot=None,
-            urgent=False,
+            urgent=True,
             total_qty=3,
             country_breakdown={"US": 3},
             push_status="pending",

@@ -60,7 +60,7 @@
                 </el-tooltip>
                 <div class="urgent-col-country">{{ getCountryLabel(item.country) }}</div>
                 <div class="urgent-col-qty">
-                  {{ item.sale_days == null ? '-' : `${item.sale_days}天` }}
+                  {{ formatSaleDays(item.sale_days) }}
                 </div>
               </div>
             </div>
@@ -278,6 +278,12 @@ function go(path: string): void {
 function goToCurrentSuggestion(): void {
   if (data.value?.suggestion_id == null) return
   go('/restock/current')
+}
+
+function formatSaleDays(value: number | null): string {
+  if (value == null) return '-'
+  if (value < 1) return '<1天'
+  return `${value}天`
 }
 
 onMounted(load)

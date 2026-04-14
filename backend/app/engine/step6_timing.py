@@ -29,17 +29,17 @@ def has_urgent_sale_days(
     for country in effective_countries:
         raw = sale_days_by_country.get(country)
         if raw is None:
-            logger.warning("step6_sale_days_missing_treated_as_urgent", country=country)
-            return True
+            logger.warning("step6_sale_days_missing_ignored_for_urgency", country=country)
+            continue
         try:
             sale_days = float(raw)
         except (TypeError, ValueError):
             logger.warning(
-                "step6_sale_days_invalid_treated_as_urgent",
+                "step6_sale_days_invalid_ignored_for_urgency",
                 country=country,
                 raw_value=raw,
             )
-            return True
+            continue
         if sale_days <= lead_time_days:
             return True
     return False

@@ -51,9 +51,19 @@ def test_has_urgent_sale_days_keeps_empty_country_set_empty() -> None:
     assert urgent is False
 
 
-def test_has_urgent_sale_days_treats_missing_country_as_urgent() -> None:
-    assert has_urgent_sale_days({}, lead_time_days=10, countries={"US"}) is True
+def test_has_urgent_sale_days_ignores_missing_country() -> None:
+    assert has_urgent_sale_days({}, lead_time_days=10, countries={"US"}) is False
 
 
-def test_has_urgent_sale_days_treats_invalid_value_as_urgent() -> None:
-    assert has_urgent_sale_days({"US": "bad"}, lead_time_days=10, countries={"US"}) is True
+def test_has_urgent_sale_days_ignores_invalid_value() -> None:
+    assert has_urgent_sale_days({"US": "bad"}, lead_time_days=10, countries={"US"}) is False
+
+
+def test_has_urgent_sale_days_still_uses_other_valid_countries() -> None:
+    urgent = has_urgent_sale_days(
+        {"US": None, "CA": 8},
+        lead_time_days=10,
+        countries={"US", "CA"},
+    )
+
+    assert urgent is True

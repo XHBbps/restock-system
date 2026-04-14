@@ -144,6 +144,32 @@ async def test_suggestion_patch_recomputes_urgent_from_sale_days_and_lead_time(m
     assert normalized_values["urgent"] is True
 
 
+async def test_suggestion_patch_ignores_missing_sale_days_when_recomputing_urgent(monkeypatch) -> None:
+    import app.api.suggestion as suggestion_module
+
+    async def _fake_enrich_item(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    async def _fake_lead_time(*_args: Any, **_kwargs: Any) -> int:
+        return 20
+
+    item = _FakeItem()
+    item.sale_days_snapshot = {"US": 25.0}
+    db = _FakeSession([_FakeSuggestion(), item, None])
+    patch = SuggestionItemPatch(
+        country_breakdown={"US": 2, "UK": 3},
+        warehouse_breakdown={"US": {"W1": 2}},
+    )
+    monkeypatch.setattr(suggestion_module, "_enrich_item", _fake_enrich_item)
+    monkeypatch.setattr(suggestion_module, "_resolve_effective_lead_time_days", _fake_lead_time)
+
+    await patch_item(patch=patch, suggestion_id=1, item_id=10, db=db, _={})  # type: ignore[arg-type]
+
+    update_stmt = db.executed_statements[-1]
+    normalized_values = _normalize_update_values(update_stmt)
+    assert normalized_values["urgent"] is False
+
+
 async def test_suggestion_patch_rejects_warehouse_sum_mismatch() -> None:
     db = _FakeSession([_FakeSuggestion(), _FakeItem()])
     patch = SuggestionItemPatch(

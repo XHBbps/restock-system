@@ -83,7 +83,7 @@ function makeOverview(overrides: Partial<DashboardOverview> = {}): DashboardOver
         commodity_name: 'Alpha',
         main_image: null,
         country: 'CA',
-        sale_days: 15,
+        sale_days: 0.4,
       },
       {
         commodity_sku: 'SKU-2',
@@ -144,7 +144,8 @@ describe('WorkspaceView', () => {
 
     const source = readFileSync('src/views/WorkspaceView.vue', 'utf-8')
     expect(source).toContain('<span class="urgent-col-country">国家</span>')
-    expect(source).toContain('item.sale_days == null ? \'-\' : `${item.sale_days}天`')
+    expect(source).toContain('function formatSaleDays(value: number | null): string')
+    expect(source).toContain("if (value < 1) return '<1天'")
 
     const urgentItems = wrapper.findAll('.urgent-item')
     expect(urgentItems).toHaveLength(3)
@@ -152,7 +153,7 @@ describe('WorkspaceView', () => {
     expect(wrapper.text()).toContain('CA - 加拿大')
     expect(wrapper.text()).toContain('JP - 日本')
     expect(wrapper.text()).toContain('10天')
-    expect(wrapper.text()).toContain('15天')
+    expect(wrapper.text()).toContain('<1天')
     expect(wrapper.text()).toContain('18天')
   })
 
