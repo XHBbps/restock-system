@@ -47,22 +47,22 @@ AUTH_MANAGE = "auth:manage"
 # ── 注册表（列表顺序 = 前端展示顺序）───────────────────────
 
 REGISTRY: list[PermDef] = [
-    PermDef(HOME_VIEW, "查看信息总览", "信息总览"),
-    PermDef(HOME_REFRESH, "刷新信息总览", "信息总览"),
-    PermDef(RESTOCK_VIEW, "查看补货发起", "补货发起"),
-    PermDef(RESTOCK_OPERATE, "操作补货发起", "补货发起"),
-    PermDef(HISTORY_VIEW, "查看历史记录", "历史记录"),
-    PermDef(HISTORY_DELETE, "删除历史记录", "历史记录"),
-    PermDef(DATA_BASE_VIEW, "查看基础数据", "基础数据"),
-    PermDef(DATA_BASE_EDIT, "编辑基础数据", "基础数据"),
-    PermDef(DATA_BIZ_VIEW, "查看业务数据", "业务数据"),
-    PermDef(SYNC_VIEW, "查看同步管理", "同步管理"),
-    PermDef(SYNC_OPERATE, "操作同步管理", "同步管理"),
-    PermDef(CONFIG_VIEW, "查看基础配置", "基础配置"),
-    PermDef(CONFIG_EDIT, "编辑基础配置", "基础配置"),
-    PermDef(MONITOR_VIEW, "查看系统监控", "系统监控"),
-    PermDef(AUTH_VIEW, "查看权限设置", "权限设置"),
-    PermDef(AUTH_MANAGE, "管理权限设置", "权限设置"),
+    PermDef(HOME_VIEW, "信息总览-查看", "信息总览"),
+    PermDef(HOME_REFRESH, "信息总览-刷新", "信息总览"),
+    PermDef(RESTOCK_VIEW, "补货发起-查看", "补货发起"),
+    PermDef(RESTOCK_OPERATE, "补货发起-操作", "补货发起"),
+    PermDef(HISTORY_VIEW, "历史记录-查看", "历史记录"),
+    PermDef(HISTORY_DELETE, "历史记录-删除", "历史记录"),
+    PermDef(DATA_BASE_VIEW, "基础数据-查看", "基础数据"),
+    PermDef(DATA_BASE_EDIT, "基础数据-编辑", "基础数据"),
+    PermDef(DATA_BIZ_VIEW, "业务数据-查看", "业务数据"),
+    PermDef(SYNC_VIEW, "同步管理-查看", "同步管理"),
+    PermDef(SYNC_OPERATE, "同步管理-操作", "同步管理"),
+    PermDef(CONFIG_VIEW, "基础配置-查看", "基础配置"),
+    PermDef(CONFIG_EDIT, "基础配置-编辑", "基础配置"),
+    PermDef(MONITOR_VIEW, "系统监控-查看", "系统监控"),
+    PermDef(AUTH_VIEW, "权限设置-查看", "权限设置"),
+    PermDef(AUTH_MANAGE, "权限设置-管理", "权限设置"),
 ]
 
 ALL_CODES: frozenset[str] = frozenset(p.code for p in REGISTRY)
