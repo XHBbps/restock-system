@@ -277,6 +277,21 @@ onMounted(reload)
   display: flex;
   flex-wrap: nowrap;
   gap: 4px;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: $color-border-default transparent;
+  padding-bottom: 2px;
+
+  &::-webkit-scrollbar {
+    height: 4px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: $color-border-default;
+    border-radius: $radius-pill;
+  }
 }
 </style>
