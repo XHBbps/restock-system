@@ -20,6 +20,7 @@ VALID_JOB_NAMES = {
     "sync_warehouse",
     "sync_inventory",
     "sync_out_records",
+    "backfill_out_record_target_country",
     "sync_order_list",
     "sync_order_detail",
     "refetch_order_detail",

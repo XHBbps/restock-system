@@ -57,6 +57,12 @@ export const manualSyncActions: SyncActionDefinition[] = [
     label: '出库记录同步',
     url: '/api/sync/out-records',
   },
+  {
+    key: 'backfill_out_record_target_country',
+    jobName: 'backfill_out_record_target_country',
+    label: '回填出库目标国家',
+    url: '/api/sync/out-records/backfill-target-country',
+  },
 ]
 
 export const replenishmentAction = {

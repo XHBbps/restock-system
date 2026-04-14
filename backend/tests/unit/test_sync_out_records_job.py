@@ -6,6 +6,8 @@ from typing import Any
 
 import pytest
 
+from app.models.in_transit import InTransitRecord
+
 
 class _FakeDb:
     def __init__(self) -> None:
@@ -118,10 +120,70 @@ async def test_upsert_out_record_skips_non_positive_items() -> None:
 def test_extract_country_from_remark_returns_country_code() -> None:
     from app.sync.out_records import _extract_country_from_remark
 
-    assert _extract_country_from_remark("20260410美国-赢捷-加州-散货-在途中") == "US"
+    assert _extract_country_from_remark("20260410美国-赢捷-纽约-散货-在途中") == "US"
 
 
 def test_extract_country_from_remark_returns_none_when_missing() -> None:
     from app.sync.out_records import _extract_country_from_remark
 
-    assert _extract_country_from_remark("赢捷-加州-散货-在途中") is None
+    assert _extract_country_from_remark("赢捷-纽约-散货-在途中") is None
+
+
+class _FakeScalarResult:
+    def __init__(self, rows: list[Any]) -> None:
+        self._rows = rows
+
+    def all(self) -> list[Any]:
+        return self._rows
+
+
+class _FakeBackfillResult:
+    def __init__(self, rows: list[Any]) -> None:
+        self._rows = rows
+
+    def scalars(self) -> _FakeScalarResult:
+        return _FakeScalarResult(self._rows)
+
+
+class _FakeBackfillDb:
+    def __init__(self, rows: list[InTransitRecord]) -> None:
+        self.rows = rows
+        self.committed = False
+
+    async def execute(self, _stmt: Any) -> _FakeBackfillResult:
+        return _FakeBackfillResult(self.rows)
+
+    async def commit(self) -> None:
+        self.committed = True
+
+
+@pytest.mark.asyncio
+async def test_backfill_target_country_from_remark_updates_only_empty_values() -> None:
+    from app.sync.out_records import _backfill_target_country_from_remark
+
+    rows = [
+        InTransitRecord(
+            saihu_out_record_id="OUT-1",
+            remark="20260410美国-赢捷-纽约-散货-在途中",
+            target_country=None,
+            is_in_transit=True,
+            last_seen_at=datetime(2026, 4, 14, 12, 0, 0),
+        ),
+        InTransitRecord(
+            saihu_out_record_id="OUT-2",
+            remark="赢捷-纽约-散货-在途中",
+            target_country=None,
+            is_in_transit=True,
+            last_seen_at=datetime(2026, 4, 14, 12, 0, 0),
+        ),
+    ]
+    db = _FakeBackfillDb(rows)
+
+    scanned, updated, skipped = await _backfill_target_country_from_remark(db)  # type: ignore[arg-type]
+
+    assert scanned == 2
+    assert updated == 1
+    assert skipped == 1
+    assert rows[0].target_country == "US"
+    assert rows[1].target_country is None
+    assert db.committed is True

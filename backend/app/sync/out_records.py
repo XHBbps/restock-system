@@ -19,6 +19,7 @@ from app.tasks.jobs import JobContext, register
 
 logger = get_logger(__name__)
 JOB_NAME = "sync_out_records"
+BACKFILL_TARGET_COUNTRY_JOB_NAME = "backfill_out_record_target_country"
 
 REMARK_COUNTRY_MAP: dict[str, str] = {
     "阿联酋": "AE",
@@ -99,6 +100,36 @@ async def sync_out_records_job(ctx: JobContext) -> None:
     except Exception as exc:
         async with async_session_factory() as db:
             await mark_sync_failed(db, JOB_NAME, str(exc))
+        raise
+
+
+@register(BACKFILL_TARGET_COUNTRY_JOB_NAME)
+async def backfill_out_record_target_country_job(ctx: JobContext) -> None:
+    await ctx.progress(current_step="回填出库目标国家", total_steps=2)
+    async with async_session_factory() as db:
+        started = await mark_sync_running(db, BACKFILL_TARGET_COUNTRY_JOB_NAME)
+
+    try:
+        async with async_session_factory() as db:
+            scanned, updated, skipped = await _backfill_target_country_from_remark(db)
+
+        async with async_session_factory() as db:
+            await mark_sync_success(db, BACKFILL_TARGET_COUNTRY_JOB_NAME, started)
+
+        logger.info(
+            "backfill_out_record_target_country_done",
+            scanned=scanned,
+            updated=updated,
+            skipped=skipped,
+        )
+        await ctx.progress(
+            current_step="完成",
+            total_steps=2,
+            step_detail=f"扫描 {scanned} 条，回填 {updated} 条，跳过 {skipped} 条",
+        )
+    except Exception as exc:
+        async with async_session_factory() as db:
+            await mark_sync_failed(db, BACKFILL_TARGET_COUNTRY_JOB_NAME, str(exc))
         raise
 
 
@@ -198,6 +229,31 @@ async def _age_out_records(sync_start_time) -> int:
         ids = [row[0] for row in result.all()]
         await db.commit()
         return len(ids)
+
+
+async def _backfill_target_country_from_remark(db: AsyncSession) -> tuple[int, int, int]:
+    rows = (
+        await db.execute(
+            select(InTransitRecord)
+            .where(InTransitRecord.target_country.is_(None))
+            .where(InTransitRecord.remark.is_not(None))
+            .order_by(InTransitRecord.saihu_out_record_id.asc())
+        )
+    ).scalars().all()
+
+    scanned = len(rows)
+    updated = 0
+    skipped = 0
+    for record in rows:
+        country = _extract_country_from_remark(record.remark)
+        if country is None:
+            skipped += 1
+            continue
+        record.target_country = country
+        updated += 1
+
+    await db.commit()
+    return scanned, updated, skipped
 
 
 def _extract_country_from_remark(raw_remark: Any) -> str | None:
