@@ -71,7 +71,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 // 80 列 × 35 行 = 2800 格，覆盖 2560px 宽度以下的桌面分辨率
 // 单元格是 32×32，使用 CSS Grid auto-fill 按视口宽度自动换行
-const GRID_CELL_COUNT = 2800
+const GRID_CELL_COUNT = 1200  // 1920px: 60列×20行; 2560px: 80列×15行(480px); radial-gradient mask 遮盖边缘不足
 
 const username = ref('')
 const password = ref('')
