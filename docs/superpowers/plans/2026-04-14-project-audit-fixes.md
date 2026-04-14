@@ -27,27 +27,29 @@
 ### 后端修改
 - `backend/app/main.py` — 通用异常处理器 + shutdown 资源释放
 - `backend/app/db/session.py` — 新增 `get_db_readonly`
+- `backend/app/api/deps.py` — 新增 `db_session_readonly` 依赖（包装 `get_db_readonly`）
 - `backend/app/models/inventory.py` — 唯一约束声明
 - `backend/app/models/in_transit.py` — FK ondelete
 - `backend/app/api/auth_users.py` — 合并 UPDATE
-- `backend/app/sync/inventory.py` — 分批 commit
-- `backend/app/sync/order_list.py` — 分批 commit
+- `backend/app/sync/inventory.py` — 分批 commit（周期性 commit 减小事务）
+- `backend/app/sync/order_list.py` — 分批 commit（周期性 commit 减小事务）
 - `backend/app/tasks/jobs/daily_archive.py` — 快照保留策略
 - `backend/app/core/rate_limit.py` — trusted proxy 验证
-- `backend/app/api/data.py` — 使用 `get_db_readonly`
-- `backend/app/api/metrics.py` — 使用 `get_db_readonly`
-- `backend/app/api/suggestion.py` — 使用 `get_db_readonly`
-- `backend/app/api/monitor.py` — 使用 `get_db_readonly`
-- `backend/app/api/config.py` — 使用 `get_db_readonly`（GET 端点）
+- `backend/app/api/auth.py` — trusted proxy 验证（与 rate_limit.py 同步修复）
+- `backend/app/api/data.py` — 纯只读 GET 端点使用 `db_session_readonly`
+- `backend/app/api/metrics.py` — 纯只读 GET 端点使用 `db_session_readonly`（注意：dashboard GET 有写操作，保持 `db_session`）
+- `backend/app/api/suggestion.py` — 注意：detail GET 有写操作（`refresh_suggestion_item_pushability`），保持 `db_session`
+- `backend/app/api/monitor.py` — 使用 `db_session_readonly`
+- `backend/app/api/config.py` — 使用 `db_session_readonly`（GET 端点）
 
 ### 后端新增
 - `backend/alembic/versions/20260414_fix_in_transit_fk.py` — FK 迁移
 
 ### 前端修改
-- `frontend/src/main.ts` — 全局错误处理 + Element Plus 按需导入
+- `frontend/src/main.ts` — 全局错误处理 + Element Plus 按需导入（保留 CSS 全量、JS 按需）
 - `frontend/vite.config.ts` — unplugin 配置
 - `frontend/vitest.config.ts` — 覆盖率阈值
-- `frontend/src/api/client.ts` — 401 用 router.replace
+- `frontend/src/api/client.ts` — 401 改用延迟加载 router 避免循环依赖
 - `frontend/src/stores/auth.ts` — `_mapUserInfo` 安全化
 - `frontend/src/views/LoginView.vue` — 减少 grid cells
 - `frontend/src/views/GlobalConfigView.vue` — try/catch
@@ -188,7 +190,7 @@ git commit -m "fix: 添加通用 500 异常处理器，防止堆栈泄露（B-01
         from app.saihu.client import get_saihu_client
         try:
             saihu = get_saihu_client()
-            await saihu.aclose()
+            await saihu.close()  # SaihuClient 暴露 close()，非 aclose()
             logger.info("saihu_client_closed")
         except Exception:
             pass  # 客户端可能未初始化
@@ -200,17 +202,9 @@ git commit -m "fix: 添加通用 500 异常处理器，防止堆栈泄露（B-01
         logger.info("app_stopped")
 ```
 
-- [ ] **Step 2: 确认 SaihuClient 有 `aclose` 方法**
+- [ ] **Step 2: 确认 SaihuClient 已有 `close()` 方法**
 
-检查 `backend/app/saihu/client.py` 中 `SaihuClient` 类是否有 `aclose` 方法。如果没有，添加：
-
-```python
-async def aclose(self) -> None:
-    """关闭底层 httpx 客户端。"""
-    if self._http and not self._http.is_closed:
-        await self._http.aclose()
-        self._http = None
-```
+`SaihuClient` 在 `backend/app/saihu/client.py:58` 已定义 `async def close(self)` 方法，内部调用 `await self._http.aclose()`。无需额外修改，直接调用 `await saihu.close()` 即可。
 
 - [ ] **Step 3: 运行全部后端测试**
 
@@ -254,7 +248,7 @@ class InventorySnapshotHistory(Base):
     __table_args__ = (
         UniqueConstraint(
             "commodity_sku", "warehouse_id", "snapshot_date",
-            name="uq_inv_snap_sku_wh_date",
+            name="uq_snapshot_history_sku_wh_date",  # 必须匹配迁移 20260410_0001 中的约束名
         ),
         Index("ix_inventory_history_date_sku", "snapshot_date", "commodity_sku"),
         Index("ix_inventory_history_sku_date", "commodity_sku", "snapshot_date"),
@@ -308,7 +302,7 @@ git commit -m "fix: ORM 模型声明 InventorySnapshotHistory 唯一约束（B-0
 import { createPinia } from 'pinia'
 import { createApp } from 'vue'
 
-import ElementPlus from 'element-plus'
+import ElementPlus, { ElMessage } from 'element-plus'
 import 'element-plus/dist/index.css'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
 
@@ -325,10 +319,7 @@ app.use(ElementPlus, { locale: zhCn })
 // 全局 Vue 错误处理：防止组件错误静默失败
 app.config.errorHandler = (err, _instance, info) => {
   console.error('[Vue Error]', err, info)
-  // 使用动态导入避免循环依赖
-  import('element-plus').then(({ ElMessage }) => {
-    ElMessage.error('操作异常，请刷新页面重试')
-  })
+  ElMessage.error('操作异常，请刷新页面重试')
 }
 
 // 捕获未处理的 Promise rejection
@@ -377,11 +368,7 @@ onMounted(async () => {
 })
 ```
 
-确保文件顶部已导入 `getActionErrorMessage`：
-
-```typescript
-import { getActionErrorMessage } from '@/utils/apiError'
-```
+`getActionErrorMessage` 已在该文件 line 101 导入，无需重复添加。
 
 - [ ] **Step 2: 运行构建验证**
 
@@ -437,11 +424,7 @@ async function loadRecentCalls(): Promise<void> {
 }
 ```
 
-确保文件已导入 `getActionErrorMessage`：
-
-```typescript
-import { getActionErrorMessage } from '@/utils/apiError'
-```
+`getActionErrorMessage` 已在该文件 line 76 导入，无需重复添加。
 
 - [ ] **Step 2: 修复 SyncConsoleView loadSyncState**
 
@@ -457,7 +440,7 @@ async function loadSyncState(): Promise<void> {
 }
 ```
 
-确保文件已导入 `getActionErrorMessage`。
+`getActionErrorMessage` 已在该文件 line 111 导入，无需重复添加。
 
 - [ ] **Step 3: 运行构建验证**
 
@@ -608,7 +591,15 @@ git status
 
 **Files:**
 - Modify: `backend/app/db/session.py:34-43`
+- Modify: `backend/app/api/deps.py:32-34`
 - Test: `backend/tests/unit/test_db_readonly.py`
+
+**关键校验说明**：
+- API 端点通过 `deps.py` 中的 `db_session()` 获取会话（它包装了 `get_db()`），而不是直接使用 `get_db`
+- 需要在 `deps.py` 中新增 `db_session_readonly` 以保持一致模式
+- **以下 GET 端点有写操作，必须保持 `db_session`，不可改为只读：**
+  - `suggestion.py` 的 `GET /current` 和 `GET /{suggestion_id}` — 调用 `refresh_suggestion_item_pushability` 会写 `push_blocker`
+  - `metrics.py` 的 `GET /dashboard` — 无缓存时调用 `enqueue_task` 写入 TaskRun
 
 - [ ] **Step 1: 写失败测试**
 
@@ -634,7 +625,6 @@ async def test_get_db_readonly_does_not_commit():
         gen = get_db_readonly()
         session = await gen.__anext__()
         assert session is mock_session
-        # 模拟正常退出
         try:
             await gen.__anext__()
         except StopAsyncIteration:
@@ -666,7 +656,25 @@ async def get_db_readonly() -> AsyncGenerator[AsyncSession, None]:
             await session.rollback()
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [ ] **Step 4: 在 deps.py 中添加 db_session_readonly**
+
+在 `backend/app/api/deps.py` 中，在 `db_session()` 之后添加：
+
+```python
+from app.db.session import get_db, get_db_readonly
+
+async def db_session() -> AsyncGenerator[AsyncSession, None]:
+    async for session in get_db():
+        yield session
+
+async def db_session_readonly() -> AsyncGenerator[AsyncSession, None]:
+    async for session in get_db_readonly():
+        yield session
+```
+
+并在 `__all__` 中添加 `"db_session_readonly"`。
+
+- [ ] **Step 5: 运行测试确认通过**
 
 ```bash
 cd backend && python -m pytest tests/unit/test_db_readonly.py -v
@@ -674,26 +682,26 @@ cd backend && python -m pytest tests/unit/test_db_readonly.py -v
 
 预期：PASS
 
-- [ ] **Step 5: 将所有 GET 端点改用 get_db_readonly**
+- [ ] **Step 6: 将纯只读 GET 端点改用 db_session_readonly**
 
-在以下文件中，将 GET 端点的 `Depends(get_db)` 替换为 `Depends(get_db_readonly)`：
+在以下文件中，将**纯只读** GET 端点的 `Depends(db_session)` 替换为 `Depends(db_session_readonly)`：
 
-- `backend/app/api/data.py` — 所有 GET 端点（list_products, list_orders, list_inventory, list_out_records, get_order_detail 等）
-- `backend/app/api/suggestion.py` — GET 端点（list_suggestions, get_suggestion, list_suggestion_history）
-- `backend/app/api/config.py` — GET 端点（get_global_config, get_zipcode_rules 等）
-- `backend/app/api/monitor.py` — GET 端点
-- `backend/app/api/metrics.py` — GET 端点
+- `backend/app/api/data.py` — 所有 GET 端点（全部只读）
+- `backend/app/api/config.py` — 所有 GET 端点（全部只读）
+- `backend/app/api/monitor.py` — 所有 GET 端点（全部只读）
 - `backend/app/api/task.py` — GET 端点（list_tasks, get_task）
-- `backend/app/api/sync.py` — GET 端点
+- `backend/app/api/metrics.py` — **仅** `GET ""` (metrics_text)，**不改** `GET /dashboard`（它有 enqueue_task 写操作）
 
-每个文件顶部添加导入：
+每个文件添加导入：
 ```python
-from app.db.session import get_db, get_db_readonly
+from app.api.deps import db_session, db_session_readonly
 ```
 
-**重要**：只修改 GET 端点。POST/PUT/DELETE 端点保持 `get_db`。
+**不可修改的 GET 端点（有写操作）：**
+- `suggestion.py` 的 `GET /current` 和 `GET /{suggestion_id}` — 保持 `db_session`
+- `metrics.py` 的 `GET /dashboard` — 保持 `db_session`
 
-- [ ] **Step 6: 运行全部后端测试**
+- [ ] **Step 7: 运行全部后端测试**
 
 ```bash
 cd backend && python -m pytest --tb=short
@@ -701,11 +709,11 @@ cd backend && python -m pytest --tb=short
 
 预期：全部 PASS
 
-- [ ] **Step 7: 提交**
+- [ ] **Step 8: 提交**
 
 ```bash
-git add backend/app/db/session.py backend/app/api/ backend/tests/unit/test_db_readonly.py
-git commit -m "perf: GET 端点使用只读会话，避免不必要的 COMMIT（P-01）"
+git add backend/app/db/session.py backend/app/api/deps.py backend/app/api/ backend/tests/unit/test_db_readonly.py
+git commit -m "perf: 纯只读 GET 端点使用 db_session_readonly，避免不必要的 COMMIT（P-01）"
 ```
 
 ---
@@ -801,22 +809,23 @@ export default defineConfig(({ mode }) => {
 })
 ```
 
-- [ ] **Step 3: 修改 main.ts 移除全量导入**
+- [ ] **Step 3: 修改 main.ts — 保留 CSS 全量，JS 改为按需**
+
+**关键校验说明**：
+- `ElementPlusLocale` 不是 element-plus 的有效导出——必须使用默认导出 `ElementPlus`
+- `ElMessage` 在 `src/api/client.ts`（.ts 文件）中被 `import { ElMessage } from 'element-plus'` 直接使用，unplugin-vue-components 不覆盖 .ts 文件，所以需要配置 `unplugin-auto-import` 来处理（它的 `include` 默认包含 .ts 文件）
+- CSS 全量导入保留（`element-overrides.scss` 依赖完整 CSS 基础），JS 组件按需注册
 
 替换 `frontend/src/main.ts`：
 
 ```typescript
-// 应用入口：装配 Vue + Pinia + Router + Element Plus（按需导入）
+// 应用入口：装配 Vue + Pinia + Router + Element Plus（JS 按需 + CSS 全量）
 import { createPinia } from 'pinia'
 import { createApp } from 'vue'
-import { ElMessage } from 'element-plus'
 
-// Element Plus 按需导入样式（仅需基础样式 + 覆盖样式）
-import 'element-plus/theme-chalk/el-message.css'
-import 'element-plus/theme-chalk/el-message-box.css'
-import 'element-plus/theme-chalk/base.css'
+import ElementPlus, { ElMessage } from 'element-plus'
+import 'element-plus/dist/index.css'  // CSS 全量保留（element-overrides.scss 依赖）
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
-import ElementPlusLocale from 'element-plus'
 
 import App from './App.vue'
 import router from './router'
@@ -826,7 +835,7 @@ const app = createApp(App)
 
 app.use(createPinia())
 app.use(router)
-app.use(ElementPlusLocale, { locale: zhCn })
+app.use(ElementPlus, { locale: zhCn })
 
 // 全局 Vue 错误处理
 app.config.errorHandler = (err, _instance, info) => {
@@ -841,15 +850,7 @@ window.addEventListener('unhandledrejection', (event) => {
 app.mount('#app')
 ```
 
-**注意**：由于 `element-overrides.scss` 中已有大量全局样式覆盖，且 `unplugin-vue-components` 的 `ElementPlusResolver` 会自动按需引入组件样式，如果构建后发现样式缺失，可能需要保留 `import 'element-plus/dist/index.css'`。在这种情况下，按需导入的收益主要是 JS 体积减少。
-
-**回退方案**：如果按需样式导入出现问题，恢复 CSS 全量导入，只移除 JS 全量导入：
-
-```typescript
-import 'element-plus/dist/index.css'  // 保留 CSS 全量
-// 不再 import ElementPlus from 'element-plus' 和 app.use(ElementPlus)
-// unplugin 会按需注册组件
-```
+**说明**：此改动仅添加全局错误处理和 unplugin 配置。Element Plus JS 全量导入暂时保留（`app.use(ElementPlus)`），因为 unplugin 的按需注册需要先移除 `app.use(ElementPlus)` 再验证每个页面组件是否正确自动注册。这个可以在后续迭代中逐步迁移——先配置 unplugin（Step 2 已完成），再逐步移除手动 `app.use`。当前批次的核心收益是 unplugin 基础设施就绪 + 全局错误处理。
 
 - [ ] **Step 4: 运行构建验证**
 
@@ -965,23 +966,37 @@ git commit -m "perf: hasChanges 改用结构化比较替代全量 JSON.stringify
 - Modify: `backend/app/sync/inventory.py:44-47`
 - Modify: `backend/app/sync/order_list.py:57-68`
 
-- [ ] **Step 1: 修改 inventory sync 分批 commit**
+**关键校验说明**：
+- 两个文件当前的 `await db.commit()` **已经在循环外**（inventory.py:47, order_list.py:68），是整批完成后单次 commit
+- 问题不是"循环内每条 commit"，而是"所有记录在一个大事务内累积 UPSERT，长时间持锁"
+- 修复方案：在循环**内**每 500 条周期性 commit，减少单次事务的锁持有时间
 
-在 `backend/app/sync/inventory.py` 中，修改 line 44-47：
+- [ ] **Step 1: 修改 inventory sync 添加周期性 commit**
+
+在 `backend/app/sync/inventory.py` 中，将 line 44-47：
 
 ```python
-        BATCH_SIZE = 500
-        async for raw in list_inventory_items(on_page=_report_page):
-            await _upsert_inventory(db, raw, warehouse_country_map)
-            count += 1
-            if count % BATCH_SIZE == 0:
-                await db.commit()
-        await db.commit()
+            async for raw in list_inventory_items(on_page=_report_page):
+                await _upsert_inventory(db, raw, warehouse_country_map)
+                count += 1
+            await db.commit()
 ```
 
-- [ ] **Step 2: 修改 order_list sync 分批 commit**
+改为：
 
-在 `backend/app/sync/order_list.py` 中，修改 line 57-68，在循环内添加分批 commit：
+```python
+            BATCH_SIZE = 500
+            async for raw in list_inventory_items(on_page=_report_page):
+                await _upsert_inventory(db, raw, warehouse_country_map)
+                count += 1
+                if count % BATCH_SIZE == 0:
+                    await db.commit()
+            await db.commit()  # 提交最后不足一批的剩余记录
+```
+
+- [ ] **Step 2: 修改 order_list sync 添加周期性 commit**
+
+在 `backend/app/sync/order_list.py` 中，将 line 57-68 的循环改为：
 
 ```python
         BATCH_SIZE = 500
@@ -998,8 +1013,10 @@ git commit -m "perf: hasChanges 改用结构化比较替代全量 JSON.stringify
                 item_count += ic
                 if order_count % BATCH_SIZE == 0:
                     await db.commit()
-            await db.commit()
+            await db.commit()  # 提交最后不足一批的剩余记录
 ```
+
+**幂等性保证**：UPSERT（`ON CONFLICT DO UPDATE`）天然幂等，部分 commit 失败后重跑安全。
 
 - [ ] **Step 3: 运行后端测试**
 
@@ -1013,7 +1030,7 @@ cd backend && python -m pytest --tb=short
 
 ```bash
 git add backend/app/sync/inventory.py backend/app/sync/order_list.py
-git commit -m "perf: 同步任务改为每 500 条 commit 一次，减少长事务锁定（P-05）"
+git commit -m "perf: 同步任务每 500 条周期性 commit，减少长事务锁持有时间（P-05）"
 ```
 
 ---
@@ -1156,6 +1173,7 @@ git commit -m "fix: InTransitRecord FK 添加 ondelete=SET NULL（R-01）"
 
 **Files:**
 - Modify: `backend/app/core/rate_limit.py:67-77`
+- Modify: `backend/app/api/auth.py:36-49` — 同一漏洞，`_get_login_source_key` 也无条件信任 XFF
 
 - [ ] **Step 1: 添加 trusted proxy 验证**
 
@@ -1198,17 +1216,55 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         return peer_ip
 ```
 
-- [ ] **Step 2: 运行后端测试**
+- [ ] **Step 2: 修复 auth.py 中的同一漏洞**
+
+在 `backend/app/api/auth.py` 中，修改 `_get_login_source_key` 函数（line 36-49），添加相同的 trusted proxy 验证逻辑：
+
+```python
+import ipaddress
+
+_TRUSTED_CIDRS = [
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("127.0.0.0/8"),
+]
+
+def _get_login_source_key(request: Request) -> str:
+    peer_ip = request.client.host if request.client else "unknown"
+    try:
+        addr = ipaddress.ip_address(peer_ip)
+        is_trusted = any(addr in cidr for cidr in _TRUSTED_CIDRS)
+    except ValueError:
+        is_trusted = False
+
+    if is_trusted:
+        forwarded_for = request.headers.get("x-forwarded-for", "").strip()
+        if forwarded_for:
+            client_ip = forwarded_for.split(",", 1)[0].strip()
+        else:
+            client_ip = request.headers.get("x-real-ip", "").strip()
+    else:
+        client_ip = peer_ip
+
+    if not client_ip:
+        client_ip = "unknown"
+    return f"ip:{client_ip}"
+```
+
+**注意**：`_TRUSTED_CIDRS` 在两个文件中重复。可以提取到 `app/core/network.py` 共享，但为保持最小改动，暂各自定义。
+
+- [ ] **Step 3: 运行后端测试**
 
 ```bash
 cd backend && python -m pytest --tb=short
 ```
 
-- [ ] **Step 3: 提交**
+- [ ] **Step 4: 提交**
 
 ```bash
-git add backend/app/core/rate_limit.py
-git commit -m "fix: rate_limit 仅在请求来自可信代理时信任 X-Forwarded-For（S-05）"
+git add backend/app/core/rate_limit.py backend/app/api/auth.py
+git commit -m "fix: rate_limit 和 auth 仅在请求来自可信代理时信任 X-Forwarded-For（S-05）"
 ```
 
 ---
@@ -1336,55 +1392,29 @@ git commit -m "chore: 提升 Vitest 覆盖率阈值（Q-04）"
 **Files:**
 - Modify: `frontend/src/api/client.ts:24-31`
 
-- [ ] **Step 1: 替换 window.location.href**
+**关键校验说明**：
+- 静态 `import router from '@/router'` 会产生循环依赖：`client.ts` → `router` → `stores/auth` → `api/auth` → `client.ts`
+- 解决方案：使用**延迟动态 import**，仅在 401 发生时才加载 router
 
-修改 `frontend/src/api/client.ts` 的 401 处理：
+- [ ] **Step 1: 使用延迟 import 替换 window.location.href**
+
+修改 `frontend/src/api/client.ts` 的 401 处理（line 24-31）：
 
 ```typescript
-// axios 封装：注入 Bearer + 401 重定向 + 403 权限提示 + 业务错误统一抛出
-import { useAuthStore } from '@/stores/auth'
-import router from '@/router'
-import axios, { AxiosError, type AxiosInstance } from 'axios'
-import { ElMessage } from 'element-plus'
-
-const client: AxiosInstance = axios.create({
-  baseURL: '/',
-  timeout: 30000,
-  headers: { 'Content-Type': 'application/json' }
-})
-
-client.interceptors.request.use((config) => {
-  const auth = useAuthStore()
-  if (auth.token) {
-    config.headers = config.headers ?? {}
-    ;(config.headers as Record<string, string>).Authorization = `Bearer ${auth.token}`
-  }
-  return config
-})
-
-client.interceptors.response.use(
-  (resp) => resp,
-  (error: AxiosError) => {
     if (error.response?.status === 401) {
       const auth = useAuthStore()
       auth.clearAuth()
-      // 使用 router 跳转保留内存状态，携带 redirect 参数
+      // 延迟 import router 避免循环依赖（client → router → stores → api → client）
       const currentPath = window.location.pathname
       if (typeof window !== 'undefined' && !currentPath.startsWith('/login')) {
-        router.replace({ path: '/login', query: { redirect: currentPath } })
+        import('@/router').then(({ default: router }) => {
+          router.replace({ path: '/login', query: { redirect: currentPath } })
+        })
       }
     }
-    if (error.response?.status === 403) {
-      ElMessage.error('权限不足，请联系管理员')
-      const auth = useAuthStore()
-      auth.restoreAuth() // fire-and-forget
-    }
-    return Promise.reject(error)
-  }
-)
-
-export default client
 ```
+
+这样只修改 401 处理块，其余代码不变。
 
 - [ ] **Step 2: 运行构建和测试**
 
@@ -1396,7 +1426,7 @@ cd frontend && npx vue-tsc --noEmit && npm run test
 
 ```bash
 git add frontend/src/api/client.ts
-git commit -m "fix: 401 使用 router.replace 替代硬跳转，保留 redirect 参数（E-04）"
+git commit -m "fix: 401 使用延迟 import router.replace 替代硬跳转，避免循环依赖（E-04）"
 ```
 
 ---
@@ -1415,6 +1445,8 @@ cd backend && pip install pip-tools && pip-compile pyproject.toml -o requirement
 
 - [ ] **Step 2: 更新 Dockerfile 使用 lockfile**
 
+**关键校验说明**：当前 Dockerfile 使用 `pip install --prefix=/install .` 安装包+依赖。但 app 代码实际通过 `COPY` + `PYTHONPATH=/app` 运行（不依赖包安装）。lockfile 只需覆盖依赖。
+
 在 `backend/Dockerfile` 中，替换 line 15-17：
 
 ```dockerfile
@@ -1423,6 +1455,8 @@ COPY requirements.lock ./
 COPY app ./app
 RUN pip install --prefix=/install -r requirements.lock
 ```
+
+**说明**：`pip install -r requirements.lock` 仅安装依赖（不安装 app 包本身），但 app 代码通过 `PYTHONPATH=/app` + `COPY app ./app` 运行，无需包安装。
 
 - [ ] **Step 3: 验证 Docker 构建**
 
@@ -1784,12 +1818,32 @@ default_statistics_target = 100
 
 - [ ] **Step 2: 修改 docker-compose.yml 挂载配置**
 
-在 `deploy/docker-compose.yml` 的 `db` 服务中，修改 `volumes` 和添加 `command`：
+**关键校验说明**：`config_file=` 会**完全替换** PostgreSQL 默认配置，只保留 custom.conf 中的参数。更安全的方式是使用 `-c` 逐项覆盖参数。
+
+在 `deploy/docker-compose.yml` 的 `db` 服务中，**使用 `-c` 参数逐项覆盖**（不替换整个配置文件）：
 
 ```yaml
   db:
     image: postgres:16-alpine
     restart: unless-stopped
+    command:
+      - postgres
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - effective_cache_size=512MB
+      - -c
+      - work_mem=4MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - max_connections=50
+      - -c
+      - wal_buffers=8MB
+      - -c
+      - checkpoint_completion_target=0.9
+      - -c
+      - random_page_cost=1.1
     environment:
       POSTGRES_DB: replenish
       POSTGRES_USER: postgres
@@ -1798,8 +1852,6 @@ default_statistics_target = 100
       POSTGRES_INITDB_ARGS: "--data-checksums"
     volumes:
       - ./data/pg:/var/lib/postgresql/data
-      - ./postgres/custom.conf:/etc/postgresql/custom.conf:ro
-    command: postgres -c config_file=/etc/postgresql/custom.conf
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d replenish"]
       interval: 10s
@@ -1815,7 +1867,7 @@ default_statistics_target = 100
           cpus: '1.0'
 ```
 
-**注意**：自定义配置会覆盖 PG 默认配置，需要确保 `custom.conf` 中包含所有必要参数。上面只包含调优参数，其他参数沿用 PG 默认值。
+`deploy/postgres/custom.conf` 文件可保留作为参数说明文档，但不再挂载。
 
 - [ ] **Step 3: 验证 compose 配置**
 
@@ -1985,7 +2037,19 @@ chmod +x deploy/scripts/backup_cron_setup.sh
 
 - [ ] **Step 2: 前端 Dockerfile 添加非 root 用户**
 
-修改 `frontend/Dockerfile`：
+**关键校验说明**：Linux 上端口 80 < 1024 需要 root 权限。必须同时修改 nginx.conf 使用高端口。
+
+2a. 先修改 `frontend/nginx.conf` line 2，将 `listen 80;` 改为 `listen 8080;`：
+
+```nginx
+server {
+    listen 8080;
+    server_name _;
+    # ... 其余不变
+}
+```
+
+2b. 修改 `frontend/Dockerfile`：
 
 ```dockerfile
 FROM node:20-alpine AS builder
@@ -2011,17 +2075,18 @@ RUN chown -R nginx:nginx /usr/share/nginx/html /var/cache/nginx /var/log/nginx /
 
 USER nginx
 
-EXPOSE 80
+EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-    CMD wget -qO- http://localhost/ > /dev/null || exit 1
+    CMD wget -qO- http://localhost:8080/ > /dev/null || exit 1
 
 CMD ["nginx", "-g", "daemon off;"]
 ```
 
-**注意**：Nginx 默认在 Alpine 上需要写入 `/var/run/nginx.pid`。需要创建并赋权该文件。如果 Nginx 配置中 listen port 80 需要 root 权限（小于 1024），需要在 nginx.conf 中使用 `listen 8080` 并更新 compose 中的端口映射，或使用 `setcap` 授权。
+2c. 修改 `deploy/docker-compose.yml` 中 frontend healthcheck 和 Caddy 反代目标：
 
-**回退方案**：如果非 root 导致 nginx 启动失败（因为端口 80 < 1024），修改前端 nginx.conf 中 `listen 80` 为 `listen 8080`，并在 compose 中不修改（Caddy 连 frontend:8080）。
+- frontend healthcheck 改为 `http://localhost:8080/`
+- `deploy/Caddyfile` 末尾 `reverse_proxy frontend:80` 改为 `reverse_proxy frontend:8080`
 
 - [ ] **Step 3: 提交**
 
@@ -2241,18 +2306,20 @@ git commit -m "fix: SSH deploy action 固定到完整 commit SHA（S-07）"
 
 - [ ] **Step 1: 在 metrics.py 中添加 prometheus 端点**
 
-在 `backend/app/api/metrics.py` 中添加一个新端点：
+**关键校验说明**：
+- router 已有 `prefix="/api/metrics"`（line 83），端点路径不能重复写全路径
+- `PlainTextResponse` 已在文件顶部从 `fastapi.responses` 导入，不需要再从 starlette 导入
+- `TaskRun` 已在文件顶部（line 26）导入，不需要局部导入
+- 此端点依赖 Task 10 的 `db_session_readonly`；如果 Task 10 未完成，暂用 `db_session`
+
+在 `backend/app/api/metrics.py` 中添加新端点：
 
 ```python
-from starlette.responses import PlainTextResponse
-
-@router.get("/api/metrics/prometheus", response_class=PlainTextResponse)
+@router.get("/prometheus", response_class=PlainTextResponse)
 async def prometheus_metrics(
-    db: AsyncSession = Depends(get_db_readonly),
+    db: AsyncSession = Depends(db_session_readonly),  # 如果 Task 10 未完成，用 db_session
 ) -> PlainTextResponse:
     """基础 Prometheus 文本格式指标。"""
-    from app.models.task_run import TaskRun
-
     pending = (
         await db.execute(
             select(func.count()).select_from(TaskRun).where(TaskRun.status == "pending")
@@ -2278,6 +2345,8 @@ async def prometheus_metrics(
     ]
     return PlainTextResponse("\n".join(lines) + "\n", media_type="text/plain")
 ```
+
+最终路径为 `/api/metrics/prometheus`（router prefix + endpoint path）。
 
 - [ ] **Step 2: 在 Caddyfile 中代理 /api/metrics/prometheus**
 
