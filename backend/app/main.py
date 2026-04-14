@@ -104,6 +104,18 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             await reaper.stop()
         if settings.process_enable_worker:
             await worker.stop()
+        # 资源清理：关闭外部连接
+        from app.saihu.client import get_saihu_client
+        try:
+            saihu = get_saihu_client()
+            await saihu.close()  # SaihuClient.close() at client.py:58
+            logger.info("saihu_client_closed")
+        except Exception:
+            pass  # 客户端可能未初始化
+
+        from app.db.session import engine
+        await engine.dispose()
+        logger.info("database_engine_disposed")
         logger.info("app_stopped")
 
 
