@@ -15,10 +15,9 @@
 12. 归档已存在的 draft/partial suggestion
 """
 
-from collections.abc import Iterable
 from typing import Any
 
-from sqlalchemy import MetaData, Table, insert, select, text, update
+from sqlalchemy import insert, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.commodity_id import resolve_commodity_id_map
@@ -39,7 +38,7 @@ from app.engine.step5_warehouse_split import (
 from app.engine.step6_timing import compute_urgency_for_sku
 from app.models.global_config import GlobalConfig
 from app.models.sku import SkuConfig
-from app.models.suggestion import Suggestion
+from app.models.suggestion import Suggestion, SuggestionItem
 from app.tasks.jobs import JobContext
 
 logger = get_logger(__name__)
@@ -47,14 +46,6 @@ logger = get_logger(__name__)
 # PostgreSQL transaction-level advisory lock key: prevents concurrent engine
 # runs from overwriting each other. Any stable int32 unique vs other locks.
 ENGINE_RUN_ADVISORY_LOCK_KEY = 7429001
-LEGACY_SUGGESTION_ITEM_DEFAULTS: dict[str, Any] = {
-    "t_purchase": {},
-    "urgent": False,
-    "push_status": "pending",
-    "push_attempt_count": 0,
-}
-
-
 async def run_engine(ctx: JobContext, *, triggered_by: str = "scheduler") -> int | None:
     """执行一次完整的规则引擎,返回新建 suggestion id。"""
     today = now_beijing().date()
@@ -270,41 +261,9 @@ async def _persist_suggestion(
     if items:
         for it in items:
             it["suggestion_id"] = suggestion_id
-        await db.execute(await _build_suggestion_item_insert_stmt(db, items))
+        await db.execute(insert(SuggestionItem).values(items))
     await db.commit()
     return suggestion_id
-
-
-def _prepare_suggestion_item_rows(
-    items: list[dict[str, Any]],
-    available_columns: Iterable[str],
-) -> list[dict[str, Any]]:
-    """Adapt item payloads to the live DB schema during rolling migrations."""
-    column_names = set(available_columns)
-    rows: list[dict[str, Any]] = []
-    for item in items:
-        row = {key: value for key, value in item.items() if key in column_names}
-        for key, value in LEGACY_SUGGESTION_ITEM_DEFAULTS.items():
-            if key in column_names:
-                row.setdefault(key, value)
-        rows.append(row)
-    return rows
-
-
-async def _build_suggestion_item_insert_stmt(
-    db: AsyncSession,
-    items: list[dict[str, Any]],
-):
-    """Build an insert against the actual DB schema for backward compatibility."""
-    connection = await db.connection()
-
-    def _load_table(sync_connection) -> Table:
-        metadata = MetaData()
-        return Table("suggestion_item", metadata, autoload_with=sync_connection)
-
-    live_table = await connection.run_sync(_load_table)
-    rows = _prepare_suggestion_item_rows(items, live_table.c.keys())
-    return insert(live_table).values(rows)
 
 
 async def _archive_active(db: AsyncSession) -> None:

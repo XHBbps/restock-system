@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-14（取消采购日期、紧急规则改为可售天数阈值、在途国家改为备注提取）
+> 最近更新：2026-04-14（清理废弃采购日期兼容层，取消采购日期、紧急规则改为可售天数阈值、在途国家改为备注提取）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -117,6 +117,10 @@
 ---
 
 ## 3. 近期重大变更（2026-04-10 ~ 2026-04-14）
+
+### 3.33 废弃采购日期字段兼容层清理（2026-04-14）
+- `backend/app/engine/runner.py` 移除为旧库保留的 `suggestion_item.t_purchase` / `push_attempt_count` 等动态补默认与运行时表结构探测，建议单条目改为直接按当前 ORM schema 写入；运行引擎前需要确保环境已执行 `alembic upgrade head`
+- `backend/tests/unit/test_engine_runner.py` 删除围绕旧表结构兼容写入的回归测试，仅保留当前 schema 行为与 `restock_regions` 透传校验
 
 ### 3.32 采购日期移除与紧急规则、在途国家口径调整（2026-04-14）
 - `backend/app/engine/step6_timing.py` 移除采购日期计算，`urgent` 统一改为“任一正补货国家的 `sale_days <= lead_time_days`”；`backend/app/engine/runner.py` 不再写入 `suggestion_item.t_purchase`，并新增 `target_days >= lead_time_days` 的运行期保护
@@ -318,7 +322,7 @@
 
 ### 3.7 引擎逻辑修复
 
-- **H4 编辑口径修正**：`total_qty` 与 `country_breakdown` 脱钩，国家补货量不再要求与总采购量一致；正补货量国家缺少 `t_purchase` 时由后端默认当天
+- **H4 编辑口径修正**：`total_qty` 与 `country_breakdown` 脱钩，国家补货量不再要求与总采购量一致
 - **step3**：返回类型从 `tuple[dict, dict]` 简化为 `dict[str, dict[str, int]]`
 
 ### 3.8 赛狐订单详情接口特殊限流

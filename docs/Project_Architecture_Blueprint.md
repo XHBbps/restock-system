@@ -543,7 +543,7 @@ Step 3: country_qty 计算时已把已推送量视为库存一部分
 - `ix_task_run_lease`：Reaper 扫描过期任务加速
 - `ix_suggestion_item_urgent`：仅索引紧急条目
 
-**JSONB 字段**：`country_breakdown`、`warehouse_breakdown`、`t_purchase`、`velocity_snapshot`、`sale_days_snapshot`、`global_config_snapshot`、`allocation_snapshot`、`payload`。其中 `global_config_snapshot` 会保留 `restock_regions` 等配置快照。当前仅整体读取，不查 JSONB 内部字段，无需 GIN 索引。
+**JSONB 字段**：`country_breakdown`、`warehouse_breakdown`、`velocity_snapshot`、`sale_days_snapshot`、`global_config_snapshot`、`allocation_snapshot`、`payload`。其中 `global_config_snapshot` 会保留 `restock_regions` 等配置快照。当前仅整体读取，不查 JSONB 内部字段，无需 GIN 索引。
 
 ### 6.3 迁移管理
 
