@@ -836,8 +836,8 @@ cd frontend && npm run test
 - [ ] **Step 6: 提交**
 
 ```bash
-git add frontend/vite.config.ts frontend/src/main.ts frontend/package.json frontend/package-lock.json
-git commit -m "perf: Element Plus 改为按需导入，减小首屏包体积（P-02）"
+git add frontend/vite.config.ts frontend/package.json frontend/package-lock.json
+git commit -m "chore: 配置 unplugin-vue-components + unplugin-auto-import 基础设施（P-02）"
 ```
 
 ---
@@ -858,7 +858,7 @@ const GRID_CELL_COUNT = 2800
 改为：
 
 ```typescript
-const GRID_CELL_COUNT = 1200  // 60列×20行，覆盖 1920px 宽 640px 高，兼顾 radial-gradient mask 视觉效果
+const GRID_CELL_COUNT = 1200  // 1920px: 60列×20行; 2560px: 80列×15行(480px); radial-gradient mask 遮盖边缘不足
 ```
 
 - [ ] **Step 2: 运行构建验证**
@@ -871,7 +871,7 @@ cd frontend && npx vue-tsc --noEmit
 
 ```bash
 git add frontend/src/views/LoginView.vue
-git commit -m "perf: 登录页装饰性 grid 从 2800 减至 500 元素（P-03）"
+git commit -m "perf: 登录页装饰性 grid 从 2800 减至 1200 元素（P-03）"
 ```
 
 ---
@@ -1490,6 +1490,9 @@ git commit -m "chore: 添加 Python 依赖 lockfile 确保构建可复现（SC-0
 
 # 批次四：部署与运维优化
 
+> **执行顺序约束**：Task 33（nginx 端口变更 + Dockerfile 非 root）必须在 Task 25（healthcheck）和 Task 32（Caddyfile）之前执行，因为后两者依赖 8080 端口。
+> 推荐执行顺序：23 → 24 → **33** → **25** → 26 → 27 → 28 → 29 → 30 → 31 → **32**
+
 ### Task 23: 容器日志轮转（D-01）
 
 **Files:**
@@ -1585,7 +1588,7 @@ git commit -m "fix: 添加容器 CPU 限制防止资源饥饿（D-02）"
 
 1. 给 `frontend` 服务添加 healthcheck（在 `restart:` 之后）：
 
-**注意**：如果 Task 33 已修改 nginx 端口为 8080，healthcheck URL 需同步改为 `http://localhost:8080/`。以下先用 80，Task 33 执行时统一改。
+**前置依赖**：Task 33 的 nginx 端口变更（8080）必须在本 Task 之前执行。批次四执行顺序：先 Task 33（端口变更）→ 再 Task 25（healthcheck）→ 再 Task 32（Caddyfile）。
 
 ```yaml
   frontend:
@@ -2116,8 +2119,8 @@ CMD ["nginx", "-g", "daemon off;"]
 - [ ] **Step 3: 提交**
 
 ```bash
-git add deploy/scripts/backup_cron_setup.sh frontend/Dockerfile
-git commit -m "fix: 定时备份脚本 + 前端容器非 root 运行（D-06, S-04）"
+git add deploy/scripts/backup_cron_setup.sh frontend/Dockerfile frontend/nginx.conf
+git commit -m "fix: 定时备份脚本 + 前端容器非 root 运行 + nginx 改用 8080 端口（D-06, S-04）"
 ```
 
 ---
