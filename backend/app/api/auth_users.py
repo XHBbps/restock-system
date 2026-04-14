@@ -75,7 +75,7 @@ def _user_select():
 
 
 @router.get(
-    "/",
+    "",
     response_model=list[UserOut],
     dependencies=[Depends(require_permission(AUTH_VIEW))],
 )
@@ -87,7 +87,7 @@ async def list_users(
 
 
 @router.post(
-    "/",
+    "",
     response_model=UserOut,
     status_code=201,
     dependencies=[Depends(require_permission(AUTH_MANAGE))],
