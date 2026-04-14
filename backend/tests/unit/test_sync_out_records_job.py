@@ -58,7 +58,7 @@ async def test_upsert_out_record_persists_record_and_item_metadata() -> None:
     inserted = await _upsert_out_record(
         db,  # type: ignore[arg-type]
         raw,
-        {"WH-TGT-1": "US"},
+        {"WH-TGT-1"},
         sync_start,
     )
 
@@ -69,7 +69,7 @@ async def test_upsert_out_record_persists_record_and_item_metadata() -> None:
     assert record_values["saihu_out_record_id"] == "OUT-1"
     assert record_values["warehouse_id"] == "WH-SRC-1"
     assert record_values["target_warehouse_id"] == "WH-TGT-1"
-    assert record_values["target_country"] == "US"
+    assert record_values["target_country"] is None
     assert record_values["status"] == "1"
     assert record_values["type"] == 3
     assert record_values["type_name"] == "调拨出库"
@@ -107,9 +107,21 @@ async def test_upsert_out_record_skips_non_positive_items() -> None:
     inserted = await _upsert_out_record(
         db,  # type: ignore[arg-type]
         raw,
-        {},
+        set(),
         sync_start,
     )
 
     assert inserted == 0
     assert len(db.statements) == 2
+
+
+def test_extract_country_from_remark_returns_country_code() -> None:
+    from app.sync.out_records import _extract_country_from_remark
+
+    assert _extract_country_from_remark("20260410美国-赢捷-加州-散货-在途中") == "US"
+
+
+def test_extract_country_from_remark_returns_none_when_missing() -> None:
+    from app.sync.out_records import _extract_country_from_remark
+
+    assert _extract_country_from_remark("赢捷-加州-散货-在途中") is None

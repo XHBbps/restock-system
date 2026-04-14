@@ -32,7 +32,6 @@ export interface SuggestionItem {
   country_breakdown: Record<string, number>
   warehouse_breakdown: Record<string, Record<string, number>>
   allocation_snapshot: Record<string, AllocationExplanation> | null
-  t_purchase: Record<string, string>
   velocity_snapshot: Record<string, number> | null
   sale_days_snapshot: Record<string, number> | null
   urgent: boolean
@@ -52,7 +51,6 @@ export interface SuggestionItemPatch {
   total_qty?: number
   country_breakdown?: Record<string, number>
   warehouse_breakdown?: Record<string, Record<string, number>>
-  t_purchase?: Record<string, string>
 }
 
 export async function listSuggestions(params: {

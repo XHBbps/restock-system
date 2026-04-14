@@ -35,7 +35,6 @@ function makeItem(overrides: Partial<SuggestionItem> = {}): SuggestionItem {
     country_breakdown: { US: 60, JP: 40 },
     warehouse_breakdown: { US: { 'WH-1': 60 }, JP: { 'WH-2': 40 } },
     allocation_snapshot: null,
-    t_purchase: { US: '2026-05-01', JP: '2026-05-01' },
     velocity_snapshot: null,
     sale_days_snapshot: null,
     urgent: false,
@@ -134,7 +133,6 @@ describe('SuggestionDetailView', () => {
           total_qty: number
           country_breakdown: Record<string, number>
           warehouse_breakdown: Record<string, Record<string, number>>
-          t_purchase: Record<string, string>
         }
       >
       save: (item: SuggestionItem) => Promise<void>
@@ -143,7 +141,6 @@ describe('SuggestionDetailView', () => {
     vm.editing[10].total_qty = 90
     vm.editing[10].country_breakdown = { US: 50, JP: 35 }
     vm.editing[10].warehouse_breakdown = { US: { 'WH-1': 50 }, JP: { 'WH-2': 35 } }
-    vm.editing[10].t_purchase = { US: '2026-05-03', JP: '2026-05-04' }
 
     await vm.save(vm.suggestion.items[0])
 
@@ -151,7 +148,6 @@ describe('SuggestionDetailView', () => {
       total_qty: 90,
       country_breakdown: { US: 50, JP: 35 },
       warehouse_breakdown: { US: { 'WH-1': 50 }, JP: { 'WH-2': 35 } },
-      t_purchase: { US: '2026-05-03', JP: '2026-05-04' },
     })
   })
 })

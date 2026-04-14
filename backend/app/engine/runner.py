@@ -35,7 +35,7 @@ from app.engine.step5_warehouse_split import (
     load_country_warehouses,
     load_zipcode_rules,
 )
-from app.engine.step6_timing import compute_timing_for_sku
+from app.engine.step6_timing import compute_urgency_for_sku
 from app.models.global_config import GlobalConfig
 from app.models.sku import SkuConfig
 from app.models.suggestion import Suggestion, SuggestionItem
@@ -72,6 +72,11 @@ async def run_engine(ctx: JobContext, *, triggered_by: str = "scheduler") -> int
             raise ValueError(f"GlobalConfig.buffer_days must be >= 0, got {config.buffer_days}")
         if config.lead_time_days < 0:
             raise ValueError(f"GlobalConfig.lead_time_days must be >= 0, got {config.lead_time_days}")
+        if config.target_days < config.lead_time_days:
+            raise ValueError(
+                "GlobalConfig.target_days must be >= GlobalConfig.lead_time_days, "
+                f"got target_days={config.target_days}, lead_time_days={config.lead_time_days}"
+            )
 
         # 加载启用 SKU
         enabled_skus = (
@@ -174,14 +179,12 @@ async def run_engine(ctx: JobContext, *, triggered_by: str = "scheduler") -> int
                 if allocation.warehouse_breakdown:
                     warehouse_breakdown[country] = allocation.warehouse_breakdown
 
-            # Timing
+            # Urgency
             lead_time = sku_lead_time.get(sku) or config.lead_time_days
-            timing = compute_timing_for_sku(
+            urgency = compute_urgency_for_sku(
                 sale_days_for_sku=sale_days.get(sku, {}),
                 country_qty_for_sku=sku_country_qty,
-                target_days=config.target_days,
                 lead_time_days=lead_time,
-                today=today,
             )
 
             # push_blocker 预检
@@ -197,10 +200,9 @@ async def run_engine(ctx: JobContext, *, triggered_by: str = "scheduler") -> int
                     "country_breakdown": sku_country_qty,
                     "warehouse_breakdown": warehouse_breakdown,
                     "allocation_snapshot": allocation_snapshot,
-                    "t_purchase": {c: d.isoformat() for c, d in timing.t_purchase.items()},
                     "velocity_snapshot": velocity.get(sku, {}),
                     "sale_days_snapshot": sale_days.get(sku, {}),
-                    "urgent": timing.urgent,
+                    "urgent": urgency.urgent,
                     "push_blocker": push_blocker,
                     "push_status": push_status,
                 }

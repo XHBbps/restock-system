@@ -47,7 +47,6 @@ function makeItem(id: number, push_status: SuggestionItem['push_status'], push_b
     country_breakdown: { US: 10 },
     warehouse_breakdown: { US: { 'WH-1': 10 } },
     allocation_snapshot: null,
-    t_purchase: { US: '2026-05-01' },
     velocity_snapshot: null,
     sale_days_snapshot: null,
     urgent: false,

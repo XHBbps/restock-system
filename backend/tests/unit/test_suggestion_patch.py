@@ -60,6 +60,7 @@ class _FakeSuggestion:
     def __init__(self, status: str = "draft") -> None:
         self.id = 1
         self.status = status
+        self.global_config_snapshot = {"lead_time_days": 20}
 
 
 class _FakeItem:
@@ -73,7 +74,7 @@ class _FakeItem:
         self.country_breakdown: dict[str, int] = {"US": 1}
         self.warehouse_breakdown: dict[str, dict[str, int]] = {"US": {"W1": 1}}
         self.allocation_snapshot: dict[str, Any] | None = {"US": {"allocation_mode": "matched"}}
-        self.t_purchase: dict[str, str] = {"US": "2099-01-01"}
+        self.sale_days_snapshot: dict[str, float] | None = {"US": 25.0}
         self.__dict__.setdefault("commodity_sku", "SKU-A")
 
 
@@ -97,13 +98,17 @@ async def test_suggestion_patch_allows_country_sum_to_differ_from_total_qty(monk
     async def _fake_enrich_item(*_args: Any, **_kwargs: Any) -> None:
         return None
 
-    db = _FakeSession([_FakeSuggestion(), _FakeItem(), None, None])
+    async def _fake_lead_time(*_args: Any, **_kwargs: Any) -> int:
+        return 20
+
+    db = _FakeSession([_FakeSuggestion(), _FakeItem(), None])
     patch = SuggestionItemPatch(
         total_qty=10,
         country_breakdown={"US": 3, "UK": 4},
         warehouse_breakdown={"US": {"W1": 3}},
     )
     monkeypatch.setattr(suggestion_module, "_enrich_item", _fake_enrich_item)
+    monkeypatch.setattr(suggestion_module, "_resolve_effective_lead_time_days", _fake_lead_time)
 
     await patch_item(patch=patch, suggestion_id=1, item_id=10, db=db, _={})  # type: ignore[arg-type]
 
@@ -113,39 +118,30 @@ async def test_suggestion_patch_allows_country_sum_to_differ_from_total_qty(monk
     assert normalized_values["country_breakdown"] == {"US": 3, "UK": 4}
 
 
-async def test_suggestion_patch_defaults_missing_t_purchase_for_positive_countries(monkeypatch) -> None:
+async def test_suggestion_patch_recomputes_urgent_from_sale_days_and_lead_time(monkeypatch) -> None:
     import app.api.suggestion as suggestion_module
 
     async def _fake_enrich_item(*_args: Any, **_kwargs: Any) -> None:
         return None
 
-    class _FakeNow:
-        @staticmethod
-        def date():
-            from datetime import date
+    async def _fake_lead_time(*_args: Any, **_kwargs: Any) -> int:
+        return 20
 
-            return date(2026, 4, 13)
-
-    db = _FakeSession([_FakeSuggestion(), _FakeItem(), None, None])
+    item = _FakeItem()
+    item.sale_days_snapshot = {"US": 20.0, "UK": 45.0}
+    db = _FakeSession([_FakeSuggestion(), item, None])
     patch = SuggestionItemPatch(
         country_breakdown={"US": 2, "UK": 3},
         warehouse_breakdown={"US": {"W1": 2}},
     )
     monkeypatch.setattr(suggestion_module, "_enrich_item", _fake_enrich_item)
-    monkeypatch.setattr(suggestion_module, "now_beijing", lambda: _FakeNow())
+    monkeypatch.setattr(suggestion_module, "_resolve_effective_lead_time_days", _fake_lead_time)
 
     await patch_item(patch=patch, suggestion_id=1, item_id=10, db=db, _={})  # type: ignore[arg-type]
 
     update_stmt = db.executed_statements[-1]
     normalized_values = _normalize_update_values(update_stmt)
-    assert normalized_values["t_purchase"] == {"US": "2099-01-01", "UK": "2026-04-13"}
-
-
-async def test_suggestion_patch_rejects_invalid_t_purchase_date() -> None:
-    db = _FakeSession([_FakeSuggestion(), _FakeItem()])
-    patch = SuggestionItemPatch(t_purchase={"US": "not-a-date"})
-    with pytest.raises(ValidationFailed, match="t_purchase"):
-        await patch_item(patch=patch, suggestion_id=1, item_id=10, db=db, _={})  # type: ignore[arg-type]
+    assert normalized_values["urgent"] is True
 
 
 async def test_suggestion_patch_rejects_warehouse_sum_mismatch() -> None:

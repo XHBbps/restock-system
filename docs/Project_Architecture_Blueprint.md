@@ -110,7 +110,7 @@
 | 3 | `step3_country_qty.py` | velocity + inventory + target_days | `country_qty[sku][country]` | `max(target × v − 库存, 0)`，纯函数无 DB |
 | 4 | `step4_total.py` | country_qty + velocity + 国内库存 + buffer_days | `total_qty[sku]` | 汇总各国补货量 + 缓冲天数 − 国内库存 |
 | 5 | `step5_warehouse_split.py` | country_qty + 订单邮编 + 邮编规则 + 国家仓库映射 | `warehouse_breakdown[country][wh_id]` | 按邮编规则分配到具体仓库，无订单时均分；若配置了 `global_config.restock_regions`，仅消费这些国家的订单明细作为分仓依据；**2026-04-11 起**同优先级 tied 均分：`match_warehouses()` 返回首批同 priority 命中列表，qty 按 `1/N` 均分（先过滤不可用仓再定 N） |
-| 6 | `step6_timing.py` | sale_days + lead_time | `t_purchase[country]`, `urgent` | 计算建议采购日，判断紧急标志 |
+| 6 | `step6_timing.py` | sale_days + lead_time | `urgent` | 不再计算采购日期；任一正补货国家 `sale_days <= lead_time_days` 即判定为紧急 |
 
 **并发控制**：通过 `pg_advisory_xact_lock(7429001)` 事务级咨询锁（`runner.py:58-61`），防止并发引擎覆盖彼此。
 
@@ -143,7 +143,7 @@ async def sync_inventory_job(ctx: JobContext) -> None:
 
 **状态追踪**：每个 job 在 `sync_state` 表中维护最后运行时间、状态、错误信息。
 
-**出库记录同步**：`sync_out_records` 会把赛狐“其他出库”记录同步到 `in_transit_record` / `in_transit_item`，除在途状态观测所需字段外，还保留 `warehouseId`、`updateTime`、`type/typeName`、`commodityId`、`perPurchase`，用于数据页直接展示“出库”主表和明细表字段。
+**出库记录同步**：`sync_out_records` 会把赛狐“其他出库”记录同步到 `in_transit_record` / `in_transit_item`，除在途状态观测所需字段外，还保留 `warehouseId`、`updateTime`、`type/typeName`、`commodityId`、`perPurchase`，用于数据页直接展示“出库”主表和明细表字段。`target_country` 改为从备注文本提取国家名（如 `20260410美国-赢捷-加州-散货-在途中` → `US`）；提取失败时保持空值，不再回退到 `targetFbaWarehouseId -> warehouse.country`。
 
 **订单详情获取**：除自动 `sync_order_detail` 外，订单页还提供右侧独立“详情获取”组件，前端仅提交回溯天数到 `POST /api/sync/order-detail/refetch`。接口层会先检查活跃的 `refetch_order_detail`、`sync_order_detail`、`sync_all` 任务并直接返回现有 task_id，避免手动触发与定时 / 全量同步并发重复抓取；仅在无冲突时才按“最近 N 天”筛选本地缺少详情的全部订单并创建 `refetch_order_detail` TaskRun 后台任务，不再设置手动单次数量上限。该任务绕过 `order_detail_fetch_log` 的去重过滤，但继续复用既有失败分类、2 QPS / 2 并发抓取与落库逻辑，并按“已完成 X / 失败 Y / 总数 N”精确回写进度。
 
@@ -425,7 +425,7 @@ runner.run_engine(ctx, "manual")
   ├─▶ Step 3: compute_country_qty() → country_qty
   ├─▶ Step 4: compute_total() → total_qty（按 SKU 循环）
   ├─▶ Step 5: explain_country_qty_split() → warehouse_breakdown
-  ├─▶ Step 6: compute_timing_for_sku() → t_purchase, urgent
+  ├─▶ Step 6: compute_urgency_for_sku() → urgent
   ├─▶ _archive_active()：旧 draft/partial 归档
   └─▶ INSERT Suggestion + SuggestionItem[]（批量）
   │
@@ -507,7 +507,7 @@ Step 3: country_qty 计算时已把已推送量视为库存一部分
 
 | 表 | 职责 | 关键约束 |
 |---|---|---|
-| `global_config` | 全局配置单行表；包含 `target_days`、`buffer_days`、`lead_time_days`、`calc_cron`、`scheduler_enabled`、`restock_regions` 等参数，其中 `restock_regions=[]` 表示全部国家参与补货计算 | `CHECK id=1` |
+| `global_config` | 全局配置单行表；包含 `target_days`、`buffer_days`、`lead_time_days`、`calc_cron`、`scheduler_enabled`、`restock_regions` 等参数，其中 `restock_regions=[]` 表示全部国家参与补货计算，且保存时要求 `target_days >= lead_time_days` | `CHECK id=1` |
 | `sku_config` | SKU 级覆盖配置（enabled, lead_time_days）；商品同步/初始化会为全部 SKU 建立配置，但仅 active + matched 的 SKU 自动启用 | PK `commodity_sku` |
 | `warehouse` | 仓库主数据（type, country, replenish_site） | `type IN (-1,0,1,2,3)` |
 | `shop` | 店铺（同步自赛狐） | — |

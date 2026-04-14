@@ -15,7 +15,6 @@ a live Postgres connection.
 
 from __future__ import annotations
 
-from datetime import date
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -240,8 +239,8 @@ async def test_run_engine_forwards_restock_regions_to_step_loaders() -> None:
         patch("app.engine.runner.compute_country_qty", return_value={"SKU-001": {"US": 8}}),
         patch("app.engine.runner.compute_total", return_value=8),
         patch(
-            "app.engine.runner.compute_timing_for_sku",
-            return_value=SimpleNamespace(t_purchase={"US": date(2026, 4, 8)}, urgent=False),
+            "app.engine.runner.compute_urgency_for_sku",
+            return_value=SimpleNamespace(urgent=False),
         ),
         patch("app.engine.runner._persist_suggestion", mocked_persist),
     ):

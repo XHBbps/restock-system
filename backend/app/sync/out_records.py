@@ -1,6 +1,7 @@
 """Sync Saihu out-records into local tracking tables."""
 
 from decimal import Decimal, InvalidOperation
+import re
 from typing import Any
 
 from sqlalchemy import delete, select, text
@@ -18,6 +19,31 @@ from app.tasks.jobs import JobContext, register
 
 logger = get_logger(__name__)
 JOB_NAME = "sync_out_records"
+
+REMARK_COUNTRY_MAP: dict[str, str] = {
+    "阿联酋": "AE",
+    "澳大利亚": "AU",
+    "比利时": "BE",
+    "巴西": "BR",
+    "加拿大": "CA",
+    "中国": "CN",
+    "德国": "DE",
+    "西班牙": "ES",
+    "法国": "FR",
+    "英国": "GB",
+    "爱尔兰": "IE",
+    "印度": "IN",
+    "意大利": "IT",
+    "日本": "JP",
+    "墨西哥": "MX",
+    "荷兰": "NL",
+    "波兰": "PL",
+    "沙特阿拉伯": "SA",
+    "新加坡": "SG",
+    "瑞典": "SE",
+    "土耳其": "TR",
+    "美国": "US",
+}
 
 
 @register(JOB_NAME)
@@ -44,9 +70,9 @@ async def sync_out_records_job(ctx: JobContext) -> None:
             )
 
         async with async_session_factory() as db:
-            warehouse_country_map = await _load_warehouse_countries(db)
+            warehouse_ids = await _load_warehouse_ids(db)
             async for raw in list_in_transit_records(on_page=_report_page):
-                ic = await _upsert_out_record(db, raw, warehouse_country_map, sync_start_time)
+                ic = await _upsert_out_record(db, raw, warehouse_ids, sync_start_time)
                 record_count += 1
                 item_count += ic
             await db.commit()
@@ -76,15 +102,15 @@ async def sync_out_records_job(ctx: JobContext) -> None:
         raise
 
 
-async def _load_warehouse_countries(db: AsyncSession) -> dict[str, str | None]:
-    rows = (await db.execute(select(Warehouse.id, Warehouse.country))).all()
-    return dict(rows)
+async def _load_warehouse_ids(db: AsyncSession) -> set[str]:
+    rows = (await db.execute(select(Warehouse.id))).scalars().all()
+    return set(rows)
 
 
 async def _upsert_out_record(
     db: AsyncSession,
     raw: dict[str, Any],
-    warehouse_country_map: dict[str, str | None],
+    warehouse_ids: set[str],
     sync_start_time,
 ) -> int:
     record_id = str(raw.get("id") or "")
@@ -92,14 +118,14 @@ async def _upsert_out_record(
         return 0
 
     target_warehouse_id = str(raw.get("targetFbaWarehouseId") or "") or None
-    target_country = warehouse_country_map.get(target_warehouse_id) if target_warehouse_id else None
+    target_country = _extract_country_from_remark(raw.get("remark"))
 
     rec_values = {
         "saihu_out_record_id": record_id,
         "warehouse_id": _to_optional_text(raw.get("warehouseId")),
         "out_warehouse_no": raw.get("outWarehouseNo"),
         "target_warehouse_id": target_warehouse_id
-        if target_warehouse_id in warehouse_country_map
+        if target_warehouse_id in warehouse_ids
         else None,
         "target_country": target_country,
         "update_time": parse_saihu_time(raw.get("updateTime")),
@@ -172,6 +198,24 @@ async def _age_out_records(sync_start_time) -> int:
         ids = [row[0] for row in result.all()]
         await db.commit()
         return len(ids)
+
+
+def _extract_country_from_remark(raw_remark: Any) -> str | None:
+    remark = _to_optional_text(raw_remark)
+    if remark is None:
+        return None
+
+    normalized = re.sub(r"^\d{4}[-/.]?\d{2}[-/.]?\d{2}", "", remark).strip()
+    tokens = [token.strip() for token in re.split(r"[-_/|,，、\s]+", normalized) if token.strip()]
+    for token in tokens:
+        country = REMARK_COUNTRY_MAP.get(token)
+        if country:
+            return country
+
+    for name, country in sorted(REMARK_COUNTRY_MAP.items(), key=lambda item: len(item[0]), reverse=True):
+        if name in normalized:
+            return country
+    return None
 
 
 def _to_int(v: Any, default: int | None = 0) -> int | None:

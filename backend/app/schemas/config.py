@@ -58,6 +58,16 @@ class GlobalConfigPatch(BaseModel):
             return None
         return normalize_restock_regions(value)
 
+    @model_validator(mode="after")
+    def validate_target_vs_lead_time(self) -> "GlobalConfigPatch":
+        if (
+            self.target_days is not None
+            and self.lead_time_days is not None
+            and self.target_days < self.lead_time_days
+        ):
+            raise ValueError("目标库存天数不能小于采购提前期")
+        return self
+
 
 # ==================== SKU Config ====================
 class SkuConfigOut(BaseModel):

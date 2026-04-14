@@ -26,6 +26,11 @@ def test_global_config_patch_rejects_invalid_restock_region() -> None:
         GlobalConfigPatch(restock_regions=["USA"])
 
 
+def test_global_config_patch_rejects_target_days_less_than_lead_time() -> None:
+    with pytest.raises(ValidationError, match="目标库存天数不能小于采购提前期"):
+        GlobalConfigPatch(target_days=20, lead_time_days=30)
+
+
 def test_zipcode_rule_accepts_string_contains_operator() -> None:
     rule = ZipcodeRuleIn(
         country="UK",

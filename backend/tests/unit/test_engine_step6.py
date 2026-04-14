@@ -1,74 +1,59 @@
-"""Unit tests for step6 purchase timing helpers."""
-
-from datetime import date
+"""Unit tests for step6 urgency helpers."""
 
 from app.engine.step6_timing import (
-    compute_timing_for_sku,
-    has_urgent_purchase,
-    missing_timing_countries,
+    compute_urgency_for_sku,
+    has_urgent_sale_days,
+    positive_qty_countries,
 )
 
 
-def test_compute_timing_basic_non_urgent() -> None:
-    today = date(2026, 4, 9)
-    result = compute_timing_for_sku(
-        sale_days_for_sku={"US": 40.0},
+def test_positive_qty_countries_only_keeps_positive_values() -> None:
+    assert positive_qty_countries({"US": 10, "CA": 0, "JP": -1, "GB": 5}) == {"US", "GB"}
+
+
+def test_compute_urgency_marks_sale_days_at_lead_time_as_urgent() -> None:
+    result = compute_urgency_for_sku(
+        sale_days_for_sku={"US": 20.0},
         country_qty_for_sku={"US": 10},
-        target_days=30,
-        lead_time_days=5,
-        today=today,
+        lead_time_days=20,
     )
 
-    assert result.t_purchase["US"] == date(2026, 4, 14)
-    assert result.urgent is False
-
-
-def test_missing_sale_days_means_immediate_purchase() -> None:
-    today = date(2026, 4, 9)
-    result = compute_timing_for_sku(
-        sale_days_for_sku={},
-        country_qty_for_sku={"US": 10},
-        target_days=30,
-        lead_time_days=7,
-        today=today,
-    )
-
-    assert result.t_purchase["US"] == today
     assert result.urgent is True
 
 
-def test_missing_timing_countries_only_reports_positive_qty() -> None:
-    missing = missing_timing_countries(
-        {"US": 10, "CA": 0, "UK": 5},
-        {"US": "2026-04-10"},
+def test_compute_urgency_ignores_non_positive_countries() -> None:
+    result = compute_urgency_for_sku(
+        sale_days_for_sku={"US": 10.0, "CA": 2.0},
+        country_qty_for_sku={"US": 0, "CA": 0},
+        lead_time_days=5,
     )
 
-    assert missing == ["UK"]
+    assert result.urgent is False
 
 
-def test_has_urgent_purchase_accepts_iso_strings() -> None:
-    urgent = has_urgent_purchase(
-        {"US": "2026-04-09", "UK": "2026-04-15"},
-        today=date(2026, 4, 9),
+def test_has_urgent_sale_days_accepts_numeric_values() -> None:
+    urgent = has_urgent_sale_days(
+        {"US": 8, "UK": 15.5},
+        lead_time_days=10,
         countries={"US", "UK"},
     )
 
     assert urgent is True
 
 
-def test_has_urgent_purchase_keeps_empty_country_set_empty() -> None:
-    urgent = has_urgent_purchase(
-        {"US": "2026-04-01"},
-        today=date(2026, 4, 9),
+def test_has_urgent_sale_days_keeps_empty_country_set_empty() -> None:
+    urgent = has_urgent_sale_days(
+        {"US": 1},
+        lead_time_days=10,
         countries=set(),
     )
 
     assert urgent is False
 
 
-def test_parse_purchase_date_invalid_format_returns_today():
-    result = has_urgent_purchase(
-        {"US": "not-a-date"},
-        today=date(2026, 4, 12),
-    )
-    assert result is True
+def test_has_urgent_sale_days_treats_missing_country_as_urgent() -> None:
+    assert has_urgent_sale_days({}, lead_time_days=10, countries={"US"}) is True
+
+
+def test_has_urgent_sale_days_treats_invalid_value_as_urgent() -> None:
+    assert has_urgent_sale_days({"US": "bad"}, lead_time_days=10, countries={"US"}) is True

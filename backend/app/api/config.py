@@ -142,13 +142,18 @@ async def patch_global(
     db: AsyncSession = Depends(db_session),
     _: dict[str, Any] = Depends(get_current_session),
 ) -> GlobalConfigOut:
+    row = (await db.execute(select(GlobalConfig).where(GlobalConfig.id == 1))).scalar_one()
     updates = patch.model_dump(exclude_none=True)
     if updates:
+        target_days = updates.get("target_days", row.target_days)
+        lead_time_days = updates.get("lead_time_days", row.lead_time_days)
+        if target_days < lead_time_days:
+            raise ValidationFailed("目标库存天数不能小于采购提前期")
         await db.execute(update(GlobalConfig).where(GlobalConfig.id == 1).values(**updates))
         await db.commit()
         if {"sync_interval_minutes", "calc_cron", "scheduler_enabled"} & updates.keys():
             await reload_scheduler()
-    row = (await db.execute(select(GlobalConfig).where(GlobalConfig.id == 1))).scalar_one()
+        row = (await db.execute(select(GlobalConfig).where(GlobalConfig.id == 1))).scalar_one()
     return GlobalConfigOut.model_validate(row)
 
 

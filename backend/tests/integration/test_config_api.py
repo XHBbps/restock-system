@@ -47,3 +47,16 @@ async def test_patch_global_config_accepts_empty_restock_regions(
 
     assert resp.status_code == 200
     assert resp.json()["restock_regions"] == []
+
+
+@pytest.mark.asyncio
+async def test_patch_global_config_rejects_target_days_less_than_lead_time(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    await seed_global_config(db_session, target_days=60, lead_time_days=50)
+    await db_session.commit()
+
+    resp = await client.patch("/api/config/global", json={"target_days": 40})
+
+    assert resp.status_code == 422
+    assert resp.json()["message"] == "目标库存天数不能小于采购提前期"

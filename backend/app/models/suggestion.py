@@ -88,7 +88,6 @@ class SuggestionItem(Base):
     country_breakdown: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     warehouse_breakdown: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     allocation_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
-    t_purchase: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     # 可追溯快照
     velocity_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     sale_days_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)

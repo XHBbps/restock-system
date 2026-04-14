@@ -183,6 +183,10 @@ onMounted(async () => {
 
 async function save(): Promise<void> {
   if (!form.value) return
+  if (form.value.target_days < form.value.lead_time_days) {
+    ElMessage.error('目标库存天数不能小于采购提前期')
+    return
+  }
   saving.value = true
   try {
     const changed = calcParamsChanged()

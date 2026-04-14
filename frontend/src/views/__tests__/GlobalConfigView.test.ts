@@ -120,4 +120,22 @@ describe('GlobalConfigView', () => {
       }),
     )
   })
+
+  it('blocks saving when target days is smaller than lead time', async () => {
+    mockGetGlobalConfig.mockResolvedValue(makeConfig({ target_days: 30, lead_time_days: 20 }))
+
+    const { default: View } = await import('../GlobalConfigView.vue')
+    const wrapper = shallowMount(View, { global: { stubs: STUBS } })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as { form: GlobalConfig | null; save: () => Promise<void> }
+    if (!vm.form) throw new Error('expected form to be initialized')
+
+    vm.form.target_days = 15
+    vm.form.lead_time_days = 20
+    await vm.save()
+
+    expect(mockPatchGlobalConfig).not.toHaveBeenCalled()
+    expect(messageError).toHaveBeenCalledWith('目标库存天数不能小于采购提前期')
+  })
 })

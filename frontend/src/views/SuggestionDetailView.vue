@@ -48,7 +48,7 @@
                   <div class="panel-header">
                     <div>
                       <div class="section-title">采购调整</div>
-                      <div class="section-desc">可统一调整总量，并按国家、仓库与采购时间逐项校正。</div>
+                      <div class="section-desc">可统一调整总量，并按国家与仓库逐项校正。</div>
                     </div>
                   </div>
                   <div class="editor-row">
@@ -78,20 +78,6 @@
                           size="small"
                         />
                         <span v-else>{{ row.qty }}</span>
-                      </template>
-                    </el-table-column>
-                    <el-table-column label="采购时间" min-width="176">
-                      <template #default="{ row }">
-                        <el-date-picker
-                          v-if="isEditable(item)"
-                          v-model="editing[item.id].t_purchase[row.country]"
-                          type="date"
-                          value-format="YYYY-MM-DD"
-                          class="table-date-input"
-                          placeholder="选择日期"
-                          size="small"
-                        />
-                        <span v-else class="allocation-text">{{ row.tPurchase || '-' }}</span>
                       </template>
                     </el-table-column>
                     <el-table-column label="各仓明细" min-width="240">
@@ -181,7 +167,7 @@
                     <el-tag v-if="!isEditable(item)" type="info">
                       {{ item.push_status === 'pushed' ? '已推送条目不可编辑' : '已归档建议单不可编辑' }}
                     </el-tag>
-                    <span v-else-if="!hasChanges(item)" class="action-hint">修改国家补货量、仓库分量或采购时间后可保存</span>
+                    <span v-else-if="!hasChanges(item)" class="action-hint">修改国家补货量或仓库分量后可保存</span>
                   </div>
                 </section>
               </aside>
@@ -224,14 +210,12 @@ interface ItemEditingState {
   total_qty: number
   country_breakdown: Record<string, number>
   warehouse_breakdown: Record<string, Record<string, number>>
-  t_purchase: Record<string, string>
 }
 
 interface CountryRow {
   country: string
   qty: number
   warehouses: Record<string, number>
-  tPurchase: string | null
   allocation: AllocationExplanation | null
 }
 
@@ -292,7 +276,6 @@ function countryRows(item: SuggestionItem): CountryRow[] {
     country,
     qty: state?.country_breakdown[country] ?? item.country_breakdown[country] ?? 0,
     warehouses: state?.warehouse_breakdown[country] ?? item.warehouse_breakdown[country] ?? {},
-    tPurchase: state?.t_purchase[country] ?? item.t_purchase[country] ?? null,
     allocation: item.allocation_snapshot?.[country] || null,
   }))
 }
@@ -346,13 +329,11 @@ function collectCountries(item: SuggestionItem, state?: ItemEditingState): strin
     ...new Set([
       ...Object.keys(item.country_breakdown || {}),
       ...Object.keys(item.warehouse_breakdown || {}),
-      ...Object.keys(item.t_purchase || {}),
       ...Object.keys(item.allocation_snapshot || {}),
       ...(state
         ? [
             ...Object.keys(state.country_breakdown),
             ...Object.keys(state.warehouse_breakdown),
-            ...Object.keys(state.t_purchase),
           ]
         : []),
     ]),
@@ -384,20 +365,11 @@ function normalizeWarehouseBreakdown(
   )
 }
 
-function normalizeDateMap(input: Record<string, string>): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(input)
-      .map(([country, value]) => [country, value || ''])
-      .sort(([left], [right]) => left.localeCompare(right)),
-  )
-}
-
 function normalizeEditingState(state: ItemEditingState) {
   return {
     total_qty: Number(state.total_qty ?? 0),
     country_breakdown: normalizeNumberMap(state.country_breakdown),
     warehouse_breakdown: normalizeWarehouseBreakdown(state.warehouse_breakdown),
-    t_purchase: normalizeDateMap(state.t_purchase),
   }
 }
 
@@ -406,7 +378,6 @@ function snapshotItemState(item: SuggestionItem) {
     total_qty: item.total_qty,
     country_breakdown: item.country_breakdown,
     warehouse_breakdown: item.warehouse_breakdown,
-    t_purchase: item.t_purchase || {},
   })
 }
 
@@ -415,7 +386,6 @@ function buildPatch(item: SuggestionItem, state: ItemEditingState) {
     total_qty?: number
     country_breakdown?: Record<string, number>
     warehouse_breakdown?: Record<string, Record<string, number>>
-    t_purchase?: Record<string, string>
   } = {}
   const normalizedState = normalizeEditingState(state)
   const normalizedItem = snapshotItemState(item)
@@ -428,9 +398,6 @@ function buildPatch(item: SuggestionItem, state: ItemEditingState) {
   }
   if (JSON.stringify(normalizedState.warehouse_breakdown) !== JSON.stringify(normalizedItem.warehouse_breakdown)) {
     patch.warehouse_breakdown = normalizedState.warehouse_breakdown
-  }
-  if (JSON.stringify(normalizedState.t_purchase) !== JSON.stringify(normalizedItem.t_purchase)) {
-    patch.t_purchase = normalizedState.t_purchase
   }
 
   return patch
@@ -478,7 +445,6 @@ function syncEditingState(data: SuggestionDetail): void {
           Object.fromEntries(Object.entries(warehouses).map(([warehouseId, qty]) => [warehouseId, Number(qty)])),
         ]),
       ),
-      t_purchase: { ...(item.t_purchase || {}) },
     }
   }
 }
@@ -853,16 +819,6 @@ watch(
 :deep(.detail-table .table-number-input) {
   width: 100%;
   max-width: 116px;
-}
-
-:deep(.detail-table .table-date-input) {
-  width: 100%;
-  min-width: 0;
-}
-
-:deep(.detail-table .table-date-input.el-date-editor.el-input) {
-  width: 100%;
-  max-width: 160px;
 }
 
 :deep(.detail-table .warehouse-number-input) {

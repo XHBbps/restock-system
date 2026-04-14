@@ -37,7 +37,6 @@ class SuggestionItemOut(BaseModel):
     country_breakdown: dict[str, Any]
     warehouse_breakdown: dict[str, Any]
     allocation_snapshot: dict[str, AllocationExplanationOut] | None = None
-    t_purchase: dict[str, Any]
     velocity_snapshot: dict[str, Any] | None = None
     sale_days_snapshot: dict[str, Any] | None = None
     urgent: bool
@@ -66,7 +65,6 @@ class SuggestionItemPatch(BaseModel):
     total_qty: int | None = Field(default=None, ge=0)
     country_breakdown: dict[str, int] | None = None
     warehouse_breakdown: dict[str, dict[str, int]] | None = None
-    t_purchase: dict[str, str] | None = None  # ISO date strings
 
     @model_validator(mode="after")
     def _values_non_negative(self) -> "SuggestionItemPatch":

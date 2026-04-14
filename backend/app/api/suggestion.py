@@ -14,8 +14,9 @@ from app.core.commodity_id import refresh_suggestion_item_pushability
 from app.core.exceptions import ConflictError, NotFound, PushBlockedError, ValidationFailed
 from app.core.query import escape_like
 from app.core.timezone import BEIJING, now_beijing
-from app.engine.step6_timing import has_urgent_purchase, positive_qty_countries
+from app.engine.step6_timing import has_urgent_sale_days, positive_qty_countries
 from app.models.product_listing import ProductListing
+from app.models.sku import SkuConfig
 from app.models.suggestion import Suggestion, SuggestionItem
 from app.schemas.suggestion import (
     PushRequest,
@@ -204,24 +205,6 @@ async def patch_item(
         if patch.warehouse_breakdown is not None
         else (item.warehouse_breakdown or {})
     )
-    effective_t_purchase = dict(item.t_purchase or {})
-    if patch.t_purchase is not None:
-        effective_t_purchase.update(patch.t_purchase)
-
-    today = now_beijing().date()
-    today_iso = today.isoformat()
-    for country in positive_qty_countries(effective_country_breakdown):
-        effective_t_purchase.setdefault(country, today_iso)
-
-    from datetime import date as _date
-
-    for country, value in effective_t_purchase.items():
-        if isinstance(value, str):
-            try:
-                _date.fromisoformat(value)
-            except (ValueError, TypeError) as exc:
-                raise ValidationFailed(f"t_purchase[{country}] 包含无效日期: {exc}") from exc
-
     for country in positive_qty_countries(effective_country_breakdown):
         warehouse_values = list((effective_warehouse_breakdown.get(country) or {}).values())
         if warehouse_values and sum(warehouse_values) != effective_country_breakdown[country]:
@@ -238,20 +221,11 @@ async def patch_item(
         updates["warehouse_breakdown"] = patch.warehouse_breakdown
     if patch.country_breakdown is not None or patch.warehouse_breakdown is not None:
         updates["allocation_snapshot"] = None
-    if patch.t_purchase is not None or any(
-        country not in (item.t_purchase or {})
-        for country in positive_qty_countries(effective_country_breakdown)
-    ):
-        updates["t_purchase"] = effective_t_purchase
-
-    if (
-        patch.t_purchase is not None
-        or patch.total_qty is not None
-        or patch.country_breakdown is not None
-    ):
-        updates["urgent"] = has_urgent_purchase(
-            effective_t_purchase,
-            today=today,
+    if patch.country_breakdown is not None:
+        lead_time_days = await _resolve_effective_lead_time_days(db, parent, item)
+        updates["urgent"] = has_urgent_sale_days(
+            item.sale_days_snapshot or {},
+            lead_time_days=lead_time_days,
             countries=positive_qty_countries(effective_country_breakdown),
         )
 
@@ -358,6 +332,26 @@ async def delete_suggestion(
 
     await db.execute(delete(Suggestion).where(Suggestion.id == suggestion_id))
     return None
+
+
+async def _resolve_effective_lead_time_days(
+    db: AsyncSession,
+    suggestion: Suggestion,
+    item: SuggestionItem,
+) -> int:
+    row = (
+        await db.execute(
+            select(SkuConfig.lead_time_days).where(SkuConfig.commodity_sku == item.commodity_sku)
+        )
+    ).first()
+    sku_lead_time = row[0] if row else None
+    if sku_lead_time is not None:
+        return int(sku_lead_time)
+
+    snapshot_lead_time = (suggestion.global_config_snapshot or {}).get("lead_time_days")
+    if isinstance(snapshot_lead_time, (int, float)):
+        return int(snapshot_lead_time)
+    return 50
 
 
 async def _build_detail(db: AsyncSession, sug: Suggestion) -> SuggestionDetailOut:

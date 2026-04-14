@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-13（信息总览图例换行与风险图显示修复）
+> 最近更新：2026-04-14（取消采购日期、紧急规则改为可售天数阈值、在途国家改为备注提取）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -55,7 +55,7 @@
   3. `step3_country_qty` — 各国补货量
   4. `step4_total` — 总采购量（扣减国内库存 + 缓冲天数）
   5. `step5_warehouse_split` — 按邮编规则分配到具体仓库
-  6. `step6_timing` — 建议采购日 / 紧急标志
+  6. `step6_timing` — 紧急标志（任一有效国家 `sale_days <= lead_time_days` 即为紧急）
 - **补货区域过滤**：全局参数 `restock_regions` 支持按国家多选；为空数组时表示全部国家参与计算，配置后仅这些国家的订单会参与 `step1_velocity` 销量统计和 `step5_warehouse_split` 的国家订单分仓
 - **并发保护**：`pg_advisory_xact_lock(7429001)` 事务级锁，阻止并发引擎覆盖彼此
 - **快照追溯**：`velocity_snapshot`、`sale_days_snapshot`、`global_config_snapshot` 存入 JSONB 字段；其中 `global_config_snapshot` 会记录 `restock_regions`
@@ -64,7 +64,7 @@
 
 - **建议单**：`draft/partial/pushed/archived/error` 状态流转
 - **跨页选择**：补货发起页的 `selectedIds` 数组跨分页保持，支持全选筛选后的所有条目
-- **编辑校验**：建议详情支持编辑 `total_qty` / `country_breakdown` / `warehouse_breakdown` / `t_purchase`；国家补货量不要求与总采购量一致，已配置仓库时仓内分量之和必须等于国家补货量；正补货量国家未显式填写 `t_purchase` 时后端默认当天
+- **编辑校验**：建议详情支持编辑 `total_qty` / `country_breakdown` / `warehouse_breakdown`；国家补货量不要求与总采购量一致，已配置仓库时仓内分量之和必须等于国家补货量；`urgent` 会随国家补货量变更按对应 SKU 的提前期重新判定
 - **历史记录删除**：历史记录页新增建议单删除入口，允许删除 `draft` / `partial` / `error` / `archived`；`pushed` 建议单保留历史追溯，不允许删除
 - **触发方式中文化**：历史记录页“触发方式”由原始值改为中文展示，当前口径统一为“手动触发 / 自动触发”
 - **推送到赛狐**：`pushback/purchase.py` 合并选中条目生成采购单，失败自动重试
@@ -97,6 +97,7 @@
 - **建议单列表 page_size 上限**：`/api/suggestions` 的 `le=5000`
 - **筛选项统一**：店铺/仓库/订单/库存/出库/补货发起 7 个页面的筛选项布局和高度一致
 - **出库页**：原“其他出库（在途观测）”改名为“出库”；主表展示出库单id、出库仓库id、更新时间、同步时间、出库单类型、状态，明细按“商品SKU、商品ID、可用数、采购单价”顺序展示；同步时间复用 `lastSeenAt`，状态统一按 `is_in_transit` 映射为“在途 / 完结”
+- **在途国家识别**：`sync_out_records` 不再使用 `targetFbaWarehouseId -> warehouse.country` 反推国家，而是从备注文本提取国家名（如 `20260410美国-赢捷-加州-散货-在途中` → `US`）；无法识别时保持空值
 
 ### 2.7 任务队列系统
 
@@ -115,7 +116,14 @@
 
 ---
 
-## 3. 近期重大变更（2026-04-10 ~ 2026-04-13）
+## 3. 近期重大变更（2026-04-10 ~ 2026-04-14）
+
+### 3.32 采购日期移除与紧急规则、在途国家口径调整（2026-04-14）
+- `backend/app/engine/step6_timing.py` 移除采购日期计算，`urgent` 统一改为“任一正补货国家的 `sale_days <= lead_time_days`”；`backend/app/engine/runner.py` 不再写入 `suggestion_item.t_purchase`，并新增 `target_days >= lead_time_days` 的运行期保护
+- `backend/app/api/suggestion.py`、`backend/app/models/suggestion.py`、`backend/app/schemas/suggestion.py` 与 `frontend/src/views/SuggestionDetailView.vue`、`frontend/src/api/suggestion.ts` 一并移除采购日期字段的存储、接口和前端编辑展示；新增迁移 `backend/alembic/versions/20260414_2100_drop_suggestion_item_t_purchase.py`
+- `backend/app/schemas/config.py`、`backend/app/api/config.py` 与 `frontend/src/views/GlobalConfigView.vue` 增加“目标库存天数不能小于采购提前期”的前后端双重校验
+- `backend/app/sync/out_records.py` 将在途记录国家改为从备注提取，解析失败时不再回退到仓库国家；补充对应单元测试
+- **测试**：新增/更新 `backend/tests/unit/test_engine_step6.py`、`backend/tests/unit/test_suggestion_patch.py`、`backend/tests/unit/test_sync_out_records_job.py`、`backend/tests/unit/test_config_schema.py`、`backend/tests/integration/test_config_api.py`、`frontend/src/views/__tests__/GlobalConfigView.test.ts`、`frontend/src/views/__tests__/SuggestionDetailView.test.ts`、`frontend/src/views/__tests__/SuggestionListView.test.ts`
 
 ### 3.31 信息总览图例换行与风险图显示修复（2026-04-13）
 - `frontend/src/components/dashboard/DashboardChartCard.vue` 将图表撑满高度的样式约束收敛到“存在 footer 的卡片”场景，避免普通图表卡片被错误压缩，恢复“各国缺货风险分布”正常显示
