@@ -114,8 +114,11 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             pass  # 客户端可能未初始化
 
         from app.db.session import engine
-        await engine.dispose()
-        logger.info("database_engine_disposed")
+        try:
+            await engine.dispose()
+            logger.info("database_engine_disposed")
+        except Exception:
+            logger.warning("database_engine_dispose_failed", exc_info=True)
         logger.info("app_stopped")
 
 
