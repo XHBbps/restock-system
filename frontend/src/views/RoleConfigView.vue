@@ -13,7 +13,7 @@
     <el-table v-loading="loading" :data="roles" stripe table-layout="fixed" empty-text="暂无角色数据">
       <el-table-column prop="name" label="角色名称" min-width="120" />
       <el-table-column prop="description" label="描述" min-width="180" show-overflow-tooltip />
-      <el-table-column label="类型" width="120">
+      <el-table-column label="类型" width="120" align="center">
         <template #default="{ row }">
           <el-tag v-if="row.is_superadmin" type="warning" size="small">系统内置</el-tag>
           <el-tag v-else size="small">自定义</el-tag>

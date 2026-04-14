@@ -129,8 +129,7 @@
         </div>
         <div class="topbar-right">
           <div class="user-area">
-            <div class="user-avatar">{{ avatarLetter }}</div>
-            <span class="user-name">{{ auth.user?.displayName || auth.user?.username || '' }}</span>
+            <div class="user-avatar" :title="auth.user?.displayName || auth.user?.username || ''">{{ avatarLetter }}</div>
             <div class="user-divider" />
             <button class="user-icon-btn" title="修改密码" @click="showPasswordDialog = true">
               <Pencil :size="14" />

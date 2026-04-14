@@ -13,7 +13,7 @@
     <el-table v-loading="loading" :data="users" stripe table-layout="fixed" empty-text="暂无用户数据">
       <el-table-column prop="username" label="用户名" min-width="120" />
       <el-table-column prop="display_name" label="显示名" min-width="120" />
-      <el-table-column label="角色" min-width="100">
+      <el-table-column label="角色" min-width="100" align="center">
         <template #default="{ row }">
           <el-tag :type="row.is_superadmin ? 'warning' : undefined" size="small">
             {{ row.role_name }}
