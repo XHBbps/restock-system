@@ -19,9 +19,7 @@
         v-if="!loading && !suggestion"
         description="当前没有活动建议单，点击上方按钮生成补货建议。"
         :image-size="80"
-      >
-        <el-button v-if="auth.hasPermission('restock:operate')" type="primary" @click="triggerEngine">生成补货建议</el-button>
-      </el-empty>
+      />
 
       <template v-else>
         <div class="table-toolbar">

@@ -2,7 +2,6 @@
   <div class="workspace-view">
     <DashboardPageHeader
       title="信息总览"
-      description="左侧风险按 SKU+国家 维度展示缓存快照；右侧补货量分布仍基于当前建议补货单。"
     >
       <template #meta>
         <div class="snapshot-meta">
