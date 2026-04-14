@@ -345,7 +345,6 @@ async function handleDelete(role: RoleOut): Promise<void> {
 .permission-group-card {
   border: 1px solid $color-border-default;
   border-radius: 6px;
-  overflow: hidden;
 }
 
 .group-header {
@@ -360,5 +359,11 @@ async function handleDelete(role: RoleOut): Promise<void> {
   display: flex;
   flex-wrap: wrap;
   gap: 12px 24px;
+  min-height: 36px;
+
+  :deep(.el-checkbox) {
+    display: inline-flex;
+    margin-right: 0;
+  }
 }
 </style>
