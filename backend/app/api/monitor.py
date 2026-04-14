@@ -8,7 +8,8 @@ from pydantic import BaseModel
 from sqlalchemy import case, exists, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import db_session, get_current_session
+from app.api.deps import UserContext, db_session, get_current_user, require_permission
+from app.core.permissions import MONITOR_VIEW, SYNC_OPERATE
 from app.core.exceptions import NotFound
 from app.core.logging import get_logger
 from app.core.timezone import now_beijing
@@ -59,7 +60,8 @@ class ApiCallsOverview(BaseModel):
 async def get_api_calls(
     hours: int = Query(default=24, ge=1, le=720),
     db: AsyncSession = Depends(db_session),
-    _: dict[str, Any] = Depends(get_current_session),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(MONITOR_VIEW)),
 ) -> ApiCallsOverview:
     since = now_beijing() - timedelta(hours=hours)
 
@@ -162,7 +164,8 @@ async def get_recent_calls(
     only_failed: bool = Query(default=False),
     limit: int = Query(default=50, ge=1, le=500),
     db: AsyncSession = Depends(db_session),
-    _: dict[str, Any] = Depends(get_current_session),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(MONITOR_VIEW)),
 ) -> list[RecentCallOut]:
     stmt = select(ApiCallLog).order_by(ApiCallLog.called_at.desc()).limit(limit)
     if endpoint:
@@ -188,7 +191,8 @@ _ENDPOINT_TO_JOB = {
 async def retry_call(
     call_id: int = Path(..., ge=1),
     db: AsyncSession = Depends(db_session),
-    _: dict[str, Any] = Depends(get_current_session),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(SYNC_OPERATE)),
 ) -> dict[str, Any]:
     row = (
         await db.execute(select(ApiCallLog).where(ApiCallLog.id == call_id))

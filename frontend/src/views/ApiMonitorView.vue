@@ -100,7 +100,7 @@
           </el-table-column>
           <el-table-column label="操作" width="100" align="center">
             <template #default="{ row }">
-              <el-button v-if="row.saihu_code !== 0" link type="primary" @click="retry(row.id)">
+              <el-button v-if="row.saihu_code !== 0 && auth.hasPermission('sync:operate')" link type="primary" @click="retry(row.id)">
                 重试
               </el-button>
             </template>
@@ -143,9 +143,12 @@ import {
   type SortState,
 } from '@/utils/tableSort'
 import type { EChartsCoreOption } from 'echarts/core'
+import { useAuthStore } from '@/stores/auth'
 import { getActionErrorMessage } from '@/utils/apiError'
 import { ElMessage } from 'element-plus'
 import { computed, onMounted, ref, watch } from 'vue'
+
+const auth = useAuthStore()
 
 const endpointRows = ref<EndpointStats[]>([])
 const recentCalls = ref<RecentCall[]>([])

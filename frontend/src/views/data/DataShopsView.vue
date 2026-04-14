@@ -8,7 +8,7 @@
         <el-option label="FE" value="fe" />
         <el-option label="IN" value="in" />
       </el-select>
-      <el-button :loading="refreshing" @click="refresh">刷新店铺</el-button>
+      <el-button v-if="auth.hasPermission('sync:operate')" :loading="refreshing" @click="refresh">刷新店铺</el-button>
     </template>
 
     <el-table v-loading="loading" :data="pagedRows" style="width: 100%" :scrollbar-always-on="true">
@@ -84,9 +84,12 @@ import TaskProgress from '@/components/TaskProgress.vue'
 import { formatUpdateTime } from '@/utils/format'
 import { normalizeSwitchValue } from '@/utils/element'
 import { getShopStatusMeta } from '@/utils/status'
+import { useAuthStore } from '@/stores/auth'
 import { getActionErrorMessage } from '@/utils/apiError'
 import { ElMessage } from 'element-plus'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+
+const auth = useAuthStore()
 
 const rows = ref<DataShop[]>([])
 const loading = ref(false)

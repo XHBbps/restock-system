@@ -10,7 +10,7 @@
           <el-option label="默认仓" :value="0" />
           <el-option label="虚拟仓" :value="-1" />
         </el-select>
-        <el-button :loading="refreshing" @click="refresh">刷新仓库</el-button>
+        <el-button v-if="auth.hasPermission('sync:operate')" :loading="refreshing" @click="refresh">刷新仓库</el-button>
       </template>
 
       <el-table
@@ -123,9 +123,12 @@ import {
   type SortChangeEvent,
   type SortState,
 } from '@/utils/tableSort'
+import { useAuthStore } from '@/stores/auth'
 import { getActionErrorMessage } from '@/utils/apiError'
 import { ElMessage } from 'element-plus'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+
+const auth = useAuthStore()
 
 const rows = ref<DataWarehouse[]>([])
 const loading = ref(false)

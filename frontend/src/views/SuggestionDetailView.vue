@@ -198,6 +198,7 @@ import {
   type SuggestionItem,
 } from '@/api/suggestion'
 import SkuCard from '@/components/SkuCard.vue'
+import { useAuthStore } from '@/stores/auth'
 import { getActionErrorMessage } from '@/utils/apiError'
 import { allocationModeLabel, allocationModeTagType, allocationSummary } from '@/utils/allocation'
 import { getSuggestionPushStatusMeta, getSuggestionStatusMeta } from '@/utils/status'
@@ -219,6 +220,7 @@ interface CountryRow {
   allocation: AllocationExplanation | null
 }
 
+const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 const suggestion = ref<SuggestionDetail | null>(null)
@@ -287,7 +289,7 @@ function hasChanges(item: SuggestionItem): boolean {
 }
 
 function isEditable(item: SuggestionItem): boolean {
-  return suggestion.value?.status !== 'archived' && item.push_status !== 'pushed'
+  return suggestion.value?.status !== 'archived' && item.push_status !== 'pushed' && auth.hasPermission('restock:operate')
 }
 
 async function save(item: SuggestionItem): Promise<void> {

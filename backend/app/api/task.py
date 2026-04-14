@@ -8,8 +8,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import db_session, get_current_session
+from app.api.deps import UserContext, db_session, get_current_user, require_permission
 from app.core.exceptions import ConflictError, NotFound
+from app.core.permissions import SYNC_OPERATE
 from app.models.task_run import TaskRun
 from app.tasks.queue import enqueue_task
 
@@ -75,7 +76,7 @@ async def list_tasks(
     status: str | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=100),
     db: AsyncSession = Depends(db_session),
-    _: dict[str, Any] = Depends(get_current_session),
+    user: UserContext = Depends(get_current_user),
 ) -> TaskListOut:
     base = select(TaskRun)
     if job_name:
@@ -91,7 +92,8 @@ async def list_tasks(
 async def create_task(
     req: EnqueueRequest,
     db: AsyncSession = Depends(db_session),
-    _: dict[str, Any] = Depends(get_current_session),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(SYNC_OPERATE)),
 ) -> EnqueueResponse:
     if req.job_name not in VALID_JOB_NAMES:
         raise ConflictError(f"未知的 job_name: {req.job_name}")
@@ -109,7 +111,7 @@ async def create_task(
 async def get_task(
     task_id: int = Path(..., ge=1),
     db: AsyncSession = Depends(db_session),
-    _: dict[str, Any] = Depends(get_current_session),
+    user: UserContext = Depends(get_current_user),
 ) -> TaskRunOut:
     row = (await db.execute(select(TaskRun).where(TaskRun.id == task_id))).scalar_one_or_none()
     if row is None:
@@ -121,7 +123,8 @@ async def get_task(
 async def cancel_task(
     task_id: int = Path(..., ge=1),
     db: AsyncSession = Depends(db_session),
-    _: dict[str, Any] = Depends(get_current_session),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(SYNC_OPERATE)),
 ) -> dict[str, str]:
     row = (await db.execute(select(TaskRun).where(TaskRun.id == task_id))).scalar_one_or_none()
     if row is None:

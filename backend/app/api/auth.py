@@ -205,7 +205,10 @@ async def login(
         raise Unauthorized("用户名或密码错误")
 
     if not row.is_active:
-        raise Unauthorized("账户已被禁用")
+        await _record_failure(db, ip_key, ip_attempt, now)
+        await _record_failure(db, user_key, user_attempt, now)
+        await db.commit()
+        raise Unauthorized("用户名或密码错误")
 
     # 验证密码
     if not verify_password(req.password, row.password_hash):
