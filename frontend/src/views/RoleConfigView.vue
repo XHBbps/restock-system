@@ -115,7 +115,7 @@
                 :disabled="!!editingRole?.is_superadmin"
                 @change="(val) => toggleCode(p.code, !!val)"
               >
-                {{ p.name }}
+                {{ stripGroupPrefix(p.name, String(groupName)) }}
               </el-checkbox>
             </div>
           </div>
@@ -205,6 +205,14 @@ function toggleCode(code: string, val: boolean): void {
   if (val) next.add(code)
   else next.delete(code)
   checkedCodes.value = next
+}
+
+// ── Permission label helper ──
+function stripGroupPrefix(name: string, groupName: string): string {
+  if (name.startsWith(groupName + '-')) {
+    return name.slice(groupName.length + 1)
+  }
+  return name
 }
 
 // ── Delete helpers ──

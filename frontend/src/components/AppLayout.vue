@@ -80,9 +80,6 @@
 
       <div class="sidebar-footer">
         <span v-if="!sidebar.isCollapsed" class="footer-version">v0.1.0</span>
-        <button class="logout-btn" title="退出登录" @click="handleLogout">
-          <LogOut :size="14" />
-        </button>
       </div>
     </aside>
 
@@ -131,18 +128,17 @@
           </div>
         </div>
         <div class="topbar-right">
-          <el-dropdown @command="handleUserCommand">
-            <span class="user-dropdown-trigger">
-              {{ auth.user?.displayName || auth.user?.username || '' }}
-              <ChevronDown :size="14" />
-            </span>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item command="change-password">修改密码</el-dropdown-item>
-                <el-dropdown-item command="logout" divided>退出登录</el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
+          <div class="user-area">
+            <div class="user-avatar">{{ avatarLetter }}</div>
+            <span class="user-name">{{ auth.user?.displayName || auth.user?.username || '' }}</span>
+            <div class="user-divider" />
+            <button class="user-icon-btn" title="修改密码" @click="showPasswordDialog = true">
+              <Pencil :size="14" />
+            </button>
+            <button class="user-icon-btn" title="退出登录" @click="handleLogout">
+              <LogOut :size="14" />
+            </button>
+          </div>
         </div>
       </header>
 
@@ -179,7 +175,7 @@ import { isSubCategory, navigationGroups } from '@/config/navigation'
 import { useAuthStore } from '@/stores/auth'
 import { useSidebarStore } from '@/stores/sidebar'
 import { ElMessage } from 'element-plus'
-import { ChevronDown, ChevronRight, IndentDecrease, IndentIncrease, LogOut } from 'lucide-vue-next'
+import { ChevronRight, IndentDecrease, IndentIncrease, LogOut, Pencil } from 'lucide-vue-next'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 
@@ -190,6 +186,11 @@ const sidebar = useSidebarStore()
 
 const currentTitle = computed(() => (route.meta.title as string) || '总览')
 const currentSection = computed(() => (route.meta.section as string) || '工作台')
+
+const avatarLetter = computed(() => {
+  const name = auth.user?.displayName || auth.user?.username || '?'
+  return name.charAt(0)
+})
 
 const filteredGroups = computed(() => {
   return navigationGroups
@@ -262,11 +263,6 @@ async function handleLogout(): Promise<void> {
     auth.clearAuth()
     router.replace('/login')
   }
-}
-
-function handleUserCommand(cmd: string) {
-  if (cmd === 'logout') handleLogout()
-  if (cmd === 'change-password') showPasswordDialog.value = true
 }
 
 const showPasswordDialog = ref(false)
@@ -497,9 +493,8 @@ async function handleChangePassword() {
   bottom: 0;
   z-index: 2;
   display: flex;
-  justify-content: space-between;
+  justify-content: center;
   align-items: center;
-  gap: $space-3;
   padding: $space-4;
   background: $color-bg-card;
   border-top: 1px solid $color-border-default;
@@ -509,33 +504,6 @@ async function handleChangePassword() {
 .footer-version {
   font-size: $font-size-xs;
   color: $color-text-disabled;
-}
-
-.logout-btn {
-  width: 32px;
-  height: 32px;
-  border: 1px solid transparent;
-  border-radius: $radius-md;
-  background: transparent;
-  color: $color-text-secondary;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-
-  &:hover {
-    background: $color-bg-subtle;
-    border-color: $color-border-default;
-    color: $color-text-primary;
-  }
-}
-
-.sidebar-collapsed .sidebar-footer {
-  justify-content: center;
-}
-
-.sidebar-collapsed .logout-btn {
-  margin: 0 auto;
 }
 
 .main {
@@ -614,16 +582,53 @@ async function handleChangePassword() {
   align-items: center;
 }
 
-.user-dropdown-trigger {
+.user-area {
   display: flex;
   align-items: center;
   gap: $space-2;
-  cursor: pointer;
-  font-size: $font-size-sm;
+}
+
+.user-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: $radius-pill;
+  background: $color-brand-primary;
+  color: $color-brand-primary-fg;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: $font-weight-semibold;
+  flex-shrink: 0;
+}
+
+.user-name {
+  font-size: 13px;
+  font-weight: $font-weight-medium;
   color: $color-text-primary;
+}
+
+.user-divider {
+  width: 1px;
+  height: 16px;
+  background: $color-border-default;
+}
+
+.user-icon-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: $radius-md;
+  background: transparent;
+  color: $color-text-secondary;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 
   &:hover {
-    color: $color-brand-primary;
+    background: $color-bg-subtle;
+    color: $color-text-primary;
   }
 }
 

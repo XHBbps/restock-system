@@ -343,21 +343,29 @@ body {
 
     .cell {
       padding: 0 !important;
+      display: flex !important;
+      align-items: center;
+      min-height: 20px; // ensure flex container has height
     }
 
     .cell[class*='-tooltip'] {
-      display: block;
+      display: flex !important; // keep flex for alignment
       max-width: 100%;
       overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+
+      > span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
     }
 
+    // Align matching th (use flexbox justify-content instead of text-align)
     &.is-right .cell {
-      text-align: right;
+      justify-content: flex-end;
     }
     &.is-center .cell {
-      text-align: center;
+      justify-content: center;
     }
   }
 
@@ -815,12 +823,18 @@ body {
 }
 
 // ==================== Form ====================
+// Ensure label vertical center aligns with input vertical center
+.el-form--label-left .el-form-item__label,
 .el-form-item__label {
+  display: flex;
+  align-items: center;
+  height: 40px; // match input height (h-10 = 40px including border)
+  padding-bottom: 0 !important; // override existing padding-bottom
+  margin-bottom: 0;
   font-size: $font-size-sm;
   font-weight: $font-weight-medium;
   color: $color-text-primary;
   line-height: $line-height-normal;
-  padding-bottom: $space-2;
 }
 
 .el-form-item__error {
@@ -871,5 +885,20 @@ body {
   .el-alert__title {
     font-size: $font-size-sm;
     font-weight: $font-weight-medium;
+  }
+}
+
+// ==================== Autofill background override ====================
+// Override browser autofill background in all dialogs and forms
+.el-dialog,
+.el-form {
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus,
+  input:-webkit-autofill:active {
+    -webkit-box-shadow: 0 0 0 1000px $color-bg-card inset !important;
+    -webkit-text-fill-color: $color-text-primary !important;
+    transition: background-color 9999s ease-in-out 0s;
+    caret-color: $color-text-primary;
   }
 }
