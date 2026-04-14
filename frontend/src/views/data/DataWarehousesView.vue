@@ -16,7 +16,7 @@
       <el-table
         v-loading="loading"
         :data="pagedRows"
-        table-layout="fixed"
+        table-layout="auto"
         style="width: 100%"
         :scrollbar-always-on="true"
         empty-text="暂无仓库数据"
@@ -277,21 +277,6 @@ onMounted(reload)
   display: flex;
   flex-wrap: nowrap;
   gap: 4px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: thin;
-  scrollbar-color: $color-border-default transparent;
-  padding-bottom: 2px;
-
-  &::-webkit-scrollbar {
-    height: 4px;
-  }
-  &::-webkit-scrollbar-track {
-    background: transparent;
-  }
-  &::-webkit-scrollbar-thumb {
-    background: $color-border-default;
-    border-radius: $radius-pill;
-  }
+  overflow: hidden;
 }
 </style>
