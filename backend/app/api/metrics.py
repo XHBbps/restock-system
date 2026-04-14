@@ -3,8 +3,8 @@
 返回 task_run 各状态计数 + 最近 24h 同步成功率,用于人工巡检。
 """
 
-from datetime import timedelta
-from typing import Any
+from datetime import datetime, timedelta
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import PlainTextResponse
@@ -19,8 +19,10 @@ from app.engine.step1_velocity import run_step1
 from app.engine.step2_sale_days import run_step2
 from app.engine.step3_country_qty import compute_country_qty
 from app.models.api_call_log import ApiCallLog
+from app.models.dashboard_snapshot import DashboardSnapshot
 from app.models.product_listing import ProductListing
 from app.models.task_run import TaskRun
+from app.tasks.queue import enqueue_task
 
 # --------------- Dashboard schemas ---------------
 
@@ -46,7 +48,7 @@ class CountryRestockDistribution(BaseModel):
     total_qty: int
 
 
-class DashboardOverview(BaseModel):
+class DashboardOverviewPayload(BaseModel):
     enabled_sku_count: int
     suggestion_item_count: int
     pushed_count: int
@@ -63,7 +65,19 @@ class DashboardOverview(BaseModel):
     top_urgent_skus: list[UrgentSkuItem]
 
 
+class DashboardOverview(DashboardOverviewPayload):
+    snapshot_status: Literal["ready", "missing", "refreshing"] = "ready"
+    snapshot_updated_at: datetime | None = None
+    snapshot_task_id: int | None = None
+
+
+class DashboardRefreshOut(BaseModel):
+    task_id: int
+    existing: bool
+
+
 router = APIRouter(prefix="/api/metrics", tags=["metrics"])
+REFRESH_DASHBOARD_JOB_NAME = "refresh_dashboard_snapshot"
 
 
 def _country_sale_days(snapshot: dict[str, Any] | None, country: str) -> float | None:
@@ -181,6 +195,164 @@ async def _build_top_urgent_skus(
     ]
 
 
+def _empty_dashboard_payload(
+    *,
+    enabled_sku_count: int,
+    lead_time_days: int,
+    target_days: int,
+) -> DashboardOverviewPayload:
+    return DashboardOverviewPayload(
+        enabled_sku_count=enabled_sku_count,
+        suggestion_item_count=0,
+        pushed_count=0,
+        urgent_count=0,
+        warning_count=0,
+        safe_count=0,
+        risk_country_count=0,
+        suggestion_id=None,
+        suggestion_status=None,
+        lead_time_days=lead_time_days,
+        target_days=target_days,
+        country_risk_distribution=[],
+        country_restock_distribution=[],
+        top_urgent_skus=[],
+    )
+
+
+async def _get_active_dashboard_refresh_task(db: AsyncSession) -> TaskRun | None:
+    result = await db.execute(
+        select(TaskRun)
+        .where(TaskRun.job_name == REFRESH_DASHBOARD_JOB_NAME)
+        .where(TaskRun.status.in_(("pending", "running")))
+        .order_by(TaskRun.id.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
+    from app.models.global_config import GlobalConfig
+    from app.models.sku import SkuConfig
+    from app.models.suggestion import Suggestion, SuggestionItem
+
+    enabled_skus = (
+        await db.execute(
+            select(SkuConfig.commodity_sku)
+            .where(SkuConfig.enabled.is_(True))
+            .order_by(SkuConfig.commodity_sku)
+        )
+    ).scalars().all()
+    enabled_sku_count = len(enabled_skus)
+
+    config = (
+        await db.execute(select(GlobalConfig).where(GlobalConfig.id == 1))
+    ).scalar_one_or_none()
+    target_days = config.target_days if config else 60
+    lead_time_days = config.lead_time_days if config else 50
+    allowed_countries = resolve_allowed_restock_regions(config.restock_regions if config else [])
+
+    velocity = (
+        await run_step1(
+            db,
+            enabled_skus,
+            now_beijing().date(),
+            allowed_countries=allowed_countries,
+        )
+        if enabled_skus
+        else {}
+    )
+    all_sale_days, inventory = await run_step2(db, velocity, enabled_skus) if enabled_skus else ({}, {})
+    live_country_qty = compute_country_qty(velocity, inventory, target_days) if enabled_skus else {}
+    country_risk_distribution, urgent_count, warning_count, safe_count = (
+        _build_country_risk_distribution(
+            all_sale_days,
+            lead_time_days=lead_time_days,
+            target_days=target_days,
+        )
+        if enabled_skus
+        else ([], 0, 0, 0)
+    )
+    top_urgent_skus = (
+        await _build_top_urgent_skus(
+            db,
+            sale_days_by_sku=all_sale_days,
+            country_qty_by_sku=live_country_qty,
+            lead_time_days=lead_time_days,
+        )
+        if enabled_skus
+        else []
+    )
+
+    suggestion = (
+        await db.execute(
+            select(Suggestion)
+            .where(Suggestion.status.in_(["draft", "partial"]))
+            .order_by(Suggestion.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    if not suggestion:
+        return DashboardOverviewPayload(
+            enabled_sku_count=enabled_sku_count,
+            suggestion_item_count=0,
+            pushed_count=0,
+            urgent_count=urgent_count,
+            warning_count=warning_count,
+            safe_count=safe_count,
+            risk_country_count=len(country_risk_distribution),
+            suggestion_id=None,
+            suggestion_status=None,
+            lead_time_days=lead_time_days,
+            target_days=target_days,
+            country_risk_distribution=country_risk_distribution,
+            country_restock_distribution=[],
+            top_urgent_skus=top_urgent_skus,
+        )
+
+    items = (
+        (
+            await db.execute(
+                select(SuggestionItem).where(SuggestionItem.suggestion_id == suggestion.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    pushed_count = sum(1 for it in items if it.push_status == "pushed")
+    country_restock_totals: dict[str, int] = {}
+    for it in items:
+        for country, qty in (it.country_breakdown or {}).items():
+            if isinstance(qty, (int, float)) and qty > 0:
+                country_restock_totals[country] = country_restock_totals.get(country, 0) + int(qty)
+
+    country_restock_distribution = sorted(
+        [
+            CountryRestockDistribution(country=country, total_qty=qty)
+            for country, qty in country_restock_totals.items()
+        ],
+        key=lambda item: (-item.total_qty, item.country),
+    )
+
+    return DashboardOverviewPayload(
+        enabled_sku_count=enabled_sku_count,
+        suggestion_item_count=len(items),
+        pushed_count=pushed_count,
+        urgent_count=urgent_count,
+        warning_count=warning_count,
+        safe_count=safe_count,
+        risk_country_count=len(country_risk_distribution),
+        suggestion_id=suggestion.id,
+        suggestion_status=suggestion.status,
+        lead_time_days=lead_time_days,
+        target_days=target_days,
+        country_risk_distribution=country_risk_distribution,
+        country_restock_distribution=country_restock_distribution,
+        top_urgent_skus=top_urgent_skus,
+    )
+
+
 @router.get("", response_class=PlainTextResponse)
 async def metrics(
     db: AsyncSession = Depends(db_session),
@@ -226,128 +398,49 @@ async def get_dashboard_overview(
     db: AsyncSession = Depends(db_session),
     _: dict[str, Any] = Depends(get_current_session),
 ) -> DashboardOverview:
-    from app.models.global_config import GlobalConfig
-    from app.models.sku import SkuConfig
-    from app.models.suggestion import Suggestion, SuggestionItem
-
-    # 1. Enabled SKU list
-    enabled_skus = (
-        await db.execute(
-            select(SkuConfig.commodity_sku)
-            .where(SkuConfig.enabled.is_(True))
-            .order_by(SkuConfig.commodity_sku)
-        )
-    ).scalars().all()
-    enabled_sku_count = len(enabled_skus)
-
-    # 2. Global config target_days
-    config = (
-        await db.execute(select(GlobalConfig).where(GlobalConfig.id == 1))
-    ).scalar_one_or_none()
-    target_days = config.target_days if config else 60
-    lead_time_days = config.lead_time_days if config else 50
-    allowed_countries = resolve_allowed_restock_regions(config.restock_regions if config else [])
-
-    velocity = (
-        await run_step1(
-            db,
-            enabled_skus,
-            now_beijing().date(),
-            allowed_countries=allowed_countries,
-        )
-        if enabled_skus
-        else {}
-    )
-    all_sale_days, inventory = await run_step2(db, velocity, enabled_skus) if enabled_skus else ({}, {})
-    live_country_qty = compute_country_qty(velocity, inventory, target_days) if enabled_skus else {}
-    country_risk_distribution, urgent_count, warning_count, safe_count = (
-        _build_country_risk_distribution(
-            all_sale_days,
-            lead_time_days=lead_time_days,
-            target_days=target_days,
-        )
-        if enabled_skus
-        else ([], 0, 0, 0)
-    )
-    top_urgent_skus = (
-        await _build_top_urgent_skus(
-            db,
-            sale_days_by_sku=all_sale_days,
-            country_qty_by_sku=live_country_qty,
-            lead_time_days=lead_time_days,
-        )
-        if enabled_skus
-        else []
-    )
-
-    # 3. Current suggestion (latest draft or partial)
-    suggestion = (
-        await db.execute(
-            select(Suggestion)
-            .where(Suggestion.status.in_(["draft", "partial"]))
-            .order_by(Suggestion.created_at.desc())
-            .limit(1)
-        )
+    active_task = await _get_active_dashboard_refresh_task(db)
+    snapshot = (
+        await db.execute(select(DashboardSnapshot).where(DashboardSnapshot.id == 1))
     ).scalar_one_or_none()
 
-    if not suggestion:
+    if snapshot and snapshot.payload:
+        payload = DashboardOverviewPayload.model_validate(snapshot.payload)
         return DashboardOverview(
-            enabled_sku_count=enabled_sku_count,
-            suggestion_item_count=0,
-            pushed_count=0,
-            urgent_count=urgent_count,
-            warning_count=warning_count,
-            safe_count=safe_count,
-            risk_country_count=len(country_risk_distribution),
-            suggestion_id=None,
-            suggestion_status=None,
-            lead_time_days=lead_time_days,
-            target_days=target_days,
-            country_risk_distribution=country_risk_distribution,
-            country_restock_distribution=[],
-            top_urgent_skus=top_urgent_skus,
+            **payload.model_dump(),
+            snapshot_status="refreshing" if active_task else "ready",
+            snapshot_updated_at=snapshot.refreshed_at or snapshot.updated_at,
+            snapshot_task_id=active_task.id if active_task else None,
         )
 
-    # 4. Load all suggestion items
-    items = (
-        (
-            await db.execute(
-                select(SuggestionItem).where(SuggestionItem.suggestion_id == suggestion.id)
-            )
+    task_id = active_task.id if active_task else None
+    if task_id is None:
+        task_id, _ = await enqueue_task(
+            db,
+            job_name=REFRESH_DASHBOARD_JOB_NAME,
+            trigger_source="manual",
+            dedupe_key=REFRESH_DASHBOARD_JOB_NAME,
+            payload={"triggered_by": "dashboard_get"},
         )
-        .scalars()
-        .all()
-    )
 
-    pushed_count = sum(1 for it in items if it.push_status == "pushed")
-
-    # 5. Aggregate suggestion-only restock totals.
-    country_restock_totals: dict[str, int] = {}
-    for it in items:
-        for country, qty in (it.country_breakdown or {}).items():
-            if isinstance(qty, (int, float)) and qty > 0:
-                country_restock_totals[country] = country_restock_totals.get(country, 0) + int(qty)
-    country_restock_distribution = sorted(
-        [
-            CountryRestockDistribution(country=country, total_qty=qty)
-            for country, qty in country_restock_totals.items()
-        ],
-        key=lambda item: (-item.total_qty, item.country),
-    )
-
+    payload = _empty_dashboard_payload(enabled_sku_count=0, lead_time_days=50, target_days=60)
     return DashboardOverview(
-        enabled_sku_count=enabled_sku_count,
-        suggestion_item_count=len(items),
-        pushed_count=pushed_count,
-        urgent_count=urgent_count,
-        warning_count=warning_count,
-        safe_count=safe_count,
-        risk_country_count=len(country_risk_distribution),
-        suggestion_id=suggestion.id,
-        suggestion_status=suggestion.status,
-        lead_time_days=lead_time_days,
-        target_days=target_days,
-        country_risk_distribution=country_risk_distribution,
-        country_restock_distribution=country_restock_distribution,
-        top_urgent_skus=top_urgent_skus,
+        **payload.model_dump(),
+        snapshot_status="refreshing",
+        snapshot_updated_at=None,
+        snapshot_task_id=task_id,
     )
+
+
+@router.post("/dashboard/refresh", response_model=DashboardRefreshOut)
+async def refresh_dashboard_snapshot(
+    db: AsyncSession = Depends(db_session),
+    _: dict[str, Any] = Depends(get_current_session),
+) -> DashboardRefreshOut:
+    task_id, existing = await enqueue_task(
+        db,
+        job_name=REFRESH_DASHBOARD_JOB_NAME,
+        trigger_source="manual",
+        dedupe_key=REFRESH_DASHBOARD_JOB_NAME,
+        payload={"triggered_by": "manual_refresh"},
+    )
+    return DashboardRefreshOut(task_id=task_id, existing=existing)

@@ -28,6 +28,7 @@ VALID_JOB_NAMES = {
     "calc_engine",
     "push_saihu",
     "daily_archive",
+    "refresh_dashboard_snapshot",
 }
 
 

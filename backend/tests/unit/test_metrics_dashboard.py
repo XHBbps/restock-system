@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 import app.api.metrics as metrics_module
-from app.api.metrics import get_dashboard_overview
+from app.api.metrics import build_dashboard_payload
 
 
 class _ScalarOneResult:
@@ -89,7 +89,7 @@ async def test_dashboard_returns_empty_risk_distribution_without_active_suggesti
     monkeypatch.setattr(metrics_module, "run_step2", _fake_run_step2)
 
     try:
-        result = await get_dashboard_overview(db=db, _={})  # type: ignore[arg-type]
+        result = await build_dashboard_payload(db=db)  # type: ignore[arg-type]
     finally:
         monkeypatch.undo()
 
@@ -231,7 +231,7 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
     monkeypatch.setattr(metrics_module, "run_step2", _fake_run_step2)
 
     try:
-        result = await get_dashboard_overview(db=db, _={})  # type: ignore[arg-type]
+        result = await build_dashboard_payload(db=db)  # type: ignore[arg-type]
     finally:
         monkeypatch.undo()
 
