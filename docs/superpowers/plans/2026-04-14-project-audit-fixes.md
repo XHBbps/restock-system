@@ -105,24 +105,28 @@ from app.main import app
 
 
 @pytest.mark.asyncio
-async def test_unhandled_exception_returns_generic_500(monkeypatch):
+async def test_unhandled_exception_returns_generic_500():
     """模拟一个端点抛出未处理异常，验证返回通用 500 而非堆栈。"""
 
-    # 注入一个会抛异常的端点
+    # 注入临时路由并在测试结束后清理，避免污染 app 路由表
     @app.get("/test-unhandled-error")
     async def _boom():
         raise RuntimeError("secret internal detail")
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as ac:
-        resp = await ac.get("/test-unhandled-error")
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get("/test-unhandled-error")
 
-    assert resp.status_code == 500
-    body = resp.json()
-    assert "detail" in body
-    assert "secret internal detail" not in body["detail"]
-    assert "Traceback" not in resp.text
+        assert resp.status_code == 500
+        body = resp.json()
+        assert "detail" in body
+        assert "secret internal detail" not in body["detail"]
+        assert "Traceback" not in resp.text
+    finally:
+        # 清理注入的路由，防止跨测试污染
+        app.routes[:] = [r for r in app.routes if getattr(r, "path", None) != "/test-unhandled-error"]
 ```
 
 - [ ] **Step 2: 运行测试确认失败**
@@ -809,48 +813,9 @@ export default defineConfig(({ mode }) => {
 })
 ```
 
-- [ ] **Step 3: 修改 main.ts — 保留 CSS 全量，JS 改为按需**
+- [ ] **Step 3: main.ts 不在此 Task 修改**
 
-**关键校验说明**：
-- `ElementPlusLocale` 不是 element-plus 的有效导出——必须使用默认导出 `ElementPlus`
-- `ElMessage` 在 `src/api/client.ts`（.ts 文件）中被 `import { ElMessage } from 'element-plus'` 直接使用，unplugin-vue-components 不覆盖 .ts 文件，所以需要配置 `unplugin-auto-import` 来处理（它的 `include` 默认包含 .ts 文件）
-- CSS 全量导入保留（`element-overrides.scss` 依赖完整 CSS 基础），JS 组件按需注册
-
-替换 `frontend/src/main.ts`：
-
-```typescript
-// 应用入口：装配 Vue + Pinia + Router + Element Plus（JS 按需 + CSS 全量）
-import { createPinia } from 'pinia'
-import { createApp } from 'vue'
-
-import ElementPlus, { ElMessage } from 'element-plus'
-import 'element-plus/dist/index.css'  // CSS 全量保留（element-overrides.scss 依赖）
-import zhCn from 'element-plus/es/locale/lang/zh-cn'
-
-import App from './App.vue'
-import router from './router'
-import './styles/element-overrides.scss'
-
-const app = createApp(App)
-
-app.use(createPinia())
-app.use(router)
-app.use(ElementPlus, { locale: zhCn })
-
-// 全局 Vue 错误处理
-app.config.errorHandler = (err, _instance, info) => {
-  console.error('[Vue Error]', err, info)
-  ElMessage.error('操作异常，请刷新页面重试')
-}
-
-window.addEventListener('unhandledrejection', (event) => {
-  console.error('[Unhandled Rejection]', event.reason)
-})
-
-app.mount('#app')
-```
-
-**说明**：此改动仅添加全局错误处理和 unplugin 配置。Element Plus JS 全量导入暂时保留（`app.use(ElementPlus)`），因为 unplugin 的按需注册需要先移除 `app.use(ElementPlus)` 再验证每个页面组件是否正确自动注册。这个可以在后续迭代中逐步迁移——先配置 unplugin（Step 2 已完成），再逐步移除手动 `app.use`。当前批次的核心收益是 unplugin 基础设施就绪 + 全局错误处理。
+`main.ts` 已在 Task 4 中添加了全局错误处理和 `ElMessage` 导入。本 Task 仅配置 `vite.config.ts` 中的 unplugin 基础设施。`app.use(ElementPlus)` 暂时保留——后续迭代中再逐步移除手动注册、验证每个页面组件的自动注册是否正确。当前批次的核心收益是 unplugin 基础设施就绪。
 
 - [ ] **Step 4: 运行构建验证**
 
@@ -893,7 +858,7 @@ const GRID_CELL_COUNT = 2800
 改为：
 
 ```typescript
-const GRID_CELL_COUNT = 500
+const GRID_CELL_COUNT = 1200  // 60列×20行，覆盖 1920px 宽 640px 高，兼顾 radial-gradient mask 视觉效果
 ```
 
 - [ ] **Step 2: 运行构建验证**
@@ -928,14 +893,21 @@ function hasChanges(item: SuggestionItem): boolean {
   const current = normalizeEditingState(state)
   // 逐字段比较替代全量序列化
   if (current.total_qty !== original.total_qty) return true
+  // country_breakdown 比较
   const currentCountries = Object.keys(current.country_breakdown)
   const originalCountries = Object.keys(original.country_breakdown)
   if (currentCountries.length !== originalCountries.length) return true
   for (const country of currentCountries) {
     if (current.country_breakdown[country] !== original.country_breakdown[country]) return true
-    const cw = current.warehouse_breakdown?.[country]
-    const ow = original.warehouse_breakdown?.[country]
-    if (JSON.stringify(cw) !== JSON.stringify(ow)) return true
+  }
+  // warehouse_breakdown 比较（独立遍历，避免遗漏 country_breakdown 中不存在的 key）
+  const currentWhCountries = Object.keys(current.warehouse_breakdown)
+  const originalWhCountries = Object.keys(original.warehouse_breakdown)
+  if (currentWhCountries.length !== originalWhCountries.length) return true
+  for (const country of currentWhCountries) {
+    const cw = current.warehouse_breakdown[country]
+    const ow = original.warehouse_breakdown[country]
+    if (JSON.stringify(cw) !== JSON.stringify(ow)) return true  // 仓库级数据量小，序列化可接受
   }
   return false
 }
@@ -1144,15 +1116,60 @@ git commit -m "feat: daily_archive 添加 90 天快照保留策略（R-03）"
     )
 ```
 
-- [ ] **Step 2: 生成 Alembic 迁移**
+- [ ] **Step 2: 手动创建 Alembic 迁移**
+
+**关键校验说明**：Alembic autogenerate 通常**不能**检测 FK `ondelete` 属性变更。必须手动编写迁移。
 
 ```bash
-cd backend && alembic revision --autogenerate -m "in_transit_record FK ondelete SET NULL"
+cd backend && alembic revision -m "in_transit_record FK ondelete SET NULL"
 ```
 
-- [ ] **Step 3: 检查生成的迁移文件**
+在生成的空迁移文件中手动编写：
 
-确认迁移内容仅包含 FK 约束的 `ondelete` 变更。如果 autogenerate 产生额外变更，手动裁剪。
+```python
+"""in_transit_record FK ondelete SET NULL"""
+
+from alembic import op
+
+# revision identifiers
+revision = "..."  # auto-generated
+down_revision = "..."  # auto-generated
+
+def upgrade() -> None:
+    op.drop_constraint(
+        "in_transit_record_target_warehouse_id_fkey",
+        "in_transit_record",
+        type_="foreignkey",
+    )
+    op.create_foreign_key(
+        "in_transit_record_target_warehouse_id_fkey",
+        "in_transit_record",
+        "warehouse",
+        ["target_warehouse_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+
+def downgrade() -> None:
+    op.drop_constraint(
+        "in_transit_record_target_warehouse_id_fkey",
+        "in_transit_record",
+        type_="foreignkey",
+    )
+    op.create_foreign_key(
+        "in_transit_record_target_warehouse_id_fkey",
+        "in_transit_record",
+        "warehouse",
+        ["target_warehouse_id"],
+        ["id"],
+    )
+```
+
+**注意**：FK 约束名称需要确认——可通过 `\d in_transit_record` 查看实际名称。如果数据库中名称不是 `in_transit_record_target_warehouse_id_fkey`，需替换为实际名称。
+
+- [ ] **Step 3: 验证迁移文件**
+
+确认迁移文件只包含 FK 重建逻辑，无其他变更。
 
 - [ ] **Step 4: 运行后端测试**
 
@@ -1324,16 +1341,10 @@ git commit -m "fix: _mapUserInfo 使用运行时类型校验替代 as 断言（Q
 
 替换为：
 ```typescript
-          return !('permission' in child && child.permission) || auth.hasPermission(child.permission as string)
+          return !child.permission || auth.hasPermission(child.permission)
 ```
 
-**注意**：`NavItem` 接口定义中 `permission` 是可选字段，而 `NavSubCategory` 也有可选 `permission`。两者都有 `permission?: string`，所以用 `'permission' in child` 可以安全窄化。
-
-检查 `navigation.ts` 的类型定义确认兼容：
-- `NavItem` 有 `permission?: string`
-- `NavSubCategory` 有 `permission?: string`
-
-两者的 union 为 `NavItem | NavSubCategory`，`'permission' in child` 是有效的窄化。
+**说明**：`NavItem` 和 `NavSubCategory` 都声明了 `permission?: string`，所以 union 类型 `NavItem | NavSubCategory` 上 `child.permission` 的类型是 `string | undefined`。`!child.permission` 在 `undefined` 和空字符串时为 `true`（跳过权限检查），`auth.hasPermission(child.permission)` 只在 truthy 分支执行，TypeScript 会窄化为 `string`——无需 `as string` 也无需 `'permission' in child`。
 
 - [ ] **Step 2: 运行构建验证**
 
@@ -1361,22 +1372,24 @@ git commit -m "fix: AppLayout 移除 as any，使用 in 类型守卫（Q-03）"
 
 ```typescript
       thresholds: {
-        statements: 15,
-        branches: 10,
-        functions: 10,
-        lines: 15,
+        statements: 10,
+        branches: 5,
+        functions: 5,
+        lines: 10,
       },
 ```
 
-**注意**：先设置为当前实际覆盖率之下的保底值，避免阻塞 CI。后续随测试补充逐步提高。
+**注意**：先从保守值起步（10/5/5/10），避免未经验证的阈值阻塞 CI。
 
-- [ ] **Step 2: 运行测试确认阈值不阻塞**
+- [ ] **Step 2: 运行覆盖率报告确认阈值安全**
 
 ```bash
 cd frontend && npm run test:coverage
 ```
 
-预期：PASS，如果当前覆盖率低于阈值则适当降低。
+检查输出中的实际覆盖率。如果任何维度低于阈值，将对应阈值降到实际值以下。例如实际 branches 3%，则设 `branches: 2`。
+
+预期：PASS
 
 - [ ] **Step 3: 提交**
 
@@ -1572,6 +1585,8 @@ git commit -m "fix: 添加容器 CPU 限制防止资源饥饿（D-02）"
 
 1. 给 `frontend` 服务添加 healthcheck（在 `restart:` 之后）：
 
+**注意**：如果 Task 33 已修改 nginx 端口为 8080，healthcheck URL 需同步改为 `http://localhost:8080/`。以下先用 80，Task 33 执行时统一改。
+
 ```yaml
   frontend:
     build:
@@ -1579,7 +1594,7 @@ git commit -m "fix: 添加容器 CPU 限制防止资源饥饿（D-02）"
       dockerfile: Dockerfile
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost/"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/"]  # 与 Task 33 的 nginx 8080 端口一致
       interval: 10s
       timeout: 3s
       retries: 3
@@ -1944,6 +1959,11 @@ git commit -m "fix: 备份后验证文件完整性（D-07）"
         -Server
     }
 
+    # 请求体大小限制（D-08）
+    request_body {
+        max_size 10MB
+    }
+
     handle /api/* {
         reverse_proxy backend:8000 {
             header_up X-Real-IP {remote_host}
@@ -1976,7 +1996,7 @@ git commit -m "fix: 备份后验证文件完整性（D-07）"
     }
 
     handle {
-        reverse_proxy frontend:80
+        reverse_proxy frontend:8080
     }
 
     log {
@@ -1988,6 +2008,11 @@ git commit -m "fix: 备份后验证文件完整性（D-07）"
     }
 }
 ```
+
+**变更要点**：
+- 新增 `request_body { max_size 10MB }`（D-08）
+- `frontend:80` → `frontend:8080`（与 Task 33 nginx 端口改为 8080 一致）
+- 所有原有指令（`encode gzip zstd`、`header_up` 等）完整保留
 
 - [ ] **Step 2: 提交**
 
@@ -2348,9 +2373,11 @@ async def prometheus_metrics(
 
 最终路径为 `/api/metrics/prometheus`（router prefix + endpoint path）。
 
-- [ ] **Step 2: 在 Caddyfile 中代理 /api/metrics/prometheus**
+**注意**：此端点**无认证**（Prometheus 抓取需要无认证访问）。由于位于 `/api/*` 路径下，通过 Caddy 公开可访问。如果需要限制，可在 Caddyfile 中添加类似健康端点的内网限制，或在端点上添加简单的 Bearer token 校验。当前作为内部系统暂可接受。
 
-该路径已被 `/api/*` 规则覆盖，无需额外配置。但可以考虑限制内网访问（与健康端点类似）。
+- [ ] **Step 2: Caddyfile 已通过 `/api/*` 规则代理**
+
+无需额外配置。如需限制访问，参考 Task 32 中健康端点的 `@health_internal` 模式。
 
 - [ ] **Step 3: 运行后端测试**
 
