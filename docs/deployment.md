@@ -129,6 +129,8 @@ bash deploy/scripts/deploy.sh
 6. **冒烟检查** — `deploy/scripts/smoke_check.sh` 访问 `/healthz` 和 `/readyz`
 7. **失败自动回滚** — 任何步骤失败触发 `deploy/scripts/rollback.sh`，仅恢复上一版应用；若迁移已执行，数据库必须通过最近一次备份手动恢复
 
+**经验**：凡是移除旧数据库字段兼容层的发布，必须坚持“先执行 `alembic upgrade head`，再启动 backend / worker / scheduler”，否则运行时会直接暴露 schema 漂移问题。
+
 ### 4.2 手动命令（细粒度操作）
 
 | 场景 | 命令 |
