@@ -142,6 +142,15 @@ async def _saihu_exc_handler(_: Request, exc: SaihuAPIError) -> JSONResponse:
     )
 
 
+@app.exception_handler(Exception)
+async def _generic_exc_handler(request: Request, exc: Exception) -> JSONResponse:
+    logger.error("unhandled_exception", exc_info=exc, path=request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "服务器内部错误，请稍后重试"},
+    )
+
+
 app.include_router(auth_api.router)
 app.include_router(auth_roles_api.router)
 app.include_router(auth_users_api.router)

@@ -10,7 +10,7 @@ import uuid
 import structlog
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 
 from app.core.logging import get_logger
 
@@ -26,7 +26,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         started = time.monotonic()
         try:
             response: Response = await call_next(request)
-        except Exception:
+        except Exception as exc:
             duration_ms = int((time.monotonic() - started) * 1000)
             logger.exception(
                 "http_request_exception",
@@ -34,7 +34,11 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
                 path=request.url.path,
                 duration_ms=duration_ms,
             )
-            raise
+            _ = exc  # exception already logged; return generic response to prevent stack trace leakage
+            return JSONResponse(
+                status_code=500,
+                content={"detail": "服务器内部错误，请稍后重试"},
+            )
 
         duration_ms = int((time.monotonic() - started) * 1000)
         log_method = logger.info if response.status_code < 400 else logger.warning
