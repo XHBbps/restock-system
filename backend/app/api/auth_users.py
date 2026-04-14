@@ -255,10 +255,9 @@ async def toggle_user_status(
         await _check_last_superadmin(db, user_id)
 
     await db.execute(
-        update(SysUser).where(SysUser.id == user_id).values(is_active=body.is_active)
-    )
-    await db.execute(
-        update(SysUser).where(SysUser.id == user_id).values(perm_version=SysUser.perm_version + 1)
+        update(SysUser)
+        .where(SysUser.id == user_id)
+        .values(is_active=body.is_active, perm_version=SysUser.perm_version + 1)
     )
 
     event = "auth_user_enabled" if body.is_active else "auth_user_disabled"
