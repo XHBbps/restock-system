@@ -741,7 +741,17 @@ body {
 }
 
 // ==================== Radio ====================
+// EP 选中态通过 CSS 变量控制，直接覆盖变量最可靠（免疫选择器特异性问题）
+.el-radio-button {
+  --el-radio-button-checked-bg-color: #{$color-brand-primary};
+  --el-radio-button-checked-text-color: #{$color-brand-primary-fg};
+  --el-radio-button-checked-border-color: #{$color-brand-primary};
+}
+
 .el-radio-button__inner {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
   background: $color-bg-card;
   border: 1px solid $color-border-default;
   color: $color-text-primary;
@@ -749,7 +759,6 @@ body {
   font-weight: $font-weight-medium;
   height: 36px;
   padding: 0 16px;
-  line-height: 34px;
 
   &:hover {
     background: $color-bg-subtle;
@@ -764,8 +773,9 @@ body {
   border-radius: 0 $radius-md $radius-md 0;
 }
 
-.el-radio-button__original-radio:checked + .el-radio-button__inner {
-  background: $color-brand-primary;
+// 选中态：匹配 EP 完整选择器特异性 (0,5,0)
+.el-radio-button.is-active .el-radio-button__original-radio:not(:disabled) + .el-radio-button__inner {
+  background-color: $color-brand-primary;
   border-color: $color-brand-primary;
   color: $color-brand-primary-fg;
   box-shadow: none;
