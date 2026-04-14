@@ -76,6 +76,7 @@
               filterable
               clearable
               placeholder="选择国家"
+              :disabled="!auth.hasPermission('config:edit')"
               style="width: 170px"
               @change="(val: string) => saveCountry(row, val)"
             >

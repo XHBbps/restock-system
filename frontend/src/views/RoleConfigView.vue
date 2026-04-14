@@ -10,13 +10,13 @@
       </el-button>
     </template>
 
-    <el-table v-loading="loading" :data="roles" stripe>
+    <el-table v-loading="loading" :data="roles" stripe table-layout="fixed" empty-text="暂无角色数据">
       <el-table-column prop="name" label="角色名称" min-width="120" />
       <el-table-column prop="description" label="描述" min-width="180" show-overflow-tooltip />
       <el-table-column label="类型" width="120">
         <template #default="{ row }">
           <el-tag v-if="row.is_superadmin" type="warning" size="small">系统内置</el-tag>
-          <span v-else>自定义</span>
+          <el-tag v-else size="small">自定义</el-tag>
         </template>
       </el-table-column>
       <el-table-column prop="user_count" label="用户数" width="90" align="center" />
@@ -53,11 +53,11 @@
     <el-dialog
       v-model="dialogVisible"
       :title="dialogMode === 'create' ? '新建角色' : '编辑角色'"
-      width="680px"
+      width="720px"
       :close-on-click-modal="false"
       destroy-on-close
     >
-      <el-form :model="form" label-width="80px" style="max-width: 560px">
+      <el-form :model="form" label-width="80px" style="max-width: 600px">
         <el-form-item label="角色名称" required>
           <el-input
             v-model="form.name"
@@ -91,7 +91,7 @@
           超管角色自动拥有所有权限，权限不可修改
         </el-alert>
 
-        <div v-loading="permLoading" class="permission-groups">
+        <div v-loading="permLoading" class="permission-groups" style="max-height: 60vh; overflow-y: auto">
           <div
             v-for="(perms, groupName) in permissionGroups"
             :key="groupName"
@@ -335,22 +335,22 @@ async function handleDelete(role: RoleOut): Promise<void> {
 }
 
 .permission-group-card {
-  border: 1px solid var(--el-border-color-lighter);
+  border: 1px solid $color-border-default;
   border-radius: 6px;
   overflow: hidden;
 }
 
 .group-header {
   padding: 8px 12px;
-  background: var(--el-fill-color-light);
-  border-bottom: 1px solid var(--el-border-color-lighter);
+  background: $color-bg-subtle;
+  border-bottom: 1px solid $color-border-default;
   font-weight: 500;
 }
 
 .group-body {
-  padding: 10px 12px;
+  padding: 12px 16px;
   display: flex;
   flex-wrap: wrap;
-  gap: 12px 20px;
+  gap: 12px 24px;
 }
 </style>

@@ -10,7 +10,7 @@
       </el-button>
     </template>
 
-    <el-table v-loading="loading" :data="users" stripe>
+    <el-table v-loading="loading" :data="users" stripe table-layout="fixed" empty-text="暂无用户数据">
       <el-table-column prop="username" label="用户名" min-width="120" />
       <el-table-column prop="display_name" label="显示名" min-width="120" />
       <el-table-column label="角色" min-width="100">
@@ -35,14 +35,11 @@
       <el-table-column
         v-if="auth.hasPermission('auth:manage')"
         label="操作"
-        width="260"
+        width="200"
         fixed="right"
       >
         <template #default="{ row }">
           <el-button link type="primary" size="small" @click="openEdit(row)">编辑</el-button>
-          <el-button link type="primary" size="small" @click="openResetPassword(row)">
-            重置密码
-          </el-button>
           <el-tooltip
             :disabled="canDisable(row)"
             :content="disableReason(row)"
@@ -60,23 +57,20 @@
               </el-button>
             </span>
           </el-tooltip>
-          <el-tooltip
-            :disabled="canDelete(row)"
-            :content="deleteReason(row)"
-            placement="top"
-          >
-            <span>
-              <el-button
-                link
-                type="danger"
-                size="small"
-                :disabled="!canDelete(row)"
-                @click="handleDelete(row)"
-              >
-                删除
-              </el-button>
-            </span>
-          </el-tooltip>
+          <el-dropdown trigger="click" @command="(cmd: string) => handleDropdownCommand(cmd, row)">
+            <el-button link type="primary" size="small">更多</el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="resetPassword">重置密码</el-dropdown-item>
+                <el-dropdown-item
+                  command="delete"
+                  :disabled="!canDelete(row)"
+                >
+                  <span class="dropdown-danger-text">删除</span>
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </template>
       </el-table-column>
     </el-table>
@@ -271,12 +265,6 @@ function disableReason(u: UserOut): string {
   return ''
 }
 
-function deleteReason(u: UserOut): string {
-  if (u.id === auth.user?.id) return '不能操作自己的账户'
-  if (u.is_superadmin && superadminCount.value <= 1) return '至少需要保留一个超管用户'
-  return ''
-}
-
 function canChangeRole(u: UserOut, newRoleIsSuperadmin: boolean): boolean {
   if (u.is_superadmin && !newRoleIsSuperadmin && superadminCount.value <= 1) return false
   return true
@@ -461,6 +449,15 @@ async function handleToggleStatus(user: UserOut): Promise<void> {
   }
 }
 
+// ── Dropdown command handler ──
+function handleDropdownCommand(command: string, user: UserOut): void {
+  if (command === 'resetPassword') {
+    openResetPassword(user)
+  } else if (command === 'delete') {
+    handleDelete(user)
+  }
+}
+
 // ── Delete ──
 async function handleDelete(user: UserOut): Promise<void> {
   try {
@@ -482,3 +479,9 @@ async function handleDelete(user: UserOut): Promise<void> {
   }
 }
 </script>
+
+<style lang="scss" scoped>
+.dropdown-danger-text {
+  color: $color-destructive;
+}
+</style>
