@@ -31,6 +31,12 @@ class Unauthorized(BusinessError):  # noqa: N818
     status_code = 401
 
 
+class Forbidden(BusinessError):  # noqa: N818
+    """已认证但权限不足。"""
+
+    status_code = 403
+
+
 class LoginLocked(BusinessError):  # noqa: N818
     """登录失败次数过多,账号被锁定。"""
 
