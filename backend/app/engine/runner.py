@@ -47,6 +47,12 @@ logger = get_logger(__name__)
 # PostgreSQL transaction-level advisory lock key: prevents concurrent engine
 # runs from overwriting each other. Any stable int32 unique vs other locks.
 ENGINE_RUN_ADVISORY_LOCK_KEY = 7429001
+LEGACY_SUGGESTION_ITEM_DEFAULTS: dict[str, Any] = {
+    "t_purchase": {},
+    "urgent": False,
+    "push_status": "pending",
+    "push_attempt_count": 0,
+}
 
 
 async def run_engine(ctx: JobContext, *, triggered_by: str = "scheduler") -> int | None:
@@ -278,8 +284,9 @@ def _prepare_suggestion_item_rows(
     rows: list[dict[str, Any]] = []
     for item in items:
         row = {key: value for key, value in item.items() if key in column_names}
-        if "t_purchase" in column_names:
-            row.setdefault("t_purchase", {})
+        for key, value in LEGACY_SUGGESTION_ITEM_DEFAULTS.items():
+            if key in column_names:
+                row.setdefault(key, value)
         rows.append(row)
     return rows
 
