@@ -200,7 +200,7 @@ const filteredGroups = computed(() => {
           if (isSubCategory(child)) {
             return child.items.some(item => !item.permission || auth.hasPermission(item.permission))
           }
-          return !(child as any).permission || auth.hasPermission((child as any).permission)
+          return !child.permission || auth.hasPermission(child.permission)
         })
         .map(child => {
           if (isSubCategory(child)) {
