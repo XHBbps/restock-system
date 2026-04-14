@@ -12,7 +12,7 @@
       </div>
 
       <nav class="nav">
-        <div v-for="(group, gi) in navigationGroups" :key="group.title" class="nav-group">
+        <div v-for="(group, gi) in filteredGroups" :key="group.title" class="nav-group">
           <!-- Divider between groups (collapsed only) -->
           <div v-if="gi > 0 && sidebar.isCollapsed" class="nav-group-divider" />
 
@@ -96,7 +96,7 @@
         @mouseleave="hidePopover"
       >
         <div class="nav-popover-title">{{ popover.label }}</div>
-        <template v-for="group in navigationGroups" :key="group.title">
+        <template v-for="group in filteredGroups" :key="group.title">
           <template v-for="child in group.children" :key="'items' in child ? child.label : child.to">
             <template v-if="isSubCategory(child) && child.label === popover.label">
               <RouterLink
@@ -131,6 +131,18 @@
           </div>
         </div>
         <div class="topbar-right">
+          <el-dropdown @command="handleUserCommand">
+            <span class="user-dropdown-trigger">
+              {{ auth.user?.displayName || auth.user?.username || '' }}
+              <ChevronDown :size="14" />
+            </span>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="change-password">修改密码</el-dropdown-item>
+                <el-dropdown-item command="logout" divided>退出登录</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </div>
       </header>
 
@@ -140,16 +152,35 @@
         </div>
       </div>
     </main>
+
+    <el-dialog v-model="showPasswordDialog" title="修改密码" width="420px" :close-on-click-modal="false">
+      <el-form :model="pwdForm" label-width="80px">
+        <el-form-item label="旧密码">
+          <el-input v-model="pwdForm.oldPassword" type="password" placeholder="请输入旧密码" show-password />
+        </el-form-item>
+        <el-form-item label="新密码">
+          <el-input v-model="pwdForm.newPassword" type="password" placeholder="至少6位" show-password />
+        </el-form-item>
+        <el-form-item label="确认密码">
+          <el-input v-model="pwdForm.confirmPassword" type="password" placeholder="再次输入新密码" show-password />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showPasswordDialog = false">取消</el-button>
+        <el-button type="primary" :loading="pwdLoading" @click="handleChangePassword">确认修改</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { logout } from '@/api/auth'
+import { changeOwnPassword, logout } from '@/api/auth'
 import { isSubCategory, navigationGroups } from '@/config/navigation'
 import { useAuthStore } from '@/stores/auth'
 import { useSidebarStore } from '@/stores/sidebar'
-import { ChevronRight, IndentDecrease, IndentIncrease, LogOut } from 'lucide-vue-next'
-import { computed, onMounted, reactive, watch } from 'vue'
+import { ElMessage } from 'element-plus'
+import { ChevronDown, ChevronRight, IndentDecrease, IndentIncrease, LogOut } from 'lucide-vue-next'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 
 const route = useRoute()
@@ -159,6 +190,30 @@ const sidebar = useSidebarStore()
 
 const currentTitle = computed(() => (route.meta.title as string) || '总览')
 const currentSection = computed(() => (route.meta.section as string) || '工作台')
+
+const filteredGroups = computed(() => {
+  return navigationGroups
+    .map(group => ({
+      ...group,
+      children: group.children
+        .filter(child => {
+          if (isSubCategory(child)) {
+            return child.items.some(item => !item.permission || auth.hasPermission(item.permission))
+          }
+          return !(child as any).permission || auth.hasPermission((child as any).permission)
+        })
+        .map(child => {
+          if (isSubCategory(child)) {
+            return {
+              ...child,
+              items: child.items.filter(item => !item.permission || auth.hasPermission(item.permission)),
+            }
+          }
+          return child
+        }),
+    }))
+    .filter(group => group.children.length > 0)
+})
 
 // Popover state for collapsed sub-category hover
 const popover = reactive({ visible: false, label: '', top: 0, left: 0 })
@@ -206,6 +261,43 @@ async function handleLogout(): Promise<void> {
   } finally {
     auth.clearAuth()
     router.replace('/login')
+  }
+}
+
+function handleUserCommand(cmd: string) {
+  if (cmd === 'logout') handleLogout()
+  if (cmd === 'change-password') showPasswordDialog.value = true
+}
+
+const showPasswordDialog = ref(false)
+const pwdLoading = ref(false)
+const pwdForm = reactive({ oldPassword: '', newPassword: '', confirmPassword: '' })
+
+async function handleChangePassword() {
+  if (!pwdForm.oldPassword || !pwdForm.newPassword) {
+    ElMessage.warning('请填写完整')
+    return
+  }
+  if (pwdForm.newPassword.length < 6) {
+    ElMessage.warning('新密码至少6位')
+    return
+  }
+  if (pwdForm.newPassword !== pwdForm.confirmPassword) {
+    ElMessage.warning('两次输入的密码不一致')
+    return
+  }
+  pwdLoading.value = true
+  try {
+    await changeOwnPassword(pwdForm.oldPassword, pwdForm.newPassword)
+    ElMessage.success('密码修改成功，请重新登录')
+    showPasswordDialog.value = false
+    auth.clearAuth()
+    window.location.href = '/login'
+  } catch (err: unknown) {
+    const e = err as { response?: { data?: { message?: string } } }
+    ElMessage.error(e.response?.data?.message || '密码修改失败')
+  } finally {
+    pwdLoading.value = false
   }
 }
 </script>
@@ -520,6 +612,19 @@ async function handleLogout(): Promise<void> {
   display: flex;
   gap: $space-2;
   align-items: center;
+}
+
+.user-dropdown-trigger {
+  display: flex;
+  align-items: center;
+  gap: $space-2;
+  cursor: pointer;
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+
+  &:hover {
+    color: $color-brand-primary;
+  }
 }
 
 .badge-env,
