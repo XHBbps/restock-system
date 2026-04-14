@@ -46,7 +46,7 @@ SETTINGS
 | 6 | 不能禁用/删除自己 | 后端校验 current_user.id ≠ target_id |
 | 7 | 用户被禁用/删除后立即踢出 | is_active 每请求检查 → 401 |
 | 8 | 超管角色不可编辑/删除 | is_superadmin=true 的角色受保护 |
-| 9 | 默认超管 admin/admin123 | migration 种子数据，不强制改密 |
+| 9 | 默认超管 admin/admin123 | migration 种子数据，不强制改密，首次登录前端弹非阻断提醒 |
 | 10 | 权限变更简化审计 | structlog 记录操作日志 |
 
 ---
@@ -56,8 +56,8 @@ SETTINGS
 ### 3.1 新增表
 
 ```sql
--- 用户表
-CREATE TABLE "user" (
+-- 用户表（使用 sys_user 避免 PostgreSQL 保留字 "user" 的引号问题）
+CREATE TABLE sys_user (
     id              SERIAL PRIMARY KEY,
     username        VARCHAR(50) UNIQUE NOT NULL,
     display_name    VARCHAR(50) NOT NULL DEFAULT '',
@@ -69,7 +69,7 @@ CREATE TABLE "user" (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX ix_user_role_id ON "user"(role_id);
+CREATE INDEX ix_sys_user_role_id ON sys_user(role_id);
 
 -- 角色表
 CREATE TABLE role (
@@ -108,9 +108,17 @@ CREATE TABLE role_permission (
 - **role.is_superadmin**: 超管角色跳过权限检查 + 不可编辑/删除，一个标记解决两个问题
 - **permission.sort_order**: 由启动同步逻辑从 REGISTRY 列表 index 自动赋值，不手动维护
 - **role_permission.created_at**: 记录权限何时分配，便于排查
-- **global_config.login_password_hash**: 保留不删，不影响新逻辑
+- **global_config.login_password_hash**: 保留不删，migration 中加注释 `-- DEPRECATED: replaced by sys_user.password_hash`，login 端点完全忽略该字段
 
-### 3.3 升级迁移策略
+### 3.3 Login Attempt 双维度限流
+
+多用户后，`login_attempt` 表复用现有结构，每次登录失败写两行记录：
+- `ip:1.2.3.4` — IP 维度（防止同一来源暴力破解）
+- `user:admin` — 用户名维度（防止从不同 IP 猜测同一账号密码）
+
+任一维度触发锁定即拒绝登录。成功登录时清除对应 IP 和用户名的失败计数。
+
+### 3.4 升级迁移策略
 
 1. Alembic migration 创建 4 张新表
 2. 同一 migration 中:
@@ -215,14 +223,15 @@ REGISTRY: list[PermDef] = [
 
 ```
 请求进入
-  → JWT 解码（纯内存，HS256 验签）
-  → get_current_user: 查 user JOIN role（优化 A，一条 SQL）
+  → JWT 解码（纯内存，HS256 验签）→ 取出 user_id + token_perm_version
+  → get_current_user: 查 sys_user JOIN role（优化 A，一条 SQL）
     SELECT u.id, u.username, u.display_name, u.is_active,
            u.perm_version, u.role_id, r.is_superadmin, r.name
-    FROM "user" u JOIN role r ON u.role_id = r.id
+    FROM sys_user u JOIN role r ON u.role_id = r.id
     WHERE u.id = :user_id
   → is_active=false → 401 "账户已被禁用"
   → 无结果 → 401 "用户不存在"
+  → db.perm_version != token_perm_version → 401 "会话已过期，请重新登录"
   → get_current_permissions: 版本缓存
     → is_superadmin → ALL_PERMISSIONS，跳过查库
     → 缓存命中且版本匹配 → 直接用（0 额外查询）
@@ -233,6 +242,10 @@ REGISTRY: list[PermDef] = [
 ```
 
 **稳态性能:** 1 次主键 JOIN 查询 / 请求（~0.05ms）
+
+**JWT 内嵌 perm_version 的作用:** 当管理员重置密码、修改角色或修改角色权限时，
+DB 中 perm_version +1，用户持有的 JWT 中的版本号不再匹配 → 401 → 强制重新登录。
+这确保了密码重置后旧 token 立即失效，权限变更后立即生效。
 
 ### 5.2 UserContext
 
@@ -264,12 +277,12 @@ class InMemoryPermissionCache:
 
 ### 5.4 缓存失效触发
 
-| 操作 | 触发 SQL（同一事务内） |
-|------|---------------------|
-| 修改用户角色 | `UPDATE "user" SET perm_version = perm_version + 1 WHERE id = :user_id` |
-| 修改角色权限 | `UPDATE "user" SET perm_version = perm_version + 1 WHERE role_id = :role_id` |
-| 管理员重置密码 | `UPDATE "user" SET perm_version = perm_version + 1 WHERE id = :user_id`（强制重登） |
-| 禁用/删除用户 | 不需要 bump，`get_current_user` 每请求检查 is_active |
+| 操作 | 触发 SQL（同一事务内） | 效果 |
+|------|---------------------|------|
+| 修改用户角色 | `UPDATE sys_user SET perm_version = perm_version + 1 WHERE id = :user_id` | JWT 版本不匹配 → 401 强制重登 |
+| 修改角色权限 | `UPDATE sys_user SET perm_version = perm_version + 1 WHERE role_id = :role_id` | 该角色下所有用户强制重登 |
+| 管理员重置密码 | `UPDATE sys_user SET perm_version = perm_version + 1 WHERE id = :user_id` | 旧 token 立即失效 |
+| 禁用/删除用户 | 不需要 bump，`get_current_user` 每请求检查 is_active | 直接 401 |
 
 ### 5.5 异常体系
 
@@ -281,12 +294,14 @@ class InMemoryPermissionCache:
 ```json
 {
   "sub": "1",          // user_id 字符串形式（JWT RFC 7519）
+  "pv": 0,             // perm_version，用于检测权限/密码变更
   "iat": 1713100000,
   "exp": 1713186400
 }
 ```
 
-旧 token `sub="owner"` 无法解析为 int → 自动 401 → 升级过渡自然完成。
+- 旧 token `sub="owner"` 无法解析为 int → 自动 401 → 升级过渡自然完成
+- `pv` 字段在每次请求中与 DB 的 `perm_version` 比对，不匹配则 401 强制重登
 
 ### 5.7 路由权限映射
 
@@ -332,12 +347,39 @@ class InMemoryPermissionCache:
     "display_name": "管理员",
     "role_name": "超级管理员",
     "is_superadmin": true,
+    "password_is_default": true,
     "permissions": ["home:view", "home:refresh", "restock:view", ...]
   }
 }
 ```
 
-`/api/auth/me` 返回与 `user` 字段相同的结构（`UserInfoResponse` schema 复用）。
+- `/api/auth/me` 返回与 `user` 字段相同的结构（`UserInfoResponse` schema 复用）
+- `password_is_default`: 密码是否仍为初始值 `admin123`（后端比对 hash），前端据此弹非阻断提醒
+
+### 5.9 路由注册顺序
+
+`/api/auth/users/me/password` 与 `/api/auth/users/:id/password` 存在路径冲突。
+**必须确保 `/me/` 路径的路由先于 `/:id/` 路径注册**（FastAPI 按注册顺序匹配）。
+
+实现方式：在 auth router 中，将 `/users/me/*` 的路由定义放在 `/users/{user_id}/*` 之前。
+
+### 5.10 审计日志事件命名规范
+
+使用 structlog 记录关键操作，event name 规范：
+
+| 事件 | event name | 附加字段 |
+|------|-----------|---------|
+| 用户创建 | `auth_user_created` | `target_username`, `role_name`, `operator_id` |
+| 用户删除 | `auth_user_deleted` | `target_username`, `operator_id` |
+| 用户禁用 | `auth_user_disabled` | `target_username`, `operator_id` |
+| 用户启用 | `auth_user_enabled` | `target_username`, `operator_id` |
+| 用户角色变更 | `auth_user_role_changed` | `target_username`, `old_role`, `new_role`, `operator_id` |
+| 密码重置 | `auth_password_reset` | `target_username`, `operator_id` |
+| 角色创建 | `auth_role_created` | `role_name`, `operator_id` |
+| 角色权限变更 | `auth_role_permissions_changed` | `role_name`, `added`, `removed`, `operator_id` |
+| 角色删除 | `auth_role_deleted` | `role_name`, `operator_id` |
+| 登录成功 | `auth_login_success` | `username`, `source_key` |
+| 登录失败 | `auth_login_failed` | `username`, `source_key`, `reason` |
 
 ---
 
@@ -368,7 +410,7 @@ interface UserInfo {
 - `hasPermission(code)`: `isSuperadmin || permissions.includes(code)`
 - `setAuth`: 同时写 localStorage（token + user JSON）
 - `clearAuth`: 同时清 localStorage + state（替代原 clearToken，所有调用点同步更新）
-- `restoreAuth`: 路由守卫中首次导航时调 `/api/auth/me` 恢复 user（localStorage 中有快照避免闪烁）
+- `restoreAuth`: 路由守卫中首次导航时调 `/api/auth/me` 恢复 user（localStorage 中有快照避免闪烁）。使用 Promise 去重模式：若正在恢复中，后续调用等待同一个 Promise，避免并发重复请求
 
 ### 6.3 路由守卫
 
@@ -416,7 +458,20 @@ declare module 'vue-router' {
 }
 ```
 
-### 6.5 侧边栏菜单过滤
+### 6.5 按钮级权限实现方式
+
+明确采用 `authStore.hasPermission('xxx')` + `v-if` / `:disabled` 方式，不封装自定义指令。
+理由：1-5 人项目，直观可读比抽象更重要，且权限检查点有限（< 20 处），不需要批量处理。
+
+### 6.6 默认密码提醒
+
+登录后若 `user.password_is_default === true`，前端弹出非阻断提醒：
+```typescript
+ElNotification({ title: '安全提醒', message: '当前使用默认密码，建议尽快修改', type: 'warning', duration: 8000 })
+```
+仅提醒，不阻断操作。
+
+### 6.7 侧边栏菜单过滤
 
 `navigation.ts` 中每个 NavItem / NavSubCategory 新增可选 `permission` 字段。
 
@@ -452,12 +507,18 @@ declare module 'vue-router' {
 | 授权配置 | 新建/编辑/删除/重置密码 | `auth:manage` | |
 | 信息总览 | 刷新（未来） | `home:refresh` | |
 
-### 6.7 Axios 拦截器
+### 6.10 顶栏用户信息
 
-- 401: 保持现有 `window.location.href = '/login'` 模式（避免循环依赖）
-- 403: `ElMessage.error('权限不足，请联系管理员')`，不跳转
+`AppLayout.vue` topbar-right 新增：
+- el-dropdown: 显示 display_name（或 username）
+- 下拉菜单: 修改密码（el-dialog）、退出登录
 
-### 6.8 顶栏用户信息
+### 6.11 Axios 拦截器
+
+- 401: 保持现有 `window.location.href = '/login'` 模式（有意为之：整页刷新可干净重置所有 Pinia 状态，避免 client.ts 引入 router 导致循环依赖）
+- 403: `ElMessage.error('权限不足，请联系管理员')` + **触发 restoreAuth 刷新权限快照**（管理员可能已变更该用户权限，刷新后菜单/按钮状态同步更新）
+
+### 6.9 按钮级权限映射
 
 `AppLayout.vue` topbar-right 新增：
 - el-dropdown: 显示 display_name（或 username）
@@ -496,7 +557,8 @@ el-dialog
     ├── 从 GET /api/auth/permissions 获取列表
     ├── 按 group_name 分组，每组一个卡片
     ├── 组内 checkbox 横排
-    └── 超管角色: 全选 + disabled + 警示条
+    ├── 每组标题栏带"全选/全不选"复选框
+    └── 超管角色: 全选 + disabled + 警示条 "超管角色自动拥有所有权限"
 ```
 
 **API:**
@@ -509,7 +571,7 @@ el-dialog
 | 删除 | DELETE | `/api/auth/roles/:id` |
 | 权限列表 | GET | `/api/auth/permissions` |
 | 角色权限查询 | GET | `/api/auth/roles/:id/permissions` |
-| 角色权限保存 | PUT | `/api/auth/roles/:id/permissions` |
+| 角色权限保存 | PUT | `/api/auth/roles/:id/permissions` (body: `{ "permission_codes": ["home:view", ...] }`) |
 
 ### 7.2 授权配置页 `UserConfigView.vue`
 
