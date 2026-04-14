@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
 
 import type { Suggestion } from '@/api/suggestion'
 
@@ -80,6 +81,7 @@ const STUBS = {
 
 describe('HistoryView', () => {
   beforeEach(() => {
+    setActivePinia(createPinia())
     vi.clearAllMocks()
   })
 

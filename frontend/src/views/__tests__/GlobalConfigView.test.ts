@@ -2,6 +2,7 @@
 
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
 
 import type { GlobalConfig } from '@/api/config'
 
@@ -63,6 +64,7 @@ function makeConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
 
 describe('GlobalConfigView', () => {
   beforeEach(() => {
+    setActivePinia(createPinia())
     vi.clearAllMocks()
   })
 
