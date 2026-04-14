@@ -29,6 +29,17 @@
         <el-option v-for="c in COUNTRY_OPTIONS" :key="c.code" :label="c.code" :value="c.code" />
       </el-select>
       <el-select
+        v-model="filters.type_name"
+        placeholder="出库单类型"
+        clearable
+        filterable
+        style="width: 160px"
+        @change="reload"
+        @clear="reload"
+      >
+        <el-option v-for="type in typeOptions" :key="type" :label="type" :value="type" />
+      </el-select>
+      <el-select
         v-model="filters.is_in_transit"
         placeholder="状态"
         clearable
@@ -70,10 +81,15 @@
           </div>
         </template>
       </el-table-column>
-      <el-table-column label="出库单id" prop="saihuOutRecordId" min-width="220" sortable="custom" show-overflow-tooltip />
-      <el-table-column label="出库仓库id" prop="warehouseId" min-width="180" sortable="custom" show-overflow-tooltip>
+      <el-table-column label="出库单ID" prop="saihuOutRecordId" min-width="220" sortable="custom" show-overflow-tooltip />
+      <el-table-column label="出库仓库ID" prop="warehouseId" min-width="180" sortable="custom" show-overflow-tooltip>
         <template #default="{ row }">
           <span class="mono">{{ row.warehouseId || '-' }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="目标国家" prop="targetCountry" width="110" sortable="custom" show-overflow-tooltip>
+        <template #default="{ row }">
+          <span class="mono">{{ row.targetCountry || '-' }}</span>
         </template>
       </el-table-column>
       <el-table-column label="更新时间" prop="updateTime" width="160" sortable="custom" show-overflow-tooltip>
@@ -130,7 +146,20 @@ const filters = reactive({
   out_warehouse_no: '',
   sku: '',
   country: '',
+  type_name: '',
   is_in_transit: undefined as boolean | undefined,
+})
+
+const typeOptions = computed(() => {
+  const values = new Set(
+    rows.value
+      .map((row) => row.typeName?.trim())
+      .filter((value): value is string => Boolean(value)),
+  )
+  if (filters.type_name) {
+    values.add(filters.type_name)
+  }
+  return Array.from(values).sort((left, right) => left.localeCompare(right, 'zh-CN'))
 })
 
 const pagedRows = computed(() => {
@@ -145,6 +174,7 @@ async function reload(): Promise<void> {
       out_warehouse_no: filters.out_warehouse_no || undefined,
       sku: filters.sku || undefined,
       country: filters.country || undefined,
+      type_name: filters.type_name || undefined,
       is_in_transit: filters.is_in_transit,
       page: 1,
       page_size: 5000,
@@ -170,7 +200,7 @@ function handleSortChange({ prop, order }: SortChangeEvent): void {
 }
 
 watch(
-  () => [filters.out_warehouse_no, filters.sku, filters.country, filters.is_in_transit],
+  () => [filters.out_warehouse_no, filters.sku, filters.country, filters.type_name, filters.is_in_transit],
   () => {
     page.value = 1
   },

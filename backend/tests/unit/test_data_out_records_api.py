@@ -44,8 +44,24 @@ def test_out_record_number_filter_escapes_like_characters() -> None:
     assert compiled.params["out_warehouse_no_1"] == r"%OB\%2603\_%"
 
 
+def test_out_record_type_name_filter_uses_exact_match() -> None:
+    stmt = select(InTransitRecord).where(InTransitRecord.type_name == "调拨出库")
+    compiled = stmt.compile()
+    sql = str(compiled)
+
+    assert "type_name" in sql
+    assert compiled.params["type_name_1"] == "调拨出库"
+
+
 def test_list_out_records_does_not_default_to_in_transit_only() -> None:
     sig = inspect.signature(list_out_records)
     default = sig.parameters["is_in_transit"].default
 
     assert default.default is None
+
+
+def test_list_out_records_accepts_type_name_filter() -> None:
+    sig = inspect.signature(list_out_records)
+
+    assert "type_name" in sig.parameters
+    assert sig.parameters["type_name"].default.default is None

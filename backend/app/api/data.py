@@ -518,6 +518,7 @@ async def list_inventory(
 async def list_out_records(
     is_in_transit: bool | None = Query(default=None),
     country: str | None = Query(default=None),
+    type_name: str | None = Query(default=None),
     sku: str | None = Query(default=None),
     out_warehouse_no: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
@@ -532,6 +533,8 @@ async def list_out_records(
         base = base.where(InTransitRecord.is_in_transit.is_(is_in_transit))
     if country:
         base = base.where(InTransitRecord.target_country == country.upper())
+    if type_name:
+        base = base.where(InTransitRecord.type_name == type_name)
     if sku:
         sub = (
             select(InTransitItem.saihu_out_record_id)

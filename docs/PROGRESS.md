@@ -96,7 +96,7 @@
 - **数据页 page_size 上限放宽**：所有 `/api/data/*` 端点的 `le=5000`（原 200），支持一次拉全量
 - **建议单列表 page_size 上限**：`/api/suggestions` 的 `le=5000`
 - **筛选项统一**：店铺/仓库/订单/库存/出库/补货发起 7 个页面的筛选项布局和高度一致
-- **出库页**：原“其他出库（在途观测）”改名为“出库”；主表展示出库单id、出库仓库id、更新时间、同步时间、出库单类型、状态，明细按“商品SKU、商品ID、可用数、采购单价”顺序展示；同步时间复用 `lastSeenAt`，状态统一按 `is_in_transit` 映射为“在途 / 完结”
+- **出库页**：原“其他出库（在途观测）”改名为“出库”；主表展示出库单id、出库仓库id、目标国家、更新时间、同步时间、出库单类型、状态，明细按“商品SKU、商品ID、可用数、采购单价”顺序展示；同步时间复用 `lastSeenAt`，状态统一按 `is_in_transit` 映射为“在途 / 完结”，并支持按“出库单类型”单选筛选
 - **在途国家识别**：`sync_out_records` 不再使用 `targetFbaWarehouseId -> warehouse.country` 反推国家，而是从备注文本提取国家名（如 `20260410美国-赢捷-加州-散货-在途中` → `US`）；无法识别时保持空值
 
 ### 2.7 任务队列系统
@@ -117,6 +117,11 @@
 ---
 
 ## 3. 近期重大变更（2026-04-10 ~ 2026-04-14）
+
+### 3.34 出库页补充目标国家列与类型单选筛选（2026-04-14）
+- `backend/app/api/data.py` 为 `GET /api/data/out-records` 新增 `type_name` 查询参数，允许按出库单类型精确筛选；`backend/tests/unit/test_data_out_records_api.py` 补充对应参数签名与过滤口径断言
+- `frontend/src/api/data.ts`、`frontend/src/views/data/DataOutRecordsView.vue` 在现有风格下新增“出库单类型”单选筛选，主表列顺序调整为“出库单ID / 出库仓库ID / 目标国家 / 更新时间 / 同步时间 / 出库单类型 / 状态”，其中“目标国家”直接展示已有 `targetCountry`
+- **测试**：更新 `frontend/src/views/__tests__/DataOutRecordsView.test.ts`，覆盖目标国家列渲染、出库单类型筛选选择/清空，以及新的列顺序
 
 ### 3.33 废弃采购日期字段兼容层清理（2026-04-14）
 - `backend/app/engine/runner.py` 移除为旧库保留的 `suggestion_item.t_purchase` / `push_attempt_count` 等动态补默认与运行时表结构探测，建议单条目改为直接按当前 ORM schema 写入；运行引擎前需要确保环境已执行 `alembic upgrade head`

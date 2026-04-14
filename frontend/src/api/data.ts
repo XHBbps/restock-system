@@ -131,6 +131,7 @@ export interface DataOutRecord {
 export async function listOutRecords(params: {
   is_in_transit?: boolean
   country?: string
+  type_name?: string
   sku?: string
   out_warehouse_no?: string
   page?: number

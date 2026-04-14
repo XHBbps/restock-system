@@ -58,6 +58,14 @@ const STUBS = {
           US
         </button>
         <button
+          v-if="placeholder === '出库单类型'"
+          type="button"
+          class="type-transfer"
+          @click="$emit('update:modelValue', '调拨出库'); $emit('change', '调拨出库')"
+        >
+          调拨出库
+        </button>
+        <button
           v-if="placeholder === '状态'"
           type="button"
           class="status-true"
@@ -89,6 +97,13 @@ const STUBS = {
   ElTableColumn: {
     props: ['label', 'prop'],
     template: '<div><span>{{ label }}</span></div>',
+  },
+}
+
+const GLOBAL_CONFIG = {
+  stubs: STUBS,
+  directives: {
+    loading: {},
   },
 }
 
@@ -134,7 +149,7 @@ describe('DataOutRecordsView', () => {
     mockListOutRecords.mockResolvedValue(buildResponse())
 
     const { default: View } = await import('../data/DataOutRecordsView.vue')
-    shallowMount(View, { global: { stubs: STUBS } })
+    shallowMount(View, { global: GLOBAL_CONFIG })
     await flushPromises()
 
     expect(mockListOutRecords).toHaveBeenCalledWith(
@@ -150,7 +165,7 @@ describe('DataOutRecordsView', () => {
     mockListOutRecords.mockResolvedValue(buildResponse())
 
     const { default: View } = await import('../data/DataOutRecordsView.vue')
-    const wrapper = shallowMount(View, { global: { stubs: STUBS } })
+    const wrapper = shallowMount(View, { global: GLOBAL_CONFIG })
     await flushPromises()
     mockListOutRecords.mockClear()
 
@@ -170,7 +185,7 @@ describe('DataOutRecordsView', () => {
     mockListOutRecords.mockResolvedValue(buildResponse())
 
     const { default: View } = await import('../data/DataOutRecordsView.vue')
-    const wrapper = shallowMount(View, { global: { stubs: STUBS } })
+    const wrapper = shallowMount(View, { global: GLOBAL_CONFIG })
     await flushPromises()
     mockListOutRecords.mockClear()
 
@@ -195,7 +210,7 @@ describe('DataOutRecordsView', () => {
     mockListOutRecords.mockResolvedValue(buildResponse())
 
     const { default: View } = await import('../data/DataOutRecordsView.vue')
-    const wrapper = shallowMount(View, { global: { stubs: STUBS } })
+    const wrapper = shallowMount(View, { global: GLOBAL_CONFIG })
     await flushPromises()
     mockListOutRecords.mockClear()
 
@@ -216,23 +231,51 @@ describe('DataOutRecordsView', () => {
     )
   })
 
-  it('renders the updated page title and detail columns', async () => {
+  it('allows selecting and clearing type filter', async () => {
     mockListOutRecords.mockResolvedValue(buildResponse())
 
     const { default: View } = await import('../data/DataOutRecordsView.vue')
-    const wrapper = shallowMount(View, { global: { stubs: STUBS } })
+    const wrapper = shallowMount(View, { global: GLOBAL_CONFIG })
+    await flushPromises()
+    mockListOutRecords.mockClear()
+
+    await wrapper.find('.type-transfer').trigger('click')
+    await flushPromises()
+    expect(mockListOutRecords).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        type_name: '调拨出库',
+      }),
+    )
+
+    await wrapper.find('[data-placeholder="出库单类型"] .select-clear').trigger('click')
+    await flushPromises()
+    expect(mockListOutRecords).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        type_name: undefined,
+      }),
+    )
+  })
+
+  it('renders the updated page title, filters, and columns', async () => {
+    mockListOutRecords.mockResolvedValue(buildResponse())
+
+    const { default: View } = await import('../data/DataOutRecordsView.vue')
+    const wrapper = shallowMount(View, { global: GLOBAL_CONFIG })
     await flushPromises()
 
     const html = wrapper.html()
     expect(html).toContain('出库')
-    expect(html).toContain('出库单id')
-    expect(html).toContain('出库仓库id')
+    expect(html).toContain('出库单ID')
+    expect(html).toContain('出库仓库ID')
+    expect(html).toContain('目标国家')
     expect(html).toContain('更新时间')
     expect(html).toContain('同步时间')
     expect(html).toContain('出库单类型')
 
     const source = readFileSync('src/views/data/DataOutRecordsView.vue', 'utf-8')
-    expect(source).toContain('出库单号')
+    expect(source).toContain('placeholder="出库单类型"')
+    expect(source).toContain('label="目标国家"')
+    expect(source).toContain('prop="targetCountry"')
     expect(source).toContain('class="detail-table"')
     expect(source).toContain('clearable')
     expect(source).toContain('商品SKU')
@@ -240,8 +283,7 @@ describe('DataOutRecordsView', () => {
     expect(source).toContain('可用数')
     expect(source).toContain('采购单价')
     expect(source).not.toContain('fixed="right"')
-    expect(source.indexOf('商品SKU')).toBeLessThan(source.indexOf('商品ID'))
-    expect(source.indexOf('商品ID')).toBeLessThan(source.indexOf('可用数'))
-    expect(source.indexOf('可用数')).toBeLessThan(source.indexOf('采购单价'))
+    expect(source.indexOf('出库仓库ID')).toBeLessThan(source.indexOf('目标国家'))
+    expect(source.indexOf('目标国家')).toBeLessThan(source.indexOf('更新时间'))
   })
 })
