@@ -2,7 +2,7 @@
 
 from datetime import date, datetime
 
-from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, Index, Integer, String
+from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
@@ -48,6 +48,10 @@ class InventorySnapshotHistory(Base):
 
     __tablename__ = "inventory_snapshot_history"
     __table_args__ = (
+        UniqueConstraint(
+            "commodity_sku", "warehouse_id", "snapshot_date",
+            name="uq_snapshot_history_sku_wh_date",
+        ),
         Index("ix_inventory_history_date_sku", "snapshot_date", "commodity_sku"),
         Index("ix_inventory_history_sku_date", "commodity_sku", "snapshot_date"),
     )
