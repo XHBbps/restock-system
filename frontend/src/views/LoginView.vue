@@ -13,6 +13,18 @@
 
       <form class="card-form" @submit.prevent="handleLogin">
         <div class="form-field">
+          <label class="field-label" for="username">用户名</label>
+          <el-input
+            id="username"
+            v-model="username"
+            placeholder="请输入用户名"
+            size="large"
+            :disabled="loading"
+            @keyup.enter="handleLogin"
+          />
+        </div>
+
+        <div class="form-field">
           <label class="field-label" for="password">密码</label>
           <el-input
             id="password"
@@ -52,7 +64,7 @@
 
 <script setup lang="ts">
 import { login } from '@/api/auth'
-import { useAuthStore } from '@/stores/auth'
+import { useAuthStore, _mapUserInfo } from '@/stores/auth'
 import { ElMessage } from 'element-plus'
 import { onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -61,6 +73,7 @@ import { useRoute, useRouter } from 'vue-router'
 // 单元格是 32×32，使用 CSS Grid auto-fill 按视口宽度自动换行
 const GRID_CELL_COUNT = 2800
 
+const username = ref('')
 const password = ref('')
 const loading = ref(false)
 const errorMsg = ref('')
@@ -106,16 +119,16 @@ onUnmounted(() => {
 })
 
 async function handleLogin(): Promise<void> {
-  if (!password.value) {
-    errorMsg.value = '请输入密码'
+  if (!username.value || !password.value) {
+    errorMsg.value = '请输入用户名和密码'
     return
   }
   loading.value = true
   errorMsg.value = ''
   clearLockedCountdown()
   try {
-    const resp = await login(password.value)
-    auth.setToken(resp.access_token)
+    const resp = await login(username.value, password.value)
+    auth.setAuth(resp.access_token, _mapUserInfo(resp.user))
     ElMessage.success('登录成功')
     const raw = (route.query.redirect as string) || '/'
     const redirect = raw.startsWith('/') && !raw.startsWith('//') ? raw : '/'

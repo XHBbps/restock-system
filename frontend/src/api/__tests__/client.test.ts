@@ -3,7 +3,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import type { AxiosError, InternalAxiosRequestConfig } from 'axios'
 
 import client from '../client'
-import { useAuthStore } from '@/stores/auth'
+import { useAuthStore, type UserInfo } from '@/stores/auth'
 
 type RequestHandler = {
   fulfilled: (c: InternalAxiosRequestConfig) => InternalAxiosRequestConfig
@@ -21,6 +21,16 @@ function getResponseHandler(): ResponseHandler {
   return (client.interceptors.response as unknown as { handlers: ResponseHandler[] }).handlers[0]
 }
 
+const dummyUser: UserInfo = {
+  id: 1,
+  username: 'test',
+  displayName: 'Test',
+  roleName: 'viewer',
+  isSuperadmin: false,
+  passwordIsDefault: false,
+  permissions: [],
+}
+
 describe('api/client interceptors', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
@@ -30,7 +40,7 @@ describe('api/client interceptors', () => {
 
   it('injects Bearer token when authenticated', () => {
     const auth = useAuthStore()
-    auth.setToken('abc123')
+    auth.setAuth('abc123', dummyUser)
 
     const config = { headers: {} } as InternalAxiosRequestConfig
     const result = getRequestHandler().fulfilled(config)
@@ -43,9 +53,9 @@ describe('api/client interceptors', () => {
     expect((result.headers as Record<string, string>).Authorization).toBeUndefined()
   })
 
-  it('clears token on 401 response', async () => {
+  it('clears auth on 401 response', async () => {
     const auth = useAuthStore()
-    auth.setToken('willbecleared')
+    auth.setAuth('willbecleared', dummyUser)
 
     // Stub window.location to a non-login path so redirect branch executes safely
     delete (window as unknown as Record<string, unknown>).location
@@ -58,11 +68,12 @@ describe('api/client interceptors', () => {
 
     await expect(getResponseHandler().rejected(error)).rejects.toBe(error)
     expect(auth.token).toBeNull()
+    expect(auth.user).toBeNull()
   })
 
-  it('does not clear token on non-401 errors', async () => {
+  it('does not clear auth on non-401 errors', async () => {
     const auth = useAuthStore()
-    auth.setToken('keepme')
+    auth.setAuth('keepme', dummyUser)
 
     const error = {
       response: { status: 500 },

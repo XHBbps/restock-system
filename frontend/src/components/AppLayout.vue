@@ -204,7 +204,7 @@ async function handleLogout(): Promise<void> {
   try {
     await logout()
   } finally {
-    auth.clearToken()
+    auth.clearAuth()
     router.replace('/login')
   }
 }

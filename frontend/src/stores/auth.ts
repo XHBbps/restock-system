@@ -1,23 +1,80 @@
-// 鉴权 Pinia store：管理 token + 登录状态
+// 鉴权 Pinia store：管理 token + 用户信息 + 权限
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
+import { me as fetchMe } from '@/api/auth'
 
 const TOKEN_KEY = 'restock_token'
+const USER_KEY = 'restock_user'
+
+export interface UserInfo {
+  id: number
+  username: string
+  displayName: string
+  roleName: string
+  isSuperadmin: boolean
+  passwordIsDefault: boolean
+  permissions: string[]
+}
 
 export const useAuthStore = defineStore('auth', () => {
   const token = ref<string | null>(localStorage.getItem(TOKEN_KEY))
 
+  // Restore user from localStorage snapshot (avoid flicker on refresh)
+  const _savedUser = localStorage.getItem(USER_KEY)
+  const user = ref<UserInfo | null>(_savedUser ? JSON.parse(_savedUser) : null)
+
   const isAuthenticated = computed(() => !!token.value)
 
-  function setToken(newToken: string) {
+  function hasPermission(code: string): boolean {
+    if (!user.value) return false
+    return user.value.isSuperadmin || user.value.permissions.includes(code)
+  }
+
+  function setAuth(newToken: string, newUser: UserInfo) {
     token.value = newToken
+    user.value = newUser
     localStorage.setItem(TOKEN_KEY, newToken)
+    localStorage.setItem(USER_KEY, JSON.stringify(newUser))
   }
 
-  function clearToken() {
+  function clearAuth() {
     token.value = null
+    user.value = null
     localStorage.removeItem(TOKEN_KEY)
+    localStorage.removeItem(USER_KEY)
   }
 
-  return { token, isAuthenticated, setToken, clearToken }
+  // Promise dedup for restoreAuth
+  let _restorePromise: Promise<void> | null = null
+
+  async function restoreAuth(): Promise<void> {
+    if (_restorePromise) return _restorePromise
+    _restorePromise = _doRestore()
+    try {
+      await _restorePromise
+    } finally {
+      _restorePromise = null
+    }
+  }
+
+  async function _doRestore(): Promise<void> {
+    const resp = await fetchMe()
+    user.value = _mapUserInfo(resp)
+    localStorage.setItem(USER_KEY, JSON.stringify(user.value))
+  }
+
+  return { token, user, isAuthenticated, hasPermission, setAuth, clearAuth, restoreAuth }
 })
+
+/** Map backend snake_case response to camelCase UserInfo */
+export function _mapUserInfo(raw: Record<string, unknown>): UserInfo {
+  return {
+    id: raw.id as number,
+    username: raw.username as string,
+    displayName: (raw.display_name as string) ?? '',
+    roleName: (raw.role_name as string) ?? '',
+    isSuperadmin: (raw.is_superadmin as boolean) ?? false,
+    passwordIsDefault: (raw.password_is_default as boolean) ?? false,
+    permissions: (raw.permissions as string[]) ?? [],
+  }
+}
