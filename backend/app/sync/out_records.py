@@ -19,7 +19,6 @@ from app.tasks.jobs import JobContext, register
 
 logger = get_logger(__name__)
 JOB_NAME = "sync_out_records"
-BACKFILL_TARGET_COUNTRY_JOB_NAME = "backfill_out_record_target_country"
 
 REMARK_COUNTRY_MAP: dict[str, str] = {
     "阿联酋": "AE",
@@ -49,19 +48,22 @@ REMARK_COUNTRY_MAP: dict[str, str] = {
 
 @register(JOB_NAME)
 async def sync_out_records_job(ctx: JobContext) -> None:
-    await ctx.progress(current_step="同步在途出库单", total_steps=2)
+    await ctx.progress(current_step="同步在途出库单", total_steps=3)
     async with async_session_factory() as db:
         sync_start_time = await mark_sync_running(db, JOB_NAME)
 
     record_count = 0
     item_count = 0
-    total_steps = 2
+    backfilled = 0
+    backfill_skipped = 0
+    total_steps = 3
     try:
+
         async def _report_page(page_no: int, total_page: int, rows_count: int) -> None:
             nonlocal total_steps
             if total_page <= 0:
                 return
-            total_steps = total_page + 1
+            total_steps = total_page + 2
             await ctx.progress(
                 total_steps=total_steps,
                 step_detail=(
@@ -73,15 +75,22 @@ async def sync_out_records_job(ctx: JobContext) -> None:
         async with async_session_factory() as db:
             warehouse_ids = await _load_warehouse_ids(db)
             async for raw in list_in_transit_records(on_page=_report_page):
-                ic = await _upsert_out_record(db, raw, warehouse_ids, sync_start_time)
+                item_count += await _upsert_out_record(db, raw, warehouse_ids, sync_start_time)
                 record_count += 1
-                item_count += ic
             await db.commit()
 
         await ctx.progress(
-            current_step="老化标签消失的记录",
+            current_step="回填目标国家",
             total_steps=total_steps,
-            step_detail=f"第 {total_steps} / {total_steps} 步，处理老化记录",
+            step_detail="根据备注回填历史空目标国家",
+        )
+        async with async_session_factory() as db:
+            _, backfilled, backfill_skipped = await _backfill_target_country_from_remark(db)
+
+        await ctx.progress(
+            current_step="老化未见记录",
+            total_steps=total_steps,
+            step_detail="处理本次未再出现的在途记录",
         )
         aged = await _age_out_records(sync_start_time)
 
@@ -91,45 +100,21 @@ async def sync_out_records_job(ctx: JobContext) -> None:
             "sync_out_records_done",
             records=record_count,
             items=item_count,
+            target_country_backfilled=backfilled,
+            target_country_skipped=backfill_skipped,
             aged_out=aged,
         )
         await ctx.progress(
             current_step="完成",
-            step_detail=f"在途单 {record_count} / 明细 {item_count} / 标签消失 {aged}",
+            total_steps=total_steps,
+            step_detail=(
+                f"在途单 {record_count} / 明细 {item_count} / "
+                f"回填国家 {backfilled} / 标记完结 {aged}"
+            ),
         )
     except Exception as exc:
         async with async_session_factory() as db:
             await mark_sync_failed(db, JOB_NAME, str(exc))
-        raise
-
-
-@register(BACKFILL_TARGET_COUNTRY_JOB_NAME)
-async def backfill_out_record_target_country_job(ctx: JobContext) -> None:
-    await ctx.progress(current_step="回填出库目标国家", total_steps=2)
-    async with async_session_factory() as db:
-        started = await mark_sync_running(db, BACKFILL_TARGET_COUNTRY_JOB_NAME)
-
-    try:
-        async with async_session_factory() as db:
-            scanned, updated, skipped = await _backfill_target_country_from_remark(db)
-
-        async with async_session_factory() as db:
-            await mark_sync_success(db, BACKFILL_TARGET_COUNTRY_JOB_NAME, started)
-
-        logger.info(
-            "backfill_out_record_target_country_done",
-            scanned=scanned,
-            updated=updated,
-            skipped=skipped,
-        )
-        await ctx.progress(
-            current_step="完成",
-            total_steps=2,
-            step_detail=f"扫描 {scanned} 条，回填 {updated} 条，跳过 {skipped} 条",
-        )
-    except Exception as exc:
-        async with async_session_factory() as db:
-            await mark_sync_failed(db, BACKFILL_TARGET_COUNTRY_JOB_NAME, str(exc))
         raise
 
 
@@ -155,9 +140,7 @@ async def _upsert_out_record(
         "saihu_out_record_id": record_id,
         "warehouse_id": _to_optional_text(raw.get("warehouseId")),
         "out_warehouse_no": raw.get("outWarehouseNo"),
-        "target_warehouse_id": target_warehouse_id
-        if target_warehouse_id in warehouse_ids
-        else None,
+        "target_warehouse_id": target_warehouse_id if target_warehouse_id in warehouse_ids else None,
         "target_country": target_country,
         "update_time": parse_saihu_time(raw.get("updateTime")),
         "type": _to_int(raw.get("type"), default=None),
@@ -211,7 +194,7 @@ async def _upsert_out_record(
 
 
 async def _age_out_records(sync_start_time) -> int:
-    """将本次未见到的活跃记录标记为非在途。"""
+    """Mark active rows not seen in this run as completed."""
     async with async_session_factory() as db:
         result = await db.execute(
             text(
@@ -262,7 +245,7 @@ def _extract_country_from_remark(raw_remark: Any) -> str | None:
         return None
 
     normalized = re.sub(r"^\d{4}[-/.]?\d{2}[-/.]?\d{2}", "", remark).strip()
-    tokens = [token.strip() for token in re.split(r"[-_/|,，、\s]+", normalized) if token.strip()]
+    tokens = [token.strip() for token in re.split(r"[-_/|,，、。\s]+", normalized) if token.strip()]
     for token in tokens:
         country = REMARK_COUNTRY_MAP.get(token)
         if country:

@@ -259,24 +259,3 @@ async def test_refetch_order_detail_enqueues_all_targets(monkeypatch) -> None:
     assert result.queued_count == 3
     assert result.active_job_name is None
     assert result.active_trigger_source is None
-
-
-@pytest.mark.asyncio
-async def test_backfill_out_record_target_country_enqueues_job(monkeypatch) -> None:
-    import app.api.sync as sync_api_module
-
-    class _FakeDb:
-        pass
-
-    async def fake_enqueue(_db, job_name: str):
-        assert job_name == sync_api_module.BACKFILL_TARGET_COUNTRY_JOB_NAME
-        return {"task_id": 123, "existing": False}
-
-    monkeypatch.setattr(sync_api_module, "_enqueue", fake_enqueue)
-
-    result = await sync_api_module.backfill_out_record_target_country(
-        db=_FakeDb(),  # type: ignore[arg-type]
-        _={},
-    )
-
-    assert result == {"task_id": 123, "existing": False}

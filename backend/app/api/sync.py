@@ -21,7 +21,6 @@ from app.sync.order_detail import (
     find_refetch_targets,
     serialize_refetch_targets,
 )
-from app.sync.out_records import BACKFILL_TARGET_COUNTRY_JOB_NAME
 from app.tasks.queue import enqueue_task
 from app.tasks.scheduler import reload_scheduler, scheduler_status
 
@@ -95,14 +94,6 @@ async def sync_out_records(
     _: dict[str, Any] = Depends(get_current_session),
 ) -> dict[str, Any]:
     return await _enqueue(db, "sync_out_records")
-
-
-@router.post("/sync/out-records/backfill-target-country")
-async def backfill_out_record_target_country(
-    db: AsyncSession = Depends(db_session),
-    _: dict[str, Any] = Depends(get_current_session),
-) -> dict[str, Any]:
-    return await _enqueue(db, BACKFILL_TARGET_COUNTRY_JOB_NAME)
 
 
 @router.post("/sync/orders")

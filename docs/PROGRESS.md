@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-14（补充出库目标国家历史回填入口；清理废弃采购日期兼容层，取消采购日期、紧急规则改为可售天数阈值、在途国家改为备注提取）
+> 最近更新：2026-04-14（将出库目标国家历史回填并入出库记录同步；清理废弃采购日期兼容层，取消采购日期、紧急规则改为可售天数阈值、在途国家改为备注提取）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -98,7 +98,7 @@
 - **筛选项统一**：店铺/仓库/订单/库存/出库/补货发起 7 个页面的筛选项布局和高度一致
 - **出库页**：原“其他出库（在途观测）”改名为“出库”；主表展示出库单id、出库仓库id、目标国家、更新时间、同步时间、出库单类型、状态，明细按“商品SKU、商品ID、可用数、采购单价”顺序展示；同步时间复用 `lastSeenAt`，状态统一按 `is_in_transit` 映射为“在途 / 完结”，并支持按“出库单类型”单选筛选
 - **在途国家识别**：`sync_out_records` 不再使用 `targetFbaWarehouseId -> warehouse.country` 反推国家，而是从备注文本提取国家名（如 `20260410美国-赢捷-加州-散货-在途中` → `US`）；无法识别时保持空值
-- **出库目标国家回填**：同步控制台新增“回填出库目标国家”手动任务，专门扫描历史 `target_country` 为空且备注可识别国家的出库记录，按备注规则补回目标国家，不覆盖已有值
+- **出库目标国家回填**：`sync_out_records` 在正常同步赛狐出库记录后，会顺带扫描历史 `target_country` 为空且备注可识别国家的出库记录，按备注规则补回目标国家，不覆盖已有值
 
 ### 2.7 任务队列系统
 
@@ -119,10 +119,10 @@
 
 ## 3. 近期重大变更（2026-04-10 ~ 2026-04-14）
 
-### 3.35 出库目标国家历史回填（2026-04-14）
-- `backend/app/sync/out_records.py` 新增 `backfill_out_record_target_country` 任务，扫描 `in_transit_record.target_country is null` 且备注非空的历史记录，复用现有备注解析逻辑回填目标国家，只更新空值行
-- `backend/app/api/sync.py` 新增 `POST /api/sync/out-records/backfill-target-country` 手动触发入口；`frontend/src/config/sync.ts` 将该任务加入同步控制台，便于对旧数据执行一次性回填
-- **测试**：更新 `backend/tests/unit/test_sync_out_records_job.py` 与 `backend/tests/unit/test_scheduler_api.py`，覆盖备注解析样例和回填任务入队/更新行为
+### 3.35 出库目标国家历史回填并入同步流程（2026-04-14）
+- `backend/app/sync/out_records.py` 将历史 `target_country` 空值回填并入 `sync_out_records` 主流程；每次同步完赛狐出库记录后，都会复用同一套备注解析逻辑补齐历史空值行，但不覆盖已有目标国家
+- `backend/app/api/sync.py`、`backend/app/api/task.py` 与 `frontend/src/config/sync.ts` 清理独立的“回填出库目标国家”任务入口，前端仍只保留“出库记录同步”按钮
+- **测试**：更新 `backend/tests/unit/test_sync_out_records_job.py` 与 `backend/tests/unit/test_scheduler_api.py`，覆盖回填 helper 和主同步流程内执行回填的行为
 
 ### 3.34 出库页补充目标国家列与类型单选筛选（2026-04-14）
 - `backend/app/api/data.py` 为 `GET /api/data/out-records` 新增 `type_name` 查询参数，允许按出库单类型精确筛选；`backend/tests/unit/test_data_out_records_api.py` 补充对应参数签名与过滤口径断言

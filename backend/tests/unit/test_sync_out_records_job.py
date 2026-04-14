@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
+from types import SimpleNamespace
 
 import pytest
 
@@ -187,3 +188,87 @@ async def test_backfill_target_country_from_remark_updates_only_empty_values() -
     assert rows[0].target_country == "US"
     assert rows[1].target_country is None
     assert db.committed is True
+
+
+@pytest.mark.asyncio
+async def test_sync_out_records_job_runs_backfill_inside_main_flow(monkeypatch) -> None:
+    import app.sync.out_records as out_records_module
+
+    calls: list[str] = []
+    progress: list[dict[str, Any]] = []
+
+    class _FakeSession:
+        async def execute(self, _stmt: Any) -> SimpleNamespace:
+            raise AssertionError("unexpected execute call")
+
+        async def commit(self) -> None:
+            return None
+
+    class _FakeSessionContext:
+        async def __aenter__(self) -> _FakeSession:
+            return _FakeSession()
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+    async def fake_mark_sync_running(_db: Any, job_name: str) -> datetime:
+        calls.append(f"running:{job_name}")
+        return datetime(2026, 4, 14, 12, 0, 0)
+
+    async def fake_mark_sync_success(_db: Any, job_name: str, _started: datetime) -> None:
+        calls.append(f"success:{job_name}")
+
+    async def fake_load_warehouse_ids(_db: Any) -> set[str]:
+        return set()
+
+    async def fake_upsert_out_record(_db: Any, _raw: dict[str, Any], _warehouse_ids: set[str], _sync_start: datetime) -> int:
+        calls.append("upsert")
+        return 2
+
+    async def fake_backfill(_db: Any) -> tuple[int, int, int]:
+        calls.append("backfill")
+        return 5, 3, 2
+
+    async def fake_age_out_records(_sync_start: datetime) -> int:
+        calls.append("age")
+        return 4
+
+    async def fake_list_in_transit_records(*, on_page):
+        await on_page(1, 1, 1)
+        yield {"id": "OUT-1", "items": [{"commoditySku": "SKU-1", "goods": "2"}]}
+
+    async def fake_progress(**kwargs: Any) -> None:
+        progress.append(kwargs)
+
+    monkeypatch.setattr(out_records_module, "async_session_factory", lambda: _FakeSessionContext())
+    monkeypatch.setattr(out_records_module, "mark_sync_running", fake_mark_sync_running)
+    monkeypatch.setattr(out_records_module, "mark_sync_success", fake_mark_sync_success)
+    monkeypatch.setattr(out_records_module, "_load_warehouse_ids", fake_load_warehouse_ids)
+    monkeypatch.setattr(out_records_module, "_upsert_out_record", fake_upsert_out_record)
+    monkeypatch.setattr(out_records_module, "_backfill_target_country_from_remark", fake_backfill)
+    monkeypatch.setattr(out_records_module, "_age_out_records", fake_age_out_records)
+    monkeypatch.setattr(out_records_module, "list_in_transit_records", fake_list_in_transit_records)
+
+    ctx = out_records_module.JobContext(
+        task_id=1,
+        job_name="sync_out_records",
+        payload={},
+        progress_setter=fake_progress,
+    )
+
+    await out_records_module.sync_out_records_job(ctx)
+
+    assert calls == [
+        "running:sync_out_records",
+        "upsert",
+        "backfill",
+        "age",
+        "success:sync_out_records",
+    ]
+    assert [item.get("current_step") for item in progress if item.get("current_step")] == [
+        "同步在途出库单",
+        "回填目标国家",
+        "老化未见记录",
+        "完成",
+    ]
+    assert "回填国家 3" in progress[-1]["step_detail"]
