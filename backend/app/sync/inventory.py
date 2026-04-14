@@ -41,10 +41,13 @@ async def sync_inventory_job(ctx: JobContext) -> None:
                     step_detail=f"第 {page_no} / {total_page} 页，当前页 {rows_count} 条，已处理 {count} 条",
                 )
 
+            BATCH_SIZE = 500
             async for raw in list_inventory_items(on_page=_report_page):
                 await _upsert_inventory(db, raw, warehouse_country_map)
                 count += 1
-            await db.commit()
+                if count % BATCH_SIZE == 0:
+                    await db.commit()
+            await db.commit()  # 提交最后不足一批的剩余记录
 
         async with async_session_factory() as db:
             await mark_sync_success(db, JOB_NAME, started)
