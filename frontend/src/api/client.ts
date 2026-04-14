@@ -24,9 +24,12 @@ client.interceptors.response.use(
     if (error.response?.status === 401) {
       const auth = useAuthStore()
       auth.clearAuth()
-      // 跳到登录
-      if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
-        window.location.href = '/login'
+      // 延迟 import router 避免循环依赖（client → router → stores → api → client）
+      const currentPath = window.location.pathname
+      if (typeof window !== 'undefined' && !currentPath.startsWith('/login')) {
+        import('@/router').then(({ default: router }) => {
+          router.replace({ path: '/login', query: { redirect: currentPath } })
+        })
       }
     }
     if (error.response?.status === 403) {
