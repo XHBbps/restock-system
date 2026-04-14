@@ -49,6 +49,9 @@ dist-ssr/
 .next/
 .nuxt/
 .output/
+# unplugin 自动生成的类型声明
+frontend/auto-imports.d.ts
+frontend/components.d.ts
 # Vitest coverage HTML/JSON output
 frontend/coverage/
 
