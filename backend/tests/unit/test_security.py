@@ -42,25 +42,27 @@ def test_hash_password_is_salted_unique() -> None:
 
 
 def test_create_access_token_contains_expected_claims() -> None:
-    token = create_access_token(subject="owner")
+    token = create_access_token(user_id=123, perm_version=7)
     payload = jwt.decode(token, options={"verify_signature": False})
-    assert payload["sub"] == "owner"
+    assert payload["sub"] == "123"
+    assert payload["pv"] == 7
     assert "iat" in payload
     assert "exp" in payload
     assert payload["exp"] > payload["iat"]
 
 
-def test_create_access_token_includes_extra_claims() -> None:
-    token = create_access_token(subject="owner", extra={"role": "admin"})
+def test_create_access_token_defaults_permission_version_to_zero() -> None:
+    token = create_access_token(user_id=123)
     payload = jwt.decode(token, options={"verify_signature": False})
-    assert payload["role"] == "admin"
-    assert payload["sub"] == "owner"
+    assert payload["sub"] == "123"
+    assert payload["pv"] == 0
 
 
 def test_decode_token_returns_payload_on_valid_token() -> None:
-    token = create_access_token(subject="owner")
+    token = create_access_token(user_id=123, perm_version=5)
     payload = decode_token(token)
-    assert payload["sub"] == "owner"
+    assert payload["sub"] == "123"
+    assert payload["pv"] == 5
 
 
 def test_decode_token_rejects_invalid_signature() -> None:

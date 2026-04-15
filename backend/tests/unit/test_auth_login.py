@@ -4,7 +4,6 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.exceptions import LoginLocked, Unauthorized
-from app.models.global_config import GlobalConfig
 from app.models.login_attempt import LoginAttempt
 
 
@@ -15,28 +14,30 @@ class _ScalarResult:
     def scalar_one_or_none(self):
         return self._value
 
+    def first(self):
+        return self._value
+
+    def scalar_one(self):
+        return self._value
+
 
 class _FakeDb:
-    def __init__(self, config, attempts=None) -> None:
-        self.config = config
+    def __init__(self, users=None, attempts=None) -> None:
+        self.users = users or {}
         self.attempts = attempts or {}
         self.commits = 0
         self.executed = []
 
     async def execute(self, stmt):
         self.executed.append(stmt)
-        if hasattr(stmt, "column_descriptions") and stmt.column_descriptions:
-            entity = stmt.column_descriptions[0].get("entity")
-            params = stmt.compile().params
-            if entity is GlobalConfig:
-                return _ScalarResult(self.config)
-            if entity is LoginAttempt:
-                source_key = next(iter(params.values()))
-                return _ScalarResult(self.attempts.get(source_key))
+        params = stmt.compile().params
+        if "source_key_1" in params:
+            return _ScalarResult(self.attempts.get(params["source_key_1"]))
+        if "username_1" in params:
+            return _ScalarResult(self.users.get(params["username_1"]))
 
         table = getattr(stmt, "table", None)
         if table is not None and table.name == "login_attempt":
-            params = stmt.compile().params
             source_key = params.get("source_key") or params.get("source_key_1")
             attempt = self.attempts.get(source_key) or SimpleNamespace(
                 source_key=source_key,
@@ -67,7 +68,19 @@ async def test_login_failed_password_records_attempt(monkeypatch) -> None:
 
     now = datetime(2026, 4, 9, 10, 0, tzinfo=UTC)
     db = _FakeDb(
-        config=SimpleNamespace(login_password_hash="hash"),
+        users={
+            "admin": SimpleNamespace(
+                id=1,
+                username="admin",
+                display_name="管理员",
+                password_hash="hash",
+                is_active=True,
+                perm_version=0,
+                role_id=1,
+                is_superadmin=True,
+                role_name="管理员",
+            )
+        },
     )
     settings = SimpleNamespace(login_failed_max=3, login_lock_minutes=10, jwt_expires_hours=24)
 
@@ -77,14 +90,16 @@ async def test_login_failed_password_records_attempt(monkeypatch) -> None:
 
     with pytest.raises(Unauthorized):
         await auth_module.login(
-            auth_module.LoginRequest(password="wrong"),
-            _make_request("10.0.0.1"),
+            auth_module.LoginRequest(username="admin", password="wrong"),
+            _make_request("8.8.8.8"),
             db=db,
         )
 
     assert db.commits == 1
-    assert db.attempts["ip:10.0.0.1"].failed_count == 1
-    assert db.attempts["ip:10.0.0.1"].locked_until is None
+    assert db.attempts["ip:8.8.8.8"].failed_count == 1
+    assert db.attempts["ip:8.8.8.8"].locked_until is None
+    assert db.attempts["user:admin"].failed_count == 1
+    assert db.attempts["user:admin"].locked_until is None
 
 
 @pytest.mark.asyncio
@@ -93,10 +108,9 @@ async def test_login_locked_source_is_rejected(monkeypatch) -> None:
 
     now = datetime(2026, 4, 9, 10, 0, tzinfo=UTC)
     db = _FakeDb(
-        config=SimpleNamespace(login_password_hash="hash"),
         attempts={
-            "ip:10.0.0.1": SimpleNamespace(
-                source_key="ip:10.0.0.1",
+            "ip:8.8.8.8": SimpleNamespace(
+                source_key="ip:8.8.8.8",
                 failed_count=0,
                 locked_until=now + timedelta(minutes=5),
             )
@@ -109,8 +123,8 @@ async def test_login_locked_source_is_rejected(monkeypatch) -> None:
 
     with pytest.raises(LoginLocked):
         await auth_module.login(
-            auth_module.LoginRequest(password="any"),
-            _make_request("10.0.0.1"),
+            auth_module.LoginRequest(username="admin", password="any"),
+            _make_request("8.8.8.8"),
             db=db,
         )
 
@@ -123,10 +137,22 @@ async def test_login_locked_source_does_not_block_other_ip(monkeypatch) -> None:
 
     now = datetime(2026, 4, 9, 10, 0, tzinfo=UTC)
     db = _FakeDb(
-        config=SimpleNamespace(login_password_hash="hash"),
+        users={
+            "admin": SimpleNamespace(
+                id=1,
+                username="admin",
+                display_name="管理员",
+                password_hash="hash",
+                is_active=True,
+                perm_version=3,
+                role_id=1,
+                is_superadmin=True,
+                role_name="管理员",
+            )
+        },
         attempts={
-            "ip:10.0.0.1": SimpleNamespace(
-                source_key="ip:10.0.0.1",
+            "ip:8.8.8.8": SimpleNamespace(
+                source_key="ip:8.8.8.8",
                 failed_count=0,
                 locked_until=now + timedelta(minutes=5),
             )
@@ -137,13 +163,18 @@ async def test_login_locked_source_does_not_block_other_ip(monkeypatch) -> None:
     monkeypatch.setattr(auth_module, "get_settings", lambda: settings)
     monkeypatch.setattr(auth_module, "now_beijing", lambda: now)
     monkeypatch.setattr(auth_module, "verify_password", lambda plain, hashed: True)
-    monkeypatch.setattr(auth_module, "create_access_token", lambda: "token-123")
+    monkeypatch.setattr(
+        auth_module,
+        "create_access_token",
+        lambda user_id, perm_version=0: f"token-{user_id}-{perm_version}",
+    )
 
     result = await auth_module.login(
-        auth_module.LoginRequest(password="correct"),
-        _make_request("10.0.0.2"),
+        auth_module.LoginRequest(username="admin", password="correct"),
+        _make_request("8.8.4.4"),
         db=db,
     )
 
-    assert result.access_token == "token-123"
-    assert db.commits == 0
+    assert result.access_token == "token-1-3"
+    assert result.user.username == "admin"
+    assert db.commits == 1
