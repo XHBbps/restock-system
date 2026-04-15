@@ -7,12 +7,7 @@ import pytest
 
 from app.config import get_settings
 from app.core.exceptions import Unauthorized
-from app.core.security import (
-    create_access_token,
-    decode_token,
-    hash_password,
-    verify_password,
-)
+from app.core.security import create_access_token, decode_token, hash_password, verify_password
 
 
 def test_hash_password_produces_bcrypt_hash() -> None:

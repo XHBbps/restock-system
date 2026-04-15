@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-15（前端 CI 等价校验切换为 Node 20 容器链路、后端镜像依赖路径修复、本地全栈 Compose 验证链路、项目审查修复批次 1-5：通用 500 处理器、shutdown 资源释放、ORM 约束对齐、前端全局错误处理、只读会话优化、同步分批 commit、快照保留策略、trusted proxy 验证、FK ondelete、类型安全修复、401 路由化、Python lockfile、容器日志轮转/CPU 限制/PG 调优、滚动部署、Caddyfile 安全加固、CI 门控、Prometheus 指标端点）
+> 最近更新：2026-04-15（CI 安全校验修复：后端 JWT_SECRET 最小长度校验、前端依赖升级与 `npm audit` 清零；前端 CI 等价校验切换为 Node 20 容器链路、后端镜像依赖路径修复、本地全栈 Compose 验证链路、项目审查修复批次 1-5：通用 500 处理器、shutdown 资源释放、ORM 约束对齐、前端全局错误处理、只读会话优化、同步分批 commit、快照保留策略、trusted proxy 验证、FK ondelete、类型安全修复、401 路由化、Python lockfile、容器日志轮转/CPU 限制/PG 调优、滚动部署、Caddyfile 安全加固、CI 门控、Prometheus 指标端点）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -94,6 +94,11 @@
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存时自动触发 `refresh_dashboard_snapshot`，并提供“刷新快照”按钮与任务进度轮询
 
+### 3.43 CI 安全校验修复：JWT 密钥长度 + 前端依赖审计（2026-04-15）
+- `backend/app/config.py` 将默认 `jwt_secret` 占位值提升到 32 字节以上，并在 `validate_settings()` 中新增 `JWT_SECRET must be at least 32 bytes` 校验；生产环境占位值检测同步更新，避免 `PyJWT` 因 HMAC 密钥过短抛出 `InsecureKeyLengthWarning`，导致 `tests/unit/test_security.py` 在 CI 中失败
+- `frontend/package.json`、`frontend/package-lock.json` 升级 `axios` 至 `1.15.0`、`vitest` / `@vitest/coverage-v8` 至 `4.1.4`，并通过同一依赖树消除 GitHub Actions 中 `npm audit --audit-level=high` 的高危告警
+- **验证**：`backend/tests/unit/test_security.py` 10 项单测已通过；前端在 Docker `node:20-alpine` 环境完成 `npm run build`、`npm run test:coverage`、`npm audit --audit-level=high`，结果为 `found 0 vulnerabilities`
+
 ### 3.42 前端 CI 等价校验改为 Node 20 容器链路（2026-04-15）
 
 - 新增 `scripts/frontend-check.ps1` 与 `scripts/frontend-check.sh`，统一使用 Docker `node:20-alpine` 执行 `npm ci && npm run build && npm run test:coverage`
@@ -167,7 +172,7 @@
 
 ---
 
-## 3. 近期重大变更（2026-04-10 ~ 2026-04-14）
+## 3. 近期重大变更（2026-04-10 ~ 2026-04-15）
 ### 3.37 急需补货SKU过滤缺失可售天数并统一 `<1天` 展示（2026-04-14）
 - `backend/app/engine/step6_timing.py` 将缺失或无效的 `sale_days` 从 urgent 判定中排除，仅对存在且可解析的国家级 `sale_days` 执行 `<= lead_time_days` 判断
 - `backend/app/api/metrics.py` 调整 dashboard 的 `top_urgent_skus` 过滤逻辑，缺失 `sale_days` 的国家不再进入“急需补货SKU”列表

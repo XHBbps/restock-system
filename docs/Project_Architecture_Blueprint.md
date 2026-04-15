@@ -23,7 +23,7 @@
 
 | 层级 | 技术 |
 |---|---|
-| 前端 | Vue 3.5 / TypeScript 5.7 / Pinia 2 / Vue Router 4 / Element Plus 2.9 / Vite 6 / ECharts 6 |
+| 前端 | Vue 3.5 / TypeScript 5.7 / Pinia 2 / Vue Router 4 / Element Plus 2.9 / Vite 6 / Vitest 4 / ECharts 6 |
 | 后端 | Python 3.11+ / FastAPI / SQLAlchemy 2.0 async / Pydantic 2 / APScheduler / httpx / structlog |
 | 数据库 | PostgreSQL 16（asyncpg 驱动）/ Alembic 迁移 |
 | 部署 | Docker Compose / Caddy 反向代理 / Nginx 静态托管 |
@@ -776,7 +776,7 @@ PROCESS_ENABLE_SCHEDULER=true
 
 | 层级 | 框架 | 覆盖范围 |
 |---|---|---|
-| 单元测试 | Vitest | API 客户端、工具函数、路由守卫、Pinia store |
+| 单元测试 | Vitest 4 | API 客户端、工具函数、路由守卫、Pinia store |
 
 **运行**：`cd frontend && npm run test`
 
@@ -877,7 +877,7 @@ npm run build
 DATABASE_URL=postgresql+asyncpg://user:pass@host:5432/db
 SAIHU_BASE_URL=https://openapi.sellfox.com
 SAIHU_CLIENT_ID, SAIHU_CLIENT_SECRET
-LOGIN_PASSWORD, JWT_SECRET, JWT_EXPIRES_HOURS=24
+LOGIN_PASSWORD, JWT_SECRET（至少 32 字节，建议 64 字节随机值）, JWT_EXPIRES_HOURS=24
 PROCESS_ENABLE_WORKER=true
 PROCESS_ENABLE_REAPER=true
 PROCESS_ENABLE_SCHEDULER=true

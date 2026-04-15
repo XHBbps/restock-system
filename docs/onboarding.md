@@ -295,7 +295,7 @@ bash scripts/check.sh
 | `SAIHU_CLIENT_ID` | 赛狐应用 ID | — |
 | `SAIHU_CLIENT_SECRET` | 赛狐应用密钥 | — |
 | `LOGIN_PASSWORD` | 登录密码（首次启动自动 hash） | — |
-| `JWT_SECRET` | JWT 签名密钥（64 字节随机） | — |
+| `JWT_SECRET` | JWT 签名密钥（至少 32 字节，建议 64 字节随机值） | — |
 | `JWT_EXPIRES_HOURS` | Token 有效期 | `24` |
 | `PROCESS_ENABLE_WORKER` | 本进程是否跑 worker | `true`（本地） |
 | `PROCESS_ENABLE_REAPER` | 本进程是否跑 reaper | `true`（本地） |

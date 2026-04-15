@@ -27,7 +27,7 @@ def test_docs_disabled_by_default_in_production(monkeypatch) -> None:
         "postgresql+asyncpg://postgres:postgres@localhost:5432/replenish",
     )
     monkeypatch.setenv("APP_ENV", "production")
-    monkeypatch.setenv("JWT_SECRET", "strong-secret")
+    monkeypatch.setenv("JWT_SECRET", "strong-secret-at-least-32-bytes!")
     monkeypatch.setenv("LOGIN_PASSWORD", "strong-password")
     monkeypatch.setenv("SAIHU_CLIENT_ID", "client")
     monkeypatch.setenv("SAIHU_CLIENT_SECRET", "secret")

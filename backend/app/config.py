@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     saihu_token_refresh_ahead_seconds: int = 300
 
     login_password: str = "please_change_me"
-    jwt_secret: str = "please_change_me"
+    jwt_secret: str = "please_change_me_32_byte_minimum_key!"
     jwt_algorithm: str = "HS256"
     jwt_expires_hours: int = 24
     login_failed_max: int = 5
@@ -80,9 +80,11 @@ def validate_settings(settings: Settings) -> Settings:
         errors.append("WORKER_HEARTBEAT_SECONDS must be less than WORKER_LEASE_MINUTES*60/2")
     if settings.push_auto_retry_times < 1:
         errors.append("PUSH_AUTO_RETRY_TIMES must be >= 1")
+    if len(settings.jwt_secret.encode("utf-8")) < 32:
+        errors.append("JWT_SECRET must be at least 32 bytes")
 
     if settings.app_env == "production":
-        if settings.jwt_secret.strip() == "please_change_me":
+        if settings.jwt_secret.strip() == "please_change_me_32_byte_minimum_key!":
             errors.append("JWT_SECRET must be replaced in production")
         if settings.login_password.strip() == "please_change_me":
             errors.append("LOGIN_PASSWORD must be replaced in production")

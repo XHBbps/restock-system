@@ -55,7 +55,7 @@ restock_system/
 | 外部集成 | 赛狐 API（httpx + aiolimiter + tenacity） |
 | 数据库 | PostgreSQL 16（asyncpg） |
 | 部署 | Docker Compose + Caddy + Nginx |
-| 测试与质量 | pytest / ruff / black / mypy / Vitest / ESLint / vue-tsc |
+| 测试与质量 | pytest / ruff / black / mypy / Vitest 4 / ESLint / vue-tsc |
 
 **技术栈变动频率**：低。若添加新的主要依赖或替换核心框架，属于架构变更，需更新本节 + `docs/Project_Architecture_Blueprint.md`。
 
