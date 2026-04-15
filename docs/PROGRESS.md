@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-14（角色配置页 RoleConfigView 实现角色 CRUD + 权限矩阵编辑；信息总览新增快照缓存与手动刷新；首行卡片改为”需补货SKU / 无需补货SKU / 覆盖国家”，并兼容旧快照自动刷新；”各国缺货风险分布”继续保持 SKU+国家风险口径；信息总览”急需补货SKU”过滤缺失可售天数并统一 `<1天` 展示；信息总览”急需补货SKU”改为按国家显示可售天数；将出库目标国家历史回填并入出库记录同步；清理废弃采购日期兼容层，取消采购日期、紧急规则改为可售天数阈值、在途国家改为备注提取）
+> 最近更新：2026-04-15（项目审查修复批次 1-5：通用 500 处理器、shutdown 资源释放、ORM 约束对齐、前端全局错误处理、只读会话优化、同步分批 commit、快照保留策略、trusted proxy 验证、FK ondelete、类型安全修复、401 路由化、Python lockfile、容器日志轮转/CPU 限制/PG 调优、滚动部署、Caddyfile 安全加固、CI 门控、Prometheus 指标端点）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -91,6 +91,18 @@
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存时自动触发 `refresh_dashboard_snapshot`，并提供“刷新快照”按钮与任务进度轮询
+
+### 3.40 项目审查修复（2026-04-15）
+
+批量修复审查发现的 40 项问题，涵盖 5 个批次：
+- **阻塞级**：通用 500 处理器（防堆栈泄露）、shutdown 资源释放（DB 引擎 + SaihuClient）、ORM 唯一约束对齐、部署脚本修复（rollback detached HEAD、restore_db 清库）
+- **性能**：GET 端点只读会话（`db_session_readonly`）、Element Plus unplugin 基础设施、登录页 DOM 精简（2800→1200）、hasChanges 结构化比较、同步任务每 500 条周期性 commit、库存快照 90 天保留策略
+- **安全**：trusted proxy 验证（rate_limit + auth）、前端容器非 root（nginx 8080）、Caddyfile 健康端点内网限制 + 请求体限制
+- **健壮性**：InTransitRecord FK ondelete=SET NULL、迁移脚本文件锁
+- **代码质量**：`_mapUserInfo` 运行时类型校验、AppLayout 移除 `as any`、engine API 类型化封装、401 延迟 import 避免循环依赖、Vitest 覆盖率阈值、Python 依赖 lockfile
+- **部署**：容器日志轮转、CPU 限制、滚动重启、PostgreSQL 调优（-c 参数）、前端 healthcheck、备份验证
+- **CI/CD**：部署工作流 CI 门控 + 并发控制 + 通知、Docker 镜像构建测试
+- **监控**：`GET /api/metrics/prometheus` 基础指标端点（队列深度 + 存活）
 
 ### 3.38 信息总览快照缓存与 SKU+国家风险口径统一（2026-04-14）
 - `backend/app/models/dashboard_snapshot.py` 与 `backend/alembic/versions/20260414_2300_add_dashboard_snapshot.py` 新增 `dashboard_snapshot` 单例缓存表，存储信息总览 payload、刷新状态、开始/完成时间和最近一次错误
