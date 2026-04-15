@@ -23,6 +23,21 @@ docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T db \
     | gzip -9 > "${BACKUP_DIR}/${BACKUP_FILE}"
 
 SIZE=$(du -h "${BACKUP_DIR}/${BACKUP_FILE}" | cut -f1)
+
+# 验证备份完整性
+BYTE_SIZE=$(stat -c%s "${BACKUP_DIR}/${BACKUP_FILE}" 2>/dev/null || stat -f%z "${BACKUP_DIR}/${BACKUP_FILE}")
+if [[ "$BYTE_SIZE" -lt 1024 ]]; then
+    echo "[$(date)] ERROR: backup too small (${BYTE_SIZE} bytes), likely corrupt" >&2
+    rm -f "${BACKUP_DIR}/${BACKUP_FILE}"
+    exit 1
+fi
+
+if ! gzip -t "${BACKUP_DIR}/${BACKUP_FILE}" 2>/dev/null; then
+    echo "[$(date)] ERROR: backup file is corrupt (gzip test failed)" >&2
+    rm -f "${BACKUP_DIR}/${BACKUP_FILE}"
+    exit 1
+fi
+
 echo "[$(date)] backup ok: $BACKUP_FILE ($SIZE)"
 
 if [[ -n "$OSS_BUCKET" ]]; then
