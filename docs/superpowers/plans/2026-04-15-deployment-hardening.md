@@ -311,7 +311,7 @@ secrets:
 
 > **警告**：在已有数据目录的部署上，将 `POSTGRES_PASSWORD` 切换为 `POSTGRES_PASSWORD_FILE` 会导致 PostgreSQL 启动失败——容器只在首次 initdb 时读取密码变量，后续启动忽略它。切换会引起密码不匹配，数据库不可访问。因此 db 服务的 `POSTGRES_PASSWORD: ${DB_PASSWORD}` 保持原样，仅为后端服务挂载 secrets。
 
-**重要**：`x-backend-env` 中的 `DATABASE_URL` 保持不变（仍用 `${DB_PASSWORD}` 注入）。`DB_PASSWORD` 变量必须保留在 `deploy/.env` 中，因为 Docker Compose 的环境变量替换发生在容器启动前，无法读取 `/run/secrets/` 文件。两种机制并存：PostgreSQL 容器用 `POSTGRES_PASSWORD_FILE` 读 secret 文件，后端服务的 DSN 仍用 `.env` 中的 `DB_PASSWORD`。这是 Docker Compose（非 Swarm）的固有限制。
+**重要**：`x-backend-env` 中的 `DATABASE_URL` 保持不变（仍用 `${DB_PASSWORD}` 注入）。`DB_PASSWORD` 变量必须保留在 `deploy/.env` 中，因为 Docker Compose 的环境变量替换发生在容器启动前，无法读取 `/run/secrets/` 文件。数据库密码和 DSN 仍完全通过 `.env` 管理；secrets 机制仅用于后端应用层读取 `jwt_secret`、`login_password`、`saihu_client_id`、`saihu_client_secret`。
 
 - [ ] **Step 2: 更新 deploy/.env.example 添加注释**
 
@@ -660,12 +660,16 @@ Expected: PASS
 
 在 `backend/app/main.py` 的 lifespan 函数中，在应用启动阶段（`yield` 之前）添加：
 
+在文件顶部 import 区添加（`get_settings` 已在 `main.py:21` 导入，无需重复）：
+
 ```python
 from app.core.sentry import init_sentry
-from app.config import get_settings
+```
 
-# 在 lifespan 函数的开头
-init_sentry(get_settings())
+在 `lifespan` 函数中，`configure_logging()` 之后（第 82 行位置）插入：
+
+```python
+    init_sentry(get_settings())
 ```
 
 - [ ] **Step 7: 更新 backend/.env.example**
@@ -1169,12 +1173,11 @@ set -a
 source "$ENV_FILE"
 set +a
 
-# 通过 Caddy（宿主机 443 端口）访问健康端点
-# Caddyfile 中 /healthz 和 /readyz 限制内网 IP 访问，
-# localhost (127.0.0.1) 匹配 Caddy 的 remote_ip 白名单
-# 注意：不能用 localhost:8000 —— backend 容器未映射端口到宿主机
-# 使用 https + -k (忽略自签名) 避免 Caddy HTTP→HTTPS 重定向问题
-HEALTH_BASE_URL="https://localhost"
+# 通过 docker compose exec 直接在 backend 容器内检查健康端点
+# 不走 Caddy：因为 (1) backend 未映射端口到宿主机
+#              (2) Caddyfile 限制 /healthz 仅内网 IP
+#              (3) Caddy site block 绑定 APP_DOMAIN，localhost 不匹配
+COMPOSE_FILE="${COMPOSE_FILE:-$DEPLOY_DIR/docker-compose.yml}"
 ALERT_WEBHOOK="${ALERT_WEBHOOK:-}"
 TIMEOUT=5
 LOG_FILE="${DEPLOY_DIR}/data/logs/health_alert.log"
@@ -1212,15 +1215,18 @@ EOJSON
 FAILED=false
 FAIL_MSG=""
 
-# 检查 liveness（通过 Caddy HTTPS，-k 忽略本地证书校验）
-if ! curl -k --fail --silent --max-time "$TIMEOUT" "${HEALTH_BASE_URL}/healthz" > /dev/null 2>&1; then
+# 检查 liveness（通过 docker compose exec 在容器内执行 curl）
+HEALTHZ=$(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T backend \
+    python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz', timeout=$TIMEOUT).read()" 2>/dev/null) || HEALTHZ=""
+if [[ -z "$HEALTHZ" ]]; then
     FAILED=true
     FAIL_MSG="healthz FAILED"
     log "FAIL: healthz unreachable"
 fi
 
-# 检查 readiness（通过 Caddy HTTPS）
-READYZ_RESPONSE=$(curl -k --silent --max-time "$TIMEOUT" "${HEALTH_BASE_URL}/readyz" 2>/dev/null || echo '{"status":"error"}')
+# 检查 readiness（通过 docker compose exec 在容器内执行）
+READYZ_RESPONSE=$(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T backend \
+    python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8000/readyz', timeout=$TIMEOUT).read().decode())" 2>/dev/null || echo '{"status":"error"}')
 if echo "$READYZ_RESPONSE" | grep -q '"error"'; then
     FAILED=true
     FAIL_MSG="${FAIL_MSG:+$FAIL_MSG | }readyz FAILED: $READYZ_RESPONSE"
