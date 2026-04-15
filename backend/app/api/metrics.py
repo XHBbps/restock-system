@@ -439,31 +439,25 @@ async def get_dashboard_overview(
         await db.execute(select(DashboardSnapshot).where(DashboardSnapshot.id == 1))
     ).scalar_one_or_none()
 
-    if snapshot and snapshot.payload and _has_restock_summary_keys(snapshot.payload):
-        payload = DashboardOverviewPayload.model_validate(snapshot.payload)
-        return DashboardOverview(
-            **payload.model_dump(),
-            snapshot_status="refreshing" if active_task else "ready",
-            snapshot_updated_at=snapshot.refreshed_at or snapshot.updated_at,
-            snapshot_task_id=active_task.id if active_task else None,
-        )
-
     if snapshot and snapshot.payload:
-        task_id = active_task.id if active_task else None
-        if task_id is None:
-            task_id, _ = await enqueue_task(
+        payload = DashboardOverviewPayload.model_validate(snapshot.payload)
+        # 旧快照缺少新增字段时，Pydantic 自动填充默认值（restock_sku_count=0 等）；
+        # 同时入队刷新任务，后台更新快照后下次请求即为完整数据
+        needs_refresh = not _has_restock_summary_keys(snapshot.payload)
+        if needs_refresh and not active_task:
+            await enqueue_task(
                 db,
                 job_name=REFRESH_DASHBOARD_JOB_NAME,
                 trigger_source="manual",
                 dedupe_key=REFRESH_DASHBOARD_JOB_NAME,
                 payload={"triggered_by": "dashboard_schema_refresh"},
             )
-        payload = await build_dashboard_payload(db)
+            active_task = await _get_active_dashboard_refresh_task(db)
         return DashboardOverview(
             **payload.model_dump(),
-            snapshot_status="refreshing",
+            snapshot_status="refreshing" if active_task else "ready",
             snapshot_updated_at=snapshot.refreshed_at or snapshot.updated_at,
-            snapshot_task_id=task_id,
+            snapshot_task_id=active_task.id if active_task else None,
         )
 
     task_id = active_task.id if active_task else None
