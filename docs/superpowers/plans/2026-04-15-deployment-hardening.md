@@ -928,7 +928,7 @@ from httpx import ASGITransport, AsyncClient
 from app.core.metrics import http_requests_total
 
 
-@pytest.mark.anyio
+@pytest.mark.asyncio
 async def test_metrics_middleware_increments_counter():
     """After a request, http_requests_total should increment."""
     from app.main import app  # 模块级单例，非工厂函数
