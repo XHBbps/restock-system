@@ -47,7 +47,24 @@ fi
 "$BACKUP_SCRIPT"
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" build backend frontend
 "$SCRIPT_DIR/migrate.sh"
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d backend worker scheduler frontend caddy
+echo "[deploy] rolling update: backend"
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --no-deps backend
+sleep 5
+
+echo "[deploy] rolling update: worker"
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --no-deps worker
+sleep 3
+
+echo "[deploy] rolling update: scheduler"
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --no-deps scheduler
+sleep 3
+
+echo "[deploy] rolling update: frontend"
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --no-deps frontend
+sleep 3
+
+echo "[deploy] rolling update: caddy"
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --no-deps caddy
 "$SCRIPT_DIR/smoke_check.sh"
 
 # Disable rollback trap on success.
