@@ -160,8 +160,6 @@ git commit -m "feat: add init_secrets.sh for Docker Secrets file generation"
 import os
 from unittest.mock import patch
 
-import pytest
-
 
 def test_settings_reads_secret_from_file(tmp_path):
     """When env var is empty but secret file exists, use file content."""
