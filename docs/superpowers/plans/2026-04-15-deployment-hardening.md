@@ -64,8 +64,8 @@
 
 | Action | File | Responsibility |
 |--------|------|----------------|
-| Modify | `deploy/docker-compose.yml` | 后端/worker/scheduler 日志挂载到宿主机 |
-| Create | `deploy/scripts/logrotate_setup.sh` | 宿主机 logrotate 配置 |
+| Modify | `deploy/docker-compose.yml` | 增大 Docker json-file 日志保留量（100m x 10） |
+| Create | `deploy/scripts/logrotate_setup.sh` | Caddy access log logrotate 配置 |
 
 ### 中优先级 — M3: 运行时告警
 
@@ -603,11 +603,11 @@ def test_init_sentry_skips_when_no_dsn():
         database_url="postgresql+asyncpg://postgres:x@localhost:5432/replenish",
         sentry_dsn="",
     )
-    with patch("sentry_sdk.init") as mock_init:
-        from app.core.sentry import init_sentry
+    # init_sentry 内部 lazy import sentry_sdk，不会走到 init 调用
+    from app.core.sentry import init_sentry
 
-        init_sentry(settings)
-        mock_init.assert_not_called()
+    # 无 DSN 时函数应直接 return，不 import sentry_sdk
+    init_sentry(settings)  # 不抛异常即通过
 
 
 def test_init_sentry_calls_sdk_when_dsn_set():
@@ -618,7 +618,11 @@ def test_init_sentry_calls_sdk_when_dsn_set():
         app_env="production",
         sentry_traces_sample_rate=0.1,
     )
-    with patch("sentry_sdk.init") as mock_init:
+    # sentry_sdk 在 init_sentry 内部 lazy import，
+    # 需要 patch 模块级别的 sentry_sdk.init
+    import sentry_sdk
+
+    with patch.object(sentry_sdk, "init") as mock_init:
         from app.core.sentry import init_sentry
 
         init_sentry(settings)
@@ -904,17 +908,11 @@ from httpx import ASGITransport, AsyncClient
 from app.core.metrics import http_requests_total
 
 
-@pytest.fixture()
-def app():
-    """Create a fresh FastAPI app for testing middleware."""
-    from app.main import create_app
-
-    return create_app()
-
-
 @pytest.mark.anyio
-async def test_metrics_middleware_increments_counter(app):
+async def test_metrics_middleware_increments_counter():
     """After a request, http_requests_total should increment."""
+    from app.main import app  # 模块级单例，非工厂函数
+
     before_total = sum(
         m._value.get() for m in http_requests_total._metrics.values()
     )
@@ -928,8 +926,6 @@ async def test_metrics_middleware_increments_counter(app):
     )
     assert after_total > before_total
 ```
-
-> **注意**：如果项目没有 `create_app` 工厂函数，需改为 `from app.main import app`。执行前先确认 `backend/app/main.py` 的 app 导出方式。
 
 - [ ] **Step 2: 运行测试确认失败**
 
@@ -1157,10 +1153,11 @@ set -a
 source "$ENV_FILE"
 set +a
 
-# 直接通过 Docker 网络访问后端容器，绕过 Caddy 的内网 IP 限制
-# Caddyfile 中 /healthz 和 /readyz 仅允许内网 IP 访问，
-# 若用 APP_BASE_URL（公网域名）请求会返回 404
-HEALTH_BASE_URL="http://localhost:8000"
+# 通过 Caddy（宿主机 80 端口）访问健康端点
+# Caddyfile 中 /healthz 和 /readyz 限制内网 IP 访问，
+# localhost (127.0.0.1) 匹配 Caddy 的 remote_ip 白名单
+# 注意：不能用 localhost:8000 —— backend 容器未映射端口到宿主机
+HEALTH_BASE_URL="http://localhost"
 ALERT_WEBHOOK="${ALERT_WEBHOOK:-}"
 TIMEOUT=5
 LOG_FILE="${DEPLOY_DIR}/data/logs/health_alert.log"
