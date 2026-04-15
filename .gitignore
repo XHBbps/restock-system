@@ -101,3 +101,6 @@ logs/
 # 编辑器本地配置
 .cursor/
 .claude/settings.local.json
+.claude/scheduled_tasks.lock
+.superpowers/
+docs/superpowers/specs/.claude/
