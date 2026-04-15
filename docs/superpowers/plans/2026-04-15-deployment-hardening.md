@@ -323,7 +323,7 @@ secrets:
       POSTGRES_INITDB_ARGS: "--data-checksums"
 ```
 
-同时将 `x-backend-env` 中的 `DATABASE_URL` 保持不变（因为 asyncpg DSN 中密码仍通过 `${DB_PASSWORD}` 注入，这是 Docker Compose 的环境变量替换，secrets 文件作为备用/增强层）。
+**重要**：`x-backend-env` 中的 `DATABASE_URL` 保持不变（仍用 `${DB_PASSWORD}` 注入）。`DB_PASSWORD` 变量必须保留在 `deploy/.env` 中，因为 Docker Compose 的环境变量替换发生在容器启动前，无法读取 `/run/secrets/` 文件。两种机制并存：PostgreSQL 容器用 `POSTGRES_PASSWORD_FILE` 读 secret 文件，后端服务的 DSN 仍用 `.env` 中的 `DB_PASSWORD`。这是 Docker Compose（非 Swarm）的固有限制。
 
 - [ ] **Step 2: 更新 deploy/.env.example 添加注释**
 
@@ -471,7 +471,8 @@ import { initSentry } from '@/utils/sentry'
 
 // ... existing code ...
 
-// 在 app.use(router) 之后、app.mount('#app') 之前
+// 在 app.use(router) 之后、app.config.errorHandler 之前调用
+// 必须在 errorHandler 之前，否则 Sentry 无法捕获 Vue 组件错误
 initSentry(app, router)
 ```
 
@@ -731,7 +732,7 @@ gzip -dc "$BACKUP_FILE" | docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FIL
     psql -U "$DB_USER" -d "$VERIFY_DB" > /dev/null 2>&1
 
 # 3. 校验关键表存在且有数据
-EXPECTED_TABLES=("product" "sku" "suggestion" "task_run" "global_config")
+EXPECTED_TABLES=("product_listing" "sku_config" "suggestion" "task_run" "global_config" "role" "permission" "role_permission" "sys_user")
 VERIFY_OK=true
 
 for table in "${EXPECTED_TABLES[@]}"; do
@@ -900,25 +901,35 @@ git commit -m "feat: add centralized Prometheus metrics definitions"
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.core.metrics import http_request_duration_seconds, http_requests_total
+from app.core.metrics import http_requests_total
+
+
+@pytest.fixture()
+def app():
+    """Create a fresh FastAPI app for testing middleware."""
+    from app.main import create_app
+
+    return create_app()
 
 
 @pytest.mark.anyio
 async def test_metrics_middleware_increments_counter(app):
     """After a request, http_requests_total should increment."""
-    before = http_requests_total._metrics.copy()
+    before_total = sum(
+        m._value.get() for m in http_requests_total._metrics.values()
+    )
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as ac:
         resp = await ac.get("/healthz")
     assert resp.status_code == 200
-    # 验证 counter 增加了（具体 label 取决于路由）
     after_total = sum(
         m._value.get() for m in http_requests_total._metrics.values()
     )
-    before_total = sum(m._value.get() for m in before.values())
     assert after_total > before_total
 ```
+
+> **注意**：如果项目没有 `create_app` 工厂函数，需改为 `from app.main import app`。执行前先确认 `backend/app/main.py` 的 app 导出方式。
 
 - [ ] **Step 2: 运行测试确认失败**
 
@@ -929,19 +940,37 @@ Expected: FAIL
 
 在 `backend/app/core/middleware.py` 的 `RequestLoggingMiddleware.__call__` 方法中，在记录日志之后添加 Prometheus 指标：
 
+在文件顶部添加 import：
+
 ```python
 from app.core.metrics import http_request_duration_seconds, http_requests_total
-
-# 在 duration_ms 计算之后添加：
-endpoint = scope["path"]
-method = scope["method"]
-http_requests_total.labels(
-    method=method, endpoint=endpoint, status=str(status_code)
-).inc()
-http_request_duration_seconds.labels(
-    method=method, endpoint=endpoint
-).observe(duration_ms / 1000.0)
 ```
+
+在 `dispatch` 方法中，**两个** `duration_ms` 计算点之后都添加指标（正常响应 + 异常）：
+
+**正常响应**（在 `log_method("http_request", ...)` 之后、`response.headers["X-Request-Id"]` 之前）：
+
+```python
+        http_requests_total.labels(
+            method=request.method, endpoint=request.url.path, status=str(response.status_code)
+        ).inc()
+        http_request_duration_seconds.labels(
+            method=request.method, endpoint=request.url.path
+        ).observe(duration_ms / 1000.0)
+```
+
+**异常路径**（在 `logger.exception(...)` 之后、`return JSONResponse(500, ...)` 之前）：
+
+```python
+            http_requests_total.labels(
+                method=request.method, endpoint=request.url.path, status="500"
+            ).inc()
+            http_request_duration_seconds.labels(
+                method=request.method, endpoint=request.url.path
+            ).observe(duration_ms / 1000.0)
+```
+
+> **注意**：中间件使用 `request.method` 和 `request.url.path`（Starlette Request API），不是 `scope["method"]`。
 
 - [ ] **Step 4: 运行测试确认通过**
 
@@ -1001,21 +1030,22 @@ async def prometheus_metrics(
 
 - [ ] **Step 2: 修改 Caddyfile 限制 /api/metrics/prometheus 内网访问**
 
-在 `deploy/Caddyfile` 中，`@health_internal` 的 `path` 行添加 metrics 路径：
+在 `deploy/Caddyfile` 中，**必须在 `handle /api/*` 之前**添加一个独立的 metrics 内网限制块（因为 Caddy handle 按先后顺序匹配，`/api/*` 会先吃掉所有 `/api/` 请求）：
 
-```
-@health_internal {
-    path /healthz /readyz /api/metrics/prometheus
-    remote_ip 127.0.0.1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
-}
-```
+在 `handle /api/*` 块**之前**插入：
 
-并在 health handle 块之后添加外网 404：
-
-```
-handle /api/metrics/prometheus {
-    respond 404
-}
+```caddyfile
+    # Prometheus 指标端点仅内网可访问（必须在 /api/* 之前）
+    @metrics_internal {
+        path /api/metrics/prometheus
+        remote_ip 127.0.0.1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+    }
+    handle @metrics_internal {
+        reverse_proxy backend:8000
+    }
+    handle /api/metrics/prometheus {
+        respond 404
+    }
 ```
 
 - [ ] **Step 3: 运行后端测试**
@@ -1032,19 +1062,17 @@ git commit -m "feat: /prometheus endpoint uses prometheus-client, restrict to in
 
 ---
 
-## Task 13: 日志持久化 — 挂载到宿主机
+## Task 13: 日志持久化 — Docker 日志保留 + logrotate
 
 **Files:**
 - Modify: `deploy/docker-compose.yml`
 - Create: `deploy/scripts/logrotate_setup.sh`
 
-- [ ] **Step 1: 修改 docker-compose.yml 添加日志卷挂载**
+> **背景**：后端 structlog 只写 stdout，不写文件。Docker json-file 日志驱动已自动捕获 stdout 到宿主机 `/var/lib/docker/containers/<id>/<id>-json.log`。因此不需要挂载 `/app/logs` 空目录，而是：(1) 增大 Docker 日志保留量；(2) 配置 logrotate 管理 Caddy access log。
 
-为 `backend`、`worker`、`scheduler` 服务添加 volumes，将 structlog 输出重定向到文件。
+- [ ] **Step 1: 增大 docker-compose.yml 日志保留量**
 
-由于 uvicorn 默认输出到 stdout，最简单的方式是利用 Docker json-file 日志驱动 + 宿主机持久化目录。修改日志驱动配置：
-
-将 `x-logging` 锚点修改为：
+将 `x-logging` 锚点改为保留更多历史日志：
 
 ```yaml
 x-logging: &default-logging
@@ -1054,50 +1082,28 @@ x-logging: &default-logging
     max-file: "10"
 ```
 
-并为后端服务添加日志目录挂载（用于 Caddy access log 之外的应用日志备份）：
-
-在 `backend` 服务添加 volumes：
-
-```yaml
-    volumes:
-      - ./data/logs/backend:/app/logs
-```
-
-在 `worker` 服务添加：
-
-```yaml
-    volumes:
-      - ./data/logs/worker:/app/logs
-```
-
-在 `scheduler` 服务添加：
-
-```yaml
-    volumes:
-      - ./data/logs/scheduler:/app/logs
-```
+这样每个容器最多保留 1GB 日志（10 x 100MB），足够回溯 7-14 天。
 
 - [ ] **Step 2: 创建 logrotate 配置脚本**
 
-创建 `deploy/scripts/logrotate_setup.sh`:
+创建 `deploy/scripts/logrotate_setup.sh`，仅管理 Caddy access log（Docker 自身日志由 json-file 驱动自动轮转）：
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 为宿主机上的 Docker json-file 日志配置 logrotate
-# Docker 自身的 max-size/max-file 已处理容器日志
-# 此脚本处理 Caddy access log 和应用日志
+# 为 Caddy access log 配置 logrotate
+# Docker 容器日志由 json-file 驱动的 max-size/max-file 自动管理
+# 此脚本仅处理 Caddy 挂载到宿主机的 access.log
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-LOG_DIR="$DEPLOY_DIR/data/logs"
 CADDY_LOG="$DEPLOY_DIR/data/caddy/access.log"
 
 LOGROTATE_CONF="/etc/logrotate.d/restock"
 
 cat > "$LOGROTATE_CONF" << EOF
-$LOG_DIR/*/*.log $CADDY_LOG {
+$CADDY_LOG {
     daily
     rotate 30
     compress
@@ -1121,7 +1127,7 @@ Expected: 无报错
 
 ```bash
 git add deploy/docker-compose.yml deploy/scripts/logrotate_setup.sh
-git commit -m "feat: persist container logs to host volume + logrotate setup"
+git commit -m "feat: increase Docker log retention + add Caddy logrotate setup"
 ```
 
 ---
@@ -1151,10 +1157,15 @@ set -a
 source "$ENV_FILE"
 set +a
 
-BASE_URL="${APP_BASE_URL:-https://${APP_DOMAIN}}"
+# 直接通过 Docker 网络访问后端容器，绕过 Caddy 的内网 IP 限制
+# Caddyfile 中 /healthz 和 /readyz 仅允许内网 IP 访问，
+# 若用 APP_BASE_URL（公网域名）请求会返回 404
+HEALTH_BASE_URL="http://localhost:8000"
 ALERT_WEBHOOK="${ALERT_WEBHOOK:-}"
 TIMEOUT=5
 LOG_FILE="${DEPLOY_DIR}/data/logs/health_alert.log"
+# 用于告警消息中标识实例
+INSTANCE_LABEL="${APP_BASE_URL:-https://${APP_DOMAIN:-unknown}}"
 
 mkdir -p "$(dirname "$LOG_FILE")"
 
@@ -1187,15 +1198,15 @@ EOJSON
 FAILED=false
 FAIL_MSG=""
 
-# 检查 liveness
-if ! curl --fail --silent --max-time "$TIMEOUT" "${BASE_URL%/}/healthz" > /dev/null 2>&1; then
+# 检查 liveness（直接访问后端容器端口）
+if ! curl --fail --silent --max-time "$TIMEOUT" "${HEALTH_BASE_URL}/healthz" > /dev/null 2>&1; then
     FAILED=true
     FAIL_MSG="healthz FAILED"
     log "FAIL: healthz unreachable"
 fi
 
-# 检查 readiness
-READYZ_RESPONSE=$(curl --silent --max-time "$TIMEOUT" "${BASE_URL%/}/readyz" 2>/dev/null || echo '{"status":"error"}')
+# 检查 readiness（直接访问后端容器端口）
+READYZ_RESPONSE=$(curl --silent --max-time "$TIMEOUT" "${HEALTH_BASE_URL}/readyz" 2>/dev/null || echo '{"status":"error"}')
 if echo "$READYZ_RESPONSE" | grep -q '"error"'; then
     FAILED=true
     FAIL_MSG="${FAIL_MSG:+$FAIL_MSG | }readyz FAILED: $READYZ_RESPONSE"
@@ -1211,7 +1222,7 @@ if [[ "$DISK_USAGE" -gt 90 ]]; then
 fi
 
 if [[ "$FAILED" == true ]]; then
-    send_alert "$FAIL_MSG (${BASE_URL})"
+    send_alert "$FAIL_MSG ($INSTANCE_LABEL)"
 else
     log "OK: all checks passed"
 fi
