@@ -8,8 +8,39 @@ on:
         required: true
         default: "main"
 
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
 jobs:
+  check-ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref }}
+      - name: Verify CI passed for this ref
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const ref = '${{ github.event.inputs.ref }}';
+            const { data: checks } = await github.rest.checks.listForRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: ref,
+            });
+            const ciBackend = checks.check_runs.find(c => c.name === 'backend');
+            const ciFrontend = checks.check_runs.find(c => c.name === 'frontend');
+            if (!ciBackend || ciBackend.conclusion !== 'success') {
+              core.setFailed(`Backend CI has not passed for ref ${ref}`);
+            }
+            if (!ciFrontend || ciFrontend.conclusion !== 'success') {
+              core.setFailed(`Frontend CI has not passed for ref ${ref}`);
+            }
+            core.info('CI checks passed');
+
   deploy:
+    needs: check-ci
     runs-on: ubuntu-latest
     steps:
       - name: Deploy over SSH
@@ -25,3 +56,15 @@ jobs:
             git checkout "${{ github.event.inputs.ref }}"
             git pull --ff-only origin "${{ github.event.inputs.ref }}"
             bash deploy/scripts/deploy.sh
+
+      - name: Notify deploy result
+        if: always()
+        run: |
+          STATUS="${{ job.status }}"
+          REF="${{ github.event.inputs.ref }}"
+          echo "Deploy $STATUS for ref $REF"
+          if [ -n "${{ secrets.DEPLOY_NOTIFY_WEBHOOK }}" ]; then
+            curl -sf -X POST "${{ secrets.DEPLOY_NOTIFY_WEBHOOK }}" \
+              -H "Content-Type: application/json" \
+              -d "{\"text\": \"Deploy ${STATUS} for ${REF} by ${{ github.actor }}\"}" || true
+          fi
