@@ -4,7 +4,6 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.exceptions import LoginLocked, Unauthorized
-from app.models.login_attempt import LoginAttempt
 
 
 class _ScalarResult:

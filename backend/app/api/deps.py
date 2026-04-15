@@ -1,6 +1,6 @@
 """FastAPI 通用依赖。"""
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass
 
 from fastapi import Depends, Header
@@ -56,8 +56,8 @@ async def get_current_user(
 
     try:
         user_id = int(payload["sub"])
-    except (ValueError, TypeError):
-        raise Unauthorized("token 无效")
+    except (ValueError, TypeError) as err:
+        raise Unauthorized("token 无效") from err
 
     token_pv = payload.get("pv", -1)
 
@@ -121,7 +121,7 @@ async def get_current_permissions(
     return perms
 
 
-def require_permission(*codes: str):
+def require_permission(*codes: str) -> Callable[..., Awaitable[None]]:
     """路由级权限检查工厂（AND 语义：所有 codes 必须满足）。"""
     async def _checker(
         permissions: frozenset[str] = Depends(get_current_permissions),

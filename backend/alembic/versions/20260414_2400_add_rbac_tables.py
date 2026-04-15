@@ -8,8 +8,8 @@ Create Date: 2026-04-14 24:00:00
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from alembic import op
 
+from alembic import op
 from app.core.permissions import REGISTRY
 from app.core.security import hash_password
 
@@ -117,7 +117,7 @@ def upgrade() -> None:
     conn = op.get_bind()
 
     reader_codes = ["home:view", "restock:view", "history:view", "data_base:view", "data_biz:view"]
-    operator_codes = reader_codes + ["restock:operate", "history:delete"]
+    operator_codes = [*reader_codes, "restock:operate", "history:delete"]
 
     # Query permission IDs by code
     perm_id_rows = conn.execute(

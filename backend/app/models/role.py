@@ -1,7 +1,8 @@
 """角色表。"""
-from app.db.base import Base, TimestampMixin
 from sqlalchemy import Boolean, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
+
+from app.db.base import Base, TimestampMixin
 
 
 class Role(TimestampMixin, Base):

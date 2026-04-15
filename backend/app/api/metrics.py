@@ -12,7 +12,13 @@ from pydantic import BaseModel
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import UserContext, db_session, db_session_readonly, get_current_user, require_permission
+from app.api.deps import (
+    UserContext,
+    db_session,
+    db_session_readonly,
+    get_current_user,
+    require_permission,
+)
 from app.core.permissions import HOME_REFRESH, HOME_VIEW
 from app.core.restock_regions import resolve_allowed_restock_regions
 from app.core.timezone import now_beijing
@@ -249,13 +255,15 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
     from app.models.sku import SkuConfig
     from app.models.suggestion import Suggestion, SuggestionItem
 
-    enabled_skus = (
-        await db.execute(
-            select(SkuConfig.commodity_sku)
-            .where(SkuConfig.enabled.is_(True))
-            .order_by(SkuConfig.commodity_sku)
-        )
-    ).scalars().all()
+    enabled_skus = list(
+        (
+            await db.execute(
+                select(SkuConfig.commodity_sku)
+                .where(SkuConfig.enabled.is_(True))
+                .order_by(SkuConfig.commodity_sku)
+            )
+        ).scalars().all()
+    )
     enabled_sku_count = len(enabled_skus)
 
     config = (
@@ -460,15 +468,17 @@ async def get_dashboard_overview(
             snapshot_task_id=active_task.id if active_task else None,
         )
 
-    task_id = active_task.id if active_task else None
+    task_id: int | None = active_task.id if active_task else None
     if task_id is None:
-        task_id, _ = await enqueue_task(
-            db,
-            job_name=REFRESH_DASHBOARD_JOB_NAME,
-            trigger_source="manual",
-            dedupe_key=REFRESH_DASHBOARD_JOB_NAME,
-            payload={"triggered_by": "dashboard_get"},
-        )
+        task_id = (
+            await enqueue_task(
+                db,
+                job_name=REFRESH_DASHBOARD_JOB_NAME,
+                trigger_source="manual",
+                dedupe_key=REFRESH_DASHBOARD_JOB_NAME,
+                payload={"triggered_by": "dashboard_get"},
+            )
+        )[0]
 
     payload = _empty_dashboard_payload(enabled_sku_count=0, lead_time_days=50, target_days=60)
     return DashboardOverview(

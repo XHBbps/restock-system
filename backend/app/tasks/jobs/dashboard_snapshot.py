@@ -1,5 +1,7 @@
 """Dashboard snapshot refresh job."""
 
+from typing import Any
+
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -34,7 +36,7 @@ async def _mark_refreshing() -> None:
         await db.commit()
 
 
-async def _mark_ready(payload: dict) -> None:
+async def _mark_ready(payload: dict[str, Any]) -> None:
     now = now_beijing()
     async with async_session_factory() as db:
         stmt = pg_insert(DashboardSnapshot).values(

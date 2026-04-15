@@ -2,8 +2,11 @@
 
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
 
 import type { DashboardOverview } from '@/api/dashboard'
+import { useAuthStore } from '@/stores/auth'
+import { formatUpdateTime } from '@/utils/format'
 
 const mockGetDashboardOverview = vi.fn()
 const mockRefreshDashboardSnapshot = vi.fn()
@@ -131,7 +134,18 @@ function makeOverview(overrides: Partial<DashboardOverview> = {}): DashboardOver
 
 describe('WorkspaceView', () => {
   beforeEach(() => {
+    setActivePinia(createPinia())
     vi.clearAllMocks()
+    const auth = useAuthStore()
+    auth.setAuth('test-token', {
+      id: 1,
+      username: 'tester',
+      displayName: 'Tester',
+      roleName: 'Reader',
+      isSuperadmin: false,
+      passwordIsDefault: false,
+      permissions: ['home:refresh'],
+    })
   })
 
   it('renders country-level risk cards and snapshot meta', async () => {
@@ -148,7 +162,7 @@ describe('WorkspaceView', () => {
     expect(wrapper.text()).not.toContain('可售天数介于')
     expect(wrapper.text()).not.toContain('可售天数不少于')
     expect(wrapper.text()).toContain('快照已缓存')
-    expect(wrapper.text()).toContain('同步时间 2026-04-14 11:30')
+    expect(wrapper.text()).toContain(`同步时间 ${formatUpdateTime('2026-04-14T11:30:00+08:00')}`)
 
     const chartCards = wrapper.findAllComponents(DashboardChartCardStub)
     expect(chartCards).toHaveLength(2)

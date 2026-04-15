@@ -1,9 +1,10 @@
 """系统用户表。"""
 from datetime import datetime
 
-from app.db.base import Base, TimestampMixin
 from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
+
+from app.db.base import Base, TimestampMixin
 
 
 class SysUser(TimestampMixin, Base):

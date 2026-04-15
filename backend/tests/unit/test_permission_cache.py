@@ -1,5 +1,6 @@
 from app.core.permission_cache import InMemoryPermissionCache
 
+
 def test_cache_miss_returns_none():
     cache = InMemoryPermissionCache()
     assert cache.get(1, 0) is None

@@ -69,7 +69,7 @@ restock_system/
 | 依赖 | 最低版本 | 推荐版本 |
 |---|---|---|
 | Python | 3.11 | 3.12 |
-| Node.js | 18 | 20 LTS |
+| Node.js | 18 | 20 LTS（CI 等价校验容器） |
 | PostgreSQL | 16 | 16 |
 | Docker | 24.0 | 最新 |
 | Docker Compose | v2.20 | 最新 |
@@ -77,6 +77,12 @@ restock_system/
 ---
 
 ## 4. 本地开发启动
+
+> 前端分为两条运行通道：
+> - **本机开发通道**：继续使用本机 Node 跑 `npm run dev`，便于日常改页面
+> - **CI 等价校验通道**：统一走 `scripts/frontend-check.*`，固定使用 Docker `node:20-alpine`
+>
+> 如果本机 Node 不是 20，也不需要强制切换；但请不要再用本机 Node 的 `build/test:coverage` 结果判断 CI 是否能通过。
 
 ### 4.1 方式 A：原生开发（推荐日常调试）
 
@@ -128,6 +134,8 @@ npm run dev
 
 前端 dev server 会自动代理 `/api/*` 请求到 `http://localhost:8000`（通过 `vite.config.ts` 的 proxy 配置）。
 
+> 日常开发默认只要求 `npm run dev` 可用；若需要构建、覆盖率测试或 CI 等价验证，请使用第 4.6 节的容器化校验入口。
+
 ### 4.4 首次使用流程
 
 1. 打开 http://localhost:5173 → 登录（用 `.env` 中的 `LOGIN_PASSWORD`）
@@ -166,6 +174,27 @@ docker compose --env-file deploy/.env.dev -f deploy/docker-compose.dev.yml up -d
 - 容器名固定为 `restock-dev-*`，因此 `docker ps` 不会再出现 Compose 自动追加的 `-1`
 - 停止环境：`docker compose --env-file deploy/.env.dev -f deploy/docker-compose.dev.yml down`
 
+### 4.6 前端 CI 等价校验
+
+当需要验证“前端在 GitHub CI / Node 20 环境下是否可通过”时，不要直接依赖本机 Node，请使用仓库内置脚本：
+
+**Windows**：
+```powershell
+.\scripts\frontend-check.ps1
+```
+
+**Linux/macOS**：
+```bash
+bash scripts/frontend-check.sh
+```
+
+说明：
+
+- 脚本固定使用 Docker `node:20-alpine`
+- 容器内执行 `npm ci && npm run build && npm run test:coverage`
+- 依赖安装写入 Docker volume，不污染宿主机 `frontend/node_modules`
+- 若 Docker 不可用，脚本会直接失败并提示，而不是回退到不稳定的本机环境
+
 ---
 
 ## 5. 常用开发命令
@@ -202,27 +231,36 @@ alembic history               # 查看历史
 ```bash
 cd frontend
 
-# 开发服务器
+# 开发服务器（本机开发通道）
 npm run dev
 
-# 类型检查
+# 类型检查（本机可直接执行）
 npx vue-tsc --noEmit
 # 或
 npm run type-check
 
-# 代码检查
+# 代码检查（本机可直接执行）
 npm run lint
 npm run lint:fix
 
 # 格式化
 npm run format
 
-# 测试
+# 测试（仅本机快速调试；不作为 CI 等价口径）
 npm run test
-npm run test:coverage
 
-# 生产构建
+# 生产构建（仅本机快速调试；不作为 CI 等价口径）
 npm run build
+```
+
+前端 **CI 等价校验** 统一使用：
+
+```bash
+# Windows
+.\scripts\frontend-check.ps1
+
+# Linux/macOS
+bash scripts/frontend-check.sh
 ```
 
 ### 5.3 统一检查（跨前后端）
@@ -236,6 +274,11 @@ npm run build
 ```bash
 bash scripts/check.sh
 ```
+
+当前统一检查口径为：
+
+- 后端：继续使用宿主机 Python 原生执行
+- 前端：自动切换为 Docker Node 20 容器执行 `build + test:coverage`
 
 ---
 

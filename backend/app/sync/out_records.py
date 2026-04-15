@@ -1,7 +1,7 @@
 """Sync Saihu out-records into local tracking tables."""
 
-from decimal import Decimal, InvalidOperation
 import re
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from sqlalchemy import delete, select, text
@@ -176,7 +176,7 @@ async def _upsert_out_record(
         commodity_sku = raw_item.get("commoditySku")
         if not commodity_sku:
             continue
-        goods = _to_int(raw_item.get("goods"), 0)
+        goods = _to_int(raw_item.get("goods"), 0) or 0
         if goods <= 0:
             continue
         items.append(

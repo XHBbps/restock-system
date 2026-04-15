@@ -1,7 +1,8 @@
 """权限表（由代码注册同步，不手动增删）。"""
-from app.db.base import Base, TimestampMixin
 from sqlalchemy import Boolean, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
+
+from app.db.base import Base, TimestampMixin
 
 
 class Permission(TimestampMixin, Base):

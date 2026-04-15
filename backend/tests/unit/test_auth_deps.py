@@ -1,9 +1,8 @@
 """Auth dependency unit tests."""
-import pytest
 
+from app.api.deps import UserContext
 from app.core.exceptions import Forbidden, Unauthorized
 from app.core.permission_cache import InMemoryPermissionCache
-from app.api.deps import UserContext
 
 
 def test_user_context_creation():

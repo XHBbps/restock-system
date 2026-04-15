@@ -42,7 +42,7 @@ async def sync_order_list_job(ctx: JobContext) -> None:
 
     order_count = 0
     item_count = 0
-    BATCH_SIZE = 500
+    batch_size = 500
     try:
         async def _report_page(page_no: int, total_page: int, rows_count: int) -> None:
             if total_page <= 0:
@@ -66,7 +66,7 @@ async def sync_order_list_job(ctx: JobContext) -> None:
                 ic = await _upsert_order(db, raw)
                 order_count += 1
                 item_count += ic
-                if order_count % BATCH_SIZE == 0:
+                if order_count % batch_size == 0:
                     await db.commit()
             await db.commit()
 

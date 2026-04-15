@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 

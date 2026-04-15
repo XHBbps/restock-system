@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-15（后端镜像依赖路径修复、本地全栈 Compose 验证链路、项目审查修复批次 1-5：通用 500 处理器、shutdown 资源释放、ORM 约束对齐、前端全局错误处理、只读会话优化、同步分批 commit、快照保留策略、trusted proxy 验证、FK ondelete、类型安全修复、401 路由化、Python lockfile、容器日志轮转/CPU 限制/PG 调优、滚动部署、Caddyfile 安全加固、CI 门控、Prometheus 指标端点）
+> 最近更新：2026-04-15（前端 CI 等价校验切换为 Node 20 容器链路、后端镜像依赖路径修复、本地全栈 Compose 验证链路、项目审查修复批次 1-5：通用 500 处理器、shutdown 资源释放、ORM 约束对齐、前端全局错误处理、只读会话优化、同步分批 commit、快照保留策略、trusted proxy 验证、FK ondelete、类型安全修复、401 路由化、Python lockfile、容器日志轮转/CPU 限制/PG 调优、滚动部署、Caddyfile 安全加固、CI 门控、Prometheus 指标端点）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -93,6 +93,14 @@
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存时自动触发 `refresh_dashboard_snapshot`，并提供“刷新快照”按钮与任务进度轮询
+
+### 3.42 前端 CI 等价校验改为 Node 20 容器链路（2026-04-15）
+
+- 新增 `scripts/frontend-check.ps1` 与 `scripts/frontend-check.sh`，统一使用 Docker `node:20-alpine` 执行 `npm ci && npm run build && npm run test:coverage`
+- 前端依赖安装写入 Docker volume（`restock-frontend-check-node-modules`、`restock-frontend-check-npm-cache`），避免污染宿主机 `frontend/node_modules`
+- `scripts/check.ps1` 与 `scripts/check.sh` 的前端部分改为默认调用上述容器脚本；后端校验仍保持宿主机 Python 原生执行
+- `docs/onboarding.md` 同步区分“本机开发通道”和“CI 等价校验通道”，明确本机 Node 可继续用于 `npm run dev`，但关键校验不再依赖宿主机版本
+- **验证**：Node 20 容器内前端 `build` 与 `test:coverage` 已通过，消除 Windows + 非 CI Node 版本导致的本地噪音失败
 
 ### 3.41 后端镜像依赖路径修复 + 本地 dev 全栈容器验证（2026-04-15）
 

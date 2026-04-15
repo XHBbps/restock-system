@@ -30,7 +30,7 @@ async def resolve_commodity_id_map(
 ) -> dict[str, str | None]:
     """Resolve SKU -> commodity_id with progressively wider fallback queries."""
     normalized_skus = sorted({sku for sku in skus if sku})
-    resolved: dict[str, str | None] = {sku: None for sku in normalized_skus}
+    resolved: dict[str, str | None] = dict.fromkeys(normalized_skus)
     unresolved = set(normalized_skus)
     if not unresolved:
         return resolved

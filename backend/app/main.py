@@ -20,9 +20,9 @@ from app.api import sync as sync_api
 from app.api import task as task_api
 from app.config import get_settings
 from app.core.exceptions import BusinessError, SaihuAPIError
-from app.core.permission_sync import sync_permissions
 from app.core.logging import configure_logging, get_logger
 from app.core.middleware import RequestLoggingMiddleware
+from app.core.permission_sync import sync_permissions
 from app.core.rate_limit import RateLimitMiddleware
 from app.core.security import hash_password
 from app.db.session import async_session_factory

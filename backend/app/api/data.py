@@ -20,7 +20,7 @@ from sqlalchemy import Float, case, func, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.api.deps import db_session, db_session_readonly, get_current_session
+from app.api.deps import db_session_readonly, get_current_session
 from app.core.exceptions import NotFound
 from app.core.query import escape_like
 from app.core.timezone import BEIJING

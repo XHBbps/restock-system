@@ -1,10 +1,11 @@
 """角色-权限关联表。"""
 from datetime import datetime
 
-from app.db.base import Base
 from sqlalchemy import DateTime, ForeignKey, Integer
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
+
+from app.db.base import Base
 
 
 class RolePermission(Base):

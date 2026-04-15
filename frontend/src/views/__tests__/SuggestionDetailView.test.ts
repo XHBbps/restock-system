@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
 import type { SuggestionDetail, SuggestionItem } from '@/api/suggestion'
+import { useAuthStore } from '@/stores/auth'
 
 const mockGetSuggestion = vi.fn()
 const mockPatchSuggestionItem = vi.fn()
@@ -85,6 +86,16 @@ describe('SuggestionDetailView', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    const auth = useAuthStore()
+    auth.setAuth('test-token', {
+      id: 1,
+      username: 'tester',
+      displayName: 'Tester',
+      roleName: 'Operator',
+      isSuperadmin: false,
+      passwordIsDefault: false,
+      permissions: ['restock:operate'],
+    })
   })
 
   it('shows archived readonly tag when suggestion is archived', async () => {

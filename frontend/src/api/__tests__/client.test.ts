@@ -2,6 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import type { AxiosError, InternalAxiosRequestConfig } from 'axios'
 
+const mockRouterReplace = vi.fn()
+
+vi.mock('@/router', () => ({
+  default: {
+    replace: (...args: unknown[]) => mockRouterReplace(...args),
+  },
+}))
+
 import client from '../client'
 import { useAuthStore, type UserInfo } from '@/stores/auth'
 
@@ -36,6 +44,7 @@ describe('api/client interceptors', () => {
     setActivePinia(createPinia())
     localStorage.clear()
     vi.restoreAllMocks()
+    mockRouterReplace.mockReset()
   })
 
   it('injects Bearer token when authenticated', () => {

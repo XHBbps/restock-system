@@ -8,7 +8,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import UserContext, db_session, db_session_readonly, get_current_user, require_permission
+from app.api.deps import (
+    UserContext,
+    db_session,
+    db_session_readonly,
+    get_current_user,
+    require_permission,
+)
 from app.core.exceptions import ConflictError, NotFound
 from app.core.permissions import SYNC_OPERATE
 from app.models.task_run import TaskRun

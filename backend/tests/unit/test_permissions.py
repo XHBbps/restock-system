@@ -11,7 +11,7 @@ def test_no_duplicate_codes():
 
 
 def test_all_codes_match_registry():
-    assert ALL_CODES == frozenset(p.code for p in REGISTRY)
+    assert frozenset(p.code for p in REGISTRY) == ALL_CODES
 
 
 def test_permdef_is_frozen():

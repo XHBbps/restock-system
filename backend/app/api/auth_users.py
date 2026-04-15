@@ -1,7 +1,9 @@
 """用户管理路由。"""
 
+from typing import Any
+
 from fastapi import APIRouter, Depends
-from sqlalchemy import select, update, delete, func
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import UserContext, db_session, get_current_user, require_permission
@@ -40,7 +42,7 @@ async def _check_last_superadmin(db: AsyncSession, user_id: int) -> None:
         raise BusinessError("至少需要保留一个超管用户")
 
 
-def _user_to_out(row) -> UserOut:
+def _user_to_out(row: Any) -> UserOut:
     """Convert a joined query row (sys_user + role) to UserOut."""
     return UserOut(
         id=row.id,
@@ -54,7 +56,7 @@ def _user_to_out(row) -> UserOut:
     )
 
 
-def _user_select():
+def _user_select() -> Any:
     """Common select for user + role join."""
     return (
         select(
@@ -155,7 +157,7 @@ async def update_user(
     if target is None:
         raise NotFound("用户不存在")
 
-    values: dict = {}
+    values: dict[str, Any] = {}
     if body.display_name is not None:
         values["display_name"] = body.display_name
 

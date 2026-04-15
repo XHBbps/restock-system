@@ -1,7 +1,9 @@
 """角色管理路由。"""
 
+from typing import Any
+
 from fastapi import APIRouter, Depends
-from sqlalchemy import select, update, delete, func
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import UserContext, db_session, get_current_user, require_permission
@@ -27,7 +29,7 @@ logger = get_logger(__name__)
 # ── helpers ──────────────────────────────────────────────────
 
 
-def _role_list_select():
+def _role_list_select() -> Any:
     """Select roles with user_count."""
     return (
         select(
@@ -125,7 +127,7 @@ async def update_role(
     if role.is_superadmin:
         raise BusinessError("系统内置角色不可编辑")
 
-    values: dict = {}
+    values: dict[str, str] = {}
     if body.name is not None:
         values["name"] = body.name
     if body.description is not None:
@@ -166,7 +168,7 @@ async def delete_role(
         await db.execute(
             select(func.count()).select_from(SysUser).where(SysUser.role_id == role_id)
         )
-    ).scalar()
+    ).scalar() or 0
     if user_count > 0:
         raise BusinessError("该角色下有用户，无法删除")
 
