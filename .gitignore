@@ -59,6 +59,7 @@ frontend/coverage/
 .env
 .env.*
 !.env.example
+!deploy/.env.dev.example
 
 # ========== Docker ==========
 # 不要忽略 deploy/docker-compose.yml / Dockerfile

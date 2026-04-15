@@ -15,8 +15,17 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
+def _drop_operator_constraint_if_exists() -> None:
+    op.execute("ALTER TABLE zipcode_rule DROP CONSTRAINT IF EXISTS operator_enum")
+    op.execute("ALTER TABLE zipcode_rule DROP CONSTRAINT IF EXISTS ck_zipcode_rule_operator_enum")
+    op.execute(
+        "ALTER TABLE zipcode_rule DROP CONSTRAINT IF EXISTS "
+        "ck_zipcode_rule_ck_zipcode_rule_operator_enum"
+    )
+
+
 def upgrade() -> None:
-    op.drop_constraint("operator_enum", "zipcode_rule", type_="check")
+    _drop_operator_constraint_if_exists()
     op.create_check_constraint(
         "operator_enum",
         "zipcode_rule",
@@ -25,7 +34,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_constraint("operator_enum", "zipcode_rule", type_="check")
+    _drop_operator_constraint_if_exists()
     op.create_check_constraint(
         "operator_enum",
         "zipcode_rule",

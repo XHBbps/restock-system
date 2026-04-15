@@ -1,16 +1,17 @@
-name: restock
+name: restock-dev
 
 x-logging: &default-logging
   driver: json-file
   options:
-    max-size: "50m"
-    max-file: "5"
+    max-size: "20m"
+    max-file: "3"
 
 x-backend-env: &backend-env
   DATABASE_URL: postgresql+asyncpg://postgres:${DB_PASSWORD}@db:5432/replenish
   APP_ENV: production
   APP_TIMEZONE: Asia/Shanghai
   APP_LOG_LEVEL: INFO
+  APP_BASE_URL: ${APP_BASE_URL}
   SAIHU_BASE_URL: https://openapi.sellfox.com
   SAIHU_CLIENT_ID: ${SAIHU_CLIENT_ID}
   SAIHU_CLIENT_SECRET: ${SAIHU_CLIENT_SECRET}
@@ -38,56 +39,34 @@ x-backend-healthcheck: &backend-healthcheck
 
 services:
   db:
-    container_name: restock-db
+    container_name: restock-dev-db
     image: postgres:16-alpine
     restart: unless-stopped
-    command:
-      - postgres
-      - -c
-      - shared_buffers=256MB
-      - -c
-      - effective_cache_size=512MB
-      - -c
-      - work_mem=4MB
-      - -c
-      - maintenance_work_mem=64MB
-      - -c
-      - max_connections=50
-      - -c
-      - wal_buffers=8MB
-      - -c
-      - checkpoint_completion_target=0.9
-      - -c
-      - random_page_cost=1.1
     environment:
       POSTGRES_DB: replenish
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       TZ: Asia/Shanghai
-      POSTGRES_INITDB_ARGS: "--data-checksums"
+    ports:
+      - "5433:5432"
     volumes:
-      - ./data/pg:/var/lib/postgresql/data
+      - ./data/pg-dev:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d replenish"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      interval: 5s
+      timeout: 3s
+      retries: 10
     networks:
       - internal
     logging: *default-logging
-    deploy:
-      resources:
-        limits:
-          memory: 1g
-          cpus: '1.0'
 
   backend:
-    container_name: restock-backend
+    container_name: restock-dev-backend
     build: *backend-build
     restart: unless-stopped
     environment:
       <<: *backend-env
-      APP_DOCS_ENABLED: ${APP_DOCS_ENABLED:-false}
+      APP_DOCS_ENABLED: ${APP_DOCS_ENABLED:-true}
       PROCESS_ENABLE_WORKER: false
       PROCESS_ENABLE_REAPER: false
       PROCESS_ENABLE_SCHEDULER: false
@@ -98,14 +77,9 @@ services:
     networks:
       - internal
     logging: *default-logging
-    deploy:
-      resources:
-        limits:
-          memory: 512m
-          cpus: '0.5'
 
   worker:
-    container_name: restock-worker
+    container_name: restock-dev-worker
     build: *backend-build
     restart: unless-stopped
     environment:
@@ -123,23 +97,15 @@ services:
     networks:
       - internal
     logging: *default-logging
-    deploy:
-      resources:
-        limits:
-          memory: 512m
-          cpus: '0.5'
 
   scheduler:
-    container_name: restock-scheduler
+    container_name: restock-dev-scheduler
     build: *backend-build
     restart: unless-stopped
     environment:
       <<: *backend-env
       APP_DOCS_ENABLED: false
       PROCESS_ENABLE_WORKER: false
-      # Reaper 在 worker 和 scheduler 两个容器冗余运行:
-      # 若 worker 容器整体 crash 未恢复,scheduler 的 reaper 仍能回收僵尸任务。
-      # 双 reaper 通过 PostgreSQL 行锁 + 幂等 UPDATE 天然并发安全。
       PROCESS_ENABLE_REAPER: true
       PROCESS_ENABLE_SCHEDULER: true
       DB_POOL_SIZE: 3
@@ -151,14 +117,9 @@ services:
     networks:
       - internal
     logging: *default-logging
-    deploy:
-      resources:
-        limits:
-          memory: 512m
-          cpus: '0.25'
 
   frontend:
-    container_name: restock-frontend
+    container_name: restock-dev-frontend
     build:
       context: ../frontend
       dockerfile: Dockerfile
@@ -175,25 +136,17 @@ services:
     networks:
       - internal
     logging: *default-logging
-    deploy:
-      resources:
-        limits:
-          memory: 256m
-          cpus: '0.25'
 
   caddy:
-    container_name: restock-caddy
+    container_name: restock-dev-caddy
     image: caddy:2-alpine
     restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
-    environment:
-      APP_DOMAIN: ${APP_DOMAIN}
+      - "8088:8088"
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./data/caddy:/data
-      - ./data/caddy-config:/config
+      - ./Caddyfile.dev:/etc/caddy/Caddyfile:ro
+      - ./data/caddy-dev:/data
+      - ./data/caddy-dev-config:/config
     depends_on:
       backend:
         condition: service_healthy
@@ -202,11 +155,6 @@ services:
     networks:
       - internal
     logging: *default-logging
-    deploy:
-      resources:
-        limits:
-          memory: 128m
-          cpus: '0.25'
 
 networks:
   internal:

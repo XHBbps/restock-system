@@ -196,7 +196,34 @@ docker compose -f deploy/docker-compose.yml exec db psql -U postgres -d replenis
    - 03:30 `sync_warehouse`、02:00 `daily_archive`
    - 默认 08:00 `calc_engine`
 
-### 3.4 JWT 密钥管理（首次生成 / 轮换 / 泄漏应急）
+### 3.4 Frontend 容器显示 unhealthy
+
+**症状**：`docker compose ps` 中 `frontend` 为 `unhealthy`，但日志显示 Nginx 已启动。
+
+**排查**：
+
+1. **确认 Nginx 进程是否启动**
+   ```bash
+   docker compose -f deploy/docker-compose.yml logs frontend | tail -50
+   ```
+
+2. **容器内探活**
+   ```bash
+   docker compose -f deploy/docker-compose.yml exec frontend \
+     wget -qO- http://127.0.0.1:8080/
+   ```
+
+3. **注意 IPv6 `localhost` 坑**
+   - Alpine 镜像中的 `wget` 可能优先解析 `localhost -> ::1`
+   - 当前前端健康检查固定使用 `http://127.0.0.1:8080/`，避免出现“服务已启动但健康检查误判失败”
+   - 本地 dev 默认容器名固定为 `restock-dev-*`；生产默认容器名固定为 `restock-*`，排障时可直接使用 `docker logs restock-dev-backend`、`docker logs restock-backend`
+
+4. **重新加载**
+   ```bash
+   docker compose -f deploy/docker-compose.yml up -d frontend
+   ```
+
+### 3.5 JWT 密钥管理（首次生成 / 轮换 / 泄漏应急）
 
 **适用范围**：`JWT_SECRET` 和 `LOGIN_PASSWORD` 两个关键密钥的生命周期管理。
 

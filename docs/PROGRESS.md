@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-15（项目审查修复批次 1-5：通用 500 处理器、shutdown 资源释放、ORM 约束对齐、前端全局错误处理、只读会话优化、同步分批 commit、快照保留策略、trusted proxy 验证、FK ondelete、类型安全修复、401 路由化、Python lockfile、容器日志轮转/CPU 限制/PG 调优、滚动部署、Caddyfile 安全加固、CI 门控、Prometheus 指标端点）
+> 最近更新：2026-04-15（后端镜像依赖路径修复、本地全栈 Compose 验证链路、项目审查修复批次 1-5：通用 500 处理器、shutdown 资源释放、ORM 约束对齐、前端全局错误处理、只读会话优化、同步分批 commit、快照保留策略、trusted proxy 验证、FK ondelete、类型安全修复、401 路由化、Python lockfile、容器日志轮转/CPU 限制/PG 调优、滚动部署、Caddyfile 安全加固、CI 门控、Prometheus 指标端点）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -27,11 +27,13 @@
 - **部署脚本**（`deploy/scripts/`）：
   - `deploy.sh` — 完整发布流程（备份 → 迁移 → 镜像 → smoke check → 失败回滚）
   - `migrate.sh` / `pg_backup.sh` / `restore_db.sh` / `rollback.sh` / `validate_env.sh` / `smoke_check.sh`
+- **本地 dev 全栈验证**：新增 `deploy/docker-compose.dev.yml`、`deploy/Caddyfile.dev`、`deploy/.env.dev.example`，支持本机验证 db → migration → backend/worker/scheduler → frontend → caddy 的完整容器链路，且不污染生产 Compose
 - **进程角色解耦**：通过 `PROCESS_ENABLE_WORKER/REAPER/SCHEDULER` 将 backend 镜像拆为 3 个服务
   - `backend` — 仅 HTTP API
   - `worker` — 任务执行 + 僵尸回收
   - `scheduler` — 定时入队
 - **资源限制**（`docker-compose.yml`）：db 1G、backend 512M、worker 512M、scheduler 512M、frontend 256M、caddy 128M
+- **后端镜像启动修复**：`backend/Dockerfile` 运行阶段将 `/install/lib/python3.11/site-packages` 加入 `PYTHONPATH`，修复 `uvicorn` / `alembic` 在容器中 `ModuleNotFoundError` 的阻塞问题
 
 ### 2.2 同步与调度
 
@@ -91,6 +93,17 @@
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存时自动触发 `refresh_dashboard_snapshot`，并提供“刷新快照”按钮与任务进度轮询
+
+### 3.41 后端镜像依赖路径修复 + 本地 dev 全栈容器验证（2026-04-15）
+
+- `backend/Dockerfile` 运行阶段补充 `PYTHONPATH=/app:/install/lib/python3.11/site-packages`，修复使用 `pip install --prefix=/install` 后 `uvicorn`、`alembic` 启动脚本可执行但模块无法 import 的问题
+- `deploy/docker-compose.dev.yml` 新增独立的本地 dev 全栈 6 服务编排：db 暴露 `5433`、Caddy 暴露 `8088`，数据目录使用 `deploy/data/pg-dev` 与 `deploy/data/caddy-dev`
+- `deploy/docker-compose.dev.yml` 与 `deploy/docker-compose.yml` 为全部服务增加固定 `container_name`，本地容器统一为 `restock-dev-*`，生产容器统一为 `restock-*`
+- `deploy/Caddyfile.dev` 新增本地 HTTP 反代入口，统一代理 `/api/*`、`/docs*`、`/openapi.json`、`/healthz`、`/readyz` 和前端静态页面
+- `backend/alembic/versions/20260410_1300_extend_zipcode_rule_operator.py` 与 `backend/alembic/versions/20260411_1500_zipcode_rule_between_operator.py` 兼容删除历史命名约定叠加产生的 `ck_zipcode_rule_ck_zipcode_rule_operator_enum`，修复全新数据库从零迁移失败
+- `deploy/docker-compose.yml` 与 `deploy/docker-compose.dev.yml` 将前端健康检查改为 `127.0.0.1:8080`，修复 Alpine `wget` 对 `localhost` 走 IPv6 时的假失败
+- `deploy/.env.dev.example`、`docs/deployment.md`、`docs/onboarding.md` 同步补充本地 dev 全栈启动说明，保持生产部署入口与本地验证入口分离
+- **验证**：已完成 Compose 构建、后端镜像依赖导入校验、本地全栈迁移与健康检查链路验证
 
 ### 3.40 项目审查修复（2026-04-15）
 

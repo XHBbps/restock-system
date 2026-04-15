@@ -17,8 +17,16 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
+def _drop_operator_constraint_if_exists() -> None:
+    op.execute("ALTER TABLE zipcode_rule DROP CONSTRAINT IF EXISTS operator_enum")
+    op.execute("ALTER TABLE zipcode_rule DROP CONSTRAINT IF EXISTS ck_zipcode_rule_operator_enum")
+    op.execute(
+        "ALTER TABLE zipcode_rule DROP CONSTRAINT IF EXISTS "
+        "ck_zipcode_rule_ck_zipcode_rule_operator_enum"
+    )
+
+
 def upgrade() -> None:
-    # 1. 扩展列长度:operator 存得下 'between',compare_value 存得下多段区间
     op.alter_column(
         "zipcode_rule",
         "operator",
@@ -33,8 +41,7 @@ def upgrade() -> None:
         type_=sa.String(length=200),
         existing_nullable=False,
     )
-    # 2. 替换 CHECK 约束,加入 'between'
-    op.drop_constraint("operator_enum", "zipcode_rule", type_="check")
+    _drop_operator_constraint_if_exists()
     op.create_check_constraint(
         "operator_enum",
         "zipcode_rule",
@@ -43,8 +50,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # 注意:若存在 operator='between' 的行,downgrade 前必须手动清理,否则 CHECK 约束会失败
-    op.drop_constraint("operator_enum", "zipcode_rule", type_="check")
+    _drop_operator_constraint_if_exists()
     op.create_check_constraint(
         "operator_enum",
         "zipcode_rule",

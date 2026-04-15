@@ -22,7 +22,7 @@ FROM python:3.11-slim AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH=/install/bin:$PATH \
-    PYTHONPATH=/app
+    PYTHONPATH=/app:/install/lib/python3.11/site-packages
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libpq5 \

@@ -75,7 +75,8 @@ restock_system/
 **1. 启动数据库**
 
 ```bash
-docker compose -f deploy/docker-compose.local.yml up -d
+cp deploy/.env.dev.example deploy/.env.dev
+docker compose --env-file deploy/.env.dev -f deploy/docker-compose.dev.yml up -d db
 ```
 
 **2. 后端**

@@ -78,13 +78,14 @@ restock_system/
 
 ## 4. 本地开发启动
 
-### 4.1 启动本地数据库
+### 4.1 方式 A：原生开发（推荐日常调试）
 
 ```bash
-docker compose -f deploy/docker-compose.local.yml up -d
+cp deploy/.env.dev.example deploy/.env.dev
+docker compose --env-file deploy/.env.dev -f deploy/docker-compose.dev.yml up -d db
 ```
 
-> `docker-compose.local.yml` 只启动 PostgreSQL（5432 端口），不启动业务服务。业务服务在本地原生运行便于调试。
+> `docker-compose.dev.yml` 是唯一保留的本地容器入口。日常原生开发只启动其中的 `db` 服务（宿主机端口 5433），业务服务在本地原生运行便于调试。
 
 ### 4.2 后端
 
@@ -135,6 +136,35 @@ npm run dev
 4. 进入"补货发起"页 → 点击"生成补货建议"
 5. 等待引擎完成（TaskProgress 会自动轮询）
 6. 查看生成的建议单，选择条目推送
+
+### 4.5 方式 B：本地全栈容器验证
+
+当需要验证“镜像构建 → 数据库迁移 → Caddy 反代 → 前后端联通”的完整容器链路时，使用全栈 Compose：
+
+```bash
+# 1. 准备本地环境变量
+cp deploy/.env.dev.example deploy/.env.dev
+
+# 2. 启动数据库
+docker compose --env-file deploy/.env.dev -f deploy/docker-compose.dev.yml up -d db
+
+# 3. 执行迁移
+docker compose --env-file deploy/.env.dev -f deploy/docker-compose.dev.yml run --rm backend alembic upgrade head
+
+# 4. 启动全栈
+docker compose --env-file deploy/.env.dev -f deploy/docker-compose.dev.yml up -d
+
+# 5. 访问
+# 前端: http://localhost:8088
+# docs: http://localhost:8088/docs
+```
+
+补充说明：
+
+- 全栈 Compose 使用独立项目名 `restock-dev`，不会影响生产 `deploy/docker-compose.yml`
+- PostgreSQL 对宿主机暴露 `5433`，避免占用本地原生开发常用的 `5432`
+- 容器名固定为 `restock-dev-*`，因此 `docker ps` 不会再出现 Compose 自动追加的 `-1`
+- 停止环境：`docker compose --env-file deploy/.env.dev -f deploy/docker-compose.dev.yml down`
 
 ---
 
