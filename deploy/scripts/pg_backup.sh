@@ -16,6 +16,14 @@ BACKUP_FILE="replenish_${TIMESTAMP}.sql.gz"
 
 mkdir -p "$BACKUP_DIR"
 
+# 空库检测：首次部署时数据库尚无 alembic_version 表，跳过备份
+HAS_TABLES=$(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T db \
+    psql -U "$DB_USER" -d "$DB_NAME" -tAc "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name='alembic_version')" 2>/dev/null || echo "f")
+if [[ "$HAS_TABLES" == *"f"* ]]; then
+    echo "[$(date)] database is empty (no alembic_version), skipping backup"
+    exit 0
+fi
+
 echo "[$(date)] backup start: $BACKUP_FILE"
 
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T db \
