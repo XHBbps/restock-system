@@ -4,6 +4,52 @@
 
 ---
 
+## 0. 首次部署（Day-0）
+
+> 仅在全新服务器上执行一次。后续更新走 `deploy.sh`。
+
+### 前提条件
+
+- Ubuntu 22.04+ / Debian 12+ 云服务器（2C4G 起步）
+- 已配置 SSH 登录
+- 已将域名 DNS 解析到服务器 IP（Caddy 自动签发 TLS 证书需要）
+
+### 步骤
+
+```bash
+# 1. 登录服务器，clone 仓库
+ssh user@your-server
+git clone https://github.com/XHBbps/restock-system.git
+cd restock-system
+
+# 2. 运行初始化脚本（检查 Docker、建目录、生成 .env、装 cron）
+bash deploy/scripts/init_server.sh
+
+# 3. 编辑 .env 填入实际配置
+vim deploy/.env
+# 必填：DB_PASSWORD, JWT_SECRET, LOGIN_PASSWORD, SAIHU_CLIENT_ID, SAIHU_CLIENT_SECRET, APP_DOMAIN
+
+# 4. 首次部署
+bash deploy/scripts/deploy.sh
+
+# 5. 验证（Caddy TLS 证书签发可能需要 10-30 秒）
+sleep 30
+curl -sf https://your-domain.com/healthz
+```
+
+### 部署后检查清单
+
+```
+[ ] curl /healthz 返回 {"status":"ok"}
+[ ] curl /readyz 返回 {"status":"ok"}
+[ ] 浏览器打开 https://your-domain.com 可见登录页
+[ ] 使用默认密码登录成功
+[ ] 全局参数页可正常加载
+[ ] deploy/data/backup/ 下次日 03:00 后有备份文件
+```
+
+---
+
 ## 1. 目标架构
 
 **单机 Docker Compose 部署**，包含 6 个服务：
