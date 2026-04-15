@@ -25,7 +25,7 @@ PREV_SHA="$1"
 
 echo "[rollback] checking out $PREV_SHA"
 cd "$REPO_DIR"
-git checkout "$PREV_SHA"
+git checkout -B "rollback-$(date +%Y%m%d-%H%M%S)" "$PREV_SHA"
 
 echo "[rollback] database schema is not downgraded automatically"
 echo "[rollback] restore the latest database backup before bringing services back if migrations already ran"
