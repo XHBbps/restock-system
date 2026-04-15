@@ -281,8 +281,6 @@ git commit -m "feat: Settings supports reading secrets from /run/secrets/ files"
 
 ```yaml
 secrets:
-  db_password:
-    file: ./secrets/db_password
   jwt_secret:
     file: ./secrets/jwt_secret
   login_password:
@@ -292,6 +290,8 @@ secrets:
   saihu_client_secret:
     file: ./secrets/saihu_client_secret
 ```
+
+> `db_password` 不加入 compose secrets——PostgreSQL 容器仍通过 `POSTGRES_PASSWORD` 环境变量获取密码（详见上方警告）。
 
 在 `backend` 服务中添加 `secrets` 挂载（与 `environment` 同级）：
 
@@ -305,23 +305,11 @@ secrets:
 
 同样为 `worker` 和 `scheduler` 服务添加相同的 `secrets` 块。
 
-`db` 服务添加：
+`db` 服务**不需要挂载 secrets**（密码仍通过 `POSTGRES_PASSWORD` 环境变量注入）。
 
-```yaml
-    secrets:
-      - db_password
-```
+保留 `db` 的 `POSTGRES_PASSWORD` 不变（**不要改为 `POSTGRES_PASSWORD_FILE`**）：
 
-并将 `db` 的 `POSTGRES_PASSWORD` 改为读 secret 文件：
-
-```yaml
-    environment:
-      POSTGRES_DB: replenish
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
-      TZ: Asia/Shanghai
-      POSTGRES_INITDB_ARGS: "--data-checksums"
-```
+> **警告**：在已有数据目录的部署上，将 `POSTGRES_PASSWORD` 切换为 `POSTGRES_PASSWORD_FILE` 会导致 PostgreSQL 启动失败——容器只在首次 initdb 时读取密码变量，后续启动忽略它。切换会引起密码不匹配，数据库不可访问。因此 db 服务的 `POSTGRES_PASSWORD: ${DB_PASSWORD}` 保持原样，仅为后端服务挂载 secrets。
 
 **重要**：`x-backend-env` 中的 `DATABASE_URL` 保持不变（仍用 `${DB_PASSWORD}` 注入）。`DB_PASSWORD` 变量必须保留在 `deploy/.env` 中，因为 Docker Compose 的环境变量替换发生在容器启动前，无法读取 `/run/secrets/` 文件。两种机制并存：PostgreSQL 容器用 `POSTGRES_PASSWORD_FILE` 读 secret 文件，后端服务的 DSN 仍用 `.env` 中的 `DB_PASSWORD`。这是 Docker Compose（非 Swarm）的固有限制。
 
@@ -398,7 +386,37 @@ for i in "${!secret_keys[@]}"; do
 done
 ```
 
-保留占位符检测逻辑不变。
+修改占位符检测逻辑，使其同时检查 .env 值和 secret 文件内容：
+
+```bash
+# 占位符检测（从 .env 或 secret 文件读取实际值）
+get_secret_value() {
+    local env_key="$1" file_name="$2"
+    local val="${!env_key:-}"
+    if [[ -z "$val" && -f "$SECRETS_DIR/$file_name" ]]; then
+        val="$(cat "$SECRETS_DIR/$file_name")"
+    fi
+    echo "$val"
+}
+
+db_pw="$(get_secret_value DB_PASSWORD db_password)"
+if [[ "$db_pw" == "please_change_me_use_strong_password" ]]; then
+    echo "DB_PASSWORD is still using the example placeholder" >&2
+    exit 1
+fi
+
+jwt_val="$(get_secret_value JWT_SECRET jwt_secret)"
+if [[ "$jwt_val" == "generate_with_openssl_rand_base64_32" ]]; then
+    echo "JWT_SECRET is still using the example placeholder" >&2
+    exit 1
+fi
+
+login_pw="$(get_secret_value LOGIN_PASSWORD login_password)"
+if [[ "$login_pw" == "please_change_me" || "$login_pw" == "your_initial_login_password" ]]; then
+    echo "LOGIN_PASSWORD is still using the example placeholder" >&2
+    exit 1
+fi
+```
 
 - [ ] **Step 2: 测试——只有 .env 时通过**
 
@@ -736,7 +754,12 @@ gzip -dc "$BACKUP_FILE" | docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FIL
     psql -U "$DB_USER" -d "$VERIFY_DB" > /dev/null 2>&1
 
 # 3. 校验关键表存在且有数据
-EXPECTED_TABLES=("product_listing" "sku_config" "suggestion" "task_run" "global_config" "role" "permission" "role_permission" "sys_user")
+EXPECTED_TABLES=(
+    "product_listing" "sku_config" "suggestion" "suggestion_item" "task_run"
+    "global_config" "role" "permission" "role_permission" "sys_user"
+    "order_header" "order_item" "order_detail" "inventory_snapshot_latest"
+    "warehouse" "shop" "sync_state" "api_call_log" "zipcode_rule"
+)
 VERIFY_OK=true
 
 for table in "${EXPECTED_TABLES[@]}"; do
@@ -863,13 +886,6 @@ taskrun_pending = Gauge(
 taskrun_running = Gauge(
     "restock_taskrun_running",
     "Number of running tasks",
-)
-
-# 赛狐 API
-saihu_api_calls_total = Counter(
-    "restock_saihu_api_calls_total",
-    "Total Saihu API calls",
-    ["endpoint", "status"],
 )
 
 # 应用状态
@@ -1153,11 +1169,12 @@ set -a
 source "$ENV_FILE"
 set +a
 
-# 通过 Caddy（宿主机 80 端口）访问健康端点
+# 通过 Caddy（宿主机 443 端口）访问健康端点
 # Caddyfile 中 /healthz 和 /readyz 限制内网 IP 访问，
 # localhost (127.0.0.1) 匹配 Caddy 的 remote_ip 白名单
 # 注意：不能用 localhost:8000 —— backend 容器未映射端口到宿主机
-HEALTH_BASE_URL="http://localhost"
+# 使用 https + -k (忽略自签名) 避免 Caddy HTTP→HTTPS 重定向问题
+HEALTH_BASE_URL="https://localhost"
 ALERT_WEBHOOK="${ALERT_WEBHOOK:-}"
 TIMEOUT=5
 LOG_FILE="${DEPLOY_DIR}/data/logs/health_alert.log"
@@ -1195,15 +1212,15 @@ EOJSON
 FAILED=false
 FAIL_MSG=""
 
-# 检查 liveness（直接访问后端容器端口）
-if ! curl --fail --silent --max-time "$TIMEOUT" "${HEALTH_BASE_URL}/healthz" > /dev/null 2>&1; then
+# 检查 liveness（通过 Caddy HTTPS，-k 忽略本地证书校验）
+if ! curl -k --fail --silent --max-time "$TIMEOUT" "${HEALTH_BASE_URL}/healthz" > /dev/null 2>&1; then
     FAILED=true
     FAIL_MSG="healthz FAILED"
     log "FAIL: healthz unreachable"
 fi
 
-# 检查 readiness（直接访问后端容器端口）
-READYZ_RESPONSE=$(curl --silent --max-time "$TIMEOUT" "${HEALTH_BASE_URL}/readyz" 2>/dev/null || echo '{"status":"error"}')
+# 检查 readiness（通过 Caddy HTTPS）
+READYZ_RESPONSE=$(curl -k --silent --max-time "$TIMEOUT" "${HEALTH_BASE_URL}/readyz" 2>/dev/null || echo '{"status":"error"}')
 if echo "$READYZ_RESPONSE" | grep -q '"error"'; then
     FAILED=true
     FAIL_MSG="${FAIL_MSG:+$FAIL_MSG | }readyz FAILED: $READYZ_RESPONSE"
