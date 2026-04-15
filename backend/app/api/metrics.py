@@ -499,3 +499,34 @@ async def refresh_dashboard_snapshot(
         payload={"triggered_by": "manual_refresh"},
     )
     return DashboardRefreshOut(task_id=task_id, existing=existing)
+
+
+@router.get("/prometheus", response_class=PlainTextResponse)
+async def prometheus_metrics(
+    db: AsyncSession = Depends(db_session_readonly),
+) -> PlainTextResponse:
+    """基础 Prometheus 文本格式指标。"""
+    pending = (
+        await db.execute(
+            select(func.count()).select_from(TaskRun).where(TaskRun.status == "pending")
+        )
+    ).scalar() or 0
+
+    running = (
+        await db.execute(
+            select(func.count()).select_from(TaskRun).where(TaskRun.status == "running")
+        )
+    ).scalar() or 0
+
+    lines = [
+        "# HELP restock_taskrun_pending Number of pending tasks",
+        "# TYPE restock_taskrun_pending gauge",
+        f"restock_taskrun_pending {pending}",
+        "# HELP restock_taskrun_running Number of running tasks",
+        "# TYPE restock_taskrun_running gauge",
+        f"restock_taskrun_running {running}",
+        "# HELP restock_up Application is up",
+        "# TYPE restock_up gauge",
+        "restock_up 1",
+    ]
+    return PlainTextResponse("\n".join(lines) + "\n", media_type="text/plain")
