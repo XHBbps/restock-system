@@ -822,7 +822,13 @@ Run: `cat deploy/scripts/backup_cron_setup.sh`
 
 - [ ] **Step 2: 追加月度验证 cron**
 
-在现有备份 cron 注册逻辑之后，添加月度验证任务（每月 1 日凌晨 4:00 执行）：
+首先在脚本开头（`LOG_DIR` 之后）补充缺失的 `DEPLOY_DIR` 定义（当前脚本只有 `SCRIPT_DIR`，其它 deploy 脚本均定义了 `DEPLOY_DIR`）：
+
+```bash
+DEPLOY_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+```
+
+然后在现有备份 cron 注册逻辑之后，添加月度验证任务（每月 1 日凌晨 4:00 执行）：
 
 ```bash
 # 月度备份恢复验证（每月 1 日 04:00）
