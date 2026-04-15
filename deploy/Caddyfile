@@ -12,6 +12,11 @@
         -Server
     }
 
+    # 请求体大小限制（D-08）
+    request_body {
+        max_size 10MB
+    }
+
     handle /api/* {
         reverse_proxy backend:8000 {
             header_up X-Real-IP {remote_host}
@@ -28,16 +33,23 @@
         reverse_proxy backend:8000
     }
 
-    handle /healthz {
+    # 健康端点仅允许内部网络访问
+    @health_internal {
+        path /healthz /readyz
+        remote_ip 127.0.0.1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+    }
+    handle @health_internal {
         reverse_proxy backend:8000
     }
-
+    handle /healthz {
+        respond 404
+    }
     handle /readyz {
-        reverse_proxy backend:8000
+        respond 404
     }
 
     handle {
-        reverse_proxy frontend:80
+        reverse_proxy frontend:8080
     }
 
     log {
