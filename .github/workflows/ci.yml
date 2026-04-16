@@ -64,3 +64,35 @@ jobs:
         run: docker build -t restock-backend:ci-test ./backend
       - name: Build frontend image
         run: docker build -t restock-frontend:ci-test ./frontend
+
+  publish:
+    needs: [backend, frontend, docker-build]
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push backend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/restock-backend:sha-${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/restock-backend:latest
+      - name: Build and push frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/restock-frontend:sha-${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/restock-frontend:latest
