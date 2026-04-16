@@ -17,6 +17,21 @@
         max_size 10MB
     }
 
+    @prometheus_internal {
+        path /api/metrics/prometheus
+        remote_ip 127.0.0.1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+    }
+    handle @prometheus_internal {
+        reverse_proxy backend:8000 {
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+    handle /api/metrics/prometheus {
+        respond 404
+    }
+
     handle /api/* {
         reverse_proxy backend:8000 {
             header_up X-Real-IP {remote_host}

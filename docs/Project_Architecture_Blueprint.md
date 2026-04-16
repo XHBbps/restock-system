@@ -336,7 +336,7 @@ client.interceptors.response.use(undefined, (error) => {
 
 `suggestion.ts` 当前负责建议单相关读写：列表查询、详情读取、条目编辑、推送采购单，以及历史记录页使用的 `DELETE /api/suggestions/{id}` 删除接口；删除仅允许作用于未推送建议单。
 
-`dashboard.ts` 当前消费 `GET /api/metrics/dashboard` 和 `POST /api/metrics/dashboard/refresh`。信息总览页默认优先读取 `dashboard_snapshot` 缓存，并在页面头部展示快照状态与同步时间；当缓存缺失时，后端会自动入队 `refresh_dashboard_snapshot` 任务，前端通过 `TaskProgress` 轮询任务进度，也允许手动点击“刷新快照”。缓存 payload 由 `build_dashboard_payload()` 统一生成，其中首行卡片使用 `restock_sku_count`、`no_restock_sku_count`、`risk_country_count` 展示“需补货SKU / 无需补货SKU / 覆盖国家”；左侧“各国缺货风险分布”和“急需补货SKU”继续基于 SKU+国家维度的实时 `sale_days` 计算结果；右侧国家分布继续汇总当前建议单全部条目的 `country_breakdown`。若读取到缺少 `restock_sku_count`、`no_restock_sku_count` 的旧快照，接口会自动触发刷新并回退到实时重算结果，保证新旧快照切换期间页面可用。
+`dashboard.ts` 当前消费 `GET /api/metrics/dashboard` 和 `POST /api/metrics/dashboard/refresh`。信息总览页默认优先读取 `dashboard_snapshot` 缓存，并在页面头部展示快照状态与同步时间；当缓存缺失或读到缺少新字段的旧快照时，后端返回 `snapshot_status="missing"`，不会自动入队刷新，前端仅在具备 `home:refresh` 时展示 `TaskProgress` 轮询与“刷新快照”按钮。缓存 payload 由 `build_dashboard_payload()` 统一生成，其中首行卡片使用 `restock_sku_count`、`no_restock_sku_count`、`risk_country_count` 展示“需补货SKU / 无需补货SKU / 覆盖国家”；左侧“各国缺货风险分布”和“急需补货SKU”继续基于 SKU+国家维度的实时 `sale_days` 计算结果；右侧国家分布继续汇总当前建议单全部条目的 `country_breakdown`。
 
 ### 4.5 数据流模式
 
@@ -383,7 +383,7 @@ async function reload() {
 | `SkuCard` | 商品展示（图片 + 名称 + SKU + blocker 标签） | 商品、库存、订单、建议单 |
 | `StatusTag` | 状态标签（基于 StatusMeta 对象） | 所有状态展示 |
 | `TablePaginationBar` | 分页条，v-model 绑定 currentPage 和 pageSize | 所有数据表格 |
-| `TaskProgress` | 长任务进度展示，自动轮询 `/api/tasks/{id}`；可解析按条数和按页数/步骤的确定型进度 | 引擎生成、推送、同步 |
+| `TaskProgress` | 长任务进度展示，自动轮询 `/api/tasks/{id}`；可解析按条数和按页数/步骤的确定型进度；任务读取权限按 `job_name` 映射到对应业务权限过滤 | 引擎生成、推送、同步 |
 | `sync/OrderDetailFetchAction` | 订单页右侧“详情获取”动作组件，封装回溯天数、触发逻辑与冲突提示 | 订单页 |
 
 **前端监控命名约定**：
@@ -447,7 +447,7 @@ Worker 标记 status=success, finished_at
 POST /api/suggestions/{id}/push, body={ item_ids: [...] }
   │
   ▼
-api/suggestion.py: push_items() → enqueue_task("push_saihu", dedupe="push_saihu#<id>")
+api/suggestion.py: push_items() → enqueue_task("push_saihu", dedupe="push_saihu#<id>#<sorted_item_ids>")
   │
   ▼
 Worker 执行 pushback/purchase.py

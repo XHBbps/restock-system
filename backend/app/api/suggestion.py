@@ -9,9 +9,10 @@ from sqlalchemy import Float, case, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.api.deps import db_session, get_current_session
+from app.api.deps import db_session, require_permission
 from app.core.commodity_id import refresh_suggestion_item_pushability
 from app.core.exceptions import ConflictError, NotFound, PushBlockedError, ValidationFailed
+from app.core.permissions import HISTORY_DELETE, RESTOCK_OPERATE, RESTOCK_VIEW
 from app.core.query import escape_like
 from app.core.timezone import BEIJING, now_beijing
 from app.engine.step6_timing import has_urgent_sale_days, positive_qty_countries
@@ -89,7 +90,7 @@ async def list_suggestions(
     sort_by: str | None = Query(default=None),
     sort_order: str = Query(default="desc", pattern="^(asc|desc)$"),
     db: AsyncSession = Depends(db_session),
-    _: dict[str, Any] = Depends(get_current_session),
+    _: None = Depends(require_permission(RESTOCK_VIEW)),
 ) -> SuggestionListOut:
     base = select(Suggestion)
     if status:
@@ -127,7 +128,7 @@ async def list_suggestions(
 @router.get("/current", response_model=SuggestionDetailOut)
 async def get_current_suggestion(
     db: AsyncSession = Depends(db_session),
-    _: dict[str, Any] = Depends(get_current_session),
+    _: None = Depends(require_permission(RESTOCK_VIEW)),
 ) -> SuggestionDetailOut:
     row = (
         await db.execute(
@@ -146,7 +147,7 @@ async def get_current_suggestion(
 async def get_suggestion(
     suggestion_id: int = Path(..., ge=1),
     db: AsyncSession = Depends(db_session),
-    _: dict[str, Any] = Depends(get_current_session),
+    _: None = Depends(require_permission(RESTOCK_VIEW)),
 ) -> SuggestionDetailOut:
     row = (
         await db.execute(select(Suggestion).where(Suggestion.id == suggestion_id))
@@ -162,7 +163,7 @@ async def patch_item(
     suggestion_id: int = Path(..., ge=1),
     item_id: int = Path(..., ge=1),
     db: AsyncSession = Depends(db_session),
-    _: dict[str, Any] = Depends(get_current_session),
+    _: None = Depends(require_permission(RESTOCK_OPERATE)),
 ) -> SuggestionItemOut:
     parent = (
         await db.execute(select(Suggestion).where(Suggestion.id == suggestion_id))
@@ -243,7 +244,7 @@ async def push_items(
     req: PushRequest,
     suggestion_id: int = Path(..., ge=1),
     db: AsyncSession = Depends(db_session),
-    _: dict[str, Any] = Depends(get_current_session),
+    _: None = Depends(require_permission(RESTOCK_OPERATE)),
 ) -> dict[str, Any]:
     sug = (
         await db.execute(select(Suggestion).where(Suggestion.id == suggestion_id))
@@ -253,15 +254,17 @@ async def push_items(
     if sug.status not in ("draft", "partial"):
         raise ConflictError(f"建议单状态为 {sug.status}, 不可推送")
 
+    normalized_item_ids = sorted(set(req.item_ids))
+
     items = (
         await db.execute(
             select(SuggestionItem).where(
-                SuggestionItem.id.in_(req.item_ids),
+                SuggestionItem.id.in_(normalized_item_ids),
                 SuggestionItem.suggestion_id == suggestion_id,
             )
         )
     ).scalars().all()
-    if len(items) != len(req.item_ids):
+    if len(items) != len(normalized_item_ids):
         raise NotFound("部分条目不存在")
 
     await refresh_suggestion_item_pushability(db, items)
@@ -289,8 +292,8 @@ async def push_items(
         db,
         job_name="push_saihu",
         trigger_source="manual",
-        dedupe_key=f"push_saihu#{suggestion_id}",
-        payload={"suggestion_id": suggestion_id, "item_ids": req.item_ids},
+        dedupe_key=f"push_saihu#{suggestion_id}#{','.join(str(item_id) for item_id in normalized_item_ids)}",
+        payload={"suggestion_id": suggestion_id, "item_ids": normalized_item_ids},
     )
     return {"task_id": task_id, "existing": existing}
 
@@ -299,7 +302,7 @@ async def push_items(
 async def archive_suggestion(
     suggestion_id: int = Path(..., ge=1),
     db: AsyncSession = Depends(db_session),
-    _: dict[str, Any] = Depends(get_current_session),
+    _: None = Depends(require_permission(RESTOCK_OPERATE)),
 ) -> None:
     sug = (
         await db.execute(select(Suggestion).where(Suggestion.id == suggestion_id))
@@ -320,7 +323,7 @@ async def archive_suggestion(
 async def delete_suggestion(
     suggestion_id: int = Path(..., ge=1),
     db: AsyncSession = Depends(db_session),
-    _: dict[str, Any] = Depends(get_current_session),
+    _: None = Depends(require_permission(HISTORY_DELETE)),
 ) -> None:
     sug = (
         await db.execute(select(Suggestion).where(Suggestion.id == suggestion_id))

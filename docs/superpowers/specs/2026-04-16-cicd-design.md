@@ -63,7 +63,18 @@
 
 **文件：** `.github/workflows/deploy.yml`
 
-将 `check-ci` job 中的 `github-script` 改为：
+在 `check-ci` job 顶部添加 `permissions` 块，再更新 `github-script`：
+
+```yaml
+check-ci:
+  runs-on: ubuntu-latest
+  permissions:
+    checks: read      # listForRef 在私有仓库需要此权限；默认权限可能不含
+  steps:
+    ...
+```
+
+`github-script` 脚本改为：
 
 ```javascript
 const ref = '${{ github.event.inputs.ref }}';

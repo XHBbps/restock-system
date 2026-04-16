@@ -174,6 +174,7 @@ const data = ref<DashboardOverview | null>(null)
 const loading = ref(false)
 const refreshSubmitting = ref(false)
 const currentTaskId = ref<number | null>(null)
+const canRefreshSnapshot = computed(() => auth.hasPermission('home:refresh'))
 
 const leadTimeDays = computed(() => data.value?.lead_time_days ?? 50)
 const targetDays = computed(() => data.value?.target_days ?? 60)
@@ -186,12 +187,16 @@ const suggestionStatus = computed(() =>
 
 const snapshotTagType = computed(() => {
   if (data.value?.snapshot_status === 'refreshing' || currentTaskId.value != null) return 'warning' as const
+  if (data.value?.snapshot_status === 'missing') return 'info' as const
   if (data.value?.snapshot_updated_at) return 'success' as const
   return 'info' as const
 })
 
 const snapshotStatusLabel = computed(() => {
   if (data.value?.snapshot_status === 'refreshing' || currentTaskId.value != null) return '快照刷新中'
+  if (data.value?.snapshot_status === 'missing') {
+    return canRefreshSnapshot.value ? '快照待刷新' : '暂无快照'
+  }
   if (data.value?.snapshot_updated_at) return '快照已缓存'
   return '等待生成快照'
 })
@@ -308,7 +313,7 @@ async function loadDashboard(): Promise<void> {
   try {
     const overview = await getDashboardOverview()
     data.value = overview
-    currentTaskId.value = overview.snapshot_task_id
+    currentTaskId.value = canRefreshSnapshot.value ? overview.snapshot_task_id : null
   } catch (error) {
     data.value = null
     currentTaskId.value = null

@@ -1,4 +1,4 @@
-"""任务系统 REST API(对应 contracts/task.yaml)。"""
+"""TaskRun REST API."""
 
 from datetime import datetime
 from typing import Any
@@ -8,15 +8,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import (
-    UserContext,
-    db_session,
-    db_session_readonly,
-    get_current_user,
-    require_permission,
-)
-from app.core.exceptions import ConflictError, NotFound
-from app.core.permissions import SYNC_OPERATE
+from app.api.deps import db_session, db_session_readonly, get_current_permissions
+from app.core.exceptions import ConflictError, Forbidden, NotFound
+from app.core.permissions import HOME_REFRESH, RESTOCK_OPERATE, SYNC_OPERATE, SYNC_VIEW
 from app.models.task_run import TaskRun
 from app.tasks.queue import enqueue_task
 
@@ -33,10 +27,63 @@ VALID_JOB_NAMES = {
     "sync_shop",
     "sync_all",
     "calc_engine",
-    "push_saihu",
     "daily_archive",
     "refresh_dashboard_snapshot",
 }
+
+TASK_VIEW_PERMISSIONS: dict[str, tuple[str, ...]] = {
+    "sync_product_listing": (SYNC_VIEW, SYNC_OPERATE),
+    "sync_warehouse": (SYNC_VIEW, SYNC_OPERATE),
+    "sync_inventory": (SYNC_VIEW, SYNC_OPERATE),
+    "sync_out_records": (SYNC_VIEW, SYNC_OPERATE),
+    "sync_order_list": (SYNC_VIEW, SYNC_OPERATE),
+    "sync_order_detail": (SYNC_VIEW, SYNC_OPERATE),
+    "refetch_order_detail": (SYNC_VIEW, SYNC_OPERATE),
+    "sync_shop": (SYNC_VIEW, SYNC_OPERATE),
+    "sync_all": (SYNC_VIEW, SYNC_OPERATE),
+    "daily_archive": (SYNC_VIEW, SYNC_OPERATE),
+    "calc_engine": (RESTOCK_OPERATE,),
+    "push_saihu": (RESTOCK_OPERATE,),
+    "refresh_dashboard_snapshot": (HOME_REFRESH,),
+}
+
+TASK_MANAGE_PERMISSIONS: dict[str, tuple[str, ...]] = {
+    "sync_product_listing": (SYNC_OPERATE,),
+    "sync_warehouse": (SYNC_OPERATE,),
+    "sync_inventory": (SYNC_OPERATE,),
+    "sync_out_records": (SYNC_OPERATE,),
+    "sync_order_list": (SYNC_OPERATE,),
+    "sync_order_detail": (SYNC_OPERATE,),
+    "refetch_order_detail": (SYNC_OPERATE,),
+    "sync_shop": (SYNC_OPERATE,),
+    "sync_all": (SYNC_OPERATE,),
+    "daily_archive": (SYNC_OPERATE,),
+    "calc_engine": (RESTOCK_OPERATE,),
+    "push_saihu": (RESTOCK_OPERATE,),
+    "refresh_dashboard_snapshot": (HOME_REFRESH,),
+}
+
+
+def _has_any_permission(permissions: frozenset[str], required: tuple[str, ...]) -> bool:
+    return any(code in permissions for code in required)
+
+
+def _visible_job_names(permissions: frozenset[str]) -> set[str]:
+    return {
+        job_name
+        for job_name, required in TASK_VIEW_PERMISSIONS.items()
+        if _has_any_permission(permissions, required)
+    }
+
+
+def _ensure_job_access(
+    job_name: str,
+    permissions: frozenset[str],
+    mapping: dict[str, tuple[str, ...]],
+) -> None:
+    required = mapping.get(job_name)
+    if required is None or not _has_any_permission(permissions, required):
+        raise Forbidden("Permission denied")
 
 
 class TaskRunOut(BaseModel):
@@ -68,7 +115,7 @@ class TaskListOut(BaseModel):
 class EnqueueRequest(BaseModel):
     job_name: str
     payload: dict[str, Any] | None = None
-    dedupe_key: str | None = Field(default=None, description="可选,默认 = job_name")
+    dedupe_key: str | None = Field(default=None, description="Optional; defaults to job_name")
 
 
 class EnqueueResponse(BaseModel):
@@ -82,9 +129,13 @@ async def list_tasks(
     status: str | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=100),
     db: AsyncSession = Depends(db_session_readonly),
-    user: UserContext = Depends(get_current_user),
+    permissions: frozenset[str] = Depends(get_current_permissions),
 ) -> TaskListOut:
-    base = select(TaskRun)
+    visible_jobs = _visible_job_names(permissions)
+    if not visible_jobs or (job_name is not None and job_name not in visible_jobs):
+        return TaskListOut(items=[], total=0)
+
+    base = select(TaskRun).where(TaskRun.job_name.in_(sorted(visible_jobs)))
     if job_name:
         base = base.where(TaskRun.job_name == job_name)
     if status:
@@ -98,11 +149,11 @@ async def list_tasks(
 async def create_task(
     req: EnqueueRequest,
     db: AsyncSession = Depends(db_session),
-    user: UserContext = Depends(get_current_user),
-    _: None = Depends(require_permission(SYNC_OPERATE)),
+    permissions: frozenset[str] = Depends(get_current_permissions),
 ) -> EnqueueResponse:
     if req.job_name not in VALID_JOB_NAMES:
-        raise ConflictError(f"未知的 job_name: {req.job_name}")
+        raise ConflictError(f"Unknown job_name: {req.job_name}")
+    _ensure_job_access(req.job_name, permissions, TASK_MANAGE_PERMISSIONS)
     task_id, existing = await enqueue_task(
         db,
         job_name=req.job_name,
@@ -117,11 +168,12 @@ async def create_task(
 async def get_task(
     task_id: int = Path(..., ge=1),
     db: AsyncSession = Depends(db_session_readonly),
-    user: UserContext = Depends(get_current_user),
+    permissions: frozenset[str] = Depends(get_current_permissions),
 ) -> TaskRunOut:
     row = (await db.execute(select(TaskRun).where(TaskRun.id == task_id))).scalar_one_or_none()
     if row is None:
-        raise NotFound(f"task {task_id} 不存在")
+        raise NotFound(f"task {task_id} does not exist")
+    _ensure_job_access(row.job_name, permissions, TASK_VIEW_PERMISSIONS)
     return TaskRunOut.model_validate(row)
 
 
@@ -129,13 +181,13 @@ async def get_task(
 async def cancel_task(
     task_id: int = Path(..., ge=1),
     db: AsyncSession = Depends(db_session),
-    user: UserContext = Depends(get_current_user),
-    _: None = Depends(require_permission(SYNC_OPERATE)),
+    permissions: frozenset[str] = Depends(get_current_permissions),
 ) -> dict[str, str]:
     row = (await db.execute(select(TaskRun).where(TaskRun.id == task_id))).scalar_one_or_none()
     if row is None:
-        raise NotFound(f"task {task_id} 不存在")
+        raise NotFound(f"task {task_id} does not exist")
+    _ensure_job_access(row.job_name, permissions, TASK_MANAGE_PERMISSIONS)
     if row.status not in ("pending",):
-        raise ConflictError(f"任务状态为 {row.status},无法取消")
+        raise ConflictError(f"Task status is {row.status}; cannot cancel")
     await db.execute(update(TaskRun).where(TaskRun.id == task_id).values(status="cancelled"))
     return {"status": "cancelled"}

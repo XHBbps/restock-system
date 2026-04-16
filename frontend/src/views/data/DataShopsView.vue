@@ -44,7 +44,7 @@
         <template #default="{ row }">
           <el-switch
             :model-value="row.syncEnabled"
-            :disabled="row.status !== '0'"
+            :disabled="row.status !== '0' || !auth.hasPermission('data_base:edit')"
             @change="(v) => toggleSync(row, normalizeSwitchValue(v))"
           />
         </template>

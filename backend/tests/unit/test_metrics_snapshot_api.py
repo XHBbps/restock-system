@@ -118,7 +118,7 @@ async def test_dashboard_marks_cached_snapshot_as_refreshing_when_task_exists(mo
 
 
 @pytest.mark.asyncio
-async def test_dashboard_enqueues_refresh_when_snapshot_missing(monkeypatch) -> None:
+async def test_dashboard_marks_missing_snapshot_without_enqueue(monkeypatch) -> None:
     import app.api.metrics as metrics_module
 
     db = _FakeDb(
@@ -128,15 +128,12 @@ async def test_dashboard_enqueues_refresh_when_snapshot_missing(monkeypatch) -> 
         ]
     )
 
-    async def _fake_enqueue_task(*_args, **_kwargs):
-        return 88, False
-
-    monkeypatch.setattr(metrics_module, "enqueue_task", _fake_enqueue_task)
+    monkeypatch.setattr(metrics_module, "enqueue_task", pytest.fail)
 
     result = await get_dashboard_overview(db=db, _={})  # type: ignore[arg-type]
 
-    assert result.snapshot_status == "refreshing"
-    assert result.snapshot_task_id == 88
+    assert result.snapshot_status == "missing"
+    assert result.snapshot_task_id is None
     assert result.restock_sku_count == 0
     assert result.no_restock_sku_count == 0
     assert result.urgent_count == 0
@@ -144,14 +141,12 @@ async def test_dashboard_enqueues_refresh_when_snapshot_missing(monkeypatch) -> 
 
 
 @pytest.mark.asyncio
-async def test_dashboard_returns_old_snapshot_with_defaults_and_enqueues_refresh(monkeypatch) -> None:
+async def test_dashboard_returns_old_snapshot_with_defaults_without_enqueue(monkeypatch) -> None:
     """旧快照缺少 restock_sku_count/no_restock_sku_count 时，
     Pydantic 填充默认值 0 并入队刷新任务，不内联计算。"""
     import app.api.metrics as metrics_module
 
     # 模拟活跃任务查询结果
-    active_task = SimpleNamespace(id=66)
-
     db = _FakeDb(
         [
             _ScalarOneOrNoneResult(None),          # 第 1 次：_get_active_dashboard_refresh_task → None
@@ -178,24 +173,15 @@ async def test_dashboard_returns_old_snapshot_with_defaults_and_enqueues_refresh
                     updated_at=datetime(2026, 4, 14, 11, 0, 0),
                 )
             ),
-            _ScalarOneOrNoneResult(active_task),   # 第 3 次：入队后再查活跃任务
         ]
     )
 
-    enqueue_called = False
-
-    async def _fake_enqueue_task(*_args, **_kwargs):
-        nonlocal enqueue_called
-        enqueue_called = True
-        return 66, False
-
-    monkeypatch.setattr(metrics_module, "enqueue_task", _fake_enqueue_task)
+    monkeypatch.setattr(metrics_module, "enqueue_task", pytest.fail)
 
     result = await get_dashboard_overview(db=db, _={})  # type: ignore[arg-type]
 
-    assert enqueue_called, "旧快照应触发入队刷新"
-    assert result.snapshot_status == "refreshing"
-    assert result.snapshot_task_id == 66
+    assert result.snapshot_status == "missing"
+    assert result.snapshot_task_id is None
     # 旧快照缺少字段，Pydantic 填充默认值 0
     assert result.restock_sku_count == 0
     assert result.no_restock_sku_count == 0

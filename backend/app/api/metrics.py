@@ -19,7 +19,7 @@ from app.api.deps import (
     get_current_user,
     require_permission,
 )
-from app.core.permissions import HOME_REFRESH, HOME_VIEW
+from app.core.permissions import HOME_REFRESH, HOME_VIEW, MONITOR_VIEW
 from app.core.restock_regions import resolve_allowed_restock_regions
 from app.core.timezone import now_beijing
 from app.engine.step1_velocity import run_step1
@@ -452,40 +452,19 @@ async def get_dashboard_overview(
         # 旧快照缺少新增字段时，Pydantic 自动填充默认值（restock_sku_count=0 等）；
         # 同时入队刷新任务，后台更新快照后下次请求即为完整数据
         needs_refresh = not _has_restock_summary_keys(snapshot.payload)
-        if needs_refresh and not active_task:
-            await enqueue_task(
-                db,
-                job_name=REFRESH_DASHBOARD_JOB_NAME,
-                trigger_source="manual",
-                dedupe_key=REFRESH_DASHBOARD_JOB_NAME,
-                payload={"triggered_by": "dashboard_schema_refresh"},
-            )
-            active_task = await _get_active_dashboard_refresh_task(db)
         return DashboardOverview(
             **payload.model_dump(),
-            snapshot_status="refreshing" if active_task else "ready",
+            snapshot_status="refreshing" if active_task else ("missing" if needs_refresh else "ready"),
             snapshot_updated_at=snapshot.refreshed_at or snapshot.updated_at,
             snapshot_task_id=active_task.id if active_task else None,
         )
 
-    task_id: int | None = active_task.id if active_task else None
-    if task_id is None:
-        task_id = (
-            await enqueue_task(
-                db,
-                job_name=REFRESH_DASHBOARD_JOB_NAME,
-                trigger_source="manual",
-                dedupe_key=REFRESH_DASHBOARD_JOB_NAME,
-                payload={"triggered_by": "dashboard_get"},
-            )
-        )[0]
-
     payload = _empty_dashboard_payload(enabled_sku_count=0, lead_time_days=50, target_days=60)
     return DashboardOverview(
         **payload.model_dump(),
-        snapshot_status="refreshing",
+        snapshot_status="refreshing" if active_task else "missing",
         snapshot_updated_at=None,
-        snapshot_task_id=task_id,
+        snapshot_task_id=active_task.id if active_task else None,
     )
 
 
@@ -508,6 +487,8 @@ async def refresh_dashboard_snapshot(
 @router.get("/prometheus", response_class=PlainTextResponse)
 async def prometheus_metrics(
     db: AsyncSession = Depends(db_session_readonly),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(MONITOR_VIEW)),
 ) -> PlainTextResponse:
     """基础 Prometheus 文本格式指标。"""
     pending = (

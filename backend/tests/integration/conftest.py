@@ -48,8 +48,10 @@ async def db_session(db_engine) -> AsyncIterator[AsyncSession]:
 
 @pytest.fixture
 async def client(db_engine) -> AsyncIterator[AsyncClient]:
+    from app.api.deps import UserContext
     from app.api.deps import db_session as dep_db_session
-    from app.api.deps import get_current_session as dep_get_current_session
+    from app.api.deps import db_session_readonly as dep_db_session_readonly
+    from app.api.deps import get_current_user as dep_get_current_user
     from app.main import app
 
     session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
@@ -58,11 +60,20 @@ async def client(db_engine) -> AsyncIterator[AsyncClient]:
         async with session_factory() as session:
             yield session
 
-    async def override_session():
-        return {"subject": "test-owner"}
+    async def override_user():
+        return UserContext(
+            id=1,
+            username="test-owner",
+            display_name="Test Owner",
+            role_id=1,
+            role_name="superadmin",
+            is_superadmin=True,
+            perm_version=0,
+        )
 
     app.dependency_overrides[dep_db_session] = override_db
-    app.dependency_overrides[dep_get_current_session] = override_session
+    app.dependency_overrides[dep_db_session_readonly] = override_db
+    app.dependency_overrides[dep_get_current_user] = override_user
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac

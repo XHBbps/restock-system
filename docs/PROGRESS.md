@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-15（CI 安全校验修复：后端 JWT_SECRET 最小长度校验、前端依赖升级与 `npm audit` 清零；前端 CI 等价校验切换为 Node 20 容器链路、后端镜像依赖路径修复、本地全栈 Compose 验证链路、项目审查修复批次 1-5：通用 500 处理器、shutdown 资源释放、ORM 约束对齐、前端全局错误处理、只读会话优化、同步分批 commit、快照保留策略、trusted proxy 验证、FK ondelete、类型安全修复、401 路由化、Python lockfile、容器日志轮转/CPU 限制/PG 调优、滚动部署、Caddyfile 安全加固、CI 门控、Prometheus 指标端点）
+> 最近更新：2026-04-16（鉴权/RBAC 收口：`config/data/suggestion` 改为后端权限校验、`/api/tasks` 按 job 权限隔离、信息总览 `GET /api/metrics/dashboard` 改为只读、Prometheus 指标端点增加鉴权与内网限制、`push_saihu` 去重粒度改为 suggestion + item_ids、README/架构文档口径同步）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -47,7 +47,7 @@
   - 03:30 `sync_warehouse`
   - 02:00 `daily_archive`
   - 默认 08:00 `calc_engine`（可配置，`calc_enabled` 控制）
-- **信息总览快照刷新任务**：`refresh_dashboard_snapshot` 通过 TaskRun 入队执行，默认由信息总览页首次无缓存访问自动触发，也支持页面手动“刷新快照”
+- **信息总览快照刷新任务**：`refresh_dashboard_snapshot` 通过 TaskRun 入队执行；`GET /api/metrics/dashboard` 只读返回现有快照 / 活跃任务状态，手动“刷新快照”是默认触发入口
 - **订单详情同步与详情获取**：`sync_order_detail` 当前按 2 QPS / 2 并发保守抓取；订单页提供右侧独立“详情获取”组件，仅提供天数选择与触发按钮；手动触发会优先复用活跃的 `refetch_order_detail`、`sync_order_detail` 或 `sync_all` 任务，避免并发重复抓取，且不再对手动详情获取施加单次数量上限；任务执行中会按“已完成 X / 失败 Y / 总数 N”持续回写精确进度
 
 ### 2.3 补货计算引擎
@@ -71,7 +71,7 @@
 - **历史记录删除**：历史记录页新增建议单删除入口，允许删除 `draft` / `partial` / `error` / `archived`；`pushed` 建议单保留历史追溯，不允许删除
 - **触发方式中文化**：历史记录页“触发方式”由原始值改为中文展示，当前口径统一为“手动触发 / 自动触发”
 - **推送到赛狐**：`pushback/purchase.py` 合并选中条目生成采购单，失败自动重试
-- **去重**：同一 suggestion 同时只有一个 push 任务（`dedupe_key="push_saihu#<id>"`）
+- **去重**：同一 suggestion 的同一组推送条目同时只有一个 push 任务（`dedupe_key="push_saihu#<id>#<sorted_item_ids>"`）
 
 ### 2.5 前端 Dashboard 体系
 
@@ -92,7 +92,15 @@
 - **全局参数页补货区域配置**：`GlobalConfigView.vue` 新增“补货区域”多选，选项复用 `COUNTRY_OPTIONS`，保存前变更检测与配置变更提示已纳入 `restock_regions`
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
-- **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存时自动触发 `refresh_dashboard_snapshot`，并提供“刷新快照”按钮与任务进度轮询
+- **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.44 鉴权/RBAC 收口与快照刷新边界修复（2026-04-16）
+- `backend/app/api/config.py`、`backend/app/api/data.py`、`backend/app/api/suggestion.py` 不再使用弱化版 `get_current_session()`；改为基于 `get_current_user()` / `require_permission()` 的后端权限校验，分别对 `config:*`、`data_base:*`、`data_biz:*`、`sync:view`、`restock:*`、`history:delete` 生效
+- `backend/app/api/task.py` 改为按 `job_name` 做作业级权限隔离：同步类任务映射到 `sync:view` / `sync:operate`，`calc_engine` 与 `push_saihu` 映射到 `restock:operate`，`refresh_dashboard_snapshot` 映射到 `home:refresh`；通用创建接口不再接受 `push_saihu`
+- `backend/app/api/suggestion.py` 推送去重键改为 `push_saihu#<suggestion_id>#<sorted_item_ids>`，并对 `item_ids` 做排序去重，避免不同推送子集误复用同一活跃任务
+- `backend/app/api/metrics.py` 将 `GET /api/metrics/dashboard` 收敛为纯读取接口；无快照或旧快照时返回 `snapshot_status="missing"`，不再自动入队刷新；`GET /api/metrics/prometheus` 新增 `monitor:view` 校验
+- `deploy/Caddyfile` 为 `/api/metrics/prometheus` 增加独立内网 matcher，公网请求直接返回 404，作为应用层权限之外的第二道防线
+- **测试**：新增 `backend/tests/unit/test_task_api.py`，并更新 `backend/tests/unit/test_metrics_snapshot_api.py`、`backend/tests/unit/test_suggestion_patch.py`、`backend/tests/integration/conftest.py`、`frontend/src/views/__tests__/WorkspaceView.test.ts`
 
 ### 3.43 CI 安全校验修复：JWT 密钥长度 + 前端依赖审计（2026-04-15）
 - `backend/app/config.py` 将默认 `jwt_secret` 占位值提升到 32 字节以上，并在 `validate_settings()` 中新增 `JWT_SECRET must be at least 32 bytes` 校验；生产环境占位值检测同步更新，避免 `PyJWT` 因 HMAC 密钥过短抛出 `InsecureKeyLengthWarning`，导致 `tests/unit/test_security.py` 在 CI 中失败
@@ -128,18 +136,18 @@
 - **代码质量**：`_mapUserInfo` 运行时类型校验、AppLayout 移除 `as any`、engine API 类型化封装、401 延迟 import 避免循环依赖、Vitest 覆盖率阈值、Python 依赖 lockfile
 - **部署**：容器日志轮转、CPU 限制、滚动重启、PostgreSQL 调优（-c 参数）、前端 healthcheck、备份验证
 - **CI/CD**：部署工作流 CI 门控 + 并发控制 + 通知、Docker 镜像构建测试
-- **监控**：`GET /api/metrics/prometheus` 基础指标端点（队列深度 + 存活）
+- **监控**：`GET /api/metrics/prometheus` 基础指标端点（队列深度 + 存活），需要登录且具备 `monitor:view`；Caddy 仅对内网来源放行
 
 ### 3.38 信息总览快照缓存与 SKU+国家风险口径统一（2026-04-14）
 - `backend/app/models/dashboard_snapshot.py` 与 `backend/alembic/versions/20260414_2300_add_dashboard_snapshot.py` 新增 `dashboard_snapshot` 单例缓存表，存储信息总览 payload、刷新状态、开始/完成时间和最近一次错误
 - `backend/app/tasks/jobs/dashboard_snapshot.py` 新增 `refresh_dashboard_snapshot` 任务；`backend/app/api/task.py`、`backend/app/main.py` 完成任务注册，信息总览快照改由后台任务生成并写回缓存
-- `backend/app/api/metrics.py` 新增 `build_dashboard_payload()`，把首行风险卡片、左侧“各国缺货风险分布”和“急需补货SKU”统一为 SKU+国家口径的实时计算结果；`GET /api/metrics/dashboard` 改为优先返回缓存快照，缺少缓存时自动入队刷新；新增 `POST /api/metrics/dashboard/refresh`
+- `backend/app/api/metrics.py` 新增 `build_dashboard_payload()`，把首行风险卡片、左侧“各国缺货风险分布”和“急需补货SKU”统一为 SKU+国家口径的实时计算结果；`GET /api/metrics/dashboard` 改为优先返回缓存快照与当前任务状态，缺少缓存时返回 `missing`，由 `POST /api/metrics/dashboard/refresh` 手动入队刷新
 - `frontend/src/api/dashboard.ts`、`frontend/src/views/WorkspaceView.vue` 接入快照状态字段、刷新按钮和 `TaskProgress` 轮询；首行卡片文案同步改为“紧急国家商品 / 临近补货国家商品 / 安全国家商品 / 覆盖国家”，右侧“补货量国家分布”继续保持基于当前建议补货单
 - **测试**：新增 `backend/tests/unit/test_metrics_snapshot_api.py`、`backend/tests/unit/test_dashboard_snapshot_job.py`，并更新 `backend/tests/unit/test_metrics_dashboard.py`、`frontend/src/views/__tests__/WorkspaceView.test.ts`，覆盖快照回读、无缓存自动入队、任务写回和前端刷新交互
 - **经验沉淀**：信息总览这类高聚合页面应优先消费快照，以换取稳定口径、可追踪刷新链路和更低的重复计算成本
 
 ### 3.39 信息总览首行卡片切换为补货视角（2026-04-14）
-- `backend/app/api/metrics.py` 在 `DashboardOverviewPayload` 中新增 `restock_sku_count`、`no_restock_sku_count`，并在 `build_dashboard_payload()` 中直接复用 `step3_country_qty + step4_total` 的现行规则统计“需补货SKU / 无需补货SKU”；同时 `GET /api/metrics/dashboard` 读取到缺少新字段的旧 `dashboard_snapshot.payload` 时，会先自动入队刷新，再回退到实时重算结果返回，避免旧快照导致接口报错或前端空白
+- `backend/app/api/metrics.py` 在 `DashboardOverviewPayload` 中新增 `restock_sku_count`、`no_restock_sku_count`，并在 `build_dashboard_payload()` 中直接复用 `step3_country_qty + step4_total` 的现行规则统计“需补货SKU / 无需补货SKU”；当 `GET /api/metrics/dashboard` 读取到缺少新字段的旧 `dashboard_snapshot.payload` 时，接口保留默认值并返回 `missing`，由手动刷新任务修复快照
 - `frontend/src/api/dashboard.ts`、`frontend/src/views/WorkspaceView.vue` 将首行卡片改为“需补货SKU / 无需补货SKU / 覆盖国家”，并移除旧的风险说明文案；下方“各国缺货风险分布”“急需补货SKU”“补货量国家分布”保持原有展示逻辑不变
 - **测试**：更新 `backend/tests/unit/test_metrics_dashboard.py`、`backend/tests/unit/test_metrics_snapshot_api.py` 与 `frontend/src/views/__tests__/WorkspaceView.test.ts`，覆盖新字段返回、旧快照兼容刷新和新卡片文案渲染
 

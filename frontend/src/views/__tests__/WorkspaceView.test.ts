@@ -271,4 +271,31 @@ describe('WorkspaceView', () => {
     expect(mockRefreshDashboardSnapshot).toHaveBeenCalled()
     expect(mockMessageSuccess).toHaveBeenCalledWith('信息总览快照刷新任务已入队')
   })
+
+  it('hides snapshot task polling for users without refresh permission', async () => {
+    const auth = useAuthStore()
+    auth.setAuth('test-token', {
+      id: 1,
+      username: 'viewer',
+      displayName: 'Viewer',
+      roleName: 'Viewer',
+      isSuperadmin: false,
+      passwordIsDefault: false,
+      permissions: [],
+    })
+    mockGetDashboardOverview.mockResolvedValue(
+      makeOverview({
+        snapshot_status: 'missing',
+        snapshot_task_id: 88,
+        snapshot_updated_at: null,
+      }),
+    )
+
+    const { default: View } = await import('../WorkspaceView.vue')
+    const wrapper = shallowMount(View, { global: { stubs: STUBS } })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('暂无快照')
+    expect(wrapper.find('.task-progress-stub').exists()).toBe(false)
+  })
 })

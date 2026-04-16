@@ -20,8 +20,9 @@ from sqlalchemy import Float, case, func, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.api.deps import db_session_readonly, get_current_session
+from app.api.deps import db_session_readonly, require_permission
 from app.core.exceptions import NotFound
+from app.core.permissions import DATA_BASE_VIEW, DATA_BIZ_VIEW, SYNC_VIEW
 from app.core.query import escape_like
 from app.core.timezone import BEIJING
 from app.models.in_transit import InTransitItem, InTransitRecord
@@ -277,7 +278,7 @@ async def list_orders(
     sort_by: str | None = Query(default=None),
     sort_order: str = Query(default="desc", pattern="^(asc|desc)$"),
     db: AsyncSession = Depends(db_session_readonly),
-    _: dict[str, Any] = Depends(get_current_session),
+    _: None = Depends(require_permission(DATA_BIZ_VIEW)),
 ) -> DataOrderListOut:
     base = select(OrderHeader)
 
@@ -382,7 +383,7 @@ async def get_order_detail(
     shop_id: str = Path(...),
     amazon_order_id: str = Path(...),
     db: AsyncSession = Depends(db_session_readonly),
-    _: dict[str, Any] = Depends(get_current_session),
+    _: None = Depends(require_permission(DATA_BIZ_VIEW)),
 ) -> DataOrderDetail:
     header = (
         await db.execute(
@@ -447,7 +448,7 @@ async def list_inventory(
     sort_by: str | None = Query(default=None),
     sort_order: str = Query(default="asc", pattern="^(asc|desc)$"),
     db: AsyncSession = Depends(db_session_readonly),
-    _: dict[str, Any] = Depends(get_current_session),
+    _: None = Depends(require_permission(DATA_BIZ_VIEW)),
 ) -> DataInventoryListOut:
     base = select(
         InventorySnapshotLatest,
@@ -526,7 +527,7 @@ async def list_out_records(
     sort_by: str | None = Query(default=None),
     sort_order: str = Query(default="desc", pattern="^(asc|desc)$"),
     db: AsyncSession = Depends(db_session_readonly),
-    _: dict[str, Any] = Depends(get_current_session),
+    _: None = Depends(require_permission(DATA_BIZ_VIEW)),
 ) -> DataOutRecordListOut:
     base = select(InTransitRecord)
     if is_in_transit is not None:
@@ -617,7 +618,7 @@ async def list_data_warehouses(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=500, ge=1, le=1000),
     db: AsyncSession = Depends(db_session_readonly),
-    _: dict[str, Any] = Depends(get_current_session),
+    _: None = Depends(require_permission(DATA_BASE_VIEW)),
 ) -> DataWarehouseListOut:
     stock_subquery = (
         select(
@@ -675,7 +676,7 @@ async def list_data_shops(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=500, ge=1, le=1000),
     db: AsyncSession = Depends(db_session_readonly),
-    _: dict[str, Any] = Depends(get_current_session),
+    _: None = Depends(require_permission(DATA_BASE_VIEW)),
 ) -> DataShopListOut:
     total = (await db.execute(select(func.count()).select_from(Shop))).scalar_one()
     rows = (
@@ -708,7 +709,7 @@ async def list_product_listings_data(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=5000),
     db: AsyncSession = Depends(db_session_readonly),
-    _: dict[str, Any] = Depends(get_current_session),
+    _: None = Depends(require_permission(DATA_BASE_VIEW)),
 ) -> DataProductListingListOut:
     base = select(ProductListing).order_by(
         ProductListing.commodity_sku, ProductListing.marketplace_id
@@ -745,7 +746,7 @@ async def list_sku_overview(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=5000),
     db: AsyncSession = Depends(db_session_readonly),
-    _: dict[str, Any] = Depends(get_current_session),
+    _: None = Depends(require_permission(DATA_BASE_VIEW)),
 ) -> SkuOverviewListOut:
     """Return SKU-level overview: config + aggregated listings, paginated by SKU."""
     from app.schemas.data import SkuListingItem, SkuOverviewItem
@@ -825,7 +826,7 @@ async def list_sku_overview(
 @router.get("/sync-state", response_model=list[DataSyncStateRow])
 async def list_sync_state(
     db: AsyncSession = Depends(db_session_readonly),
-    _: dict[str, Any] = Depends(get_current_session),
+    _: None = Depends(require_permission(SYNC_VIEW)),
 ) -> list[DataSyncStateRow]:
     from app.models.sync_state import SyncState
 

@@ -238,6 +238,28 @@ async def test_suggestion_push_auto_resolves_missing_commodity_id_before_enqueue
 
     assert result == {"task_id": 321, "existing": False}
     enqueue_mock.assert_awaited_once()
+    assert enqueue_mock.await_args.kwargs["dedupe_key"] == "push_saihu#1#10"
+    assert enqueue_mock.await_args.kwargs["payload"] == {"suggestion_id": 1, "item_ids": [10]}
+
+
+async def test_suggestion_push_normalizes_item_ids_for_payload_and_dedupe(monkeypatch) -> None:
+    import app.api.suggestion as suggestion_module
+
+    item_a = _FakeItem()
+    item_b = _FakeItem()
+    item_b.id = 11
+    db = _FakeSession([_FakeSuggestion(status="draft"), [item_b, item_a]])
+    req = PushRequest(item_ids=[11, 10, 10])
+
+    enqueue_mock = AsyncMock(return_value=(321, False))
+    monkeypatch.setattr(suggestion_module, "enqueue_task", enqueue_mock)
+
+    result = await push_items(req=req, suggestion_id=1, db=db, _={})  # type: ignore[arg-type]
+
+    assert result == {"task_id": 321, "existing": False}
+    enqueue_mock.assert_awaited_once()
+    assert enqueue_mock.await_args.kwargs["dedupe_key"] == "push_saihu#1#10,11"
+    assert enqueue_mock.await_args.kwargs["payload"] == {"suggestion_id": 1, "item_ids": [10, 11]}
 
 
 async def test_suggestion_delete_rejects_missing_row() -> None:

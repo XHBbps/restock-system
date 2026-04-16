@@ -7,8 +7,15 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import db_session, db_session_readonly, get_current_session
+from app.api.deps import db_session, db_session_readonly, require_permission
 from app.core.exceptions import ConflictError, NotFound, ValidationFailed
+from app.core.permissions import (
+    CONFIG_EDIT,
+    CONFIG_VIEW,
+    DATA_BASE_EDIT,
+    DATA_BASE_VIEW,
+    SYNC_OPERATE,
+)
 from app.core.query import escape_like
 from app.models.global_config import GlobalConfig
 from app.models.inventory import InventorySnapshotLatest
@@ -130,7 +137,7 @@ async def init_sku_configs_from_listings(db: AsyncSession) -> int:
 @router.get("/global", response_model=GlobalConfigOut)
 async def get_global(
     db: AsyncSession = Depends(db_session_readonly),
-    _: dict[str, Any] = Depends(get_current_session),
+    _: None = Depends(require_permission(CONFIG_VIEW)),
 ) -> GlobalConfigOut:
     row = (await db.execute(select(GlobalConfig).where(GlobalConfig.id == 1))).scalar_one()
     return GlobalConfigOut.model_validate(row)
@@ -140,7 +147,7 @@ async def get_global(
 async def patch_global(
     patch: GlobalConfigPatch,
     db: AsyncSession = Depends(db_session),
-    _: dict[str, Any] = Depends(get_current_session),
+    _: None = Depends(require_permission(CONFIG_EDIT)),
 ) -> GlobalConfigOut:
     row = (await db.execute(select(GlobalConfig).where(GlobalConfig.id == 1))).scalar_one()
     updates = patch.model_dump(exclude_none=True)
@@ -167,7 +174,7 @@ async def list_sku_configs(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
     db: AsyncSession = Depends(db_session_readonly),
-    _: dict[str, Any] = Depends(get_current_session),
+    _: None = Depends(require_permission(DATA_BASE_VIEW)),
 ) -> SkuConfigListOut:
     base = select(SkuConfig).order_by(SkuConfig.commodity_sku)
     if enabled is not None:
@@ -213,7 +220,7 @@ async def list_sku_configs(
 @router.post("/sku/init")
 async def init_sku_configs(
     db: AsyncSession = Depends(db_session),
-    _: dict[str, Any] = Depends(get_current_session),
+    _: None = Depends(require_permission(DATA_BASE_EDIT)),
 ) -> dict[str, int]:
     created = await init_sku_configs_from_listings(db)
     total = (await db.execute(select(func.count()).select_from(SkuConfig))).scalar_one()
@@ -225,7 +232,7 @@ async def patch_sku_config(
     patch: SkuConfigPatch,
     commodity_sku: str = Path(...),
     db: AsyncSession = Depends(db_session),
-    _: dict[str, Any] = Depends(get_current_session),
+    _: None = Depends(require_permission(DATA_BASE_EDIT)),
 ) -> SkuConfigOut:
     row = (
         await db.execute(select(SkuConfig).where(SkuConfig.commodity_sku == commodity_sku))
@@ -247,7 +254,7 @@ async def patch_sku_config(
 @router.get("/warehouse", response_model=list[WarehouseOut])
 async def list_warehouses(
     db: AsyncSession = Depends(db_session_readonly),
-    _: dict[str, Any] = Depends(get_current_session),
+    _: None = Depends(require_permission(CONFIG_VIEW)),
 ) -> list[WarehouseOut]:
     rows = (await db.execute(_warehouse_list_stmt())).all()
     return [_warehouse_out_from_row(row) for row in rows]
@@ -258,7 +265,7 @@ async def patch_warehouse_country(
     patch: WarehouseCountryPatch,
     warehouse_id: str = Path(...),
     db: AsyncSession = Depends(db_session),
-    _: dict[str, Any] = Depends(get_current_session),
+    _: None = Depends(require_permission(CONFIG_EDIT)),
 ) -> WarehouseOut:
     row = (
         await db.execute(select(Warehouse).where(Warehouse.id == warehouse_id))
@@ -289,7 +296,7 @@ async def patch_warehouse_country(
 async def list_zipcode_rules(
     country: str | None = Query(default=None),
     db: AsyncSession = Depends(db_session_readonly),
-    _: dict[str, Any] = Depends(get_current_session),
+    _: None = Depends(require_permission(CONFIG_VIEW)),
 ) -> list[ZipcodeRuleOut]:
     base = select(ZipcodeRule).order_by(ZipcodeRule.country, ZipcodeRule.priority)
     if country:
@@ -302,7 +309,7 @@ async def list_zipcode_rules(
 async def create_zipcode_rule(
     body: ZipcodeRuleIn,
     db: AsyncSession = Depends(db_session),
-    _: dict[str, Any] = Depends(get_current_session),
+    _: None = Depends(require_permission(CONFIG_EDIT)),
 ) -> ZipcodeRuleOut:
     # 校验仓库存在
     wh = (
@@ -332,7 +339,7 @@ async def patch_zipcode_rule(
     body: ZipcodeRuleIn,
     rule_id: int = Path(..., ge=1),
     db: AsyncSession = Depends(db_session),
-    _: dict[str, Any] = Depends(get_current_session),
+    _: None = Depends(require_permission(CONFIG_EDIT)),
 ) -> ZipcodeRuleOut:
     rule = (
         await db.execute(select(ZipcodeRule).where(ZipcodeRule.id == rule_id))
@@ -367,7 +374,7 @@ async def patch_zipcode_rule(
 async def delete_zipcode_rule(
     rule_id: int = Path(..., ge=1),
     db: AsyncSession = Depends(db_session),
-    _: dict[str, Any] = Depends(get_current_session),
+    _: None = Depends(require_permission(CONFIG_EDIT)),
 ) -> None:
     res = await db.execute(delete(ZipcodeRule).where(ZipcodeRule.id == rule_id))
     if res.rowcount == 0:
@@ -381,7 +388,7 @@ async def delete_zipcode_rule(
 @router.get("/shops", response_model=list[ShopOut])
 async def list_shops(
     db: AsyncSession = Depends(db_session_readonly),
-    _: dict[str, Any] = Depends(get_current_session),
+    _: None = Depends(require_permission(DATA_BASE_VIEW)),
 ) -> list[ShopOut]:
     rows = (await db.execute(select(Shop).order_by(Shop.id))).scalars().all()
     return [ShopOut.model_validate(r) for r in rows]
@@ -390,7 +397,7 @@ async def list_shops(
 @router.post("/shops/refresh")
 async def refresh_shops(
     db: AsyncSession = Depends(db_session),
-    _: dict[str, Any] = Depends(get_current_session),
+    _: None = Depends(require_permission(SYNC_OPERATE)),
 ) -> dict[str, Any]:
     """触发 sync_shop 任务从赛狐刷新店铺列表。"""
     task_id, existing = await enqueue_task(db, job_name="sync_shop", trigger_source="manual")
@@ -402,7 +409,7 @@ async def patch_shop(
     patch: ShopPatch,
     shop_id: str = Path(...),
     db: AsyncSession = Depends(db_session),
-    _: dict[str, Any] = Depends(get_current_session),
+    _: None = Depends(require_permission(DATA_BASE_EDIT)),
 ) -> ShopOut:
     row = (await db.execute(select(Shop).where(Shop.id == shop_id))).scalar_one_or_none()
     if row is None:

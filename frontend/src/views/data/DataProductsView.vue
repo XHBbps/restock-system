@@ -19,7 +19,11 @@
         <el-option label="已启用" :value="true" />
         <el-option label="已禁用" :value="false" />
       </el-select>
-      <el-button :loading="initLoading" @click="initFromListings">从商品同步初始化</el-button>
+      <el-button
+        :loading="initLoading"
+        :disabled="!auth.hasPermission('data_base:edit')"
+        @click="initFromListings"
+      >从商品同步初始化</el-button>
     </template>
 
     <el-table v-loading="loading" :data="pagedRows" row-key="commodity_sku">
