@@ -10,56 +10,33 @@
 
 ### 当前问题
 
-1. **CI 失败**：`backend/tests/unit/test_metrics_snapshot_api.py` 中 2 个单元测试失败。
-   根本原因：`app/api/metrics.py` 的 `get_dashboard_overview` 在快照缺失或过期时未自动调用 `enqueue_task`，但测试已按新行为写好。
-
-2. **deploy.yml `check-ci` 有缺陷**：
+1. **deploy.yml `check-ci` 有缺陷**（唯一剩余 CI/CD 问题）：
    - 未使用 `filter: 'latest'`，可能命中旧的失败记录
    - 默认 `per_page: 30`，check run 较多时可能截断
+   - `check-ci` job 缺少 `permissions: checks: read`，在私有仓库可能返回 403
+
+2. ~~CI 单元测试失败~~ **已解决**（2026-04-16 批量提交 d5bb1c6 完成）：
+   - 原 2 个失败测试（期望自动入队）已改写为对齐"不自动入队、返回 `missing` 状态"的设计决策
+   - 当前：pytest 268 pass / ruff clean / mypy clean（需从 `backend/` 目录运行）
 
 ### 目标
 
-- 修复 CI，使所有单元测试通过
 - 加固 `deploy.yml` 的 `check-ci` 逻辑
+- 补充 secrets 文档
 - 为后续迁移到 GHCR 预构建镜像流水线奠定基础
 
 ---
 
-## 2. 第一阶段：CI 修复 + deploy.yml 加固
+## 2. 第一阶段：deploy.yml 加固
 
-### 2.1 修复 `get_dashboard_overview` 自动入队逻辑
+> **注：** 原 Section 2.1（修复 `get_dashboard_overview` 自动入队）已作废。
+> 该问题于 2026-04-16 批量提交 d5bb1c6 中通过调整设计决策解决：
+> `GET /dashboard` **不自动入队**，返回 `"missing"` 状态；由前端/用户主动调用 `/dashboard/refresh` 触发。
+> 当前所有测试已通过，无需代码改动。
 
-**文件：** `backend/app/api/metrics.py`
+### 2.1 修复 deploy.yml `check-ci` 步骤
 
-在以下两种情况下补全 `enqueue_task` 调用：
-
-**情况 A — 快照不存在**（当前 `metrics.py:462-468`）
-
-```
-修前：返回 snapshot_status="missing"，不入队
-修后：调用 enqueue_task(
-        db, job_name=REFRESH_DASHBOARD_JOB_NAME,
-        trigger_source="manual",                          ← 必须是 "manual"，不能是 "auto"
-        dedupe_key=REFRESH_DASHBOARD_JOB_NAME,
-        payload={"triggered_by": "auto_dashboard_refresh"}
-      )
-      用返回的 task_id 设置 snapshot_task_id，返回 snapshot_status="refreshing"
-```
-
-**情况 B — 快照存在但缺少新字段**（`needs_refresh=True`，`metrics.py:454-460`）
-
-```
-修前：active_task 为 None 且 needs_refresh 时返回 snapshot_status="missing"，不入队
-修后：active_task 为 None 且 needs_refresh 时调用 enqueue_task(...)
-      返回 snapshot_status="refreshing"，snapshot_task_id=新任务id
-```
-
-**边界处理：**
-- `dedupe_key` 复用现有 `REFRESH_DASHBOARD_JOB_NAME`，并发请求幂等，不会重复入队
-- `trigger_source` 必须用 `"manual"`（`enqueue_task` 硬校验只接受 `"scheduler"` 或 `"manual"`，传 `"auto"` 会抛 `ValueError`）；用 `payload={"triggered_by": "auto_dashboard_refresh"}` 区别于手动刷新的 `"manual_refresh"`
-- 修复后现有 2 个失败测试通过，其余 258 个测试不受影响
-
-### 2.2 修复 deploy.yml `check-ci` 步骤
+**文件：** `.github/workflows/deploy.yml`
 
 **文件：** `.github/workflows/deploy.yml`
 
@@ -276,16 +253,19 @@ on:
 
 ```
 第一阶段（当下）
-  T1. 修复 get_dashboard_overview 自动入队逻辑（metrics.py）
-  T2. 修复 deploy.yml check-ci（filter+per_page+paginate）
-  T3. 改善部署通知 webhook payload
-  T4. 在 docs/deployment.md 补充 secrets 清单
+  T1. 修复 deploy.yml check-ci（permissions + filter + per_page + paginate）
+  T2. 改善部署通知 webhook payload
+  T3. 在 docs/deployment.md 补充 secrets 清单
+
+  [已完成，无需操作]
+  ✓ pytest CI 失败（2 个测试）→ 2026-04-16 d5bb1c6 已解决
 
 第二阶段（有服务器后）
-  T5. ci.yml 新增 publish job（GHCR build & push）
-  T6. docker-compose.yml 加 image: 字段
-  T7. deploy.yml SSH script 改为 pull 镜像
-  T8. deploy.sh 删除 docker compose build 行
+  T4. ci.yml 新增 publish job（GHCR build & push）
+  T5. docker-compose.yml 加 image: 字段（backend/worker/scheduler/frontend）
+  T6. deploy.yml SSH script 加 export IMAGE_TAG
+  T7. deploy.sh 将 build 替换为 pull（backend worker scheduler frontend）
+  T8. deploy/.env.example 追加 GHCR_OWNER 注释
   T9. （可选）deploy.yml 加 push: tags: ['v*'] 触发
 ```
 
@@ -295,7 +275,7 @@ on:
 
 | 检查点 | 通过条件 |
 |--------|----------|
-| CI backend job | pytest 全部通过（含修复后的 2 个测试） |
+| CI backend job | pytest 268 pass，ruff clean，mypy clean（从 backend/ 目录运行）✅ 已达成 |
 | CI frontend job | build + test:coverage + audit 全部通过 |
 | deploy.yml check-ci | 手动触发后正确识别 backend/frontend CI 状态 |
 | 第二阶段 publish job | GHCR 上可见 `sha-<hash>` 和 `latest` 两个 tag |
