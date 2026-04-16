@@ -61,6 +61,7 @@ jobs:
             git fetch --all --tags
             git checkout "${{ github.event.inputs.ref }}"
             git pull --ff-only origin "${{ github.event.inputs.ref }}"
+            export IMAGE_TAG="sha-$(git rev-parse HEAD)"
             bash deploy/scripts/deploy.sh
 
       - name: Notify deploy result
