@@ -45,7 +45,7 @@ if [[ "$db_ready" -ne 1 ]]; then
 fi
 
 "$BACKUP_SCRIPT"
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" build backend frontend
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" pull backend worker scheduler frontend
 "$SCRIPT_DIR/migrate.sh"
 echo "[deploy] rolling update: backend"
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --no-deps backend
