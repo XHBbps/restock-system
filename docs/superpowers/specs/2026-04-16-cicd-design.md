@@ -51,7 +51,7 @@
 
 **边界处理：**
 - `dedupe_key` 复用现有 `REFRESH_DASHBOARD_JOB_NAME`，并发请求幂等，不会重复入队
-- `trigger_source` 设为 `"auto"`，区别于手动刷新的 `"manual"`
+- `trigger_source` 必须用 `"manual"`（`enqueue_task` 硬校验只接受 `"scheduler"` 或 `"manual"`，传 `"auto"` 会抛 `ValueError`）；用 `payload={"triggered_by": "auto_dashboard_refresh"}` 区别于手动刷新的 `"manual_refresh"`
 - 修复后现有 2 个失败测试通过，其余 258 个测试不受影响
 
 ### 2.2 修复 deploy.yml `check-ci` 步骤
@@ -168,15 +168,23 @@ publish:
 
 ### 3.3 docker-compose.yml 改动
 
-backend / frontend 服务新增 `image:` 字段，`build:` 保留供本地开发使用。  
+`worker` 和 `scheduler` 与 `backend` 共用同一镜像（均引用 `x-backend-build` 别名），三个服务都需要加 `image:` 字段。`build:` 保留供本地开发使用。  
 `GHCR_OWNER` 通过 `deploy/.env` 注入（值为 GitHub 用户名，如 `XHBbps`）：
 
 ```yaml
 backend:
   image: ghcr.io/${GHCR_OWNER}/restock-backend:${IMAGE_TAG:-latest}
-  build:
-    context: ../backend
-    dockerfile: Dockerfile
+  build: *backend-build
+  # ... 其余不变
+
+worker:
+  image: ghcr.io/${GHCR_OWNER}/restock-backend:${IMAGE_TAG:-latest}
+  build: *backend-build
+  # ... 其余不变
+
+scheduler:
+  image: ghcr.io/${GHCR_OWNER}/restock-backend:${IMAGE_TAG:-latest}
+  build: *backend-build
   # ... 其余不变
 
 frontend:
@@ -187,22 +195,33 @@ frontend:
   # ... 其余不变
 ```
 
-`IMAGE_TAG` 默认 `latest`，deploy.yml SSH script 在 checkout 后通过 `git rev-parse HEAD` 解析出实际 commit SHA 并传入。
+`IMAGE_TAG` 默认 `latest`，deploy.yml SSH script 在 checkout 后通过 `git rev-parse HEAD` 解析。
 
-### 3.4 deploy.yml 改动
+### 3.4 deploy.yml + deploy.sh 改动
 
-`deploy` job SSH script 中去掉 `docker compose build`，改为：
+**deploy.yml SSH script**：在 `git pull` 后导出 `IMAGE_TAG`，其余不变。`$ENV_FILE` / `$COMPOSE_FILE` 均在 `deploy.sh` 内部定义，不能在 SSH script 中提前引用：
 
 ```bash
-# git pull 已在上方完成，此处解析当前 HEAD SHA 作为镜像 tag
-export IMAGE_TAG="sha-$(git -C "${{ secrets.DEPLOY_PATH }}" rev-parse HEAD)"
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" pull backend frontend
+set -euo pipefail
+cd "${{ secrets.DEPLOY_PATH }}"
+git fetch --all --tags
+git checkout "${{ github.event.inputs.ref }}"
+git pull --ff-only origin "${{ github.event.inputs.ref }}"
+export IMAGE_TAG="sha-$(git rev-parse HEAD)"   # cd 已完成，无需 -C
 bash deploy/scripts/deploy.sh
 ```
 
-> `github.event.inputs.ref` 是分支名或 tag 名，不是 SHA；必须用 `git rev-parse HEAD` 解析，才能与 publish job 打的 `sha-<hash>` tag 对应。
+**deploy.sh**：将第 48 行的 `build` 替换为 `pull`，同时补上 `worker` / `scheduler`（它们共享 backend 镜像，一次 pull 即可，但显式列出意图更清晰）：
 
-`deploy.sh` 对应删除 `docker compose build backend frontend` 一行。
+```bash
+# 旧（删除）：
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" build backend frontend
+
+# 新（替换）：
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" pull backend worker scheduler frontend
+```
+
+> `IMAGE_TAG` 由 SSH script `export` 传入，`deploy.sh` 作为子进程自动继承。`docker compose` 通过 compose 文件中的 `${IMAGE_TAG:-latest}` 读取该值。
 
 ### 3.5 触发策略（可选）
 
