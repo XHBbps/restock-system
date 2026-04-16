@@ -15,6 +15,8 @@ concurrency:
 jobs:
   check-ci:
     runs-on: ubuntu-latest
+    permissions:
+      checks: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -24,13 +26,17 @@ jobs:
         with:
           script: |
             const ref = '${{ github.event.inputs.ref }}';
-            const { data: checks } = await github.rest.checks.listForRef({
+            const checkRuns = await github.paginate(github.rest.checks.listForRef, {
               owner: context.repo.owner,
               repo: context.repo.repo,
               ref: ref,
+              filter: 'latest',
+              per_page: 100,
             });
-            const ciBackend = checks.check_runs.find(c => c.name === 'backend');
-            const ciFrontend = checks.check_runs.find(c => c.name === 'frontend');
+
+            const ciBackend  = checkRuns.find(c => c.name === 'backend');
+            const ciFrontend = checkRuns.find(c => c.name === 'frontend');
+
             if (!ciBackend || ciBackend.conclusion !== 'success') {
               core.setFailed(`Backend CI has not passed for ref ${ref}`);
             }
