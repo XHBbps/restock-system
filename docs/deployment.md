@@ -166,6 +166,20 @@ Scheduler 保持单例避免重复触发，Worker 可水平扩展。
 | 防火墙 | 开放 `80` / `443` |
 | SSL | Caddy 自动申请 Let's Encrypt 证书 |
 
+### GitHub Actions Secrets（CI/CD 部署用）
+
+在仓库 Settings → Secrets and variables → Actions 中配置以下 secrets，`deploy.yml` 手动触发部署时使用：
+
+| Secret | 必填 | 说明 |
+|--------|------|------|
+| `DEPLOY_HOST` | ✅ | 服务器 IP 或域名 |
+| `DEPLOY_USER` | ✅ | SSH 登录用户名 |
+| `DEPLOY_SSH_KEY` | ✅ | SSH 私钥完整内容（`cat ~/.ssh/id_ed25519`） |
+| `DEPLOY_PATH` | ✅ | 服务器上仓库根目录绝对路径（如 `/opt/restock`） |
+| `DEPLOY_NOTIFY_WEBHOOK` | 可选 | 飞书 / Slack incoming webhook URL，部署成功或失败时发送通知 |
+
+配置完成后，在 GitHub Actions 页面手动触发 `Deploy` workflow 即可一键部署。
+
 ---
 
 ## 3. 环境变量
