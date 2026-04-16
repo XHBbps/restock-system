@@ -37,7 +37,12 @@
 
 ```
 修前：返回 snapshot_status="missing"，不入队
-修后：调用 enqueue_task(dedupe_key=REFRESH_DASHBOARD_JOB_NAME, trigger_source="auto")
+修后：调用 enqueue_task(
+        db, job_name=REFRESH_DASHBOARD_JOB_NAME,
+        trigger_source="manual",                          ← 必须是 "manual"，不能是 "auto"
+        dedupe_key=REFRESH_DASHBOARD_JOB_NAME,
+        payload={"triggered_by": "auto_dashboard_refresh"}
+      )
       用返回的 task_id 设置 snapshot_task_id，返回 snapshot_status="refreshing"
 ```
 
@@ -244,6 +249,13 @@ on:
 |------|------|------|
 | `GITHUB_TOKEN` | Actions 内置 secret | 无需手动配置，GHCR 登录用 |
 | `GHCR_OWNER` | `deploy/.env` 环境变量 | GitHub 用户名（如 `XHBbps`），docker-compose image 引用用 |
+
+同时在 `deploy/.env.example` 末尾追加注释行，方便后续配置：
+
+```
+# 第二阶段 GHCR 镜像流水线所需（Phase 2）
+# GHCR_OWNER=your_github_username
+```
 
 无需引入任何付费服务或外部依赖。
 
