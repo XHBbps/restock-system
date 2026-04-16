@@ -72,5 +72,5 @@ jobs:
           if [ -n "${{ secrets.DEPLOY_NOTIFY_WEBHOOK }}" ]; then
             curl -sf -X POST "${{ secrets.DEPLOY_NOTIFY_WEBHOOK }}" \
               -H "Content-Type: application/json" \
-              -d "{\"text\": \"Deploy ${STATUS} for ${REF} by ${{ github.actor }}\"}" || true
+              -d "{\"text\": \"Deploy ${STATUS} | ref: ${REF} | by: ${{ github.actor }} | run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" || true
           fi
