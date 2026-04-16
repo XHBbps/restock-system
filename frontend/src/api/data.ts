@@ -54,6 +54,7 @@ export async function listOrders(params: {
   date_from?: string
   date_to?: string
   country?: string
+  shop_id?: string
   status?: string
   sku?: string
   page?: number

@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-16（鉴权/RBAC 收口：`config/data/suggestion` 改为后端权限校验、`/api/tasks` 按 job 权限隔离、信息总览 `GET /api/metrics/dashboard` 改为只读、Prometheus 指标端点增加鉴权与内网限制、`push_saihu` 去重粒度改为 suggestion + item_ids、README/架构文档口径同步）
+> 最近更新：2026-04-16（订单页大批量加载优化：订单列表改为后端分页/筛选/排序，新增 `shop_id` 过滤，订单页店铺选项改为独立加载，并为 `order_header` 补充分页常用索引）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -11,7 +11,7 @@
 |---|---|
 | 主链路 | 打通 — 赛狐同步 → 补货计算 → 建议编辑 → 采购单推送 |
 | 工程化 | 运行时配置校验、健康检查、部署脚本、CI 骨架、测试覆盖已就绪 |
-| 前端 | 已统一到 `PageSectionCard` + 本地分页模式，设计系统对齐 shadcn Zinc |
+| 前端 | 已统一到 `PageSectionCard`；多数数据页保持本地分页，订单页已切换为后端分页模式，设计系统对齐 shadcn Zinc |
 | 后端 | 三服务进程分离（backend / worker / scheduler），TaskRun 队列稳定运行 |
 
 ---
@@ -86,7 +86,7 @@
 - **Dashboard 复用组件**：
   - `DashboardPageHeader` / `DashboardStatCard` / `DashboardSection` / `DashboardChartCard` / `DataTableCard`
   - `BaseChart`（ECharts 封装）
-- **数据加载模式**：所有数据页统一使用"一次拉全量 + 前端筛选 + 本地分页"，`page_size=5000`
+- **数据加载模式**：多数数据页使用"一次拉全量 + 前端筛选 + 本地分页"，`page_size=5000`；订单页 (`DataOrdersView.vue`) 已切换为后端分页、后端筛选、后端排序
 - **筛选控件高度统一**：`PageSectionCard` 的 `section-actions` 强制所有控件 32px 高度
 - **订单状态中文映射**：`DataOrdersView.vue` 添加 `ORDER_STATUS_LABEL`（已发货 / 部分发货 / 未发货 / 待处理 / 已取消）
 - **全局参数页补货区域配置**：`GlobalConfigView.vue` 新增“补货区域”多选，选项复用 `COUNTRY_OPTIONS`，保存前变更检测与配置变更提示已纳入 `restock_regions`
@@ -101,6 +101,12 @@
 - `backend/app/api/metrics.py` 将 `GET /api/metrics/dashboard` 收敛为纯读取接口；无快照或旧快照时返回 `snapshot_status="missing"`，不再自动入队刷新；`GET /api/metrics/prometheus` 新增 `monitor:view` 校验
 - `deploy/Caddyfile` 为 `/api/metrics/prometheus` 增加独立内网 matcher，公网请求直接返回 404，作为应用层权限之外的第二道防线
 - **测试**：新增 `backend/tests/unit/test_task_api.py`，并更新 `backend/tests/unit/test_metrics_snapshot_api.py`、`backend/tests/unit/test_suggestion_patch.py`、`backend/tests/integration/conftest.py`、`frontend/src/views/__tests__/WorkspaceView.test.ts`
+
+### 3.45 订单页大批量加载性能优化（2026-04-16）
+- `backend/app/api/data.py` 的 `GET /api/data/orders` 新增 `shop_id` 过滤参数；订单列表查询改为严格按当前页返回，并仅对当前页订单补查 `item_count` / `has_detail`，避免大批量订单下前端一次加载 5000 条和后端批量补查明细状态
+- `backend/app/models/order.py` 与 `backend/alembic/versions/20260416_1700_add_order_page_indexes.py` 为 `order_header` 补充 `shop_id + purchase_date`、`order_status + purchase_date` 索引，优化订单页按店铺/状态倒序浏览
+- `frontend/src/views/data/DataOrdersView.vue` 改为服务端分页：页码、页大小、筛选、排序均回传 `/api/data/orders`；SKU 输入改为短防抖搜索；店铺筛选选项改为独立调用 `listDataShops()`，不再从当前页订单数据推导
+- **测试**：新增 `backend/tests/unit/test_data_orders_api.py` 与 `frontend/src/views/__tests__/DataOrdersView.test.ts`，覆盖 `shop_id` 过滤、空页短路、服务端分页、页码切换、店铺筛选与 SKU 防抖搜索
 
 ### 3.43 CI 安全校验修复：JWT 密钥长度 + 前端依赖审计（2026-04-15）
 - `backend/app/config.py` 将默认 `jwt_secret` 占位值提升到 32 字节以上，并在 `validate_settings()` 中新增 `JWT_SECRET must be at least 32 bytes` 校验；生产环境占位值检测同步更新，避免 `PyJWT` 因 HMAC 密钥过短抛出 `InsecureKeyLengthWarning`，导致 `tests/unit/test_security.py` 在 CI 中失败

@@ -109,22 +109,26 @@ def _order_item_count_expr() -> ColumnElement[int]:
 
 
 def _order_has_detail_expr() -> ColumnElement[int]:
-    visible_detail_count = (
+    visible_detail_exists = (
         select(func.count())
         .where(
             OrderDetail.shop_id == OrderHeader.shop_id,
             OrderDetail.amazon_order_id == OrderHeader.amazon_order_id,
-            or_(
-                OrderDetail.postal_code.is_not(None),
-                OrderDetail.state_or_region.is_not(None),
-                OrderDetail.city.is_not(None),
-                OrderDetail.detail_address.is_not(None),
-                OrderDetail.receiver_name.is_not(None),
-            ),
+            _order_detail_visible_predicate(),
         )
         .scalar_subquery()
     )
-    return case((visible_detail_count > 0, 1), else_=0)
+    return case((visible_detail_exists > 0, 1), else_=0)
+
+
+def _order_detail_visible_predicate() -> ColumnElement[bool]:
+    return or_(
+        OrderDetail.postal_code.is_not(None),
+        OrderDetail.state_or_region.is_not(None),
+        OrderDetail.city.is_not(None),
+        OrderDetail.detail_address.is_not(None),
+        OrderDetail.receiver_name.is_not(None),
+    )
 
 
 def _order_status_sort_expr() -> ColumnElement[int]:
@@ -269,6 +273,7 @@ async def list_orders(
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
     country: str | None = Query(default=None),
+    shop_id: str | None = Query(default=None),
     status: str | None = Query(default=None),
     sku: str | None = Query(
         default=None, description="按 commodity_sku 或 amazon_order_id 模糊匹配"
@@ -294,6 +299,8 @@ async def list_orders(
         )
     if country:
         base = base.where(OrderHeader.country_code == country.upper())
+    if shop_id:
+        base = base.where(OrderHeader.shop_id == shop_id)
     if status:
         base = base.where(OrderHeader.order_status == status)
     if sku:
@@ -335,19 +342,15 @@ async def list_orders(
         det_rows = (
             (
                 await db.execute(
-                    select(OrderDetail).where(
-                        tuple_(OrderDetail.shop_id, OrderDetail.amazon_order_id).in_(keys)
+                    select(OrderDetail.shop_id, OrderDetail.amazon_order_id).where(
+                        tuple_(OrderDetail.shop_id, OrderDetail.amazon_order_id).in_(keys),
+                        _order_detail_visible_predicate(),
                     )
                 )
             )
-            .scalars()
             .all()
         )
-        detail_set = {
-            (detail.shop_id, detail.amazon_order_id)
-            for detail in det_rows
-            if _has_visible_order_detail(detail)
-        }
+        detail_set = {(shop_id, amazon_order_id) for shop_id, amazon_order_id in det_rows}
 
     items = [
         DataOrderSummary.model_validate(

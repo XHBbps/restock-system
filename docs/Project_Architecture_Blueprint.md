@@ -340,7 +340,7 @@ client.interceptors.response.use(undefined, (error) => {
 
 ### 4.5 数据流模式
 
-**统一的"加载全量 + 前端筛选 + 本地分页"模式**：
+**默认模式："加载全量 + 前端筛选 + 本地分页"**：
 
 ```typescript
 const rows = ref<T[]>([])                    // 全量数据
@@ -363,6 +363,29 @@ async function reload() {
   page.value = 1
 }
 ```
+
+**订单页例外：后端分页 + 后端筛选 + 后端排序**：
+
+```typescript
+const rows = ref<T[]>([])                    // 当前页数据
+const total = ref(0)
+const page = ref(1)
+const pageSize = ref(50)
+
+async function reload() {
+  const resp = await listOrders({
+    page: page.value,
+    page_size: pageSize.value,
+    shop_id: filters.shop || undefined,
+    sort_by: sortState.value.prop,
+    sort_order: sortState.value.order,
+  })
+  rows.value = resp.items
+  total.value = resp.total
+}
+```
+
+订单页之所以单独切换到服务端分页，是因为订单量增长最快，且 `item_count` / `has_detail` 需要额外聚合查询；继续“一次拉全量”会同时放大后端查询和前端渲染成本。
 
 **优势**：筛选即时响应无需 API、代码简单、跨页选择容易实现。
 **限制**：数据量不宜超过数千条（当前内部用户场景完全满足）。
@@ -670,15 +693,18 @@ PROCESS_ENABLE_SCHEDULER=true
 
 ### ADR-4：前端本地分页
 
-- **决策**：数据页一次拉全量（`page_size=5000`），前端做筛选和分页
+- **决策**：多数数据页一次拉全量（`page_size=5000`），前端做筛选和分页；订单页改为 server-side 分页、筛选、排序
 - **驱动**：
-  - 内部用户 1-5 人，数据量有限（订单 < 5000 条）
+  - 内部用户 1-5 人，多数数据页数据量有限
   - 筛选即时响应无需往返 API
   - 跨页选择实现简单
+- **订单页例外驱动**：
+  - 订单量增长快，大批量加载时首屏不应再拉满 5000 条
+  - 订单列表还要补查 `item_count` 与 `has_detail`，全量查询成本更高
 - **代价**：
-  - 数据量增长后会有性能瓶颈
-  - 初次加载慢
-- **未来演进**：若数据量超过数万条，切换为 server-side 分页 + 虚拟滚动
+  - 本地分页模式在高增长数据集上会遇到性能瓶颈
+  - 订单页前后端都要维护分页状态
+- **未来演进**：若订单量继续增长，可在服务端分页基础上叠加虚拟滚动
 
 ### ADR-5：PageSectionCard 作为所有页面的统一容器
 

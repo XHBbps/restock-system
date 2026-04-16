@@ -33,6 +33,8 @@ class OrderHeader(Base):
         UniqueConstraint("shop_id", "amazon_order_id", name="uq_order_header_key"),
         Index("ix_order_header_purchase_date", "purchase_date"),
         Index("ix_order_header_country_purchase", "country_code", "purchase_date"),
+        Index("ix_order_header_shop_purchase", "shop_id", "purchase_date"),
+        Index("ix_order_header_status_purchase", "order_status", "purchase_date"),
         Index("ix_order_header_last_update", "last_update_date"),
     )
 

@@ -11,23 +11,24 @@
             end-placeholder="结束"
             value-format="YYYY-MM-DD"
             style="width: 260px"
-            @change="reload"
+            @change="reloadFirstPage"
           />
           <el-input
             v-model="filters.sku"
             placeholder="SKU / 订单号"
             clearable
             style="width: 200px"
-            @keyup.enter="reload"
-            @clear="reload"
+            @input="scheduleSkuReload"
+            @keyup.enter="reloadFirstPage"
+            @clear="reloadFirstPage"
           />
-          <el-select v-model="filters.country" placeholder="国家" clearable filterable style="width: 140px" @change="reload">
+          <el-select v-model="filters.country" placeholder="国家" clearable filterable style="width: 140px" @change="reloadFirstPage">
             <el-option v-for="c in COUNTRY_OPTIONS" :key="c.code" :label="c.code" :value="c.code" />
           </el-select>
-          <el-select v-model="filters.shop" placeholder="店铺" clearable filterable style="width: 160px">
+          <el-select v-model="filters.shop" placeholder="店铺" clearable filterable style="width: 160px" @change="reloadFirstPage">
             <el-option v-for="s in shopOptions" :key="s" :label="s" :value="s" />
           </el-select>
-          <el-select v-model="filters.status" placeholder="状态" clearable style="width: 140px" @change="reload">
+          <el-select v-model="filters.status" placeholder="状态" clearable style="width: 140px" @change="reloadFirstPage">
             <el-option label="已发货" value="Shipped" />
             <el-option label="部分发货" value="PartiallyShipped" />
             <el-option label="未发货" value="Unshipped" />
@@ -41,7 +42,7 @@
       </div>
     </template>
 
-    <el-table v-loading="loading" :data="pagedRows" table-layout="auto" @sort-change="handleSortChange">
+    <el-table v-loading="loading" :data="rows" table-layout="auto" @sort-change="handleSortChange">
       <el-table-column label="订单号" prop="amazonOrderId" min-width="240" sortable="custom">
         <template #default="{ row }">
           <span class="mono nowrap">{{ row.amazonOrderId }}</span>
@@ -92,8 +93,10 @@
     <TablePaginationBar
       v-model:current-page="page"
       v-model:page-size="pageSize"
-      :total="filteredRows.length"
+      :total="total"
       :page-sizes="[20, 50, 100, 200]"
+      @current-change="handlePageChange"
+      @size-change="handlePageSizeChange"
     />
 
     <TaskProgress v-if="detailFetchTaskId" :task-id="detailFetchTaskId" @terminal="onDetailFetchDone" />
@@ -156,7 +159,7 @@
 </template>
 
 <script setup lang="ts">
-import { getOrderDetail, listOrders, type DataOrderDetail, type DataOrderSummary } from '@/api/data'
+import { getOrderDetail, listDataShops, listOrders, type DataOrderDetail, type DataOrderSummary } from '@/api/data'
 import { COUNTRY_OPTIONS } from '@/utils/countries'
 import PageSectionCard from '@/components/PageSectionCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
@@ -168,22 +171,13 @@ import { formatDateTime } from '@/utils/format'
 import { normalizeSortOrder, type SortChangeEvent, type SortState } from '@/utils/tableSort'
 import { getActionErrorMessage } from '@/utils/apiError'
 import { ElMessage } from 'element-plus'
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 
 const rows = ref<DataOrderSummary[]>([])
+const total = ref(0)
 const page = ref(1)
 const pageSize = ref(50)
-const shopOptions = computed(() => [...new Set(rows.value.map((r) => r.shopId))].sort())
-
-const filteredRows = computed(() => {
-  if (!filters.shop) return rows.value
-  return rows.value.filter((r) => r.shopId === filters.shop)
-})
-
-const pagedRows = computed(() => {
-  const start = (page.value - 1) * pageSize.value
-  return filteredRows.value.slice(start, start + pageSize.value)
-})
+const shopOptions = ref<string[]>([])
 const loading = ref(false)
 const sortState = ref<SortState>({ prop: 'purchaseDate', order: 'desc' })
 const dateRange = ref<[string, string] | null>(null)
@@ -198,28 +192,69 @@ const filters = reactive({
 const dialogVisible = ref(false)
 const detail = ref<DataOrderDetail | null>(null)
 let detailReqId = 0
+let listReqId = 0
+let skuReloadTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearSkuReloadTimer(): void {
+  if (skuReloadTimer !== null) {
+    clearTimeout(skuReloadTimer)
+    skuReloadTimer = null
+  }
+}
 
 async function reload(): Promise<void> {
+  clearSkuReloadTimer()
+  const myReqId = ++listReqId
   loading.value = true
   try {
     const resp = await listOrders({
       date_from: dateRange.value?.[0],
       date_to: dateRange.value?.[1],
       country: filters.country || undefined,
+      shop_id: filters.shop || undefined,
       status: filters.status || undefined,
       sku: filters.sku || undefined,
-      page: 1,
-      page_size: 5000,
+      page: page.value,
+      page_size: pageSize.value,
       sort_by: sortState.value.prop,
       sort_order: sortState.value.order,
     })
+    if (myReqId !== listReqId) return
     rows.value = resp.items
-    page.value = 1
+    total.value = resp.total
   } catch (err) {
-    ElMessage.error(getActionErrorMessage(err, '加载失败'))
+    if (myReqId === listReqId) {
+      ElMessage.error(getActionErrorMessage(err, '加载失败'))
+    }
   } finally {
-    loading.value = false
+    if (myReqId === listReqId) {
+      loading.value = false
+    }
   }
+}
+
+async function loadShopOptions(): Promise<void> {
+  try {
+    const resp = await listDataShops()
+    shopOptions.value = [...new Set(resp.items.map((item) => item.id))].sort()
+  } catch (err) {
+    ElMessage.error(getActionErrorMessage(err, '加载店铺列表失败'))
+  }
+}
+
+function reloadFirstPage(): void {
+  clearSkuReloadTimer()
+  page.value = 1
+  void reload()
+}
+
+function scheduleSkuReload(): void {
+  page.value = 1
+  clearSkuReloadTimer()
+  skuReloadTimer = setTimeout(() => {
+    skuReloadTimer = null
+    void reload()
+  }, 300)
 }
 
 async function openDetail(row: DataOrderSummary): Promise<void> {
@@ -292,16 +327,28 @@ function handleSortChange({ prop, order }: SortChangeEvent): void {
   sortState.value = normalizedOrder && prop
     ? { prop, order: normalizedOrder }
     : { prop: 'purchaseDate', order: 'desc' }
+  reloadFirstPage()
+}
+
+function handlePageChange(value: number): void {
+  page.value = value
+  void reload()
+}
+
+function handlePageSizeChange(value: number): void {
+  pageSize.value = value
   page.value = 1
   void reload()
 }
 
-watch(
-  () => [filters.sku, filters.country, filters.status, filters.shop],
-  () => { page.value = 1 },
-)
+onMounted(() => {
+  void loadShopOptions()
+  void reload()
+})
 
-onMounted(reload)
+onBeforeUnmount(() => {
+  clearSkuReloadTimer()
+})
 </script>
 
 <style lang="scss" scoped>
