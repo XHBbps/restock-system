@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-17（大数据页服务端分页：历史记录、商品、库存、出库记录继续从“拉 5000 条到前端”迁移为后端分页 / 筛选）
+> 最近更新：2026-04-17（大数据页服务端分页已落地，并修复 GHCR 发布链路对大小写仓库 owner 的兼容问题）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -123,6 +123,11 @@
 - `backend/app/api/data.py` 新增 `GET /api/data/out-record-types`，出库记录页的类型筛选选项改为独立读取；`DataOutRecordsView.vue` 改为将 SKU、仓库单号、国家、类型、在途状态、排序、分页全部下推到 `/api/data/out-records`
 - `frontend/src/views/data/DataProductsView.vue`、`DataInventoryView.vue`、`DataOutRecordsView.vue` 与 `frontend/src/views/HistoryView.vue` 均改为后端分页模式：`rows` 仅保存当前页，`total` 来自接口，筛选变化重置第一页，页码/页大小变化触发重新请求
 - **测试**：新增 `backend/tests/unit/test_data_inventory_groups_api.py`、`backend/tests/unit/test_suggestion_list_api.py`、`frontend/src/views/__tests__/DataProductsView.test.ts`、`frontend/src/views/__tests__/DataInventoryView.test.ts`，并更新历史记录与出库记录页测试覆盖服务端分页参数
+
+### 3.48 GHCR owner 小写归一化修复（2026-04-17）
+- `.github/workflows/ci.yml` 的 `publish` job 新增 owner 归一化步骤，统一使用小写 owner 生成 `ghcr.io/<owner>/restock-{backend,frontend}:sha-<commit>` 与 `latest` 标签，修复 GitHub 用户名包含大写字符时 buildx 直接报 `repository name must be lowercase`
+- `deploy/scripts/validate_env.sh` 将 `GHCR_OWNER` 纳入必填校验，并显式拒绝非小写值；`deploy/scripts/deploy.sh` 在调用 Compose 前再次导出小写 `GHCR_OWNER`，避免线上 `.env` 沿用旧值导致拉镜像失败
+- `deploy/.env.example` 与 `docs/deployment.md` 同步明确 `GHCR_OWNER` 必须使用全小写 GitHub 用户名/组织名
 
 ### 3.43 CI 安全校验修复：JWT 密钥长度 + 前端依赖审计（2026-04-15）
 - `backend/app/config.py` 将默认 `jwt_secret` 占位值提升到 32 字节以上，并在 `validate_settings()` 中新增 `JWT_SECRET must be at least 32 bytes` 校验；生产环境占位值检测同步更新，避免 `PyJWT` 因 HMAC 密钥过短抛出 `InsecureKeyLengthWarning`，导致 `tests/unit/test_security.py` 在 CI 中失败

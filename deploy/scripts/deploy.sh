@@ -16,6 +16,13 @@ IMAGE_TAG="${IMAGE_TAG:-sha-$PREV_SHA}"
 export IMAGE_TAG
 echo "[deploy] image tag: $IMAGE_TAG"
 
+set -a
+source "$ENV_FILE"
+set +a
+GHCR_OWNER="${GHCR_OWNER,,}"
+export GHCR_OWNER
+echo "[deploy] ghcr owner: $GHCR_OWNER"
+
 rollback_on_failure() {
     local exit_code=$?
     if [[ $exit_code -ne 0 ]]; then

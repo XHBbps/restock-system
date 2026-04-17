@@ -182,7 +182,7 @@ Scheduler 保持单例避免重复触发，Worker 可水平扩展。
 
 补充约定：
 
-- `CI` workflow 会在 `main`、`master` 和 `v*` tag 上发布 GHCR 镜像，镜像标签统一为 `sha-<commit>`
+- `CI` workflow 会在 `main`、`master` 和 `v*` tag 上发布 GHCR 镜像，镜像标签统一为 `sha-<commit>`，并自动将 owner 归一化为小写
 - `Deploy` workflow 支持传入分支名、tag 名或 commit SHA；部署机会先切到对应 ref，再导出同名 `IMAGE_TAG=sha-<commit>` 给 Compose 使用
 - `latest` 仅作为主分支便捷标签，生产发布以 `sha-<commit>` 为准，避免分支名与镜像 tag 脱节
 
@@ -197,6 +197,7 @@ Scheduler 保持单例避免重复触发，Worker 可水平扩展。
 | `APP_DOMAIN` | 对外域名（Caddy 用） | `restock.example.com` |
 | `APP_BASE_URL` | 应用基础 URL | `https://restock.example.com` |
 | `APP_DOCS_ENABLED` | 是否开放 `/docs`（生产建议 `false`） | `false` |
+| `GHCR_OWNER` | GHCR 命名空间所有者，必须小写 | `xhbbps` |
 | `DB_PASSWORD` | PostgreSQL 密码（强密码） | — |
 | `SAIHU_CLIENT_ID` | 赛狐应用 ID | — |
 | `SAIHU_CLIENT_SECRET` | 赛狐应用密钥 | — |
@@ -226,6 +227,7 @@ Scheduler 保持单例避免重复触发，Worker 可水平扩展。
 | `APP_DOMAIN` | — | `deploy/.env` | — | `deploy/Caddyfile`、`deploy/scripts/validate_env.sh` | 仅生产使用；决定 Caddy 域名和 TLS 证书 |
 | `APP_BASE_URL` | `deploy/.env.dev` | `deploy/.env` | 可选 `backend/.env` | `deploy/docker-compose*.yml`、`deploy/scripts/smoke_check.sh` | 本地通常为 `http://localhost:8088`，生产为 `https://<domain>` |
 | `APP_DOCS_ENABLED` | `deploy/.env.dev` | `deploy/.env` | `backend/.env` | `deploy/docker-compose*.yml`、`backend/app/config.py` | 控制 `/docs` 是否开放；生产默认建议关闭 |
+| `GHCR_OWNER` | — | `deploy/.env` | — | `deploy/docker-compose.yml`、`deploy/scripts/validate_env.sh` | 生产镜像命名空间；必须使用全小写 GitHub 用户名/组织名 |
 | `DB_PASSWORD` | `deploy/.env.dev` | `deploy/.env` | — | `deploy/docker-compose*.yml` | Compose 内部 PostgreSQL 密码；修改前需确认数据卷兼容性 |
 | `DATABASE_URL` | — | — | `backend/.env` | `backend/app/config.py` | 仅原生后端开发使用；容器内由 Compose 拼装生成 |
 | `SAIHU_CLIENT_ID` | `deploy/.env.dev` | `deploy/.env` | `backend/.env` | `deploy/docker-compose*.yml`、`backend/app/saihu/token.py` | 赛狐 access_token 申请参数 |
@@ -298,7 +300,7 @@ bash deploy/scripts/deploy.sh
 
 脚本会依次执行：
 
-1. **校验环境变量** — `deploy/scripts/validate_env.sh` 检查必填项，并拦截 `.env.example` 中的示例占位值（包括 `LOGIN_PASSWORD=your_initial_login_password`）
+1. **校验环境变量** — `deploy/scripts/validate_env.sh` 检查必填项，并拦截 `.env.example` 中的示例占位值（包括 `LOGIN_PASSWORD=your_initial_login_password` 与非小写 `GHCR_OWNER`）
 2. **数据库备份** — `deploy/scripts/pg_backup.sh` 生成 `deploy/data/backups/<timestamp>.sql.gz`
 3. **拉取镜像** — `docker compose pull backend worker scheduler frontend`（`IMAGE_TAG` 默认取当前 git commit 的 `sha-<commit>`）
 4. **执行迁移** — `docker compose run --rm backend alembic upgrade head`

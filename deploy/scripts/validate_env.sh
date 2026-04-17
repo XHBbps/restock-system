@@ -17,6 +17,7 @@ set +a
 required_keys=(
     APP_DOMAIN
     APP_BASE_URL
+    GHCR_OWNER
     DB_PASSWORD
     SAIHU_CLIENT_ID
     SAIHU_CLIENT_SECRET
@@ -30,6 +31,11 @@ for key in "${required_keys[@]}"; do
         exit 1
     fi
 done
+
+if [[ "${GHCR_OWNER}" =~ [A-Z] ]]; then
+    echo "GHCR_OWNER must be lowercase (for example: xhbbps)" >&2
+    exit 1
+fi
 
 if [[ "${DB_PASSWORD}" == "please_change_me_use_strong_password" ]]; then
     echo "DB_PASSWORD is still using the example placeholder" >&2
