@@ -18,6 +18,7 @@ from app.models.role_permission import RolePermission
 from app.models.shop import Shop
 from app.models.sku import SkuConfig
 from app.models.suggestion import Suggestion, SuggestionItem
+from app.models.suggestion_snapshot import SuggestionSnapshot, SuggestionSnapshotItem  # noqa: F401
 from app.models.sync_state import SyncState
 from app.models.sys_user import SysUser
 from app.models.task_run import TaskRun
@@ -46,6 +47,8 @@ __all__ = [
     "SkuConfig",
     "Suggestion",
     "SuggestionItem",
+    "SuggestionSnapshot",
+    "SuggestionSnapshotItem",
     "SyncState",
     "SysUser",
     "TaskRun",
