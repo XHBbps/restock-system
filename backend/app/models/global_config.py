@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, Integer, SmallInteger, String, text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, SmallInteger, String, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
@@ -48,6 +48,17 @@ class GlobalConfig(Base):
 
     # 登录
     login_password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    # 补货建议生成开关（首次导出自动 OFF，管理员手动 ON）
+    suggestion_generation_enabled: Mapped[bool] = mapped_column(
+        nullable=False, default=True, server_default=text("true")
+    )
+    generation_toggle_updated_by: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("sys_user.id", ondelete="SET NULL"), nullable=True
+    )
+    generation_toggle_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(
