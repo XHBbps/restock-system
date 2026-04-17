@@ -24,6 +24,8 @@ HOME_REFRESH = "home:refresh"
 
 RESTOCK_VIEW = "restock:view"
 RESTOCK_OPERATE = "restock:operate"
+RESTOCK_EXPORT = "restock:export"
+RESTOCK_NEW_CYCLE = "restock:new_cycle"
 
 HISTORY_VIEW = "history:view"
 HISTORY_DELETE = "history:delete"
@@ -51,6 +53,8 @@ REGISTRY: list[PermDef] = [
     PermDef(HOME_REFRESH, "信息总览-刷新", "信息总览"),
     PermDef(RESTOCK_VIEW, "补货发起-查看", "补货发起"),
     PermDef(RESTOCK_OPERATE, "补货发起-操作", "补货发起"),
+    PermDef(RESTOCK_EXPORT, "补货发起-导出", "补货发起"),
+    PermDef(RESTOCK_NEW_CYCLE, "补货发起-开启新一轮", "补货发起"),
     PermDef(HISTORY_VIEW, "历史记录-查看", "历史记录"),
     PermDef(HISTORY_DELETE, "历史记录-删除", "历史记录"),
     PermDef(DATA_BASE_VIEW, "基础数据-查看", "基础数据"),
