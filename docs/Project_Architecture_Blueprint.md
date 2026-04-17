@@ -17,7 +17,7 @@
 3. **进程内编排**：Worker、Scheduler、Reaper 与 FastAPI 在同一 Python 进程中运行（可通过环境变量分离）
 4. **快照即历史**：补货建议生成时快照输入（velocity、sale_days、配置，含 `restock_regions`），已生成的建议单不会因配置变更而改动
 5. **批量优先于迭代**：引擎和同步层尽量批量加载，避免 N+1 查询
-6. **前端本地分页**：数据页一次拉取全量，前端做筛选和分页（内部用户 1-5 人，数据量有限）
+6. **前端分页按页面规模选型**：多数数据页保留“全量拉取 + 前端筛选 + 本地分页”，订单页等高增长数据改为服务端分页，避免单页数据量继续放大时拖慢交互
 
 ### 技术栈
 
@@ -209,6 +209,7 @@ CREATE INDEX ix_task_run_lease
 
 **进度追踪**：`TaskRun.current_step / step_detail / total_steps` 由 worker 在执行中写入，前端 `TaskProgress` 组件轮询 `/api/tasks/{id}`。`sync_order_detail` / `refetch_order_detail` 直接按目标订单数回写精确进度；店铺、仓库、商品、库存、订单、出库等分页同步任务则复用赛狐分页响应里的 `totalPage` 输出“第 P / N 页”进度，不额外发起预扫描请求。
 **信息总览快照任务**：`refresh_dashboard_snapshot` 也是标准 TaskRun 任务，复用现有去重、轮询和失败回写机制；它在后台调用 `build_dashboard_payload()` 生成 `dashboard_snapshot` 单例缓存，页面刷新时优先消费该缓存而不是重复现算。
+**任务权限注册表**：`app/tasks/access.py` 统一维护 TaskRun 作业清单，以及查看/操作权限映射；通用 `POST /api/tasks` 只允许创建显式白名单里的任务，`push_saihu` 仍必须通过建议单专用业务入口触发。
 
 ### 3.4 赛狐集成层（app/saihu）
 
@@ -256,6 +257,7 @@ _ENDPOINT_RATE_OVERRIDES = {
 | **异常** | `BusinessError` 层次（NotFound/Unauthorized/ValidationFailed/...）+ `SaihuAPIError` 层次，全局 exception handler 转 JSON | `core/exceptions.py`, `main.py:113-131` |
 | **日志** | structlog + contextvars 绑定 `request_id`，dev ConsoleRenderer / prod JSONRenderer | `core/logging.py`, `core/middleware.py` |
 | **中间件** | `RequestLoggingMiddleware` 记录 method/path/status/duration_ms，注入 X-Request-Id 响应头 | `core/middleware.py` |
+| **应用限流** | 进程内 IP 滑动窗口限流，定期清理过期客户端并在超过容量上限时驱逐最旧 key | `core/rate_limit.py` |
 | **时区** | 存储 UTC，展示北京时间；`parse_saihu_time` 按 marketplace_id 推断源时区再转换 | `core/timezone.py` |
 | **配置** | `pydantic-settings` 从环境变量/`.env` 加载，`get_settings()` 单例 | `config.py` |
 
@@ -280,9 +282,9 @@ src/
 ├── api/             # API 客户端（每个领域一个文件）
 ├── stores/          # Pinia 状态（auth / sidebar / task）
 ├── router/          # 路由 + 鉴权守卫
-├── utils/           # 工具函数（format / tableSort / countries / warehouse / status / monitoring / ...）
+├── utils/           # 工具函数（format / tableSort / countries / warehouse / status / monitoring / storage / ...）
 ├── styles/          # 设计系统（tokens.scss + element-overrides.scss）
-├── config/          # 导航配置
+├── config/          # 页面元数据与导航配置
 └── main.ts
 ```
 
@@ -303,8 +305,8 @@ src/
 
 | Store | 状态 | 持久化 |
 |---|---|---|
-| `useAuthStore` | token, isAuthenticated | localStorage |
-| `useSidebarStore` | isCollapsed, expandedCategories | localStorage |
+| `useAuthStore` | token, user, isAuthenticated | localStorage（异常 JSON 会自动清理） |
+| `useSidebarStore` | isCollapsed, expandedCategories | localStorage（异常 JSON 会自动清理） |
 | `useTaskStore` | tasksById, polling | 内存（刷新丢失） |
 
 **全局状态仅保留 3 个 store**，其余状态局部保存在 view 的 `ref/reactive` 中。
@@ -388,11 +390,13 @@ async function reload() {
 订单页之所以单独切换到服务端分页，是因为订单量增长最快，且 `item_count` / `has_detail` 需要额外聚合查询；继续“一次拉全量”会同时放大后端查询和前端渲染成本。
 
 **优势**：筛选即时响应无需 API、代码简单、跨页选择容易实现。
-**限制**：数据量不宜超过数千条（当前内部用户场景完全满足）。
+**限制**：数据量不宜超过数千条；`HistoryView`、`DataProductsView`、`DataInventoryView`、`DataOutRecordsView` 仍保留本地分页，后续按数据增长再逐页迁移到服务端分页。
 
 ### 4.6 路由与鉴权
 
-**`src/router/index.ts`**：
+**`src/config/appPages.ts` + `src/router/index.ts` + `src/config/navigation.ts`**：
+- `appPages` 作为页面真理源，统一维护 path / title / permission / icon / lazy component
+- router 与 navigation 都从 `appPages` 派生，特殊页（登录、403、404、建议详情、legacy redirect）继续在 `router/index.ts` 单独声明
 - 所有业务路由嵌套在 `AppLayout` 下
 - `meta.public: true` 允许未登录访问（仅 `/login`）
 - `authGuard` 在 `beforeEach` 中检查，失败时跳转 `/login?redirect=<origin>`
@@ -652,6 +656,8 @@ PROCESS_ENABLE_SCHEDULER=true
 | `rollback.sh` | 回滚到上一个成功版本 |
 | `validate_env.sh` | 验证环境变量完整性 |
 | `smoke_check.sh` | 部署后健康检查（/healthz, /readyz） |
+
+`deploy.sh` 在未显式传入 `IMAGE_TAG` 时，会默认使用当前仓库 HEAD 派生 `sha-<commit>`，与 CI 发布到 GHCR 的镜像标签保持一致；GitHub Actions 部署也是同一口径。
 
 ### 7.4 健康检查
 

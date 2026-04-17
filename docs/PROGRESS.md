@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-16（订单页大批量加载优化：订单列表改为后端分页/筛选/排序，新增 `shop_id` 过滤，订单页店铺选项改为独立加载，并为 `order_header` 补充分页常用索引）
+> 最近更新：2026-04-17（Review 修复：打通 `main`/tag 部署链路、放行 Amazon 商品缩略图域名、收敛前端路由/导航配置、补 localStorage 容错，并为进程内限流补全全局清理与容量保护）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -107,6 +107,15 @@
 - `backend/app/models/order.py` 与 `backend/alembic/versions/20260416_1700_add_order_page_indexes.py` 为 `order_header` 补充 `shop_id + purchase_date`、`order_status + purchase_date` 索引，优化订单页按店铺/状态倒序浏览
 - `frontend/src/views/data/DataOrdersView.vue` 改为服务端分页：页码、页大小、筛选、排序均回传 `/api/data/orders`；SKU 输入改为短防抖搜索；店铺筛选选项改为独立调用 `listDataShops()`，不再从当前页订单数据推导
 - **测试**：新增 `backend/tests/unit/test_data_orders_api.py` 与 `frontend/src/views/__tests__/DataOrdersView.test.ts`，覆盖 `shop_id` 过滤、空页短路、服务端分页、页码切换、店铺筛选与 SKU 防抖搜索
+
+### 3.46 Review 风险修复：部署链路、前端容错与限流边界（2026-04-17）
+- `.github/workflows/ci.yml` 为 `v*` tag 补充 CI + GHCR 发布触发，`publish` 统一覆盖 `main` / `master` / tag；`.github/workflows/deploy.yml` 与 `deploy/scripts/deploy.sh` 同步收敛为按真实 commit SHA 派生 `IMAGE_TAG=sha-<commit>`，并兼容 branch / tag / detached SHA 部署，修复 `main` 分支和 tag 发布容易拉不到镜像的问题
+- `deploy/Caddyfile` 的生产 CSP 将 `img-src` 放行到 `https://m.media-amazon.com`，与赛狐同步的 Amazon 商品主图来源保持一致，避免订单/商品页缩略图被浏览器策略拦截
+- `frontend/src/config/appPages.ts` 新增统一页面定义，`frontend/src/router/index.ts` 与 `frontend/src/config/navigation.ts` 改为共同消费同一份路由/菜单元数据，减少页面 path / title / permission 双份维护
+- `frontend/src/utils/storage.ts` 新增安全读取工具；`frontend/src/stores/auth.ts`、`frontend/src/stores/sidebar.ts` 在 localStorage JSON 损坏或结构异常时自动清理脏数据并回退默认值，避免 SPA 启动阶段因 `JSON.parse` 直接崩溃
+- `backend/app/tasks/access.py` 收敛 TaskRun 作业白名单与查看/操作权限映射，`backend/app/api/task.py` 改为复用统一注册表；保留 `push_saihu` 仅允许通过专用业务入口触发的约束
+- `backend/app/core/rate_limit.py` 为进程内限流补充周期性全局过期清理、`max_tracked_clients` 容量上限和最旧客户端驱逐逻辑，降低不同 IP 扫描导致的内存持续膨胀风险
+- **测试**：新增 `backend/tests/unit/test_rate_limit_middleware.py`、`frontend/src/stores/__tests__/sidebar.test.ts`，并扩展 `frontend/src/stores/__tests__/auth.test.ts`
 
 ### 3.43 CI 安全校验修复：JWT 密钥长度 + 前端依赖审计（2026-04-15）
 - `backend/app/config.py` 将默认 `jwt_secret` 占位值提升到 32 字节以上，并在 `validate_settings()` 中新增 `JWT_SECRET must be at least 32 bytes` 校验；生产环境占位值检测同步更新，避免 `PyJWT` 因 HMAC 密钥过短抛出 `InsecureKeyLengthWarning`，导致 `tests/unit/test_security.py` 在 CI 中失败

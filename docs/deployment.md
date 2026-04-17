@@ -180,6 +180,12 @@ Scheduler 保持单例避免重复触发，Worker 可水平扩展。
 
 配置完成后，在 GitHub Actions 页面手动触发 `Deploy` workflow 即可一键部署。
 
+补充约定：
+
+- `CI` workflow 会在 `main`、`master` 和 `v*` tag 上发布 GHCR 镜像，镜像标签统一为 `sha-<commit>`
+- `Deploy` workflow 支持传入分支名、tag 名或 commit SHA；部署机会先切到对应 ref，再导出同名 `IMAGE_TAG=sha-<commit>` 给 Compose 使用
+- `latest` 仅作为主分支便捷标签，生产发布以 `sha-<commit>` 为准，避免分支名与镜像 tag 脱节
+
 ---
 
 ## 3. 环境变量
@@ -294,13 +300,19 @@ bash deploy/scripts/deploy.sh
 
 1. **校验环境变量** — `deploy/scripts/validate_env.sh` 检查必填项，并拦截 `.env.example` 中的示例占位值（包括 `LOGIN_PASSWORD=your_initial_login_password`）
 2. **数据库备份** — `deploy/scripts/pg_backup.sh` 生成 `deploy/data/backups/<timestamp>.sql.gz`
-3. **拉取/构建镜像** — `docker compose build backend frontend`
+3. **拉取镜像** — `docker compose pull backend worker scheduler frontend`（`IMAGE_TAG` 默认取当前 git commit 的 `sha-<commit>`）
 4. **执行迁移** — `docker compose run --rm backend alembic upgrade head`
 5. **滚动更新服务** — `docker compose up -d db backend worker scheduler frontend caddy`
 6. **冒烟检查** — `deploy/scripts/smoke_check.sh` 访问 `/healthz` 和 `/readyz`
 7. **失败自动回滚** — 任何步骤失败触发 `deploy/scripts/rollback.sh`，仅恢复上一版应用；若迁移已执行，数据库必须通过最近一次备份手动恢复
 
 **经验**：凡是移除旧数据库字段兼容层的发布，必须坚持“先执行 `alembic upgrade head`，再启动 backend / worker / scheduler”，否则运行时会直接暴露 schema 漂移问题。
+
+如果是通过 GitHub Actions 触发发布，推荐流程如下：
+
+1. 选择已经通过 CI 的 `main` / `master` / `v*` tag / commit SHA
+2. 确认对应 GHCR 中已存在 `sha-<commit>` 镜像
+3. 执行 `Deploy` workflow，由 workflow 自动切 ref、设置 `IMAGE_TAG` 并调用 `deploy/scripts/deploy.sh`
 
 ### 4.2 手动命令（细粒度操作）
 
@@ -352,6 +364,7 @@ curl https://your-domain.com/readyz
    docker compose logs scheduler | grep -i error
    docker compose logs caddy | grep -i error
    ```
+5. **商品缩略图**：打开商品/订单页面，确认 Amazon 缩略图能正常显示；若图片空白，优先检查 `deploy/Caddyfile` 的 `Content-Security-Policy` 是否包含 `https://m.media-amazon.com`
 
 ---
 

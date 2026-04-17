@@ -23,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.ref }}
+          ref: ${{ github.event.inputs.ref || github.ref_name }}
       - name: Verify CI passed for this ref
         uses: actions/github-script@v7
         with:
@@ -63,8 +63,20 @@ jobs:
             REF="${{ github.event.inputs.ref || github.ref_name }}"
             cd "${{ secrets.DEPLOY_PATH }}"
             git fetch --all --tags
-            git checkout "$REF"
-            git pull --ff-only origin "$REF"
+            if [[ "$REF" == refs/heads/* ]]; then
+              BRANCH="${REF#refs/heads/}"
+              git checkout "$BRANCH"
+              git pull --ff-only origin "$BRANCH"
+            elif [[ "$REF" == refs/tags/* ]]; then
+              git checkout --detach "$REF"
+            elif git show-ref --verify --quiet "refs/remotes/origin/$REF"; then
+              git checkout "$REF"
+              git pull --ff-only origin "$REF"
+            elif git show-ref --verify --quiet "refs/tags/$REF"; then
+              git checkout --detach "refs/tags/$REF"
+            else
+              git checkout --detach "$REF"
+            fi
             export IMAGE_TAG="sha-$(git rev-parse HEAD)"
             bash deploy/scripts/deploy.sh
 
@@ -72,7 +84,7 @@ jobs:
         if: always()
         run: |
           STATUS="${{ job.status }}"
-          REF="${{ github.event.inputs.ref }}"
+          REF="${{ github.event.inputs.ref || github.ref_name }}"
           echo "Deploy $STATUS for ref $REF"
           if [ -n "${{ secrets.DEPLOY_NOTIFY_WEBHOOK }}" ]; then
             curl -sf -X POST "${{ secrets.DEPLOY_NOTIFY_WEBHOOK }}" \

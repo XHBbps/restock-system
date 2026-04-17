@@ -12,6 +12,9 @@ ROLLBACK_SCRIPT="${ROLLBACK_SCRIPT:-$SCRIPT_DIR/rollback.sh}"
 # Capture current git SHA before any changes, for rollback.
 PREV_SHA="$(cd "$REPO_DIR" && git rev-parse HEAD)"
 echo "[deploy] previous SHA: $PREV_SHA"
+IMAGE_TAG="${IMAGE_TAG:-sha-$PREV_SHA}"
+export IMAGE_TAG
+echo "[deploy] image tag: $IMAGE_TAG"
 
 rollback_on_failure() {
     local exit_code=$?

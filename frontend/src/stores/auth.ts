@@ -1,7 +1,8 @@
-// 鉴权 Pinia store：管理 token + 用户信息 + 权限
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
+
 import { me as fetchMe } from '@/api/auth'
+import { readStoredJson } from '@/utils/storage'
 
 const TOKEN_KEY = 'restock_token'
 const USER_KEY = 'restock_user'
@@ -16,12 +17,31 @@ export interface UserInfo {
   permissions: string[]
 }
 
+function isUserInfo(value: unknown): value is UserInfo {
+  if (!value || typeof value !== 'object') {
+    return false
+  }
+
+  const raw = value as Record<string, unknown>
+  return (
+    typeof raw.id === 'number'
+    && typeof raw.username === 'string'
+    && typeof raw.displayName === 'string'
+    && typeof raw.roleName === 'string'
+    && typeof raw.isSuperadmin === 'boolean'
+    && typeof raw.passwordIsDefault === 'boolean'
+    && Array.isArray(raw.permissions)
+    && raw.permissions.every((permission) => typeof permission === 'string')
+  )
+}
+
 export const useAuthStore = defineStore('auth', () => {
   const token = ref<string | null>(localStorage.getItem(TOKEN_KEY))
-
-  // Restore user from localStorage snapshot (avoid flicker on refresh)
-  const _savedUser = localStorage.getItem(USER_KEY)
-  const user = ref<UserInfo | null>(_savedUser ? JSON.parse(_savedUser) : null)
+  const user = ref<UserInfo | null>(
+    readStoredJson<UserInfo | null>(USER_KEY, null, {
+      guard: (value): value is UserInfo | null => isUserInfo(value),
+    }),
+  )
 
   const isAuthenticated = computed(() => !!token.value)
 
@@ -44,7 +64,6 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem(USER_KEY)
   }
 
-  // Promise dedup for restoreAuth
   let _restorePromise: Promise<void> | null = null
 
   async function restoreAuth(): Promise<void> {
@@ -66,7 +85,6 @@ export const useAuthStore = defineStore('auth', () => {
   return { token, user, isAuthenticated, hasPermission, setAuth, clearAuth, restoreAuth }
 })
 
-/** Map backend snake_case response to camelCase UserInfo */
 export function _mapUserInfo(raw: Record<string, unknown>): UserInfo {
   return {
     id: typeof raw.id === 'number' ? raw.id : 0,

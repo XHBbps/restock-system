@@ -1,15 +1,15 @@
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 
+import { isStringArray, readStoredJson } from '@/utils/storage'
+
 const COLLAPSED_KEY = 'sidebar_collapsed'
 const EXPANDED_CATS_KEY = 'sidebar_expanded_cats'
 
 export const useSidebarStore = defineStore('sidebar', () => {
   const isCollapsed = ref(localStorage.getItem(COLLAPSED_KEY) === 'true')
-
-  const _savedCats = localStorage.getItem(EXPANDED_CATS_KEY)
   const expandedCategories = ref<Set<string>>(
-    _savedCats ? new Set(JSON.parse(_savedCats) as string[]) : new Set(),
+    new Set(readStoredJson<string[]>(EXPANDED_CATS_KEY, [], { guard: isStringArray })),
   )
 
   watch(isCollapsed, (val) => localStorage.setItem(COLLAPSED_KEY, String(val)))

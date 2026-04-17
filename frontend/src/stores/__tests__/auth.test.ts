@@ -30,12 +30,33 @@ describe('useAuthStore', () => {
   it('hydrates token and user from localStorage on init', () => {
     localStorage.setItem('restock_token', 'stored-token')
     localStorage.setItem('restock_user', JSON.stringify(mockUser))
-    // Re-create pinia so the store re-initializes with fresh localStorage
     setActivePinia(createPinia())
     const auth = useAuthStore()
     expect(auth.token).toBe('stored-token')
     expect(auth.user).toEqual(mockUser)
     expect(auth.isAuthenticated).toBe(true)
+  })
+
+  it('clears invalid stored user snapshot instead of crashing', () => {
+    localStorage.setItem('restock_token', 'stored-token')
+    localStorage.setItem('restock_user', '{invalid-json')
+
+    setActivePinia(createPinia())
+    const auth = useAuthStore()
+
+    expect(auth.token).toBe('stored-token')
+    expect(auth.user).toBeNull()
+    expect(localStorage.getItem('restock_user')).toBeNull()
+  })
+
+  it('clears malformed stored user shape instead of using bad data', () => {
+    localStorage.setItem('restock_user', JSON.stringify({ username: 'admin' }))
+
+    setActivePinia(createPinia())
+    const auth = useAuthStore()
+
+    expect(auth.user).toBeNull()
+    expect(localStorage.getItem('restock_user')).toBeNull()
   })
 
   it('setAuth updates state and localStorage', () => {

@@ -398,11 +398,35 @@ docker compose -f deploy/docker-compose.yml restart backend
   │     curl http://backend:8000/readyz  (在 docker 网络内)
   │     或 docker compose exec caddy wget -O- http://backend:8000/readyz
   │
-  └─▶ Caddy 配置是否正确反代
-       查看 deploy/Caddyfile
+   └─▶ Caddy 配置是否正确反代
+        查看 deploy/Caddyfile
 ```
 
-### 3.9 补货引擎卡住或异常
+### 3.9 发布后商品缩略图空白
+
+**症状**：页面能打开，但商品卡片或订单详情里的商品缩略图不显示；浏览器控制台出现 CSP / `img-src` 拦截。
+
+**排查**：
+
+1. **确认图片来源域名**
+   - 当前赛狐同步的 Amazon 商品主图默认来自 `https://m.media-amazon.com`
+   - 若接入了新的图片来源域名，需要同步更新 `deploy/Caddyfile` 的 `Content-Security-Policy`
+
+2. **检查生产 Caddy 配置**
+   ```bash
+   grep -n "Content-Security-Policy" deploy/Caddyfile
+   ```
+
+3. **重载后验证响应头**
+   ```bash
+   curl -I https://your-domain.com | grep -i content-security-policy
+   ```
+
+4. **浏览器复查**
+   - 强制刷新页面（`Ctrl+F5`）
+   - 打开开发者工具 → Network / Console，确认不再出现 `Refused to load the image` 之类的 CSP 报错
+
+### 3.10 补货引擎卡住或异常
 
 **症状**：点击"生成补货建议"后任务长时间 running；或任务 failed 但无明确原因。
 
@@ -428,6 +452,28 @@ docker compose -f deploy/docker-compose.yml restart backend
    ```
 
 ---
+
+### 3.11 频繁出现 429 或内存持续升高
+
+**症状**：接口大量返回 429，或仅遭遇不同 IP 扫描时 backend 进程内存缓慢上涨。
+
+**排查**：
+
+1. **先看访问日志**
+   ```bash
+   tail -f deploy/data/caddy/access.log
+   ```
+
+2. **确认是否为不同 IP 扫描**
+   - `RateLimitMiddleware` 现在会周期性清理过期 IP，并在超过 `max_tracked_clients` 时驱逐最旧客户端
+   - 如果仍持续触顶，说明扫描规模已经超过当前进程内限流设计边界
+
+3. **短期处理**
+   - 先在 Caddy / 云防火墙层封禁异常来源
+   - 必要时临时收紧 `max_requests` 或缩短 `window_seconds`
+
+4. **长期处理**
+   - 若未来演进到多实例部署，改为 Redis / 网关级集中限流，避免进程内口径不一致
 
 ## 4. 监控端点速查
 

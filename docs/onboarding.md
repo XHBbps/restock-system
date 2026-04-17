@@ -367,8 +367,15 @@ Conventional Commits：
 | `@/utils/status` | 状态元数据映射 |
 | `@/utils/tableSort` | 本地排序工具 |
 | `@/utils/monitoring` | 监控名称映射（接口/资源中文化）、分位点工具、任务反馈文案 |
+| `@/utils/storage` | localStorage 安全读取；JSON 损坏或结构异常时自动清理脏数据并回退默认值 |
 
-**数据页模式**（所有列表页必须遵循）：
+页面与导航配置约定：
+
+- `@/config/appPages` 是主页面路由/导航真理源，统一维护 `path`、`title`、`permission`、`icon`、懒加载组件
+- `@/router/index.ts` 与 `@/config/navigation.ts` 都应从 `appPages` 派生，避免再手写第二份菜单/路由定义
+- 登录页、403/404、建议详情、legacy redirect 等特殊路由仍放在 `router/index.ts` 单独维护
+
+**数据页模式**（默认遵循；订单页已切到服务端分页）：
 
 ```typescript
 // 1. 一次拉全量
