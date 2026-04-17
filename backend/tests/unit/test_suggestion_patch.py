@@ -4,13 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
-from unittest.mock import AsyncMock
-
 import pytest
 
-from app.api.suggestion import delete_suggestion, patch_item, push_items
-from app.core.exceptions import ConflictError, NotFound, PushBlockedError, ValidationFailed
-from app.schemas.suggestion import PushRequest, SuggestionItemPatch
+from app.api.suggestion import delete_suggestion, patch_item
+from app.core.exceptions import ConflictError, NotFound, ValidationFailed
+from app.schemas.suggestion import SuggestionItemPatch
 
 
 @dataclass
@@ -178,88 +176,6 @@ async def test_suggestion_patch_rejects_warehouse_sum_mismatch() -> None:
     )
     with pytest.raises(ValidationFailed, match="warehouse_breakdown"):
         await patch_item(patch=patch, suggestion_id=1, item_id=10, db=db, _={})  # type: ignore[arg-type]
-
-
-async def test_suggestion_push_archived_rejected() -> None:
-    db = _FakeSession([_FakeSuggestion(status="archived")])
-    req = PushRequest(item_ids=[10])
-    with pytest.raises(ConflictError, match=r"archived|不可推送"):
-        await push_items(req=req, suggestion_id=1, db=db, _={})  # type: ignore[arg-type]
-
-
-async def test_suggestion_push_pushed_rejected() -> None:
-    db = _FakeSession([_FakeSuggestion(status="pushed")])
-    req = PushRequest(item_ids=[10])
-    with pytest.raises(ConflictError, match=r"pushed|不可推送"):
-        await push_items(req=req, suggestion_id=1, db=db, _={})  # type: ignore[arg-type]
-
-
-async def test_suggestion_push_rejects_already_pushed_items_in_partial() -> None:
-    db = _FakeSession(
-        [
-            _FakeSuggestion(status="partial"),
-            [_FakeItem(push_status="pushed"), _FakeItem(push_status="pending")],
-        ]
-    )
-    req = PushRequest(item_ids=[10, 11])
-    with pytest.raises(ConflictError, match=r"已推送|重复推送"):
-        await push_items(req=req, suggestion_id=1, db=db, _={})  # type: ignore[arg-type]
-
-
-async def test_suggestion_push_rejects_zero_qty_items() -> None:
-    item = _FakeItem()
-    item.total_qty = 0
-    db = _FakeSession([_FakeSuggestion(status="draft"), [item]])
-    req = PushRequest(item_ids=[10])
-    with pytest.raises(PushBlockedError, match="total_qty<=0"):
-        await push_items(req=req, suggestion_id=1, db=db, _={})  # type: ignore[arg-type]
-
-
-async def test_suggestion_push_auto_resolves_missing_commodity_id_before_enqueue(monkeypatch) -> None:
-    import app.api.suggestion as suggestion_module
-
-    item = _FakeItem(push_status="blocked")
-    item.commodity_id = None
-    item.push_blocker = "missing_commodity_id"
-    db = _FakeSession([_FakeSuggestion(status="draft"), [item]])
-    req = PushRequest(item_ids=[10])
-
-    async def _fake_refresh(*_args: Any, **_kwargs: Any) -> set[int]:
-        item.commodity_id = "CID-NEW"
-        item.push_blocker = None
-        item.push_status = "pending"
-        return {item.id}
-
-    enqueue_mock = AsyncMock(return_value=(321, False))
-    monkeypatch.setattr(suggestion_module, "refresh_suggestion_item_pushability", _fake_refresh)
-    monkeypatch.setattr(suggestion_module, "enqueue_task", enqueue_mock)
-
-    result = await push_items(req=req, suggestion_id=1, db=db, _={})  # type: ignore[arg-type]
-
-    assert result == {"task_id": 321, "existing": False}
-    enqueue_mock.assert_awaited_once()
-    assert enqueue_mock.await_args.kwargs["dedupe_key"] == "push_saihu#1#10"
-    assert enqueue_mock.await_args.kwargs["payload"] == {"suggestion_id": 1, "item_ids": [10]}
-
-
-async def test_suggestion_push_normalizes_item_ids_for_payload_and_dedupe(monkeypatch) -> None:
-    import app.api.suggestion as suggestion_module
-
-    item_a = _FakeItem()
-    item_b = _FakeItem()
-    item_b.id = 11
-    db = _FakeSession([_FakeSuggestion(status="draft"), [item_b, item_a]])
-    req = PushRequest(item_ids=[11, 10, 10])
-
-    enqueue_mock = AsyncMock(return_value=(321, False))
-    monkeypatch.setattr(suggestion_module, "enqueue_task", enqueue_mock)
-
-    result = await push_items(req=req, suggestion_id=1, db=db, _={})  # type: ignore[arg-type]
-
-    assert result == {"task_id": 321, "existing": False}
-    enqueue_mock.assert_awaited_once()
-    assert enqueue_mock.await_args.kwargs["dedupe_key"] == "push_saihu#1#10,11"
-    assert enqueue_mock.await_args.kwargs["payload"] == {"suggestion_id": 1, "item_ids": [10, 11]}
 
 
 async def test_suggestion_delete_rejects_missing_row() -> None:

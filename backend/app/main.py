@@ -28,7 +28,6 @@ from app.core.security import hash_password
 from app.db.session import async_session_factory
 from app.engine import calc_engine_job as _job_calc  # noqa: F401
 from app.models.global_config import GlobalConfig
-from app.pushback import purchase as _job_push  # noqa: F401
 from app.sync import all as _job_all  # noqa: F401
 from app.sync import inventory as _job_inv  # noqa: F401
 from app.sync import order_detail as _job_od  # noqa: F401

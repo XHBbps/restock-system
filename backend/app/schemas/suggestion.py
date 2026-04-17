@@ -82,9 +82,3 @@ class SuggestionItemPatch(BaseModel):
                             f"warehouse_breakdown[{country}][{wid}] 不可为负"
                         )
         return self
-
-
-class PushRequest(BaseModel):
-    """推送选中条目至赛狐。"""
-
-    item_ids: list[int] = Field(..., min_length=1)

@@ -10,8 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.api.deps import db_session, require_permission
-from app.core.commodity_id import refresh_suggestion_item_pushability
-from app.core.exceptions import ConflictError, NotFound, PushBlockedError, ValidationFailed
+from app.core.exceptions import ConflictError, NotFound, ValidationFailed
 from app.core.permissions import HISTORY_DELETE, RESTOCK_OPERATE, RESTOCK_VIEW
 from app.core.query import escape_like
 from app.core.timezone import BEIJING, now_beijing
@@ -20,15 +19,12 @@ from app.models.product_listing import ProductListing
 from app.models.sku import SkuConfig
 from app.models.suggestion import Suggestion, SuggestionItem
 from app.schemas.suggestion import (
-    PushRequest,
     SuggestionDetailOut,
     SuggestionItemOut,
     SuggestionItemPatch,
     SuggestionListOut,
     SuggestionOut,
 )
-from app.tasks.queue import enqueue_task
-
 router = APIRouter(prefix="/api/suggestions", tags=["suggestion"])
 
 SUGGESTION_STATUS_SORT_ORDER: dict[str, int] = {
@@ -241,65 +237,6 @@ async def patch_item(
     return await _enrich_item(db, item)
 
 
-@router.post("/{suggestion_id}/push")
-async def push_items(
-    req: PushRequest,
-    suggestion_id: int = Path(..., ge=1),
-    db: AsyncSession = Depends(db_session),
-    _: None = Depends(require_permission(RESTOCK_OPERATE)),
-) -> dict[str, Any]:
-    sug = (
-        await db.execute(select(Suggestion).where(Suggestion.id == suggestion_id))
-    ).scalar_one_or_none()
-    if sug is None:
-        raise NotFound(f"建议单 {suggestion_id} 不存在")
-    if sug.status not in ("draft", "partial"):
-        raise ConflictError(f"建议单状态为 {sug.status}, 不可推送")
-
-    normalized_item_ids = sorted(set(req.item_ids))
-
-    items = (
-        await db.execute(
-            select(SuggestionItem).where(
-                SuggestionItem.id.in_(normalized_item_ids),
-                SuggestionItem.suggestion_id == suggestion_id,
-            )
-        )
-    ).scalars().all()
-    if len(items) != len(normalized_item_ids):
-        raise NotFound("部分条目不存在")
-
-    await refresh_suggestion_item_pushability(db, items)
-
-    blocked = [it.id for it in items if it.push_blocker]
-    if blocked:
-        raise PushBlockedError(
-            f"以下条目带有 push_blocker,无法推送: {blocked}",
-            detail={"blocked_item_ids": blocked},
-        )
-    zero_qty = [it.id for it in items if (it.total_qty or 0) <= 0]
-    if zero_qty:
-        raise PushBlockedError(
-            f"以下条目 total_qty<=0,无法推送: {zero_qty}",
-            detail={"zero_qty_item_ids": zero_qty},
-        )
-    already_pushed = [it.id for it in items if it.push_status == "pushed"]
-    if already_pushed:
-        raise ConflictError(
-            f"以下条目已推送,不可重复推送: {already_pushed}",
-            detail={"already_pushed_item_ids": already_pushed},
-        )
-
-    task_id, existing = await enqueue_task(
-        db,
-        job_name="push_saihu",
-        trigger_source="manual",
-        dedupe_key=f"push_saihu#{suggestion_id}#{','.join(str(item_id) for item_id in normalized_item_ids)}",
-        payload={"suggestion_id": suggestion_id, "item_ids": normalized_item_ids},
-    )
-    return {"task_id": task_id, "existing": existing}
-
-
 @router.post("/{suggestion_id}/archive", status_code=204)
 async def archive_suggestion(
     suggestion_id: int = Path(..., ge=1),
@@ -367,7 +304,6 @@ async def _build_detail(db: AsyncSession, sug: Suggestion) -> SuggestionDetailOu
             .order_by(SuggestionItem.urgent.desc(), SuggestionItem.id)
         )
     ).scalars().all()
-    await refresh_suggestion_item_pushability(db, items)
 
     sku_codes = [it.commodity_sku for it in items]
     name_map: dict[str, tuple[str | None, str | None]] = {}

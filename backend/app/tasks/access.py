@@ -15,7 +15,6 @@ TASK_VIEW_PERMISSIONS: dict[str, tuple[str, ...]] = {
     "sync_all": (SYNC_VIEW, SYNC_OPERATE),
     "daily_archive": (SYNC_VIEW, SYNC_OPERATE),
     "calc_engine": (RESTOCK_OPERATE,),
-    "push_saihu": (RESTOCK_OPERATE,),
     "refresh_dashboard_snapshot": (HOME_REFRESH,),
 }
 
@@ -31,12 +30,11 @@ TASK_MANAGE_PERMISSIONS: dict[str, tuple[str, ...]] = {
     "sync_all": (SYNC_OPERATE,),
     "daily_archive": (SYNC_OPERATE,),
     "calc_engine": (RESTOCK_OPERATE,),
-    "push_saihu": (RESTOCK_OPERATE,),
     "refresh_dashboard_snapshot": (HOME_REFRESH,),
 }
 
 ALL_TASK_JOB_NAMES = frozenset(TASK_VIEW_PERMISSIONS)
-MANUAL_ENQUEUE_JOB_NAMES = ALL_TASK_JOB_NAMES - {"push_saihu"}
+MANUAL_ENQUEUE_JOB_NAMES = ALL_TASK_JOB_NAMES
 
 
 def has_any_task_permission(permissions: frozenset[str], required: tuple[str, ...]) -> bool:
