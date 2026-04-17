@@ -24,7 +24,6 @@ import pytest
 from app.engine.runner import (
     ENGINE_RUN_ADVISORY_LOCK_KEY,
     _config_snapshot,
-    _load_commodity_id_map,
     run_engine,
 )
 
@@ -224,7 +223,6 @@ async def test_run_engine_forwards_restock_regions_to_step_loaders() -> None:
     mocked_load_country_warehouses = AsyncMock(return_value={"US": ["WH-US"]})
     mocked_load_zipcode_rules = AsyncMock(return_value=[])
     mocked_load_all_orders = AsyncMock(return_value={("SKU-001", "US"): []})
-    mocked_load_commodity_ids = AsyncMock(return_value={"SKU-001": "CID-001"})
     mocked_persist = AsyncMock(return_value=123)
 
     with (
@@ -235,7 +233,6 @@ async def test_run_engine_forwards_restock_regions_to_step_loaders() -> None:
         patch("app.engine.runner.load_country_warehouses", mocked_load_country_warehouses),
         patch("app.engine.runner.load_zipcode_rules", mocked_load_zipcode_rules),
         patch("app.engine.runner.load_all_sku_country_orders", mocked_load_all_orders),
-        patch("app.engine.runner._load_commodity_id_map", mocked_load_commodity_ids),
         patch("app.engine.runner.compute_country_qty", return_value={"SKU-001": {"US": 8}}),
         patch("app.engine.runner.compute_total", return_value=8),
         patch(
@@ -254,71 +251,3 @@ async def test_run_engine_forwards_restock_regions_to_step_loaders() -> None:
 def test_engine_run_advisory_lock_key_is_stable() -> None:
     """ENGINE_RUN_ADVISORY_LOCK_KEY is a fixed int (regression guard)."""
     assert ENGINE_RUN_ADVISORY_LOCK_KEY == 7429001
-
-
-# ---------------------------------------------------------------------------
-# Option B: _load_commodity_id_map with fake DB
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_load_commodity_id_map_maps_sku_to_first_id() -> None:
-    """_load_commodity_id_map returns correct sku->commodity_id mapping."""
-    # rows returned by DB: list of (sku, commodity_id) tuples
-    rows = [("SKU-A", "C001"), ("SKU-A", "C002"), ("SKU-B", "C010")]
-    db = _FakeDb([_ScalarResult(rows)])
-    # Patch .all() via the scalar result — our _ScalarResult.all() returns the list
-    # but _load_commodity_id_map calls .all() on the execute result directly.
-    # Provide a result object whose .all() returns the rows.
-    db._responses = [SimpleNamespace(all=lambda: rows)]
-
-    result = await _load_commodity_id_map(db, ["SKU-A", "SKU-B"])  # type: ignore[arg-type]
-
-    # SKU-A should map to the first commodity_id encountered ("C001")
-    assert result["SKU-A"] == "C001"
-    assert result["SKU-B"] == "C010"
-
-
-@pytest.mark.asyncio
-async def test_load_commodity_id_map_ignores_inactive_or_unmatched_rows() -> None:
-    rows = [
-        ("SKU-A", "C999"),  # fake execute result only returns rows that survived SQL filters
-        ("SKU-B", "C010"),
-    ]
-    db = _FakeDb([SimpleNamespace(all=lambda: rows)])
-
-    result = await _load_commodity_id_map(db, ["SKU-A", "SKU-B"])  # type: ignore[arg-type]
-
-    assert result["SKU-A"] == "C999"
-    assert result["SKU-B"] == "C010"
-
-    compiled_sql = str(db.executed[0]).lower()
-    assert "product_listing.is_matched is true" in compiled_sql
-    assert "product_listing.online_status = :online_status_1" in compiled_sql
-
-
-@pytest.mark.asyncio
-async def test_load_commodity_id_map_unknown_skus_map_to_none() -> None:
-    """_load_commodity_id_map returns None for SKUs with no product listing."""
-    db = _FakeDb([SimpleNamespace(all=lambda: [])])
-
-    result = await _load_commodity_id_map(db, ["SKU-X", "SKU-Y"])  # type: ignore[arg-type]
-
-    assert result["SKU-X"] is None
-    assert result["SKU-Y"] is None
-
-
-@pytest.mark.asyncio
-async def test_load_commodity_id_map_falls_back_to_seller_sku() -> None:
-    db = _FakeDb(
-        [
-            SimpleNamespace(all=lambda: []),
-            SimpleNamespace(all=lambda: []),
-            SimpleNamespace(all=lambda: []),
-            SimpleNamespace(all=lambda: [("SKU-A", "CID-SELLER")]),
-        ]
-    )
-
-    result = await _load_commodity_id_map(db, ["SKU-A"])  # type: ignore[arg-type]
-
-    assert result["SKU-A"] == "CID-SELLER"
