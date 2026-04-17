@@ -18,8 +18,8 @@ class SuggestionOut(BaseModel):
     status: str
     triggered_by: str
     total_items: int
-    pushed_items: int
-    failed_items: int
+    snapshot_count: int = 0  # 由 API 层 JOIN suggestion_snapshot 注入
+    archived_trigger: str | None = None
     global_config_snapshot: dict[str, Any]
     created_at: datetime
     archived_at: datetime | None = None
@@ -30,7 +30,6 @@ class SuggestionOut(BaseModel):
 class SuggestionItemOut(BaseModel):
     id: int
     commodity_sku: str
-    commodity_id: str | None = None
     commodity_name: str | None = None  # 由 API 层 JOIN product_listing 注入
     main_image: str | None = None
     total_qty: int
@@ -40,12 +39,9 @@ class SuggestionItemOut(BaseModel):
     velocity_snapshot: dict[str, Any] | None = None
     sale_days_snapshot: dict[str, Any] | None = None
     urgent: bool
-    push_blocker: str | None = None
-    push_status: str
-    saihu_po_number: str | None = None
-    push_error: str | None = None
-    push_attempt_count: int
-    pushed_at: datetime | None = None
+    export_status: str
+    exported_snapshot_id: int | None = None
+    exported_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
