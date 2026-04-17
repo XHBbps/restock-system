@@ -19,6 +19,7 @@ jobs:
   check-ci:
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       checks: read
     steps:
       - uses: actions/checkout@v4

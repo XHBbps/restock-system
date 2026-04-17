@@ -128,6 +128,7 @@
 - `.github/workflows/ci.yml` 的 `publish` job 新增 owner 归一化步骤，统一使用小写 owner 生成 `ghcr.io/<owner>/restock-{backend,frontend}:sha-<commit>` 与 `latest` 标签，修复 GitHub 用户名包含大写字符时 buildx 直接报 `repository name must be lowercase`
 - `deploy/scripts/validate_env.sh` 将 `GHCR_OWNER` 纳入必填校验，并显式拒绝非小写值；`deploy/scripts/deploy.sh` 在调用 Compose 前再次导出小写 `GHCR_OWNER`，避免线上 `.env` 沿用旧值导致拉镜像失败
 - `deploy/.env.example` 与 `docs/deployment.md` 同步明确 `GHCR_OWNER` 必须使用全小写 GitHub 用户名/组织名
+- `.github/workflows/deploy.yml` 的 `check-ci` job 补充 `contents: read`，修复手动触发部署时 `actions/checkout` 因权限不足报 `repository not found` 的阻塞问题
 
 ### 3.43 CI 安全校验修复：JWT 密钥长度 + 前端依赖审计（2026-04-15）
 - `backend/app/config.py` 将默认 `jwt_secret` 占位值提升到 32 字节以上，并在 `validate_settings()` 中新增 `JWT_SECRET must be at least 32 bytes` 校验；生产环境占位值检测同步更新，避免 `PyJWT` 因 HMAC 密钥过短抛出 `InsecureKeyLengthWarning`，导致 `tests/unit/test_security.py` 在 CI 中失败
