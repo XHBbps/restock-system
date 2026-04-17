@@ -35,6 +35,8 @@ from app.models.warehouse import Warehouse
 from app.schemas.data import (
     DataInventoryItem,
     DataInventoryListOut,
+    DataInventoryWarehouseGroup,
+    DataInventoryWarehouseGroupListOut,
     DataOrderDetail,
     DataOrderItem,
     DataOrderListOut,
@@ -187,6 +189,29 @@ def _apply_inventory_sort(stmt, sort_by: str | None, sort_order: str):
         InventorySnapshotLatest.commodity_sku.asc(),
         Warehouse.id.asc(),
     )
+
+
+def _apply_inventory_filters(
+    stmt,
+    *,
+    country: str | None,
+    warehouse_id: str | None = None,
+    sku: str | None,
+    only_nonzero: bool,
+):
+    if country:
+        stmt = stmt.where(InventorySnapshotLatest.country == country.upper())
+    if warehouse_id:
+        stmt = stmt.where(InventorySnapshotLatest.warehouse_id == warehouse_id)
+    if sku:
+        stmt = stmt.where(
+            InventorySnapshotLatest.commodity_sku.ilike(f"%{escape_like(sku)}%", escape="\\")
+        )
+    if only_nonzero:
+        stmt = stmt.where(
+            (InventorySnapshotLatest.available > 0) | (InventorySnapshotLatest.reserved > 0)
+        )
+    return stmt
 
 
 def _out_record_item_count_expr() -> ColumnElement[int]:
@@ -458,18 +483,13 @@ async def list_inventory(
         Warehouse.name.label("wh_name"),
         Warehouse.type.label("wh_type"),
     ).join(Warehouse, Warehouse.id == InventorySnapshotLatest.warehouse_id)
-    if country:
-        base = base.where(InventorySnapshotLatest.country == country.upper())
-    if warehouse_id:
-        base = base.where(InventorySnapshotLatest.warehouse_id == warehouse_id)
-    if sku:
-        base = base.where(
-            InventorySnapshotLatest.commodity_sku.ilike(f"%{escape_like(sku)}%", escape="\\")
-        )
-    if only_nonzero:
-        base = base.where(
-            (InventorySnapshotLatest.available > 0) | (InventorySnapshotLatest.reserved > 0)
-        )
+    base = _apply_inventory_filters(
+        base,
+        country=country,
+        warehouse_id=warehouse_id,
+        sku=sku,
+        only_nonzero=only_nonzero,
+    )
 
     base = _apply_inventory_sort(base, sort_by, sort_order)
     total = (
@@ -515,9 +535,145 @@ async def list_inventory(
     return DataInventoryListOut(items=items, total=int(total or 0), page=page, page_size=page_size)
 
 
+@router.get("/inventory/warehouse-groups", response_model=DataInventoryWarehouseGroupListOut)
+async def list_inventory_warehouse_groups(
+    country: str | None = Query(default=None),
+    sku: str | None = Query(default=None),
+    only_nonzero: bool = Query(default=True),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=200),
+    db: AsyncSession = Depends(db_session_readonly),
+    _: None = Depends(require_permission(DATA_BIZ_VIEW)),
+) -> DataInventoryWarehouseGroupListOut:
+    group_stmt = (
+        select(
+            InventorySnapshotLatest.warehouse_id.label("warehouse_id"),
+            Warehouse.name.label("warehouse_name"),
+            Warehouse.type.label("warehouse_type"),
+            func.count().label("sku_count"),
+            func.coalesce(func.sum(InventorySnapshotLatest.available), 0).label("total_available"),
+            func.coalesce(func.sum(InventorySnapshotLatest.reserved), 0).label("total_occupy"),
+        )
+        .join(Warehouse, Warehouse.id == InventorySnapshotLatest.warehouse_id)
+        .group_by(InventorySnapshotLatest.warehouse_id, Warehouse.name, Warehouse.type)
+        .order_by(Warehouse.name.asc(), InventorySnapshotLatest.warehouse_id.asc())
+    )
+    group_stmt = _apply_inventory_filters(
+        group_stmt,
+        country=country,
+        sku=sku,
+        only_nonzero=only_nonzero,
+    )
+
+    grouped_subquery = group_stmt.order_by(None).subquery()
+    total = (await db.execute(select(func.count()).select_from(grouped_subquery))).scalar_one()
+    group_rows = (
+        await db.execute(group_stmt.offset((page - 1) * page_size).limit(page_size))
+    ).all()
+
+    warehouse_ids = [row.warehouse_id for row in group_rows]
+    if not warehouse_ids:
+        return DataInventoryWarehouseGroupListOut(
+            items=[],
+            total=int(total or 0),
+            page=page,
+            page_size=page_size,
+        )
+
+    item_stmt = (
+        select(
+            InventorySnapshotLatest,
+            Warehouse.name.label("wh_name"),
+            Warehouse.type.label("wh_type"),
+        )
+        .join(Warehouse, Warehouse.id == InventorySnapshotLatest.warehouse_id)
+        .where(InventorySnapshotLatest.warehouse_id.in_(warehouse_ids))
+        .order_by(Warehouse.name.asc(), InventorySnapshotLatest.warehouse_id.asc(), InventorySnapshotLatest.commodity_sku.asc())
+    )
+    item_stmt = _apply_inventory_filters(
+        item_stmt,
+        country=country,
+        sku=sku,
+        only_nonzero=only_nonzero,
+    )
+    item_rows = (await db.execute(item_stmt)).all()
+
+    sku_codes = list({row[0].commodity_sku for row in item_rows})
+    name_map: dict[str, tuple[str | None, str | None]] = {}
+    if sku_codes:
+        pl_rows = (
+            await db.execute(
+                select(
+                    ProductListing.commodity_sku,
+                    ProductListing.commodity_name,
+                    ProductListing.main_image,
+                ).where(ProductListing.commodity_sku.in_(sku_codes))
+            )
+        ).all()
+        for sk, name, img in pl_rows:
+            name_map.setdefault(sk, (name, img))
+
+    items_by_warehouse: dict[str, list[DataInventoryItem]] = {warehouse_id: [] for warehouse_id in warehouse_ids}
+    for inv, wh_name, wh_type in item_rows:
+        name, image = name_map.get(inv.commodity_sku, (None, None))
+        items_by_warehouse.setdefault(inv.warehouse_id, []).append(
+            DataInventoryItem.model_validate(
+                {
+                    "commodity_sku": inv.commodity_sku,
+                    "commodity_name": name,
+                    "main_image": image,
+                    "warehouse_id": inv.warehouse_id,
+                    "warehouse_name": wh_name,
+                    "warehouse_type": wh_type,
+                    "country": inv.country,
+                    "stock_available": inv.available,
+                    "stock_occupy": inv.reserved,
+                    "updated_at": inv.updated_at,
+                }
+            )
+        )
+
+    groups = [
+        DataInventoryWarehouseGroup.model_validate(
+            {
+                "warehouse_id": row.warehouse_id,
+                "warehouse_name": row.warehouse_name,
+                "warehouse_type": row.warehouse_type,
+                "sku_count": int(row.sku_count or 0),
+                "total_available": int(row.total_available or 0),
+                "total_occupy": int(row.total_occupy or 0),
+                "items": items_by_warehouse.get(row.warehouse_id, []),
+            }
+        )
+        for row in group_rows
+    ]
+    return DataInventoryWarehouseGroupListOut(
+        items=groups,
+        total=int(total or 0),
+        page=page,
+        page_size=page_size,
+    )
+
+
 # ============================================================
 # 3. 其他出库列表(在途数据)
 # ============================================================
+@router.get("/out-record-types", response_model=list[str])
+async def list_out_record_types(
+    db: AsyncSession = Depends(db_session_readonly),
+    _: None = Depends(require_permission(DATA_BIZ_VIEW)),
+) -> list[str]:
+    rows = (
+        await db.execute(
+            select(InTransitRecord.type_name)
+            .where(InTransitRecord.type_name.is_not(None), InTransitRecord.type_name != "")
+            .distinct()
+            .order_by(InTransitRecord.type_name)
+        )
+    ).all()
+    return [type_name for (type_name,) in rows if type_name]
+
+
 @router.get("/out-records", response_model=DataOutRecordListOut)
 async def list_out_records(
     is_in_transit: bool | None = Query(default=None),

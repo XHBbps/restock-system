@@ -17,7 +17,7 @@
 3. **进程内编排**：Worker、Scheduler、Reaper 与 FastAPI 在同一 Python 进程中运行（可通过环境变量分离）
 4. **快照即历史**：补货建议生成时快照输入（velocity、sale_days、配置，含 `restock_regions`），已生成的建议单不会因配置变更而改动
 5. **批量优先于迭代**：引擎和同步层尽量批量加载，避免 N+1 查询
-6. **前端分页按页面规模选型**：多数数据页保留“全量拉取 + 前端筛选 + 本地分页”，订单页等高增长数据改为服务端分页，避免单页数据量继续放大时拖慢交互
+6. **高增长列表服务端分页**：订单、历史、商品、库存、出库记录等数据量持续增长的页面统一采用后端分页 / 筛选 / 排序，避免单页数据量放大拖慢接口和交互
 
 ### 技术栈
 
@@ -342,31 +342,34 @@ client.interceptors.response.use(undefined, (error) => {
 
 ### 4.5 数据流模式
 
-**默认模式："加载全量 + 前端筛选 + 本地分页"**：
+**高增长数据页默认模式：“后端分页 + 后端筛选”**：
 
 ```typescript
-const rows = ref<T[]>([])                    // 全量数据
+const rows = ref<T[]>([])                    // 当前页数据
+const total = ref(0)
 const filters = reactive({ ... })            // 筛选条件
 const page = ref(1)
-const pageSize = ref(20)
-
-const filteredRows = computed(() => {        // 筛选
-  return rows.value.filter(r => ...)
-})
-
-const pagedRows = computed(() => {           // 分页
-  const start = (page.value - 1) * pageSize.value
-  return filteredRows.value.slice(start, start + pageSize.value)
-})
+const pageSize = ref(50)
 
 async function reload() {
-  const resp = await listData({ page: 1, page_size: 5000 })  // 一次拉完
+  const resp = await listData({
+    page: page.value,
+    page_size: pageSize.value,
+    ...filters,
+  })
   rows.value = resp.items
-  page.value = 1
+  total.value = resp.total
 }
 ```
 
-**订单页例外：后端分页 + 后端筛选 + 后端排序**：
+当前已按该模式迁移：
+- `DataOrdersView.vue`：订单列表按页返回，并仅对当前页补查 `item_count` / `has_detail`
+- `HistoryView.vue`：建议单历史页直接消费 `GET /api/suggestions` 的 `items/total/page/page_size`
+- `DataProductsView.vue`：商品页通过 `listSkuOverview()` 下推 SKU、启用状态和分页参数
+- `DataInventoryView.vue`：库存页通过 `GET /api/data/inventory/warehouse-groups` 做仓库分组分页，保持仓库展开明细交互
+- `DataOutRecordsView.vue`：出库记录页将 SKU、仓库单号、国家、类型、在途状态、排序和分页下推到后端
+
+**订单页排序示例**：
 
 ```typescript
 const rows = ref<T[]>([])                    // 当前页数据
@@ -387,10 +390,9 @@ async function reload() {
 }
 ```
 
-订单页之所以单独切换到服务端分页，是因为订单量增长最快，且 `item_count` / `has_detail` 需要额外聚合查询；继续“一次拉全量”会同时放大后端查询和前端渲染成本。
+订单页最早切换到服务端分页，是因为订单量增长最快，且 `item_count` / `has_detail` 需要额外聚合查询；继续“一次拉全量”会同时放大后端查询和前端渲染成本。后续迁移把同一原则扩展到历史记录、商品、库存和出库记录页。
 
-**优势**：筛选即时响应无需 API、代码简单、跨页选择容易实现。
-**限制**：数据量不宜超过数千条；`HistoryView`、`DataProductsView`、`DataInventoryView`、`DataOutRecordsView` 仍保留本地分页，后续按数据增长再逐页迁移到服务端分页。
+**轻量基础页例外**：店铺、仓库等低增长基础数据页仍可保留简单分页；新建可能超过数千条的列表页时，优先采用服务端分页模式。
 
 ### 4.6 路由与鉴权
 
@@ -697,20 +699,17 @@ PROCESS_ENABLE_SCHEDULER=true
   - 非阻塞性（其他查询不受影响）
 - **代价**：仅限同一 PostgreSQL 实例
 
-### ADR-4：前端本地分页
+### ADR-4：高增长列表服务端分页
 
-- **决策**：多数数据页一次拉全量（`page_size=5000`），前端做筛选和分页；订单页改为 server-side 分页、筛选、排序
+- **决策**：订单、历史、商品、库存、出库记录等高增长列表统一使用 server-side 分页、筛选、排序；店铺、仓库等低增长基础页可保留轻量分页
 - **驱动**：
-  - 内部用户 1-5 人，多数数据页数据量有限
-  - 筛选即时响应无需往返 API
-  - 跨页选择实现简单
-- **订单页例外驱动**：
-  - 订单量增长快，大批量加载时首屏不应再拉满 5000 条
-  - 订单列表还要补查 `item_count` 与 `has_detail`，全量查询成本更高
+  - 避免前端首屏一次拉取 5000 条导致渲染和交互变慢
+  - 避免后端为非当前页数据做额外聚合查询，例如订单 `item_count` / `has_detail`
+  - 筛选条件直接下推数据库，数据继续增长时接口耗时更可控
 - **代价**：
-  - 本地分页模式在高增长数据集上会遇到性能瓶颈
-  - 订单页前后端都要维护分页状态
-- **未来演进**：若订单量继续增长，可在服务端分页基础上叠加虚拟滚动
+  - 前后端都要维护分页、筛选、排序状态
+  - 跨页选择需要显式维护已选 ID，而不能依赖当前本地数组
+- **未来演进**：若单页渲染仍受影响，可在服务端分页基础上叠加虚拟滚动
 
 ### ADR-5：PageSectionCard 作为所有页面的统一容器
 

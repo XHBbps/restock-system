@@ -117,6 +117,25 @@ class DataInventoryListOut(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
 
+class DataInventoryWarehouseGroup(SaihuLikeModel):
+    warehouse_id: str
+    warehouse_name: str
+    warehouse_type: int
+    sku_count: int
+    total_available: int
+    total_occupy: int
+    items: list[DataInventoryItem]
+
+
+class DataInventoryWarehouseGroupListOut(BaseModel):
+    items: list[DataInventoryWarehouseGroup]
+    total: int
+    page: int
+    page_size: int
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+
 # ==================== 其他出库列表 ====================
 class DataOutRecordItem(SaihuLikeModel):
     commodity_id: str | None = None

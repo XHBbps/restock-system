@@ -6,16 +6,16 @@
         placeholder="出库单号"
         clearable
         style="width: 200px"
-        @keyup.enter="reload"
-        @clear="reload"
+        @keyup.enter="reloadFirstPage"
+        @clear="reloadFirstPage"
       />
       <el-input
         v-model="filters.sku"
         placeholder="商品 SKU"
         clearable
         style="width: 200px"
-        @keyup.enter="reload"
-        @clear="reload"
+        @keyup.enter="reloadFirstPage"
+        @clear="reloadFirstPage"
       />
       <el-select
         v-model="filters.country"
@@ -23,8 +23,8 @@
         clearable
         filterable
         style="width: 140px"
-        @change="reload"
-        @clear="reload"
+        @change="reloadFirstPage"
+        @clear="reloadFirstPage"
       >
         <el-option v-for="c in COUNTRY_OPTIONS" :key="c.code" :label="c.code" :value="c.code" />
       </el-select>
@@ -34,8 +34,8 @@
         clearable
         filterable
         style="width: 160px"
-        @change="reload"
-        @clear="reload"
+        @change="reloadFirstPage"
+        @clear="reloadFirstPage"
       >
         <el-option v-for="type in typeOptions" :key="type" :label="type" :value="type" />
       </el-select>
@@ -44,8 +44,8 @@
         placeholder="状态"
         clearable
         style="width: 130px"
-        @change="reload"
-        @clear="reload"
+        @change="reloadFirstPage"
+        @clear="reloadFirstPage"
       >
         <el-option label="在途" :value="true" />
         <el-option label="完结" :value="false" />
@@ -54,7 +54,7 @@
 
     <el-table
       v-loading="loading"
-      :data="pagedRows"
+      :data="rows"
       row-key="saihuOutRecordId"
       table-layout="fixed"
       @sort-change="handleSortChange"
@@ -121,14 +121,16 @@
     <TablePaginationBar
       v-model:current-page="page"
       v-model:page-size="pageSize"
-      :total="rows.length"
+      :total="total"
       :page-sizes="[20, 50, 100]"
+      @current-change="handlePageChange"
+      @size-change="handlePageSizeChange"
     />
   </PageSectionCard>
 </template>
 
 <script setup lang="ts">
-import { listOutRecords, type DataOutRecord } from '@/api/data'
+import { listOutRecords, listOutRecordTypes, type DataOutRecord } from '@/api/data'
 import PageSectionCard from '@/components/PageSectionCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
 import { getActionErrorMessage } from '@/utils/apiError'
@@ -137,12 +139,14 @@ import { formatShortTime, formatUpdateTime } from '@/utils/format'
 import { getOutRecordTransitStatusMeta } from '@/utils/status'
 import { normalizeSortOrder, type SortChangeEvent, type SortState } from '@/utils/tableSort'
 import { ElMessage } from 'element-plus'
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 
 const rows = ref<DataOutRecord[]>([])
+const total = ref(0)
 const page = ref(1)
 const pageSize = ref(50)
 const loading = ref(false)
+const typeOptions = ref<string[]>([])
 const sortState = ref<SortState>({ prop: 'updateTime', order: 'desc' })
 const filters = reactive({
   out_warehouse_no: '',
@@ -152,24 +156,10 @@ const filters = reactive({
   is_in_transit: undefined as boolean | undefined,
 })
 
-const typeOptions = computed(() => {
-  const values = new Set(
-    rows.value
-      .map((row) => row.typeName?.trim())
-      .filter((value): value is string => Boolean(value)),
-  )
-  if (filters.type_name) {
-    values.add(filters.type_name)
+async function reload(resetPage = false): Promise<void> {
+  if (resetPage) {
+    page.value = 1
   }
-  return Array.from(values).sort((left, right) => left.localeCompare(right, 'zh-CN'))
-})
-
-const pagedRows = computed(() => {
-  const start = (page.value - 1) * pageSize.value
-  return rows.value.slice(start, start + pageSize.value)
-})
-
-async function reload(): Promise<void> {
   loading.value = true
   try {
     const resp = await listOutRecords({
@@ -178,13 +168,13 @@ async function reload(): Promise<void> {
       country: filters.country || undefined,
       type_name: filters.type_name || undefined,
       is_in_transit: filters.is_in_transit,
-      page: 1,
-      page_size: 5000,
+      page: page.value,
+      page_size: pageSize.value,
       sort_by: sortState.value.prop,
       sort_order: sortState.value.order,
     })
     rows.value = resp.items
-    page.value = 1
+    total.value = resp.total
   } catch (err) {
     ElMessage.error(getActionErrorMessage(err, '加载失败'))
   } finally {
@@ -197,18 +187,35 @@ function handleSortChange({ prop, order }: SortChangeEvent): void {
   sortState.value = normalizedOrder && prop
     ? { prop, order: normalizedOrder }
     : { prop: 'updateTime', order: 'desc' }
-  page.value = 1
-  void reload()
+  void reload(true)
 }
 
-watch(
-  () => [filters.out_warehouse_no, filters.sku, filters.country, filters.type_name, filters.is_in_transit],
-  () => {
-    page.value = 1
-  },
-)
+async function loadTypeOptions(): Promise<void> {
+  try {
+    typeOptions.value = await listOutRecordTypes()
+  } catch (err) {
+    ElMessage.error(getActionErrorMessage(err, '加载出库单类型失败'))
+  }
+}
 
-onMounted(reload)
+onMounted(() => {
+  void loadTypeOptions()
+  void reload()
+})
+
+function reloadFirstPage(): void {
+  void reload(true)
+}
+
+function handlePageChange(value: number): void {
+  page.value = value
+  void reload(false)
+}
+
+function handlePageSizeChange(value: number): void {
+  pageSize.value = value
+  void reload(true)
+}
 </script>
 
 <style lang="scss" scoped>

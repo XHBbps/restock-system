@@ -85,8 +85,8 @@ describe('HistoryView', () => {
     vi.clearAllMocks()
   })
 
-  it('loads history suggestions on mount with default sort', async () => {
-    mockListSuggestions.mockResolvedValue({ items: [makeSuggestion()], total: 1 })
+  it('loads history suggestions on mount with backend pagination and default sort', async () => {
+    mockListSuggestions.mockResolvedValue({ items: [makeSuggestion()], total: 1, page: 1, pageSize: 20 })
 
     const { default: View } = await import('../HistoryView.vue')
     shallowMount(View, { global: { stubs: STUBS } })
@@ -95,7 +95,7 @@ describe('HistoryView', () => {
     expect(mockListSuggestions).toHaveBeenCalledWith(
       expect.objectContaining({
         page: 1,
-        page_size: 5000,
+        page_size: 20,
         sort_by: 'created_at',
         sort_order: 'desc',
       }),
@@ -114,7 +114,7 @@ describe('HistoryView', () => {
   })
 
   it('maps trigger source labels and only allows deleting non-pushed rows', async () => {
-    mockListSuggestions.mockResolvedValue({ items: [makeSuggestion()], total: 1 })
+    mockListSuggestions.mockResolvedValue({ items: [makeSuggestion()], total: 1, page: 1, pageSize: 20 })
 
     const { default: View } = await import('../HistoryView.vue')
     const wrapper = shallowMount(View, { global: { stubs: STUBS } })
@@ -134,8 +134,8 @@ describe('HistoryView', () => {
 
   it('confirms deletion, deletes row and refreshes list', async () => {
     mockListSuggestions
-      .mockResolvedValueOnce({ items: [makeSuggestion()], total: 1 })
-      .mockResolvedValueOnce({ items: [], total: 0 })
+      .mockResolvedValueOnce({ items: [makeSuggestion()], total: 1, page: 1, pageSize: 20 })
+      .mockResolvedValueOnce({ items: [], total: 0, page: 1, pageSize: 20 })
     mockDeleteSuggestion.mockResolvedValue(undefined)
     mockConfirm.mockResolvedValue('confirm')
 
@@ -163,7 +163,7 @@ describe('HistoryView', () => {
   })
 
   it('does not delete when confirmation is cancelled', async () => {
-    mockListSuggestions.mockResolvedValue({ items: [makeSuggestion()], total: 1 })
+    mockListSuggestions.mockResolvedValue({ items: [makeSuggestion()], total: 1, page: 1, pageSize: 20 })
     mockConfirm.mockRejectedValue(new Error('cancel'))
 
     const { default: View } = await import('../HistoryView.vue')

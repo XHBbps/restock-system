@@ -6,16 +6,16 @@
         placeholder="commoditySku"
         clearable
         style="width: 220px"
-        @keyup.enter="reload"
-        @clear="reload"
+        @keyup.enter="reloadFirstPage"
+        @clear="reloadFirstPage"
       />
-      <el-select v-model="filters.country" placeholder="国家" clearable filterable style="width: 140px" @change="reload">
+      <el-select v-model="filters.country" placeholder="国家" clearable filterable style="width: 140px" @change="reloadFirstPage">
         <el-option v-for="c in COUNTRY_OPTIONS" :key="c.code" :label="c.code" :value="c.code" />
       </el-select>
-      <el-switch v-model="filters.only_nonzero" active-text="仅非零" @change="reload" />
+      <el-switch v-model="filters.only_nonzero" active-text="仅非零" @change="reloadFirstPage" />
     </template>
 
-    <el-table v-loading="loading" :data="pagedGroups" row-key="warehouseId">
+    <el-table v-loading="loading" :data="warehouseGroups" row-key="warehouseId">
       <el-table-column type="expand">
         <template #default="{ row }">
           <div class="expand-wrapper">
@@ -68,14 +68,16 @@
     <TablePaginationBar
       v-model:current-page="page"
       v-model:page-size="pageSize"
-      :total="warehouseGroups.length"
+      :total="total"
       :page-sizes="[10, 20, 50]"
+      @current-change="handlePageChange"
+      @size-change="handlePageSizeChange"
     />
   </PageSectionCard>
 </template>
 
 <script setup lang="ts">
-import { listInventory, type DataInventoryItem } from '@/api/data'
+import { listInventoryWarehouseGroups, type DataInventoryWarehouseGroup } from '@/api/data'
 import { COUNTRY_OPTIONS } from '@/utils/countries'
 import { formatUpdateTime } from '@/utils/format'
 import { warehouseTypeLabel } from '@/utils/warehouse'
@@ -84,19 +86,10 @@ import SkuCard from '@/components/SkuCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
 import { getActionErrorMessage } from '@/utils/apiError'
 import { ElMessage } from 'element-plus'
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 
-interface WarehouseGroup {
-  warehouseId: string
-  warehouseName: string
-  warehouseType: number
-  skuCount: number
-  totalAvailable: number
-  totalOccupy: number
-  items: DataInventoryItem[]
-}
-
-const rows = ref<DataInventoryItem[]>([])
+const warehouseGroups = ref<DataInventoryWarehouseGroup[]>([])
+const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
 const loading = ref(false)
@@ -106,47 +99,21 @@ const filters = reactive({
   only_nonzero: true,
 })
 
-const warehouseGroups = computed<WarehouseGroup[]>(() => {
-  const map = new Map<string, WarehouseGroup>()
-  for (const item of rows.value) {
-    let group = map.get(item.warehouseId)
-    if (!group) {
-      group = {
-        warehouseId: item.warehouseId,
-        warehouseName: item.warehouseName,
-        warehouseType: item.warehouseType,
-        skuCount: 0,
-        totalAvailable: 0,
-        totalOccupy: 0,
-        items: [],
-      }
-      map.set(item.warehouseId, group)
-    }
-    group.skuCount++
-    group.totalAvailable += item.stockAvailable
-    group.totalOccupy += item.stockOccupy
-    group.items.push(item)
+async function reload(resetPage = false): Promise<void> {
+  if (resetPage) {
+    page.value = 1
   }
-  return [...map.values()]
-})
-
-const pagedGroups = computed(() => {
-  const start = (page.value - 1) * pageSize.value
-  return warehouseGroups.value.slice(start, start + pageSize.value)
-})
-
-async function reload(): Promise<void> {
   loading.value = true
   try {
-    const resp = await listInventory({
+    const resp = await listInventoryWarehouseGroups({
       sku: filters.sku || undefined,
       country: filters.country || undefined,
       only_nonzero: filters.only_nonzero,
-      page: 1,
-      page_size: 5000,
+      page: page.value,
+      page_size: pageSize.value,
     })
-    rows.value = resp.items
-    page.value = 1
+    warehouseGroups.value = resp.items
+    total.value = resp.total
   } catch (err) {
     ElMessage.error(getActionErrorMessage(err, '加载失败'))
   } finally {
@@ -154,12 +121,21 @@ async function reload(): Promise<void> {
   }
 }
 
-watch(
-  () => [filters.sku, filters.country, filters.only_nonzero],
-  () => { page.value = 1 },
-)
-
 onMounted(reload)
+
+function reloadFirstPage(): void {
+  void reload(true)
+}
+
+function handlePageChange(value: number): void {
+  page.value = value
+  void reload(false)
+}
+
+function handlePageSizeChange(value: number): void {
+  pageSize.value = value
+  void reload(true)
+}
 </script>
 
 <style lang="scss" scoped>

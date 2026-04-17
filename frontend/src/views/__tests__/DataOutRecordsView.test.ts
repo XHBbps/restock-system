@@ -7,9 +7,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
 
 const mockListOutRecords = vi.fn()
+const mockListOutRecordTypes = vi.fn()
 
 vi.mock('@/api/data', () => ({
   listOutRecords: (...args: unknown[]) => mockListOutRecords(...args),
+  listOutRecordTypes: (...args: unknown[]) => mockListOutRecordTypes(...args),
 }))
 
 vi.mock('element-plus', async () => {
@@ -143,6 +145,7 @@ function buildResponse() {
 describe('DataOutRecordsView', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockListOutRecordTypes.mockResolvedValue(['调拨出库'])
   })
 
   it('loads out records with updateTime descending by default', async () => {
@@ -155,10 +158,13 @@ describe('DataOutRecordsView', () => {
     expect(mockListOutRecords).toHaveBeenCalledWith(
       expect.objectContaining({
         is_in_transit: undefined,
+        page: 1,
+        page_size: 50,
         sort_by: 'updateTime',
         sort_order: 'desc',
       }),
     )
+    expect(mockListOutRecordTypes).toHaveBeenCalledTimes(1)
   })
 
   it('passes outWarehouseNo filter when searching by out record number', async () => {

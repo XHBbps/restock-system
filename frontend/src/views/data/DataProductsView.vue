@@ -6,15 +6,15 @@
         placeholder="搜索 SKU / 商品名"
         clearable
         style="width: 220px"
-        @keyup.enter="reload"
-        @clear="reload"
+        @keyup.enter="reloadFirstPage"
+        @clear="reloadFirstPage"
       />
       <el-select
         v-model="filters.enabled"
         placeholder="启用状态"
         clearable
         style="width: 130px"
-        @change="reload"
+        @change="reloadFirstPage"
       >
         <el-option label="已启用" :value="true" />
         <el-option label="已禁用" :value="false" />
@@ -26,7 +26,7 @@
       >从商品同步初始化</el-button>
     </template>
 
-    <el-table v-loading="loading" :data="pagedRows" row-key="commodity_sku">
+    <el-table v-loading="loading" :data="rows" row-key="commodity_sku">
       <el-table-column type="expand">
         <template #default="{ row }">
           <div class="expand-wrapper">
@@ -79,8 +79,10 @@
     <TablePaginationBar
       v-model:current-page="page"
       v-model:page-size="pageSize"
-      :total="rows.length"
+      :total="total"
       :page-sizes="[20, 50, 100, 200]"
+      @current-change="handlePageChange"
+      @size-change="handlePageSizeChange"
     />
   </PageSectionCard>
 </template>
@@ -97,16 +99,13 @@ import { getListingOnlineStatusMeta } from '@/utils/status'
 import { getActionErrorMessage } from '@/utils/apiError'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage } from 'element-plus'
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 
 const auth = useAuthStore()
 const rows = ref<SkuOverviewItem[]>([])
+const total = ref(0)
 const page = ref(1)
 const pageSize = ref(50)
-const pagedRows = computed(() => {
-  const start = (page.value - 1) * pageSize.value
-  return rows.value.slice(start, start + pageSize.value)
-})
 const loading = ref(false)
 const initLoading = ref(false)
 
@@ -115,24 +114,20 @@ const filters = reactive({
   enabled: undefined as boolean | undefined,
 })
 
-watch(
-  () => [filters.keyword, filters.enabled],
-  () => {
+async function reload(resetPage = false): Promise<void> {
+  if (resetPage) {
     page.value = 1
-  },
-)
-
-async function reload(): Promise<void> {
+  }
   loading.value = true
   try {
     const resp = await listSkuOverview({
       keyword: filters.keyword || undefined,
       enabled: filters.enabled,
-      page: 1,
-      page_size: 5000,
+      page: page.value,
+      page_size: pageSize.value,
     })
     rows.value = resp.items
-    page.value = 1
+    total.value = resp.total
   } catch (err) {
     ElMessage.error(getActionErrorMessage(err, '加载失败'))
   } finally {
@@ -143,6 +138,7 @@ async function reload(): Promise<void> {
 async function updateEnabled(row: SkuOverviewItem, value: boolean): Promise<void> {
   try {
     await patchSkuConfig(row.commodity_sku, { enabled: value })
+    await reload(false)
     ElMessage.success(`已${value ? '启用' : '禁用'} ${row.commodity_sku}`)
   } catch (err) {
     row.enabled = !value
@@ -156,7 +152,7 @@ async function initFromListings(): Promise<void> {
   initLoading.value = true
   try {
     const resp = await initSkuConfigs()
-    await reload()
+    await reload(true)
     ElMessage.success(`已初始化 ${resp.created} 个 SKU，当前共 ${resp.total} 个配置。`)
   } catch (err) {
     ElMessage.error(getActionErrorMessage(err, '初始化 SKU 配置失败。'))
@@ -166,6 +162,20 @@ async function initFromListings(): Promise<void> {
 }
 
 onMounted(reload)
+
+function reloadFirstPage(): void {
+  void reload(true)
+}
+
+function handlePageChange(value: number): void {
+  page.value = value
+  void reload(false)
+}
+
+function handlePageSizeChange(value: number): void {
+  pageSize.value = value
+  void reload(true)
+}
 </script>
 
 <style lang="scss" scoped>

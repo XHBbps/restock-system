@@ -28,7 +28,7 @@
       </el-select>
     </template>
 
-    <el-table v-loading="loading" :data="pagedRows" @sort-change="handleSortChange">
+    <el-table v-loading="loading" :data="rows" @sort-change="handleSortChange">
       <el-table-column label="建议单 ID" prop="id" width="130" sortable="custom" show-overflow-tooltip />
       <el-table-column label="生成时间" prop="created_at" min-width="180" sortable="custom" show-overflow-tooltip>
         <template #default="{ row }">
@@ -76,8 +76,10 @@
     <TablePaginationBar
       v-model:current-page="page"
       v-model:page-size="pageSize"
-      :total="rows.length"
+      :total="total"
       :page-sizes="[20, 50, 100]"
+      @current-change="handlePageChange"
+      @size-change="handlePageSizeChange"
     />
   </PageSectionCard>
 </template>
@@ -92,18 +94,15 @@ import { normalizeSortOrder, type SortChangeEvent, type SortState } from '@/util
 import { getActionErrorMessage } from '@/utils/apiError'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { computed, onMounted, ref, watch } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
 const auth = useAuthStore()
 const rows = ref<Suggestion[]>([])
+const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
-const pagedRows = computed(() => {
-  const start = (page.value - 1) * pageSize.value
-  return rows.value.slice(start, start + pageSize.value)
-})
 const loading = ref(false)
 const sortState = ref<SortState>({ prop: 'created_at', order: 'desc' })
 
@@ -112,20 +111,29 @@ const status = ref<string | undefined>(undefined)
 const sku = ref('')
 
 async function reload(resetPage = true): Promise<void> {
+  if (resetPage) {
+    page.value = 1
+  }
   loading.value = true
+  const requestedPage = page.value
   try {
     const resp = await listSuggestions({
       date_from: dateRange.value?.[0],
       date_to: dateRange.value?.[1],
       status: status.value,
       sku: sku.value || undefined,
-      page: 1,
-      page_size: 5000,
+      page: page.value,
+      page_size: pageSize.value,
       sort_by: sortState.value.prop,
       sort_order: sortState.value.order,
     })
     rows.value = resp.items
-    page.value = resetPage ? 1 : clampPage(page.value, rows.value.length, pageSize.value)
+    total.value = resp.total
+    const nextPage = clampPage(page.value, total.value, pageSize.value)
+    if (!resetPage && requestedPage !== nextPage) {
+      page.value = nextPage
+      await reload(false)
+    }
   } catch (err) {
     ElMessage.error(getActionErrorMessage(err, '加载失败'))
   } finally {
@@ -184,15 +192,20 @@ function handleSortChange({ prop, order }: SortChangeEvent): void {
   sortState.value = normalizedOrder && prop
     ? { prop, order: normalizedOrder }
     : { prop: 'created_at', order: 'desc' }
-  page.value = 1
-  void reload()
+  void reload(true)
 }
 
 onMounted(reload)
 
-watch([() => rows.value.length, pageSize], () => {
-  page.value = clampPage(page.value, rows.value.length, pageSize.value)
-})
+function handlePageChange(value: number): void {
+  page.value = value
+  void reload(false)
+}
+
+function handlePageSizeChange(value: number): void {
+  pageSize.value = value
+  void reload(true)
+}
 </script>
 
 <style lang="scss" scoped>

@@ -57,6 +57,8 @@ class SuggestionDetailOut(SuggestionOut):
 class SuggestionListOut(BaseModel):
     items: list[SuggestionOut]
     total: int
+    page: int
+    page_size: int
 
 
 class SuggestionItemPatch(BaseModel):

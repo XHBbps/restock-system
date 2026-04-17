@@ -121,7 +121,7 @@ restock_system/
 - 统一使用 `@/components/PageSectionCard` 作为页面容器
 - 使用 `@/components/TablePaginationBar` 作为分页条
 - 使用 `@/utils/format`、`@/utils/warehouse`、`@/utils/countries`、`@/utils/status`、`@/utils/tableSort` 等共享工具，不重复造轮子
-- 数据加载模式：**一次拉全量 → 前端筛选 → 本地分页**（`page_size=5000`）
+- 数据加载模式：高增长列表页（订单、历史、商品、库存、出库记录等）优先使用**后端分页 + 后端筛选**；仅店铺、仓库等低增长基础页可保留轻量本地分页
 - 筛选控件高度统一 32px（`PageSectionCard` 的 `section-actions` 已强制）
 
 ### 6.5 后端约定

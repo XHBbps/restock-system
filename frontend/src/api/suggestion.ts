@@ -2,6 +2,7 @@
 import type { SortOrder } from '@/utils/tableSort'
 
 import client from './client'
+import type { PageResult } from './data'
 
 export interface AllocationExplanation {
   allocation_mode: 'matched' | 'fallback_even' | 'no_warehouse'
@@ -62,7 +63,7 @@ export async function listSuggestions(params: {
   page_size?: number
   sort_by?: string
   sort_order?: SortOrder
-}): Promise<{ items: Suggestion[]; total: number }> {
+}): Promise<PageResult<Suggestion>> {
   const { data } = await client.get('/api/suggestions', { params })
   return data
 }

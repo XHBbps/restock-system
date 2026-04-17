@@ -122,6 +122,8 @@ async def list_suggestions(
     return SuggestionListOut(
         items=[SuggestionOut.model_validate(row) for row in rows],
         total=int(total or 0),
+        page=page,
+        page_size=page_size,
     )
 
 

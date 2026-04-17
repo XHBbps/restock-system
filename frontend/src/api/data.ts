@@ -90,6 +90,16 @@ export interface DataInventoryItem {
   updatedAt: string
 }
 
+export interface DataInventoryWarehouseGroup {
+  warehouseId: string
+  warehouseName: string
+  warehouseType: number
+  skuCount: number
+  totalAvailable: number
+  totalOccupy: number
+  items: DataInventoryItem[]
+}
+
 export async function listInventory(params: {
   country?: string
   warehouse_id?: string
@@ -101,6 +111,17 @@ export async function listInventory(params: {
   sort_order?: SortOrder
 }): Promise<PageResult<DataInventoryItem>> {
   const { data } = await client.get('/api/data/inventory', { params })
+  return data
+}
+
+export async function listInventoryWarehouseGroups(params: {
+  country?: string
+  sku?: string
+  only_nonzero?: boolean
+  page?: number
+  page_size?: number
+}): Promise<PageResult<DataInventoryWarehouseGroup>> {
+  const { data } = await client.get('/api/data/inventory/warehouse-groups', { params })
   return data
 }
 
@@ -141,6 +162,11 @@ export async function listOutRecords(params: {
   sort_order?: SortOrder
 }): Promise<PageResult<DataOutRecord>> {
   const { data } = await client.get('/api/data/out-records', { params })
+  return data
+}
+
+export async function listOutRecordTypes(): Promise<string[]> {
+  const { data } = await client.get<string[]>('/api/data/out-record-types')
   return data
 }
 

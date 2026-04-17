@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-17（Review 修复：打通 `main`/tag 部署链路、放行 Amazon 商品缩略图域名、收敛前端路由/导航配置、补 localStorage 容错，并为进程内限流补全全局清理与容量保护）
+> 最近更新：2026-04-17（大数据页服务端分页：历史记录、商品、库存、出库记录继续从“拉 5000 条到前端”迁移为后端分页 / 筛选）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -11,7 +11,7 @@
 |---|---|
 | 主链路 | 打通 — 赛狐同步 → 补货计算 → 建议编辑 → 采购单推送 |
 | 工程化 | 运行时配置校验、健康检查、部署脚本、CI 骨架、测试覆盖已就绪 |
-| 前端 | 已统一到 `PageSectionCard`；多数数据页保持本地分页，订单页已切换为后端分页模式，设计系统对齐 shadcn Zinc |
+| 前端 | 已统一到 `PageSectionCard`；订单、历史、商品、库存、出库记录等高增长页面已切换为后端分页模式，设计系统对齐 shadcn Zinc |
 | 后端 | 三服务进程分离（backend / worker / scheduler），TaskRun 队列稳定运行 |
 
 ---
@@ -86,7 +86,7 @@
 - **Dashboard 复用组件**：
   - `DashboardPageHeader` / `DashboardStatCard` / `DashboardSection` / `DashboardChartCard` / `DataTableCard`
   - `BaseChart`（ECharts 封装）
-- **数据加载模式**：多数数据页使用"一次拉全量 + 前端筛选 + 本地分页"，`page_size=5000`；订单页 (`DataOrdersView.vue`) 已切换为后端分页、后端筛选、后端排序
+- **数据加载模式**：订单页、历史记录页、商品页、库存页、出库记录页使用“后端分页 + 后端筛选”；仓库、店铺等低增长基础页仍保留轻量分页
 - **筛选控件高度统一**：`PageSectionCard` 的 `section-actions` 强制所有控件 32px 高度
 - **订单状态中文映射**：`DataOrdersView.vue` 添加 `ORDER_STATUS_LABEL`（已发货 / 部分发货 / 未发货 / 待处理 / 已取消）
 - **全局参数页补货区域配置**：`GlobalConfigView.vue` 新增“补货区域”多选，选项复用 `COUNTRY_OPTIONS`，保存前变更检测与配置变更提示已纳入 `restock_regions`
@@ -116,6 +116,13 @@
 - `backend/app/tasks/access.py` 收敛 TaskRun 作业白名单与查看/操作权限映射，`backend/app/api/task.py` 改为复用统一注册表；保留 `push_saihu` 仅允许通过专用业务入口触发的约束
 - `backend/app/core/rate_limit.py` 为进程内限流补充周期性全局过期清理、`max_tracked_clients` 容量上限和最旧客户端驱逐逻辑，降低不同 IP 扫描导致的内存持续膨胀风险
 - **测试**：新增 `backend/tests/unit/test_rate_limit_middleware.py`、`frontend/src/stores/__tests__/sidebar.test.ts`，并扩展 `frontend/src/stores/__tests__/auth.test.ts`
+
+### 3.47 剩余大数据页服务端分页迁移（2026-04-17）
+- `backend/app/api/suggestion.py` 的 `GET /api/suggestions` 返回补齐 `page` / `page_size`，历史记录页直接消费后端当前页结果，不再在前端对 5000 条建议单做本地筛选分页
+- `backend/app/api/data.py` 复用库存筛选逻辑，并新增 `GET /api/data/inventory/warehouse-groups`，按仓库维度返回分页分组、SKU 数、可用/占用库存合计与当前页明细，库存页在保持“按仓库展开”交互的同时避免一次性加载全部库存
+- `backend/app/api/data.py` 新增 `GET /api/data/out-record-types`，出库记录页的类型筛选选项改为独立读取；`DataOutRecordsView.vue` 改为将 SKU、仓库单号、国家、类型、在途状态、排序、分页全部下推到 `/api/data/out-records`
+- `frontend/src/views/data/DataProductsView.vue`、`DataInventoryView.vue`、`DataOutRecordsView.vue` 与 `frontend/src/views/HistoryView.vue` 均改为后端分页模式：`rows` 仅保存当前页，`total` 来自接口，筛选变化重置第一页，页码/页大小变化触发重新请求
+- **测试**：新增 `backend/tests/unit/test_data_inventory_groups_api.py`、`backend/tests/unit/test_suggestion_list_api.py`、`frontend/src/views/__tests__/DataProductsView.test.ts`、`frontend/src/views/__tests__/DataInventoryView.test.ts`，并更新历史记录与出库记录页测试覆盖服务端分页参数
 
 ### 3.43 CI 安全校验修复：JWT 密钥长度 + 前端依赖审计（2026-04-15）
 - `backend/app/config.py` 将默认 `jwt_secret` 占位值提升到 32 字节以上，并在 `validate_settings()` 中新增 `JWT_SECRET must be at least 32 bytes` 校验；生产环境占位值检测同步更新，避免 `PyJWT` 因 HMAC 密钥过短抛出 `InsecureKeyLengthWarning`，导致 `tests/unit/test_security.py` 在 CI 中失败

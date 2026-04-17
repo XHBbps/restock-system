@@ -375,26 +375,31 @@ Conventional Commits：
 - `@/router/index.ts` 与 `@/config/navigation.ts` 都应从 `appPages` 派生，避免再手写第二份菜单/路由定义
 - 登录页、403/404、建议详情、legacy redirect 等特殊路由仍放在 `router/index.ts` 单独维护
 
-**数据页模式**（默认遵循；订单页已切到服务端分页）：
+**数据页模式**（高增长列表默认遵循）：
 
 ```typescript
-// 1. 一次拉全量
+// 1. 仅保存当前页
 const rows = ref<T[]>([])
+const total = ref(0)
+const page = ref(1)
+const pageSize = ref(50)
+
+// 2. 筛选、排序、分页参数统一下推到后端
 async function reload() {
-  const resp = await listData({ page: 1, page_size: 5000 })
+  const resp = await listData({
+    page: page.value,
+    page_size: pageSize.value,
+    ...filters,
+    ...sortState.value,
+  })
   rows.value = resp.items
-  page.value = 1
+  total.value = resp.total
 }
-
-// 2. 前端筛选
-const filteredRows = computed(() => { ... })
-
-// 3. 本地分页
-const pagedRows = computed(() => {
-  const start = (page.value - 1) * pageSize.value
-  return filteredRows.value.slice(start, start + pageSize.value)
-})
 ```
+
+- 订单、历史记录、商品、库存、出库记录等可能持续增长的页面必须使用服务端分页 / 筛选。
+- 库存页如需保留“按仓库展开”交互，优先复用 `/api/data/inventory/warehouse-groups` 的仓库分组分页接口。
+- 店铺、仓库等低增长基础数据页可以保留轻量分页，但不要再为大数据页新增 `page_size=5000` 的前端本地筛选模式。
 
 ### 7.5 后端开发约定
 
