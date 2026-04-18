@@ -7,19 +7,26 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import FileResponse
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import UserContext, db_session, get_current_user, require_permission
 from app.config import get_settings
-from app.core.permissions import RESTOCK_EXPORT
+from app.core.permissions import RESTOCK_EXPORT, RESTOCK_VIEW
 from app.models.excel_export_log import ExcelExportLog
 from app.models.global_config import GlobalConfig
 from app.models.product_listing import ProductListing
 from app.models.suggestion import Suggestion, SuggestionItem
 from app.models.suggestion_snapshot import SuggestionSnapshot, SuggestionSnapshotItem
+from app.models.sys_user import SysUser
 from app.models.warehouse import Warehouse
-from app.schemas.suggestion_snapshot import SnapshotCreateRequest, SnapshotOut
+from app.schemas.suggestion_snapshot import (
+    SnapshotCreateRequest,
+    SnapshotDetailOut,
+    SnapshotItemOut,
+    SnapshotOut,
+)
 from app.services.excel_export import (
     SnapshotExportContext,
     build_excel_workbook,
@@ -241,4 +248,141 @@ async def create_snapshot(
         generation_status=snapshot.generation_status,
         file_size_bytes=snapshot.file_size_bytes,
         download_count=snapshot.download_count,
+    )
+
+
+@router.get(
+    "/suggestions/{suggestion_id}/snapshots",
+    response_model=list[SnapshotOut],
+)
+async def list_snapshots(
+    suggestion_id: int,
+    _: None = Depends(require_permission(RESTOCK_VIEW)),
+    db: AsyncSession = Depends(db_session),
+) -> list[SnapshotOut]:
+    rows = (
+        await db.execute(
+            select(
+                SuggestionSnapshot,
+                SysUser.display_name.label("exported_by_name"),
+            )
+            .outerjoin(SysUser, SysUser.id == SuggestionSnapshot.exported_by)
+            .where(SuggestionSnapshot.suggestion_id == suggestion_id)
+            .order_by(SuggestionSnapshot.version.asc())
+        )
+    ).all()
+    return [
+        SnapshotOut(
+            id=snap.id,
+            suggestion_id=snap.suggestion_id,
+            version=snap.version,
+            exported_by=snap.exported_by,
+            exported_by_name=name,
+            exported_at=snap.exported_at,
+            item_count=snap.item_count,
+            note=snap.note,
+            generation_status=snap.generation_status,
+            file_size_bytes=snap.file_size_bytes,
+            download_count=snap.download_count,
+        )
+        for snap, name in rows
+    ]
+
+
+@router.get("/snapshots/{snapshot_id}", response_model=SnapshotDetailOut)
+async def get_snapshot_detail(
+    snapshot_id: int,
+    _: None = Depends(require_permission(RESTOCK_VIEW)),
+    db: AsyncSession = Depends(db_session),
+) -> SnapshotDetailOut:
+    row = (
+        await db.execute(
+            select(
+                SuggestionSnapshot,
+                SysUser.display_name.label("exported_by_name"),
+            )
+            .outerjoin(SysUser, SysUser.id == SuggestionSnapshot.exported_by)
+            .where(SuggestionSnapshot.id == snapshot_id)
+        )
+    ).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="快照不存在")
+    snap, name = row
+    items = (
+        (
+            await db.execute(
+                select(SuggestionSnapshotItem).where(
+                    SuggestionSnapshotItem.snapshot_id == snapshot_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return SnapshotDetailOut(
+        id=snap.id,
+        suggestion_id=snap.suggestion_id,
+        version=snap.version,
+        exported_by=snap.exported_by,
+        exported_by_name=name,
+        exported_at=snap.exported_at,
+        item_count=snap.item_count,
+        note=snap.note,
+        generation_status=snap.generation_status,
+        file_size_bytes=snap.file_size_bytes,
+        download_count=snap.download_count,
+        items=[SnapshotItemOut.model_validate(it) for it in items],
+        global_config_snapshot=snap.global_config_snapshot,
+    )
+
+
+@router.get("/snapshots/{snapshot_id}/download")
+async def download_snapshot(
+    snapshot_id: int,
+    request: Request,
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(RESTOCK_EXPORT)),
+    db: AsyncSession = Depends(db_session),
+) -> FileResponse:
+    snap = (
+        await db.execute(
+            select(SuggestionSnapshot).where(SuggestionSnapshot.id == snapshot_id)
+        )
+    ).scalar_one_or_none()
+    if snap is None:
+        raise HTTPException(status_code=404, detail="快照不存在")
+    if snap.generation_status != "ready":
+        raise HTTPException(status_code=409, detail="文件尚未就绪或生成失败")
+
+    settings = get_settings()
+    storage_root = Path(settings.export_storage_dir).resolve()
+    file_abs = storage_root / (snap.file_path or "")
+    if not snap.file_path or not file_abs.exists():
+        raise HTTPException(status_code=410, detail="文件已丢失")
+
+    # 更新下载计数
+    await db.execute(
+        update(SuggestionSnapshot)
+        .where(SuggestionSnapshot.id == snapshot_id)
+        .values(
+            download_count=SuggestionSnapshot.download_count + 1,
+            last_downloaded_at=datetime.utcnow(),
+        )
+    )
+    db.add(
+        ExcelExportLog(
+            snapshot_id=snapshot_id,
+            action="download",
+            performed_by=user.id,
+            performed_from_ip=request.client.host if request.client else None,
+            user_agent=(request.headers.get("user-agent", "") or "")[:500] or None,
+        )
+    )
+    await db.commit()
+
+    filename = Path(snap.file_path).name
+    return FileResponse(
+        path=file_abs,
+        filename=filename,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )

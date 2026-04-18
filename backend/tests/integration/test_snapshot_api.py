@@ -167,3 +167,82 @@ async def test_create_snapshot_flips_toggle_off(
     # 开关 OFF
     await db_session.refresh(gc_before)
     assert gc_before.suggestion_generation_enabled is False
+
+
+@pytest.mark.asyncio
+async def test_list_snapshots_for_suggestion(
+    client, seed_suggestion, ensure_global_config, tmp_path, monkeypatch
+):
+    from app import config as cfg_mod
+    settings = cfg_mod.get_settings()
+    monkeypatch.setattr(settings, "export_storage_dir", str(tmp_path), raising=False)
+
+    sid = seed_suggestion["suggestion_id"]
+    item_ids = seed_suggestion["item_ids"]
+    await client.post(
+        f"/api/suggestions/{sid}/snapshots",
+        json={"item_ids": item_ids[:1]},
+    )
+    r = await client.get(f"/api/suggestions/{sid}/snapshots")
+    assert r.status_code == 200
+    body = r.json()
+    assert isinstance(body, list)
+    assert len(body) == 1
+    assert body[0]["version"] == 1
+
+
+@pytest.mark.asyncio
+async def test_snapshot_detail(
+    client, seed_suggestion, ensure_global_config, tmp_path, monkeypatch
+):
+    from app import config as cfg_mod
+    settings = cfg_mod.get_settings()
+    monkeypatch.setattr(settings, "export_storage_dir", str(tmp_path), raising=False)
+
+    sid = seed_suggestion["suggestion_id"]
+    item_ids = seed_suggestion["item_ids"]
+    created = (
+        await client.post(
+            f"/api/suggestions/{sid}/snapshots",
+            json={"item_ids": item_ids[:2]},
+        )
+    ).json()
+    snap_id = created["id"]
+    r = await client.get(f"/api/snapshots/{snap_id}")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["version"] == 1
+    assert len(body["items"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_snapshot_download(
+    client, seed_suggestion, ensure_global_config, tmp_path, monkeypatch
+):
+    from app import config as cfg_mod
+    settings = cfg_mod.get_settings()
+    monkeypatch.setattr(settings, "export_storage_dir", str(tmp_path), raising=False)
+
+    sid = seed_suggestion["suggestion_id"]
+    item_ids = seed_suggestion["item_ids"]
+    created = (
+        await client.post(
+            f"/api/suggestions/{sid}/snapshots",
+            json={"item_ids": item_ids[:1]},
+        )
+    ).json()
+    snap_id = created["id"]
+
+    r1 = await client.get(f"/api/snapshots/{snap_id}/download")
+    assert r1.status_code == 200
+    assert "attachment" in r1.headers.get("content-disposition", "")
+
+    # download_count 递增
+    r2 = await client.get(f"/api/snapshots/{snap_id}")
+    assert r2.json()["download_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_snapshot_download_404(client, ensure_global_config):
+    r = await client.get("/api/snapshots/99999/download")
+    assert r.status_code == 404
