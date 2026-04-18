@@ -3,9 +3,9 @@
 from dataclasses import dataclass
 from typing import Any
 
-from openpyxl import Workbook
-from openpyxl.styles import Alignment, Font, PatternFill
-from openpyxl.utils import get_column_letter
+from openpyxl import Workbook  # type: ignore[import-untyped]
+from openpyxl.styles import Alignment, Font, PatternFill  # type: ignore[import-untyped]
+from openpyxl.utils import get_column_letter  # type: ignore[import-untyped]
 
 
 @dataclass
@@ -26,7 +26,7 @@ HEADER_FILL = PatternFill(start_color="4F46E5", end_color="4F46E5", fill_type="s
 HEADER_ALIGN = Alignment(horizontal="center", vertical="center")
 
 
-def _apply_header(ws, row: int, headers: list[str]) -> None:
+def _apply_header(ws: Any, row: int, headers: list[str]) -> None:
     for col_idx, text in enumerate(headers, start=1):
         cell = ws.cell(row=row, column=col_idx, value=text)
         cell.font = HEADER_FONT
@@ -34,7 +34,7 @@ def _apply_header(ws, row: int, headers: list[str]) -> None:
         cell.alignment = HEADER_ALIGN
 
 
-def _autosize(ws) -> None:
+def _autosize(ws: Any) -> None:
     for col_idx in range(1, ws.max_column + 1):
         letter = get_column_letter(col_idx)
         max_len = 0

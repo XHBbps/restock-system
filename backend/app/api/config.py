@@ -185,7 +185,7 @@ async def _load_generation_toggle(db: AsyncSession) -> GenerationToggleOut:
             .outerjoin(SysUser, SysUser.id == GlobalConfig.generation_toggle_updated_by)
             .where(GlobalConfig.id == 1)
         )
-    ).first()
+    ).one()
     enabled, updated_by, updated_at, display_name = row
     return GenerationToggleOut(
         enabled=bool(enabled),
