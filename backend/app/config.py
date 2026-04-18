@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     default_calc_cron: str = "0 8 * * *"
     default_sync_interval_minutes: int = 60
 
+    # Excel 导出文件根目录（相对 backend/ 或绝对路径）
+    export_storage_dir: str = "../deploy/data/exports"
+
     def docs_enabled(self) -> bool:
         if self.app_docs_enabled is not None:
             return self.app_docs_enabled
