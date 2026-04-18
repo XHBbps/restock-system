@@ -124,6 +124,7 @@ def _make_config(**overrides: Any) -> SimpleNamespace:
         "include_tax": "0",
         "default_purchase_warehouse_id": "WH-001",
         "shop_sync_mode": "all",
+        "suggestion_generation_enabled": True,
     }
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
@@ -251,3 +252,37 @@ async def test_run_engine_forwards_restock_regions_to_step_loaders() -> None:
 def test_engine_run_advisory_lock_key_is_stable() -> None:
     """ENGINE_RUN_ADVISORY_LOCK_KEY is a fixed int (regression guard)."""
     assert ENGINE_RUN_ADVISORY_LOCK_KEY == 7429001
+
+
+# ---------------------------------------------------------------------------
+# Generation toggle off → run_engine short-circuits
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_run_engine_skips_when_generation_disabled() -> None:
+    """生成开关关闭时直接返回 None,不加载 SKU/不跑 step。"""
+    config = _make_config(suggestion_generation_enabled=False)
+
+    db = _FakeDb(
+        [
+            None,                      # advisory lock
+            _ScalarResult(config),     # GlobalConfig
+        ]
+    )
+    factory = _FakeSessionFactory(db)
+    ctx = _FakeContext()
+
+    mocked_run_step1 = AsyncMock()
+    with (
+        patch("app.engine.runner.async_session_factory", factory),
+        patch("app.engine.runner.run_step1", mocked_run_step1),
+    ):
+        result = await run_engine(ctx, triggered_by="manual")  # type: ignore[arg-type]
+
+    assert result is None
+    mocked_run_step1.assert_not_called()
+    assert any(
+        "补货建议生成已关闭" in (call.get("step_detail") or "")
+        for call in ctx.progress_calls
+    )

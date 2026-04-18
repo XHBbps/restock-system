@@ -56,6 +56,19 @@ async def run_engine(ctx: JobContext, *, triggered_by: str = "scheduler") -> int
         )
         # 加载全局配置
         config = (await db.execute(select(GlobalConfig).where(GlobalConfig.id == 1))).scalar_one()
+
+        # 生成开关：关闭时跳过本次引擎运行（手动/定时均受控）
+        if not config.suggestion_generation_enabled:
+            logger.warning(
+                "engine_generation_disabled",
+                extra={"triggered_by": triggered_by},
+            )
+            await ctx.progress(
+                current_step="完成",
+                step_detail="补货建议生成已关闭,跳过本次计算",
+            )
+            return None
+
         global_snapshot = _config_snapshot(config)
         allowed_countries = resolve_allowed_restock_regions(config.restock_regions)
 
