@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, Path, Query
-from sqlalchemy import Float, case, delete, func, select, update
+from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -18,6 +18,7 @@ from app.engine.step6_timing import has_urgent_sale_days, positive_qty_countries
 from app.models.product_listing import ProductListing
 from app.models.sku import SkuConfig
 from app.models.suggestion import Suggestion, SuggestionItem
+from app.models.suggestion_snapshot import SuggestionSnapshot
 from app.schemas.suggestion import (
     SuggestionDetailOut,
     SuggestionItemOut,
@@ -46,27 +47,13 @@ def _suggestion_status_sort_expr() -> ColumnElement[int]:
     )
 
 
-def _success_rate_sort_expr() -> ColumnElement[float]:
-    return func.coalesce(
-        Suggestion.pushed_items.cast(Float) / func.nullif(Suggestion.total_items, 0),
-        -1.0,
-    )
-
-
 def _apply_suggestion_sort(stmt, sort_by: str | None, sort_order: str):
-    success_rate_expr = _success_rate_sort_expr()
     sort_map: dict[str, tuple[ColumnElement[object], ...]] = {
         "id": (Suggestion.id,),
         "created_at": (Suggestion.created_at,),
         "triggered_by": (Suggestion.triggered_by,),
         "status": (_suggestion_status_sort_expr(),),
         "total_items": (Suggestion.total_items,),
-        "pushed_items": (Suggestion.pushed_items,),
-        "failed_items": (Suggestion.failed_items,),
-        "success_rate": (
-            case((Suggestion.total_items == 0, 1), else_=0),
-            success_rate_expr,
-        ),
     }
     columns = sort_map.get(sort_by or "", (Suggestion.created_at,))
     ordered_columns = [
@@ -112,11 +99,26 @@ async def list_suggestions(
     base = _apply_suggestion_sort(base, sort_by, sort_order)
     count_stmt = base.with_only_columns(func.count()).order_by(None)
     total = (await db.execute(count_stmt)).scalar_one()
+
+    snap_count_sq = (
+        select(func.count(SuggestionSnapshot.id))
+        .where(SuggestionSnapshot.suggestion_id == Suggestion.id)
+        .correlate(Suggestion)
+        .scalar_subquery()
+    )
+    data_stmt = base.add_columns(snap_count_sq.label("snapshot_count"))
     rows = (
-        await db.execute(base.offset((page - 1) * page_size).limit(page_size))
-    ).scalars().all()
+        await db.execute(data_stmt.offset((page - 1) * page_size).limit(page_size))
+    ).all()
+    items = []
+    for row in rows:
+        sug_obj = row[0]
+        snap_count = row[1] or 0
+        out = SuggestionOut.model_validate(sug_obj)
+        out.snapshot_count = snap_count
+        items.append(out)
     return SuggestionListOut(
-        items=[SuggestionOut.model_validate(row) for row in rows],
+        items=items,
         total=int(total or 0),
         page=page,
         page_size=page_size,
@@ -181,8 +183,8 @@ async def patch_item(
     ).scalar_one_or_none()
     if item is None:
         raise NotFound(f"建议条目 {item_id} 不存在")
-    if item.push_status == "pushed":
-        raise ValidationFailed("已推送的明细不可编辑")
+    if item.export_status == "exported":
+        raise ValidationFailed("已导出的条目不可编辑")
 
     if patch.country_breakdown is not None:
         for value in patch.country_breakdown.values():
@@ -271,6 +273,16 @@ async def delete_suggestion(
         raise NotFound(f"建议单 {suggestion_id} 不存在")
     if sug.status == "pushed":
         raise ConflictError("已推送的建议单不可删除")
+
+    snap_count = (
+        await db.execute(
+            select(func.count()).select_from(SuggestionSnapshot).where(
+                SuggestionSnapshot.suggestion_id == suggestion_id
+            )
+        )
+    ).scalar_one()
+    if snap_count > 0:
+        raise ConflictError(f"建议单已有 {snap_count} 个快照，不可删除")
 
     await db.execute(delete(Suggestion).where(Suggestion.id == suggestion_id))
     return None

@@ -18,6 +18,9 @@ class _FakeResult:
     def scalar_one_or_none(self) -> Any:
         return self.value
 
+    def scalar_one(self) -> Any:
+        return self.value
+
     def first(self) -> Any:
         return self.value
 
@@ -62,18 +65,16 @@ class _FakeSuggestion:
 
 
 class _FakeItem:
-    def __init__(self, push_status: str = "pending") -> None:
+    def __init__(self, export_status: str = "pending") -> None:
         self.id = 10
         self.suggestion_id = 1
-        self.commodity_id: str | None = "CID-001"
-        self.push_status = push_status
-        self.push_blocker: str | None = None
+        self.commodity_sku: str = "SKU-A"
+        self.export_status = export_status
         self.total_qty: int = 1
         self.country_breakdown: dict[str, int] = {"US": 1}
         self.warehouse_breakdown: dict[str, dict[str, int]] = {"US": {"W1": 1}}
         self.allocation_snapshot: dict[str, Any] | None = {"US": {"allocation_mode": "matched"}}
         self.sale_days_snapshot: dict[str, float] | None = {"US": 25.0}
-        self.__dict__.setdefault("commodity_sku", "SKU-A")
 
 
 async def test_suggestion_patch_archived_rejected() -> None:
@@ -83,10 +84,10 @@ async def test_suggestion_patch_archived_rejected() -> None:
         await patch_item(patch=patch, suggestion_id=1, item_id=10, db=db, _={})  # type: ignore[arg-type]
 
 
-async def test_suggestion_patch_pushed_rejected() -> None:
-    db = _FakeSession([_FakeSuggestion(), _FakeItem(push_status="pushed")])
+async def test_suggestion_patch_exported_rejected() -> None:
+    db = _FakeSession([_FakeSuggestion(), _FakeItem(export_status="exported")])
     patch = SuggestionItemPatch(total_qty=5)
-    with pytest.raises(ValidationFailed, match=r"pushed|推送"):
+    with pytest.raises(ValidationFailed, match=r"exported|导出"):
         await patch_item(patch=patch, suggestion_id=1, item_id=10, db=db, _={})  # type: ignore[arg-type]
 
 
@@ -192,7 +193,8 @@ async def test_suggestion_delete_rejects_pushed_row() -> None:
 
 @pytest.mark.parametrize("status", ["draft", "partial", "error", "archived"])
 async def test_suggestion_delete_allows_non_pushed_rows(status: str) -> None:
-    db = _FakeSession([_FakeSuggestion(status=status), None])
+    # Results: 1) suggestion lookup, 2) snapshot count (0), 3) delete execution
+    db = _FakeSession([_FakeSuggestion(status=status), 0, None])
 
     await delete_suggestion(suggestion_id=1, db=db, _={})  # type: ignore[arg-type]
 
