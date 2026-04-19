@@ -61,7 +61,7 @@ class DashboardOverviewPayload(BaseModel):
     restock_sku_count: int = 0
     no_restock_sku_count: int = 0
     suggestion_item_count: int
-    exported_count: int
+    exported_count: int = 0
     urgent_count: int
     warning_count: int
     safe_count: int
