@@ -202,9 +202,12 @@ describe('SuggestionListView', () => {
     vm.page = 1
     await flushPromises()
     expect(vm.pagedItems).toHaveLength(2)
+    // Default sort: urgent first (id=4), then by id ascending -> [4, 1, 2, 3]
+    expect(vm.pagedItems.map((item) => item.id)).toEqual([4, 1])
 
     vm.page = 2
     await flushPromises()
     expect(vm.pagedItems).toHaveLength(2)
+    expect(vm.pagedItems.map((item) => item.id)).toEqual([2, 3])
   })
 })
