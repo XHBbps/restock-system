@@ -17,6 +17,15 @@
             </div>
           </div>
           <div class="actions">
+            <el-button
+              v-if="auth.hasPermission('restock:export') && suggestion.status === 'draft'"
+              type="primary"
+              :disabled="!toggleEnabled || exportable.length === 0"
+              :loading="exporting"
+              @click="handleExport"
+            >
+              {{ exportButtonText }}
+            </el-button>
             <el-button @click="goBack">返回</el-button>
           </div>
         </div>
@@ -172,6 +181,35 @@
       </el-collapse>
     </el-card>
 
+    <PageSectionCard v-if="suggestion" title="历史快照" class="snapshot-section">
+      <el-table v-loading="loadingSnapshots" :data="snapshots" empty-text="暂无导出记录">
+        <el-table-column label="版本" width="96">
+          <template #default="{ row }">v{{ row.version }}</template>
+        </el-table-column>
+        <el-table-column label="导出人" prop="exported_by_name" min-width="140">
+          <template #default="{ row }">{{ row.exported_by_name || '—' }}</template>
+        </el-table-column>
+        <el-table-column label="导出时间" min-width="180">
+          <template #default="{ row }">{{ formatDateTime(row.exported_at) }}</template>
+        </el-table-column>
+        <el-table-column label="商品数" prop="item_count" width="100" align="right" />
+        <el-table-column label="下载次数" prop="download_count" width="100" align="right" />
+        <el-table-column label="操作" width="120" align="center">
+          <template #default="{ row }">
+            <el-button
+              link
+              type="primary"
+              :disabled="row.generation_status !== 'ready'"
+              :title="row.generation_status === 'failed' ? '生成失败' : ''"
+              @click="downloadSnapshot(row.id)"
+            >
+              下载
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </PageSectionCard>
+
     <el-empty v-else-if="notFound" description="建议单不存在或已失效。" :image-size="84">
       <el-button type="primary" @click="goCurrent">返回当前建议</el-button>
     </el-empty>
@@ -192,13 +230,22 @@ import {
   type SuggestionDetail,
   type SuggestionItem,
 } from '@/api/suggestion'
+import {
+  createSnapshot,
+  downloadSnapshotBlob,
+  listSnapshots,
+  type SnapshotOut,
+} from '@/api/snapshot'
+import { getGenerationToggle } from '@/api/config'
+import PageSectionCard from '@/components/PageSectionCard.vue'
 import SkuCard from '@/components/SkuCard.vue'
 import { useAuthStore } from '@/stores/auth'
 import { getActionErrorMessage } from '@/utils/apiError'
+import { triggerBlobDownload } from '@/utils/download'
 import { allocationModeLabel, allocationModeTagType, allocationSummary } from '@/utils/allocation'
 import { getSuggestionStatusMeta } from '@/utils/status'
 import dayjs from 'dayjs'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -225,6 +272,21 @@ const savingState = reactive<Record<number, boolean>>({})
 const loading = ref(false)
 const notFound = ref(false)
 const loadError = ref('')
+
+const snapshots = ref<SnapshotOut[]>([])
+const loadingSnapshots = ref(false)
+const toggleEnabled = ref(true)
+const exporting = ref(false)
+
+const exportable = computed(() =>
+  suggestion.value?.items.filter((it) => it.export_status !== 'exported') ?? [],
+)
+
+const exportButtonText = computed(() => {
+  if (!toggleEnabled.value) return '生成开关已关闭'
+  if (exportable.value.length === 0) return '无可导出条目'
+  return '导出 Excel'
+})
 
 const suggestionStatusMeta = computed(() =>
   suggestion.value ? getSuggestionStatusMeta(suggestion.value.status) : { label: '暂无', tagType: 'info' as const },
@@ -253,6 +315,7 @@ async function load(): Promise<void> {
     suggestion.value = data
     syncEditingState(data)
     await syncRouteItemFocus(data)
+    await Promise.all([loadSnapshots(), loadToggle()])
   } catch (error) {
     suggestion.value = null
     const status = (error as { response?: { status?: number } })?.response?.status
@@ -263,6 +326,63 @@ async function load(): Promise<void> {
     }
   } finally {
     loading.value = false
+  }
+}
+
+async function loadSnapshots(): Promise<void> {
+  if (!suggestion.value) return
+  loadingSnapshots.value = true
+  try {
+    snapshots.value = await listSnapshots(suggestion.value.id)
+  } catch (error) {
+    ElMessage.error(getActionErrorMessage(error, '加载快照历史失败'))
+  } finally {
+    loadingSnapshots.value = false
+  }
+}
+
+async function loadToggle(): Promise<void> {
+  try {
+    const toggle = await getGenerationToggle()
+    toggleEnabled.value = toggle.enabled
+  } catch {
+    toggleEnabled.value = true
+  }
+}
+
+async function handleExport(): Promise<void> {
+  if (!suggestion.value || exportable.value.length === 0) return
+  try {
+    await ElMessageBox.confirm(
+      '确认导出？导出后当前建议单的商品将无法重复导出，生成开关将自动关闭。',
+      '确认导出',
+      { type: 'warning', confirmButtonText: '确认导出', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  exporting.value = true
+  try {
+    const itemIds = exportable.value.map((it) => it.id)
+    const snapshot = await createSnapshot(suggestion.value.id, itemIds)
+    const { blob, filename } = await downloadSnapshotBlob(snapshot.id)
+    triggerBlobDownload(blob, filename)
+    ElMessage.success('导出成功，生成开关已关闭')
+    await Promise.all([load(), loadSnapshots(), loadToggle()])
+  } catch (error) {
+    ElMessage.error(getActionErrorMessage(error, '导出失败'))
+  } finally {
+    exporting.value = false
+  }
+}
+
+async function downloadSnapshot(snapshotId: number): Promise<void> {
+  try {
+    const { blob, filename } = await downloadSnapshotBlob(snapshotId)
+    triggerBlobDownload(blob, filename)
+    await loadSnapshots()
+  } catch (error) {
+    ElMessage.error(getActionErrorMessage(error, '下载失败'))
   }
 }
 
@@ -504,6 +624,10 @@ watch(
   display: flex;
   flex-direction: column;
   gap: $space-4;
+}
+
+.snapshot-section {
+  margin-top: $space-4;
 }
 
 .header-main {
