@@ -108,7 +108,7 @@
 | Step | 模块 | 输入 | 输出 | 说明 |
 |---|---|---|---|---|
 | 1 | `step1_velocity.py` | 近 30 天订单 | `velocity[sku][country]` | 加权日均销量：7日×0.5 + 14日×0.3 + 30日×0.2；若 `global_config.restock_regions` 非空，则仅统计这些国家的订单 |
-| 2 | `step2_sale_days.py` | velocity + 海外库存 + 在途 | `sale_days[sku][country]`, `inventory[sku][country]` | 可售天数 = 库存总和 / velocity；`load_in_transit` 基于已推送未归档的建议条目 |
+| 2 | `step2_sale_days.py` | velocity + 海外库存 + 在途 | `sale_days[sku][country]`, `inventory[sku][country]` | 可售天数 = 库存总和 / velocity；`load_in_transit` 聚合已同步的赛狐出库记录（`in_transit_record.is_in_transit=true` 的 `in_transit_item`）按 `(commodity_sku, target_country)` 汇总 `goods` 字段——Plan A 重构后不再依赖建议单推送状态 |
 | 3 | `step3_country_qty.py` | velocity + inventory + target_days | `country_qty[sku][country]` | `max(target × v − 库存, 0)`，纯函数无 DB |
 | 4 | `step4_total.py` | country_qty + velocity + 国内库存 + buffer_days | `total_qty[sku]` | 汇总各国补货量 + 缓冲天数 − 国内库存 |
 | 5 | `step5_warehouse_split.py` | country_qty + 订单邮编 + 邮编规则 + 国家仓库映射 | `warehouse_breakdown[country][wh_id]` | 按邮编规则分配到具体仓库，无订单时均分；若配置了 `global_config.restock_regions`，仅消费这些国家的订单明细作为分仓依据；**2026-04-11 起**同优先级 tied 均分：`match_warehouses()` 返回首批同 priority 命中列表，qty 按 `1/N` 均分（先过滤不可用仓再定 N） |
@@ -469,7 +469,7 @@ async function reload() {
 | `SkuCard` | 商品展示（图片 + 名称 + SKU + blocker 标签） | 商品、库存、订单、建议单 |
 | `StatusTag` | 状态标签（基于 StatusMeta 对象） | 所有状态展示 |
 | `TablePaginationBar` | 分页条，v-model 绑定 currentPage 和 pageSize | 所有数据表格 |
-| `TaskProgress` | 长任务进度展示，自动轮询 `/api/tasks/{id}`；可解析按条数和按页数/步骤的确定型进度；任务读取权限按 `job_name` 映射到对应业务权限过滤 | 引擎生成、推送、同步 |
+| `TaskProgress` | 长任务进度展示，自动轮询 `/api/tasks/{id}`；可解析按条数和按页数/步骤的确定型进度；任务读取权限按 `job_name` 映射到对应业务权限过滤 | 引擎生成、同步 |
 | `sync/OrderDetailFetchAction` | 订单页右侧“详情获取”动作组件，封装回溯天数、触发逻辑与冲突提示 | 订单页 |
 
 **前端监控命名约定**：
@@ -487,7 +487,7 @@ async function reload() {
 | 视图 | 职责 |
 |---|---|
 | `SuggestionListView` | 顶部 `PageSectionCard.actions` 展示生成开关只读状态 tag（`loadToggle()` + `onMounted` + `onActivated` 双钩子保证切页回来也刷新）；只读标签不可切换（翻开关由 `GlobalConfigView` 负责）。已移除推送时代的选择列、推送按钮、`pushTaskId` 轮询、`selectedIds` / `handleSelection` / `handleSelectAll` / `syncTableSelection` / `handlePush` / `PUSH_STATUS_SORT_ORDER` / `filterPushStatus` 等死代码。 |
-| `SuggestionDetailView` | 勾选 `export_status='pending'` 的条目 → “导出 Excel”按钮走一步式 `POST /api/suggestions/{id}/snapshots` + `GET /api/snapshots/{id}/download` blob 流程（失败时仍在 `finally` 中 `await load()` 刷新快照历史，并区分”导出成功但下载失败”的独立错误文案）；右侧新增”历史快照区”`PageSectionCard`（6 列，按 `version` 降序，可重复下载）；`SkuCard` 的 `:blocker` 属性已移除；条目 `isEditable` 改为 `export_status !== 'exported'`（对应 snapshot 条目不可变的约束，见 §9.5 Don'ts）。 |
+| `SuggestionDetailView` | 勾选 `export_status='pending'` 的条目 → “导出 Excel”按钮走一步式 `POST /api/suggestions/{id}/snapshots` + `GET /api/snapshots/{id}/download` blob 流程（失败时仍在 `finally` 中 `await load()` 刷新快照历史，并区分”导出成功但下载失败”的独立错误文案）；右侧新增”历史快照区”`PageSectionCard`（6 列，按 `version` 降序，可重复下载）；`SkuCard` 停止传入 `:blocker`（组件 prop 仍保留但所有调用点不再传值）；条目 `isEditable` 改为 `export_status !== 'exported'`（对应 snapshot 条目不可变的约束，见 §9.5 Don'ts）。 |
 | `GlobalConfigView` | 新增”生成开关卡片”：`el-switch` 即时保存，翻 ON 时弹 `ElMessageBox` 二次确认”将归档全部 draft”，`PATCH` 失败时回滚开关状态并提示；无 `config:edit` 时控件只读并提示”无权限操作此开关”。 |
 | `HistoryView` | 参见 §4.5 — 状态筛选 3 项，快照数 + 导出状态列，`canDelete` 基于 `snapshot_count === 0`。 |
 
@@ -784,11 +784,13 @@ PROCESS_ENABLE_SCHEDULER=true
 
 ### ADR-6：去重基于已推送建议而非赛狐在途
 
-- **决策**：`load_in_transit` 从 `suggestion_item` 汇总已推送条目，而非查赛狐在途
-- **驱动**：
+- **Status**: Superseded by Plan A 2026-04-19（见 §3.6 / PROGRESS.md §3.49）。推送链路已整体删除，本 ADR 的原始决策不再有效，仅保留做审计追溯。
+- **Replacement decision**：`load_in_transit` 改回直接读取赛狐同步下来的在途出库记录（`in_transit_record` + `in_transit_item`，按 `is_in_transit=true` 过滤），不再做跨批次"已推送未归档"去重。业务人员通过 Excel 导出 + 线下落单的工作流替代了即时去重诉求；如果需要防止重复下单，现在依靠"首次导出后翻 OFF 生成开关 → 新周期由业务人员显式翻 ON 并归档旧 draft"这一闸门，而不是引擎层的数量冲销。
+- **原始决策（已失效）**：`load_in_transit` 从 `suggestion_item` 汇总已推送条目，而非查赛狐在途
+- **原始驱动（已失效）**：
   - 赛狐在途数据有同步延迟（需要下次 sync 才写入本地）
   - 已推送建议单立即可查，0 延迟去重
-- **约束**：只考虑近 90 天的已推送建议（避免累积过多历史数据）
+- **原始约束（已失效）**：只考虑近 90 天的已推送建议（避免累积过多历史数据）
 
 ---
 
