@@ -31,7 +31,6 @@
                   :sku="item.commodity_sku"
                   :name="item.commodity_name"
                   :image="item.main_image"
-                  :blocker="item.push_blocker"
                 />
               </div>
               <div class="item-stats">
@@ -122,27 +121,23 @@
                   <div class="panel-header">
                     <div>
                       <div class="section-title">状态信息</div>
-                      <div class="section-desc">用于快速判断当前条目的推送状态和异常信息。</div>
+                      <div class="section-desc">用于快速判断当前条目的导出状态。</div>
                     </div>
                   </div>
                   <div class="status-grid">
                     <div class="status-row">
-                      <span class="status-label">推送状态</span>
-                      <el-tag :type="getSuggestionPushStatusMeta(item.push_status).tagType" size="small">
-                        {{ getSuggestionPushStatusMeta(item.push_status).label }}
+                      <span class="status-label">导出状态</span>
+                      <el-tag :type="item.export_status === 'exported' ? 'success' : 'warning'" size="small">
+                        {{ item.export_status === 'exported' ? '已导出' : '未导出' }}
                       </el-tag>
                     </div>
                     <div class="status-row">
-                      <span class="status-label">推送阻塞</span>
-                      <span class="status-value">{{ item.push_blocker || '-' }}</span>
+                      <span class="status-label">导出时间</span>
+                      <span class="status-value">{{ formatDateTime(item.exported_at) }}</span>
                     </div>
                     <div class="status-row">
-                      <span class="status-label">采购单号</span>
-                      <span class="status-value">{{ item.saihu_po_number || '-' }}</span>
-                    </div>
-                    <div class="status-row">
-                      <span class="status-label">失败原因</span>
-                      <span class="status-value">{{ item.push_error || '-' }}</span>
+                      <span class="status-label">所属快照</span>
+                      <span class="status-value">{{ item.exported_snapshot_id ? `v${item.exported_snapshot_id}` : '-' }}</span>
                     </div>
                   </div>
                 </section>
@@ -165,7 +160,7 @@
                       保存修改
                     </el-button>
                     <el-tag v-if="!isEditable(item)" type="info">
-                      {{ item.push_status === 'pushed' ? '已推送条目不可编辑' : '已归档建议单不可编辑' }}
+                      {{ item.export_status === 'exported' ? '已导出条目不可编辑' : '已归档建议单不可编辑' }}
                     </el-tag>
                     <span v-else-if="!hasChanges(item)" class="action-hint">修改国家补货量或仓库分量后可保存</span>
                   </div>
@@ -201,7 +196,7 @@ import SkuCard from '@/components/SkuCard.vue'
 import { useAuthStore } from '@/stores/auth'
 import { getActionErrorMessage } from '@/utils/apiError'
 import { allocationModeLabel, allocationModeTagType, allocationSummary } from '@/utils/allocation'
-import { getSuggestionPushStatusMeta, getSuggestionStatusMeta } from '@/utils/status'
+import { getSuggestionStatusMeta } from '@/utils/status'
 import dayjs from 'dayjs'
 import { ElMessage } from 'element-plus'
 import { computed, nextTick, reactive, ref, watch } from 'vue'
@@ -306,7 +301,7 @@ function hasChanges(item: SuggestionItem): boolean {
 }
 
 function isEditable(item: SuggestionItem): boolean {
-  return suggestion.value?.status !== 'archived' && item.push_status !== 'pushed' && auth.hasPermission('restock:operate')
+  return suggestion.value?.status !== 'archived' && item.export_status !== 'exported' && auth.hasPermission('restock:operate')
 }
 
 async function save(item: SuggestionItem): Promise<void> {
