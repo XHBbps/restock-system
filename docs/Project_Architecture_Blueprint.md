@@ -421,7 +421,7 @@ async function reload() {
 
 当前已按该模式迁移：
 - `DataOrdersView.vue`：订单列表按页返回，并仅对当前页补查 `item_count` / `has_detail`
-- `HistoryView.vue`：建议单历史页直接消费 `GET /api/suggestions` 的 `items/total/page/page_size`；状态筛选收敛为 3 项（`draft / archived / error`），原推送列被替换为"快照数"+"导出状态"tag；`canDelete(row)` 规则改为 `row.snapshot_count === 0`（代替旧的推送态判断），`successRate()` 等推送期辅助函数已删除
+- `HistoryView.vue`：建议单历史页直接消费 `GET /api/suggestions` 的 `items/total/page/page_size`；状态列使用 `getSuggestionDisplayStatusMeta(status, snapshot_count)` 派生 4 档显示标签（`未提交 / 已导出 / 已归档 / 异常`），状态下拉收敛为 3 档（`未提交 / 已导出 / 已归档`）——`未提交`/`已导出` 均向后端发 `status=draft`，前端再按 `snapshot_count` 二次过滤；`canDelete(row)` 规则为 `row.snapshot_count === 0`。派生逻辑定义在 `frontend/src/utils/status.ts::deriveSuggestionDisplayStatus`，`SuggestionListView` 与 `SuggestionDetailView` 的状态 tag 共用该函数，避免多处硬编码映射。
 - `DataProductsView.vue`：商品页通过 `listSkuOverview()` 下推 SKU、启用状态和分页参数
 - `DataInventoryView.vue`：库存页通过 `GET /api/data/inventory/warehouse-groups` 做仓库分组分页，保持仓库展开明细交互
 - `DataOutRecordsView.vue`：出库记录页将 SKU、仓库单号、国家、类型、在途状态、排序和分页下推到后端
