@@ -3,7 +3,9 @@ FROM python:3.11-slim AS builder
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_DEFAULT_TIMEOUT=120 \
+    PIP_RETRIES=8
 
 WORKDIR /build
 
@@ -12,10 +14,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
+ARG PIP_INDEX_URL=https://pypi.org/simple
+ARG PIP_TRUSTED_HOST=
+
 COPY pyproject.toml README.md ./
 COPY requirements.lock ./
 COPY app ./app
-RUN pip install --prefix=/install -r requirements.lock
+RUN pip install --prefix=/install \
+        --index-url "${PIP_INDEX_URL}" \
+        ${PIP_TRUSTED_HOST:+--trusted-host "${PIP_TRUSTED_HOST}"} \
+        -r requirements.lock
 
 FROM python:3.11-slim AS runtime
 
