@@ -13,11 +13,10 @@ export interface AllocationExplanation {
 
 export interface Suggestion {
   id: number
-  status: 'draft' | 'partial' | 'pushed' | 'archived' | 'error'
+  status: 'draft' | 'archived' | 'error'
   triggered_by: string
   total_items: number
-  pushed_items: number
-  failed_items: number
+  snapshot_count: number
   global_config_snapshot: Record<string, unknown>
   created_at: string
   archived_at: string | null
@@ -36,12 +35,9 @@ export interface SuggestionItem {
   velocity_snapshot: Record<string, number> | null
   sale_days_snapshot: Record<string, number> | null
   urgent: boolean
-  push_blocker: string | null
-  push_status: 'pending' | 'pushed' | 'push_failed' | 'blocked'
-  saihu_po_number: string | null
-  push_error: string | null
-  push_attempt_count: number
-  pushed_at: string | null
+  export_status: 'pending' | 'exported'
+  exported_snapshot_id: number | null
+  exported_at: string | null
 }
 
 export interface SuggestionDetail extends Suggestion {
@@ -86,17 +82,6 @@ export async function patchSuggestionItem(
   const { data } = await client.patch<SuggestionItem>(
     `/api/suggestions/${suggestionId}/items/${itemId}`,
     patch
-  )
-  return data
-}
-
-export async function pushItems(
-  suggestionId: number,
-  itemIds: number[]
-): Promise<{ task_id: number; existing: boolean }> {
-  const { data } = await client.post<{ task_id: number; existing: boolean }>(
-    `/api/suggestions/${suggestionId}/push`,
-    { item_ids: itemIds }
   )
   return data
 }
