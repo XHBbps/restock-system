@@ -21,8 +21,6 @@
       />
       <el-select v-model="status" placeholder="状态" clearable style="width: 140px" @change="() => reload()">
         <el-option label="草稿" value="draft" />
-        <el-option label="部分推送" value="partial" />
-        <el-option label="已推送" value="pushed" />
         <el-option label="已归档" value="archived" />
         <el-option label="异常" value="error" />
       </el-select>
@@ -48,11 +46,12 @@
         </template>
       </el-table-column>
       <el-table-column label="条目数" prop="total_items" width="100" align="right" sortable="custom" show-overflow-tooltip />
-      <el-table-column label="已推送" prop="pushed_items" width="100" align="right" sortable="custom" show-overflow-tooltip />
-      <el-table-column label="失败数" prop="failed_items" width="100" align="right" sortable="custom" show-overflow-tooltip />
-      <el-table-column label="推送成功率" prop="success_rate" width="120" align="right" sortable="custom">
+      <el-table-column label="快照数" prop="snapshot_count" width="100" align="right" sortable="custom" show-overflow-tooltip />
+      <el-table-column label="导出状态" width="110" align="center">
         <template #default="{ row }">
-          {{ successRate(row) }}
+          <el-tag :type="row.snapshot_count > 0 ? 'success' : 'info'" size="small">
+            {{ row.snapshot_count > 0 ? '已导出' : '未导出' }}
+          </el-tag>
         </template>
       </el-table-column>
       <el-table-column label="操作" width="160" align="center">
@@ -141,12 +140,6 @@ async function reload(resetPage = true): Promise<void> {
   }
 }
 
-function successRate(row: Suggestion): string {
-  if (!row.total_items) return '-'
-  const rate = (row.pushed_items / row.total_items) * 100
-  return `${rate.toFixed(0)}%`
-}
-
 function triggeredByLabel(triggeredBy: string): string {
   if (triggeredBy === 'manual') return '手动触发'
   if (triggeredBy === 'scheduler') return '自动触发'
@@ -158,7 +151,7 @@ function goDetail(id: number): void {
 }
 
 function canDelete(row: Suggestion): boolean {
-  return row.status !== 'pushed'
+  return row.snapshot_count === 0
 }
 
 async function remove(row: Suggestion): Promise<void> {
