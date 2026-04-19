@@ -169,7 +169,9 @@ export interface GenerationToggle {
 }
 
 export async function getGenerationToggle(): Promise<GenerationToggle> {
-  const { data } = await client.get<GenerationToggle>('/api/config/generation-toggle')
+  const { data } = await client.get<GenerationToggle>('/api/config/generation-toggle', {
+    suppressForbiddenToast: true,
+  })
   return data
 }
 

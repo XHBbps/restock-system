@@ -14,7 +14,14 @@
           生成开关：{{ toggle.enabled ? '开启' : '已关闭' }}
         </el-tag>
         <el-button @click="loadCurrent">刷新</el-button>
-        <el-button v-if="auth.hasPermission('restock:operate')" type="primary" :loading="generating" @click="triggerEngine">生成补货建议</el-button>
+        <el-button
+          v-if="auth.hasPermission('restock:operate')"
+          type="primary"
+          :loading="generating"
+          :disabled="toggle !== null && !toggle.enabled"
+          :title="toggle !== null && !toggle.enabled ? '生成开关已关闭，请先在「系统配置」中开启' : ''"
+          @click="triggerEngine"
+        >生成补货建议</el-button>
       </template>
 
       <!-- TaskProgress for engine task -->

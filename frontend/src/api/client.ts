@@ -3,6 +3,12 @@ import { useAuthStore } from '@/stores/auth'
 import axios, { AxiosError, type AxiosInstance } from 'axios'
 import { ElMessage } from 'element-plus'
 
+declare module 'axios' {
+  export interface AxiosRequestConfig {
+    suppressForbiddenToast?: boolean
+  }
+}
+
 const client: AxiosInstance = axios.create({
   baseURL: '/',
   timeout: 30000,
@@ -32,7 +38,7 @@ client.interceptors.response.use(
         })
       }
     }
-    if (error.response?.status === 403) {
+    if (error.response?.status === 403 && !error.config?.suppressForbiddenToast) {
       ElMessage.error('权限不足，请联系管理员')
       const auth = useAuthStore()
       auth.restoreAuth() // fire-and-forget
