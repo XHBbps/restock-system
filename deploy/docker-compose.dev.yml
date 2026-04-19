@@ -18,6 +18,7 @@ x-backend-env: &backend-env
   LOGIN_PASSWORD: ${LOGIN_PASSWORD}
   JWT_SECRET: ${JWT_SECRET}
   JWT_EXPIRES_HOURS: 24
+  EXPORT_STORAGE_DIR: /app/data/exports
   TZ: Asia/Shanghai
 
 x-backend-build: &backend-build
@@ -73,6 +74,8 @@ services:
       PROCESS_ENABLE_WORKER: false
       PROCESS_ENABLE_REAPER: false
       PROCESS_ENABLE_SCHEDULER: false
+    volumes:
+      - ./data/exports:/app/data/exports
     depends_on:
       db:
         condition: service_healthy
