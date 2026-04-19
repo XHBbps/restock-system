@@ -104,7 +104,7 @@ import SkuCard from '@/components/SkuCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
 import TaskProgress from '@/components/TaskProgress.vue'
 import { getActionErrorMessage } from '@/utils/apiError'
-import { getSuggestionStatusMeta } from '@/utils/status'
+import { getSuggestionDisplayStatusMeta } from '@/utils/status'
 import {
   applyLocalSort,
   compareNumber,
@@ -138,7 +138,9 @@ const toggleTitle = computed(() => {
 })
 
 const statusMeta = computed(() =>
-  suggestion.value ? getSuggestionStatusMeta(suggestion.value.status) : { label: '暂无', tagType: 'info' as const },
+  suggestion.value
+    ? getSuggestionDisplayStatusMeta(suggestion.value.status, suggestion.value.snapshot_count ?? 0)
+    : { label: '暂无', tagType: 'info' as const },
 )
 
 async function loadCurrent(): Promise<void> {

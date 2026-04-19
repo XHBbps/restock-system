@@ -112,13 +112,14 @@ describe('HistoryView', () => {
     expect(statusIndex).toBeGreaterThan(dateIndex)
   })
 
-  it('status-filter dropdown only offers draft / archived / error', () => {
+  it('status-filter dropdown offers 未提交 / 已导出 / 已归档 派生值', () => {
     const source = readFileSync('src/views/HistoryView.vue', 'utf-8')
-    expect(source).toContain('value="draft"')
+    expect(source).toContain('value="pending"')
+    expect(source).toContain('value="exported"')
     expect(source).toContain('value="archived"')
-    expect(source).toContain('value="error"')
     expect(source).not.toContain('value="pushed"')
     expect(source).not.toContain('value="partial"')
+    expect(source).not.toContain('value="draft"')
   })
 
   it('maps trigger source labels and only allows deleting rows without snapshots', async () => {

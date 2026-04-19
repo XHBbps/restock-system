@@ -16,6 +16,29 @@ const suggestionStatusMap: Record<string, StatusMeta> = {
   error: { label: '异常', tagType: 'danger' },
 }
 
+// 派生的 4 档显示状态：未提交 / 已导出 / 已归档 / 异常
+// - draft + snapshot_count=0 → 未提交
+// - draft + snapshot_count>0 → 已导出（包含分批导出的中间态）
+// - archived → 已归档
+// - error → 异常（兜底）
+const suggestionDisplayStatusMap: Record<string, StatusMeta> = {
+  pending: { label: '未提交', tagType: 'warning' },
+  exported: { label: '已导出', tagType: 'success' },
+  archived: { label: '已归档', tagType: 'info' },
+  error: { label: '异常', tagType: 'danger' },
+}
+
+export type SuggestionDisplayStatus = 'pending' | 'exported' | 'archived' | 'error'
+
+export function deriveSuggestionDisplayStatus(
+  status: string,
+  snapshotCount: number,
+): SuggestionDisplayStatus {
+  if (status === 'archived') return 'archived'
+  if (status === 'error') return 'error'
+  return snapshotCount > 0 ? 'exported' : 'pending'
+}
+
 const syncStatusMap: Record<string, StatusMeta> = {
   success: { label: '成功', tagType: 'success' },
   failed: { label: '失败', tagType: 'danger' },
@@ -34,6 +57,14 @@ const shopStatusMap: Record<string, StatusMeta> = {
 
 export function getSuggestionStatusMeta(status: string): StatusMeta {
   return suggestionStatusMap[status] || fallbackMeta(status)
+}
+
+export function getSuggestionDisplayStatusMeta(
+  status: string,
+  snapshotCount: number,
+): StatusMeta {
+  const derived = deriveSuggestionDisplayStatus(status, snapshotCount)
+  return suggestionDisplayStatusMap[derived] || fallbackMeta(status)
 }
 
 export function getSyncStatusMeta(status: string | null | undefined): StatusMeta {

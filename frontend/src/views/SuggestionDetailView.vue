@@ -243,7 +243,7 @@ import { useAuthStore } from '@/stores/auth'
 import { getActionErrorMessage } from '@/utils/apiError'
 import { triggerBlobDownload } from '@/utils/download'
 import { allocationModeLabel, allocationModeTagType, allocationSummary } from '@/utils/allocation'
-import { getSuggestionStatusMeta } from '@/utils/status'
+import { getSuggestionDisplayStatusMeta } from '@/utils/status'
 import dayjs from 'dayjs'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, nextTick, reactive, ref, watch } from 'vue'
@@ -289,7 +289,9 @@ const exportButtonText = computed(() => {
 })
 
 const suggestionStatusMeta = computed(() =>
-  suggestion.value ? getSuggestionStatusMeta(suggestion.value.status) : { label: '暂无', tagType: 'info' as const },
+  suggestion.value
+    ? getSuggestionDisplayStatusMeta(suggestion.value.status, suggestion.value.snapshot_count ?? 0)
+    : { label: '暂无', tagType: 'info' as const },
 )
 
 const triggeredByLabel = computed(() => {
