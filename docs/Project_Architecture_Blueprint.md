@@ -310,8 +310,9 @@ _ENDPOINT_RATE_OVERRIDES = {
 
 - `restock:export` — 创建 snapshot / 下载文件
 - `restock:new_cycle` — 翻生成开关（含"翻 ON 时清空 draft"的隐含语义）
+- `config:view` — 读取生成开关等全局配置（`GET /api/config/*`）
 
-`superadmin` 角色自动继承全部权限。
+`superadmin` 角色自动继承全部权限。`业务人员` 角色（seed role `id=3`）除既有的 `restock:operate` / `history:delete` 等基础补货权限外，通过迁移 `20260419_0000_grant_export_and_config_view_to_business_role` 补齐 `restock:export` 与 `config:view`，因此可在建议单详情页完成"勾选条目 → 导出 Excel → 下载"闭环，并在列表页看到生成开关只读状态；翻生成开关仍由 `restock:new_cycle` 单独控制（当前仅 `superadmin` 默认持有）。
 
 ---
 
@@ -334,13 +335,15 @@ src/
 ├── api/             # API 客户端（每个领域一个文件）
 ├── stores/          # Pinia 状态（auth / sidebar / task）
 ├── router/          # 路由 + 鉴权守卫
-├── utils/           # 工具函数（format / tableSort / countries / warehouse / status / monitoring / storage / ...）
+├── utils/           # 工具函数（format / tableSort / countries / warehouse / status / monitoring / storage / download / ...）
 ├── styles/          # 设计系统（tokens.scss + element-overrides.scss）
 ├── config/          # 页面元数据与导航配置
 └── main.ts
 ```
 
 `components/dashboard/` 中的 `DashboardChartCard` 当前除标准图表卡片外，还支持在图表下方渲染自定义 footer 区域，用于信息总览页这类“上图下图例”布局；图表撑满高度的样式仅在存在 footer 时启用，普通图表卡片保持原有自适应高度。
+
+**导出链路前端文件关系**：`frontend/src/api/snapshot.ts` 对接后端 `app/api/snapshot.py`（创建 / 列表 / 详情 / 下载）；新增共享工具 `frontend/src/utils/download.ts`（`triggerBlobDownload`）被 `SuggestionDetailView` 的"导出 Excel"按钮与"历史快照区"下载流程共同引用。`api/snapshot.ts` 在 `downloadSnapshotBlob` 中解析 `Content-Disposition` 文件名并回传给 `triggerBlobDownload`，保持 blob 下载行为在全前端只有一份实现。
 
 ### 4.2 设计系统
 
@@ -386,9 +389,11 @@ client.interceptors.response.use(undefined, (error) => {
 })
 ```
 
-**按领域拆分**：`auth.ts` / `data.ts` / `suggestion.ts` / `config.ts` / `monitor.ts` / `sync.ts` / `task.ts` / `dashboard.ts`。每个文件导出类型定义和异步函数。
+**按领域拆分**：`auth.ts` / `data.ts` / `suggestion.ts` / `snapshot.ts` / `config.ts` / `monitor.ts` / `sync.ts` / `task.ts` / `dashboard.ts`。每个文件导出类型定义和异步函数。
 
-`suggestion.ts` 当前负责建议单相关读写：列表查询（返回包含 `snapshot_count`）、详情读取、条目编辑，以及历史记录页使用的 `DELETE /api/suggestions/{id}` 删除接口；snapshot 相关的创建 / 列表 / 详情 / 下载由独立的 `snapshot.ts` 消费（§3.6）。
+`suggestion.ts` 当前负责建议单相关读写：列表查询（返回包含 `snapshot_count`）、详情读取、条目编辑，以及历史记录页使用的 `DELETE /api/suggestions/{id}` 删除接口；snapshot 相关的创建 / 列表 / 详情 / 下载由独立的 `snapshot.ts` 消费（§3.6）。TS 侧 `Suggestion.status` 枚举收敛为 `'draft' | 'archived' | 'error'`，`Suggestion` 携带 `snapshot_count: number`；`SuggestionItem` 去除全部推送字段（`push_status` / `push_blocker` / `push_error` / `push_attempt_count` / `pushed_at` / `saihu_po_number`），新增 `export_status: 'pending' | 'exported'`、`exported_snapshot_id: number | null`、`exported_at: string | null`；`utils/status.ts` 的 `suggestionStatusMap` 同步收缩到 3 项，`suggestionPushStatusMap` / `getSuggestionPushStatusMeta` 等死代码已删除。
+
+`snapshot.ts`（对接 `app/api/snapshot.py`）提供 `createSnapshot` / `listSnapshots`（返回按 `version` 降序）/ `getSnapshot` / `downloadSnapshotBlob`（解析 `Content-Disposition` 拿文件名）等函数；`utils/download.ts` 提供 `triggerBlobDownload(blob, filename)` 浏览器落盘工具，被 `SuggestionDetailView` 的导出按钮与"历史快照区下载"共享复用。
 
 `dashboard.ts` 当前消费 `GET /api/metrics/dashboard` 和 `POST /api/metrics/dashboard/refresh`。信息总览页默认优先读取 `dashboard_snapshot` 缓存，并在页面头部展示快照状态与同步时间；当缓存缺失或读到缺少新字段的旧快照时，后端返回 `snapshot_status="missing"`，不会自动入队刷新，前端仅在具备 `home:refresh` 时展示 `TaskProgress` 轮询与“刷新快照”按钮。缓存 payload 由 `build_dashboard_payload()` 统一生成，其中首行卡片使用 `restock_sku_count`、`no_restock_sku_count`、`risk_country_count` 展示“需补货SKU / 无需补货SKU / 覆盖国家”；左侧“各国缺货风险分布”和“急需补货SKU”继续基于 SKU+国家维度的实时 `sale_days` 计算结果；右侧国家分布继续汇总当前建议单全部条目的 `country_breakdown`。
 
@@ -416,7 +421,7 @@ async function reload() {
 
 当前已按该模式迁移：
 - `DataOrdersView.vue`：订单列表按页返回，并仅对当前页补查 `item_count` / `has_detail`
-- `HistoryView.vue`：建议单历史页直接消费 `GET /api/suggestions` 的 `items/total/page/page_size`
+- `HistoryView.vue`：建议单历史页直接消费 `GET /api/suggestions` 的 `items/total/page/page_size`；状态筛选收敛为 3 项（`draft / archived / error`），原推送列被替换为"快照数"+"导出状态"tag；`canDelete(row)` 规则改为 `row.snapshot_count === 0`（代替旧的推送态判断），`successRate()` 等推送期辅助函数已删除
 - `DataProductsView.vue`：商品页通过 `listSkuOverview()` 下推 SKU、启用状态和分页参数
 - `DataInventoryView.vue`：库存页通过 `GET /api/data/inventory/warehouse-groups` 做仓库分组分页，保持仓库展开明细交互
 - `DataOutRecordsView.vue`：出库记录页将 SKU、仓库单号、国家、类型、在途状态、排序和分页下推到后端
@@ -476,6 +481,15 @@ async function reload() {
 - 左图使用分组柱状图展示各国缺货风险分布，统计对象是实时计算后写入 `dashboard_snapshot.payload.country_risk_distribution` 的 SKU+国家数量，而不是当前建议单快照
 - “急需补货SKU”列表同样使用快照中的国家级 `sale_days`，一行只表示一个 SKU 在一个国家上的风险，不再按 SKU 聚合
 - 右图继续使用饼图，数据仍为 `country_restock_distribution`，即当前建议单全部条目的 `country_breakdown` 汇总，用于展示实际建议补货量的国家分布
+
+**建议单与全局配置视图职责**：
+
+| 视图 | 职责 |
+|---|---|
+| `SuggestionListView` | 顶部 `PageSectionCard.actions` 展示生成开关只读状态 tag（`loadToggle()` + `onMounted` + `onActivated` 双钩子保证切页回来也刷新）；只读标签不可切换（翻开关由 `GlobalConfigView` 负责）。已移除推送时代的选择列、推送按钮、`pushTaskId` 轮询、`selectedIds` / `handleSelection` / `handleSelectAll` / `syncTableSelection` / `handlePush` / `PUSH_STATUS_SORT_ORDER` / `filterPushStatus` 等死代码。 |
+| `SuggestionDetailView` | 勾选 `export_status='pending'` 的条目 → “导出 Excel”按钮走一步式 `POST /api/suggestions/{id}/snapshots` + `GET /api/snapshots/{id}/download` blob 流程（失败时仍在 `finally` 中 `await load()` 刷新快照历史，并区分”导出成功但下载失败”的独立错误文案）；右侧新增”历史快照区”`PageSectionCard`（6 列，按 `version` 降序，可重复下载）；`SkuCard` 的 `:blocker` 属性已移除；条目 `isEditable` 改为 `export_status !== 'exported'`（对应 snapshot 条目不可变的约束，见 §9.5 Don'ts）。 |
+| `GlobalConfigView` | 新增”生成开关卡片”：`el-switch` 即时保存，翻 ON 时弹 `ElMessageBox` 二次确认”将归档全部 draft”，`PATCH` 失败时回滚开关状态并提示；无 `config:edit` 时控件只读并提示”无权限操作此开关”。 |
+| `HistoryView` | 参见 §4.5 — 状态筛选 3 项，快照数 + 导出状态列，`canDelete` 基于 `snapshot_count === 0`。 |
 
 ---
 

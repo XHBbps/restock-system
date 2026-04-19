@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-19（Plan A 后端导出重构落地：推送赛狐链路替换为 Excel 导出 + Snapshot 版本化；24 项集成测试在 `replenish_test` 全绿）
+> 最近更新：2026-04-19（Plan A 前端收尾：导出按钮 + 历史快照区、生成开关卡片、清理赛狐推送时代死代码；业务人员角色补齐 `restock:export` + `config:view`）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -93,6 +93,11 @@
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.50 Plan A 前端收尾：导出按钮 + 历史快照区 + 生成开关 + 推送死代码清理（2026-04-19）
+- 前端：新增快照 API 客户端与 blob 下载工具；建议单详情页加导出按钮（一步式 POST+GET blob）与历史快照区；全局配置页加生成开关卡片（即时保存 + 翻 ON 二次确认）；列表页加开关只读 tag；全量清理赛狐推送时代死代码（~110 行 UI + 8 死字段 + `utils/status.ts` map + 4 个测试文件的推送相关 case）；`Suggestion.status` TS 枚举收敛为 `'draft' | 'archived' | 'error'`；`HistoryView.canDelete` 改用 `snapshot_count === 0`。
+- 后端：alembic 迁移 `20260419_0000_grant_export_and_config_view_to_business_role` 给“业务人员”角色补齐 `restock:export` + `config:view`（幂等 `ON CONFLICT DO NOTHING`）。
+- 新增/更新文件：`frontend/src/api/snapshot.ts`、`frontend/src/utils/download.ts` 新增；`frontend/src/api/suggestion.ts`、`frontend/src/api/config.ts`、`frontend/src/utils/status.ts`、`frontend/src/views/SuggestionDetailView.vue`、`frontend/src/views/SuggestionListView.vue`、`frontend/src/views/HistoryView.vue`、`frontend/src/views/GlobalConfigView.vue` 同步收敛为导出视角，并清理推送字段 / pushItems / selection 列等相关 UI 与测试分支。
 
 ### 3.49 Plan A 后端导出重构：推送赛狐 → Excel 导出 + Snapshot 版本化（2026-04-19）
 - 数据模型：`backend/alembic/versions/20260418_0900_redesign_to_export_model.py` 新增 `suggestion_snapshot` / `suggestion_snapshot_item` / `excel_export_log` 三张表，清空 `suggestion` / `suggestion_item` 的推送字段，追加 `export_status` / `exported_snapshot_id` / `exported_at` / `archived_trigger` / `archived_by` 等导出 & 归档审计字段；`suggestion.status` 枚举收缩为 `draft / archived / error`；`global_config` 新增 `suggestion_generation_enabled` 与 `generation_toggle_updated_by / generation_toggle_updated_at`；非生产数据采用一次性迁移。
