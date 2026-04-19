@@ -12,9 +12,6 @@
       <!-- TaskProgress for engine task -->
       <TaskProgress v-if="genTaskId" :task-id="genTaskId" @terminal="onGenDone" />
 
-      <!-- TaskProgress for push task -->
-      <TaskProgress v-if="pushTaskId" :task-id="pushTaskId" @terminal="onPushDone" />
-
       <el-empty
         v-if="!loading && !suggestion"
         description="当前没有活动建议单，点击上方按钮生成补货建议。"
@@ -25,34 +22,14 @@
         <div class="table-toolbar">
           <div class="toolbar-filters">
             <el-input v-model="searchSku" placeholder="搜索 SKU" clearable style="width: 220px" />
-            <el-select v-model="filterPushStatus" placeholder="推送状态" clearable style="width: 140px">
-              <el-option label="待推送" value="pending" />
-              <el-option label="待处理" value="blocked" />
-              <el-option label="已推送" value="pushed" />
-              <el-option label="推送失败" value="push_failed" />
-            </el-select>
           </div>
-          <el-button
-            v-if="auth.hasPermission('restock:operate')"
-            type="primary"
-            :loading="pushing"
-            :disabled="selectedIds.length === 0"
-            @click="handlePush"
-          >
-            推送（{{ selectedIds.length }}）
-          </el-button>
         </div>
         <el-table
-          ref="tableRef"
           v-loading="loading"
           :data="pagedItems"
-          row-key="id"
           :row-class-name="rowClass"
-          @selection-change="handleSelection"
-          @select-all="handleSelectAll"
           @sort-change="handleSortChange"
         >
-          <el-table-column type="selection" width="48" :selectable="canSelect" />
           <el-table-column label="商品信息" min-width="320">
             <template #default="{ row }">
               <el-tooltip
@@ -85,13 +62,6 @@
               </el-tooltip>
             </template>
           </el-table-column>
-          <el-table-column label="推送状态" prop="push_status" width="120" sortable="custom">
-            <template #default="{ row }">
-              <el-tag :type="getSuggestionPushStatusMeta(row.push_status).tagType">
-                {{ getSuggestionPushStatusMeta(row.push_status).label }}
-              </el-tag>
-            </template>
-          </el-table-column>
           <el-table-column label="操作" width="100" align="center">
             <template #default="{ row }">
               <el-button link type="primary" @click="goDetail(row.id)">详情</el-button>
@@ -112,13 +82,13 @@
 <script setup lang="ts">
 import { runEngine } from '@/api/engine'
 import type { TaskRun } from '@/api/task'
-import { getCurrentSuggestion, pushItems, type SuggestionDetail, type SuggestionItem } from '@/api/suggestion'
+import { getCurrentSuggestion, type SuggestionDetail, type SuggestionItem } from '@/api/suggestion'
 import PageSectionCard from '@/components/PageSectionCard.vue'
 import SkuCard from '@/components/SkuCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
 import TaskProgress from '@/components/TaskProgress.vue'
 import { getActionErrorMessage } from '@/utils/apiError'
-import { getSuggestionPushStatusMeta, getSuggestionStatusMeta } from '@/utils/status'
+import { getSuggestionStatusMeta } from '@/utils/status'
 import {
   applyLocalSort,
   compareNumber,
@@ -127,34 +97,20 @@ import {
   type SortState,
 } from '@/utils/tableSort'
 import { useAuthStore } from '@/stores/auth'
-import type { TableInstance } from 'element-plus'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { ElMessage } from 'element-plus'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
 const auth = useAuthStore()
-const tableRef = ref<TableInstance>()
 const suggestion = ref<SuggestionDetail | null>(null)
-const selectedIds = ref<number[]>([])
-const suppressSelectionSync = ref(false)
 const searchSku = ref('')
-const filterPushStatus = ref('')
-const pushing = ref(false)
 const generating = ref(false)
-const pushTaskId = ref<number | null>(null)
 const genTaskId = ref<number | null>(null)
 const page = ref(1)
 const pageSize = ref(20)
 const loading = ref(false)
 const sortState = ref<SortState>({})
-
-const PUSH_STATUS_SORT_ORDER: Record<SuggestionItem['push_status'], number> = {
-  pending: 0,
-  blocked: 1,
-  push_failed: 2,
-  pushed: 3,
-}
 
 const statusMeta = computed(() =>
   suggestion.value ? getSuggestionStatusMeta(suggestion.value.status) : { label: '暂无', tagType: 'info' as const },
@@ -164,12 +120,10 @@ async function loadCurrent(): Promise<void> {
   loading.value = true
   try {
     suggestion.value = await getCurrentSuggestion()
-    selectedIds.value = []
   } catch (err: unknown) {
     const e = err as { response?: { status?: number } }
     if (e.response?.status === 404) {
       suggestion.value = null
-      selectedIds.value = []
     } else {
       ElMessage.error(getActionErrorMessage(err, '加载当前建议失败'))
     }
@@ -212,9 +166,6 @@ const filteredItems = computed(() => {
     const q = searchSku.value.toLowerCase()
     items = items.filter((it) => it.commodity_sku.toLowerCase().includes(q))
   }
-  if (filterPushStatus.value) {
-    items = items.filter((it) => it.push_status === filterPushStatus.value)
-  }
   return items
 })
 
@@ -229,8 +180,6 @@ const sortedItems = computed(() =>
     sortState.value,
     {
       total_qty: (left, right) => compareNumber(left.total_qty, right.total_qty),
-      push_status: (left, right) =>
-        compareNumber(PUSH_STATUS_SORT_ORDER[left.push_status], PUSH_STATUS_SORT_ORDER[right.push_status]),
     },
     defaultSuggestionComparator,
   ),
@@ -241,118 +190,18 @@ const pagedItems = computed(() => {
   return sortedItems.value.slice(start, start + pageSize.value)
 })
 
-watch([searchSku, filterPushStatus, pageSize], () => {
+watch([searchSku, pageSize], () => {
   page.value = 1
-  selectedIds.value = []
-  nextTick(() => tableRef.value?.clearSelection())
 })
-
-// Restore checkbox state when changing pages
-watch(page, () => {
-  nextTick(() => syncTableSelection())
-})
-
 
 function rowClass({ row }: { row: SuggestionItem }): string {
   return row.urgent ? 'row-urgent' : ''
-}
-
-function canSelect(row: SuggestionItem): boolean {
-  return !row.push_blocker && row.push_status !== 'pushed' && row.push_status !== 'blocked'
-}
-
-function handleSelection(rows: SuggestionItem[]): void {
-  if (suppressSelectionSync.value) return
-  // Sync current page checkbox changes into selectedIds
-  const currentPageIdSet = new Set(pagedItems.value.map((r) => r.id))
-  const kept = selectedIds.value.filter((id) => !currentPageIdSet.has(id))
-  const added = rows.map((r) => r.id)
-  selectedIds.value = [...kept, ...added]
-}
-
-function handleSelectAll(currentPageSelection: SuggestionItem[]): void {
-  // Suppress immediately — selection-change fires synchronously after select-all
-  suppressSelectionSync.value = true
-
-  const isSelectingAll = currentPageSelection.length > 0
-  if (isSelectingAll) {
-    const existing = new Set(selectedIds.value)
-    const toAdd = sortedItems.value
-      .filter((row) => canSelect(row) && !existing.has(row.id))
-      .map((row) => row.id)
-    selectedIds.value = [...selectedIds.value, ...toAdd]
-  } else {
-    selectedIds.value = []
-  }
-
-  nextTick(() => {
-    syncTableSelection()
-  })
-}
-
-function syncTableSelection(): void {
-  const table = tableRef.value
-  if (!table) return
-  suppressSelectionSync.value = true
-  table.clearSelection()
-  const idSet = new Set(selectedIds.value)
-  for (const row of pagedItems.value) {
-    if (idSet.has(row.id)) {
-      table.toggleRowSelection(row, true)
-    }
-  }
-  nextTick(() => { suppressSelectionSync.value = false })
 }
 
 function handleSortChange({ prop, order }: SortChangeEvent): void {
   const normalizedOrder = normalizeSortOrder(order)
   sortState.value = normalizedOrder && prop ? { prop, order: normalizedOrder } : {}
   page.value = 1
-  selectedIds.value = []
-  nextTick(() => tableRef.value?.clearSelection())
-}
-
-async function handlePush(): Promise<void> {
-  if (!suggestion.value || selectedIds.value.length === 0) {
-    ElMessage.warning('请先勾选要推送的条目')
-    return
-  }
-  try {
-    await ElMessageBox.confirm(
-      `确认推送 ${selectedIds.value.length} 条建议生成采购单吗？`,
-      '确认推送',
-      { type: 'warning' },
-    )
-  } catch {
-    return
-  }
-  pushing.value = true
-  try {
-    const resp = await pushItems(
-      suggestion.value.id,
-      selectedIds.value,
-    )
-    pushTaskId.value = resp.task_id
-    if (resp.existing) {
-      ElMessage.warning('已有推送任务在执行，当前复用已有任务进度')
-    } else {
-      ElMessage.success('推送任务已入队')
-    }
-  } catch (error) {
-    ElMessage.error(getActionErrorMessage(error, '推送任务入队失败'))
-  } finally {
-    pushing.value = false
-  }
-}
-
-async function onPushDone(task: TaskRun): Promise<void> {
-  pushTaskId.value = null
-  await loadCurrent()
-  if (task.status === 'success') {
-    ElMessage.success('推送任务已完成，当前建议已刷新')
-    return
-  }
-  ElMessage.error(task.error_msg || '推送任务执行失败，请查看任务详情')
 }
 
 function goDetail(id: number): void {
