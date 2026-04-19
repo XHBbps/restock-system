@@ -12,17 +12,8 @@ const fallbackMeta = (value: string, tagType: TagType = 'info'): StatusMeta => (
 
 const suggestionStatusMap: Record<string, StatusMeta> = {
   draft: { label: '草稿', tagType: 'warning' },
-  partial: { label: '部分推送', tagType: 'warning' },
-  pushed: { label: '已推送', tagType: 'success' },
   archived: { label: '已归档', tagType: 'info' },
   error: { label: '异常', tagType: 'danger' },
-}
-
-const suggestionPushStatusMap: Record<string, StatusMeta> = {
-  pending: { label: '待推送', tagType: 'warning' },
-  pushed: { label: '已推送', tagType: 'success' },
-  push_failed: { label: '推送失败', tagType: 'danger' },
-  blocked: { label: '待处理', tagType: 'info' },
 }
 
 const syncStatusMap: Record<string, StatusMeta> = {
@@ -43,10 +34,6 @@ const shopStatusMap: Record<string, StatusMeta> = {
 
 export function getSuggestionStatusMeta(status: string): StatusMeta {
   return suggestionStatusMap[status] || fallbackMeta(status)
-}
-
-export function getSuggestionPushStatusMeta(status: string): StatusMeta {
-  return suggestionPushStatusMap[status] || fallbackMeta(status)
 }
 
 export function getSyncStatusMeta(status: string | null | undefined): StatusMeta {
