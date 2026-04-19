@@ -1,7 +1,5 @@
 // @vitest-environment jsdom
 
-import { readFileSync } from 'node:fs'
-
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
@@ -10,11 +8,9 @@ import { defineComponent, h } from 'vue'
 import type { SuggestionDetail, SuggestionItem } from '@/api/suggestion'
 
 const mockGetCurrentSuggestion = vi.fn()
-const mockPushItems = vi.fn()
 
 vi.mock('@/api/suggestion', () => ({
   getCurrentSuggestion: (...args: unknown[]) => mockGetCurrentSuggestion(...args),
-  pushItems: (...args: unknown[]) => mockPushItems(...args),
 }))
 
 vi.mock('@/api/client', () => ({
@@ -36,7 +32,10 @@ vi.mock('element-plus', async () => {
   }
 })
 
-function makeItem(id: number, push_status: SuggestionItem['push_status'], push_blocker: string | null = null): SuggestionItem {
+function makeItem(
+  id: number,
+  overrides: Partial<SuggestionItem> = {},
+): SuggestionItem {
   return {
     id,
     commodity_sku: `SKU-${id}`,
@@ -50,12 +49,10 @@ function makeItem(id: number, push_status: SuggestionItem['push_status'], push_b
     velocity_snapshot: null,
     sale_days_snapshot: null,
     urgent: false,
-    push_blocker,
-    push_status,
-    saihu_po_number: null,
-    push_error: null,
-    push_attempt_count: 0,
-    pushed_at: null,
+    export_status: 'pending',
+    exported_snapshot_id: null,
+    exported_at: null,
+    ...overrides,
   }
 }
 
@@ -65,16 +62,15 @@ function makeSuggestion(): SuggestionDetail {
     status: 'draft',
     triggered_by: 'manual',
     total_items: 4,
-    pushed_items: 1,
-    failed_items: 1,
+    snapshot_count: 0,
     global_config_snapshot: {},
     created_at: '2026-04-13T10:00:00',
     archived_at: null,
     items: [
-      makeItem(1, 'pending'),
-      makeItem(2, 'blocked', 'missing_commodity_id'),
-      makeItem(3, 'push_failed'),
-      makeItem(4, 'pushed'),
+      makeItem(1, { total_qty: 10, commodity_sku: 'SKU-ALPHA' }),
+      makeItem(2, { total_qty: 30, commodity_sku: 'SKU-BETA' }),
+      makeItem(3, { total_qty: 20, commodity_sku: 'SKU-GAMMA' }),
+      makeItem(4, { total_qty: 5, commodity_sku: 'SKU-DELTA', urgent: true }),
     ],
   }
 }
@@ -110,8 +106,8 @@ const STUBS = {
   ElTableColumn: true,
   ElTooltip: { template: '<div><slot /></div>' },
   SkuCard: {
-    props: ['sku', 'name', 'image', 'blocker'],
-    template: '<div class="sku-card-stub">{{ sku }}|{{ blocker ?? "none" }}</div>',
+    props: ['sku', 'name', 'image'],
+    template: '<div class="sku-card-stub">{{ sku }}</div>',
   },
 }
 
@@ -135,25 +131,19 @@ describe('SuggestionListView', () => {
     vi.clearAllMocks()
   })
 
-  it('keeps blocked items out of the pending filter', async () => {
+  it('renders the current suggestion items loaded from the API', async () => {
     mockGetCurrentSuggestion.mockResolvedValue(makeSuggestion())
 
     const { default: View } = await import('../SuggestionListView.vue')
     const wrapper = shallowMount(View, createMountOptions())
     await flushPromises()
 
-    const vm = wrapper.vm as unknown as {
-      filterPushStatus: string
-      filteredItems: SuggestionItem[]
-    }
-
-    vm.filterPushStatus = 'pending'
-    await flushPromises()
-
-    expect(vm.filteredItems.map((item) => item.id)).toEqual([1])
+    const vm = wrapper.vm as unknown as { filteredItems: SuggestionItem[] }
+    expect(mockGetCurrentSuggestion).toHaveBeenCalled()
+    expect(vm.filteredItems.map((item) => item.id)).toEqual([1, 2, 3, 4])
   })
 
-  it('supports filtering blocked items separately', async () => {
+  it('filters items by SKU keyword (case insensitive)', async () => {
     mockGetCurrentSuggestion.mockResolvedValue(makeSuggestion())
 
     const { default: View } = await import('../SuggestionListView.vue')
@@ -161,25 +151,60 @@ describe('SuggestionListView', () => {
     await flushPromises()
 
     const vm = wrapper.vm as unknown as {
-      filterPushStatus: string
+      searchSku: string
       filteredItems: SuggestionItem[]
     }
 
-    vm.filterPushStatus = 'blocked'
+    vm.searchSku = 'beta'
     await flushPromises()
 
     expect(vm.filteredItems.map((item) => item.id)).toEqual([2])
   })
 
-  it('does not pass blocker tags through the product card on suggestion list', async () => {
+  it('supports sorting by total_qty via handleSortChange', async () => {
     mockGetCurrentSuggestion.mockResolvedValue(makeSuggestion())
 
     const { default: View } = await import('../SuggestionListView.vue')
-    shallowMount(View, createMountOptions())
+    const wrapper = shallowMount(View, createMountOptions())
     await flushPromises()
 
-    const source = readFileSync('src/views/SuggestionListView.vue', 'utf-8')
-    expect(source).not.toContain(':blocker=')
-    expect(source).toContain('value="blocked"')
+    const vm = wrapper.vm as unknown as {
+      handleSortChange: (event: { prop: string; order: string | null }) => void
+      pagedItems: SuggestionItem[]
+    }
+
+    vm.handleSortChange({ prop: 'total_qty', order: 'descending' })
+    await flushPromises()
+
+    expect(vm.pagedItems.map((item) => item.total_qty)).toEqual([30, 20, 10, 5])
+
+    vm.handleSortChange({ prop: 'total_qty', order: 'ascending' })
+    await flushPromises()
+
+    expect(vm.pagedItems.map((item) => item.total_qty)).toEqual([5, 10, 20, 30])
+  })
+
+  it('paginates items according to pageSize and current page', async () => {
+    mockGetCurrentSuggestion.mockResolvedValue(makeSuggestion())
+
+    const { default: View } = await import('../SuggestionListView.vue')
+    const wrapper = shallowMount(View, createMountOptions())
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      page: number
+      pageSize: number
+      pagedItems: SuggestionItem[]
+    }
+
+    vm.pageSize = 2
+    await flushPromises()
+    vm.page = 1
+    await flushPromises()
+    expect(vm.pagedItems).toHaveLength(2)
+
+    vm.page = 2
+    await flushPromises()
+    expect(vm.pagedItems).toHaveLength(2)
   })
 })

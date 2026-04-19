@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { getListingOnlineStatusMeta, getOutRecordTransitStatusMeta, getSuggestionPushStatusMeta } from './status'
+import { getListingOnlineStatusMeta, getOutRecordTransitStatusMeta } from './status'
 
 describe('getListingOnlineStatusMeta', () => {
   it('treats active status case-insensitively as on sale', () => {
@@ -48,15 +48,6 @@ describe('getOutRecordTransitStatusMeta', () => {
   it('maps inactive rows to 完结', () => {
     expect(getOutRecordTransitStatusMeta(false)).toEqual({
       label: '完结',
-      tagType: 'info',
-    })
-  })
-})
-
-describe('getSuggestionPushStatusMeta', () => {
-  it('maps blocked rows to a dedicated display meta', () => {
-    expect(getSuggestionPushStatusMeta('blocked')).toEqual({
-      label: '待处理',
       tagType: 'info',
     })
   })

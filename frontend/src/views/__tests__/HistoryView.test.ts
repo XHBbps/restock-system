@@ -37,8 +37,7 @@ function makeSuggestion(overrides: Partial<Suggestion> = {}): Suggestion {
     status: 'draft',
     triggered_by: 'manual',
     total_items: 10,
-    pushed_items: 2,
-    failed_items: 1,
+    snapshot_count: 0,
     global_config_snapshot: {},
     created_at: '2026-04-13T10:00:00',
     archived_at: null,
@@ -113,7 +112,16 @@ describe('HistoryView', () => {
     expect(statusIndex).toBeGreaterThan(dateIndex)
   })
 
-  it('maps trigger source labels and only allows deleting non-pushed rows', async () => {
+  it('status-filter dropdown only offers draft / archived / error', () => {
+    const source = readFileSync('src/views/HistoryView.vue', 'utf-8')
+    expect(source).toContain('value="draft"')
+    expect(source).toContain('value="archived"')
+    expect(source).toContain('value="error"')
+    expect(source).not.toContain('value="pushed"')
+    expect(source).not.toContain('value="partial"')
+  })
+
+  it('maps trigger source labels and only allows deleting rows without snapshots', async () => {
     mockListSuggestions.mockResolvedValue({ items: [makeSuggestion()], total: 1, page: 1, pageSize: 20 })
 
     const { default: View } = await import('../HistoryView.vue')
@@ -128,8 +136,8 @@ describe('HistoryView', () => {
     expect(vm.triggeredByLabel('manual')).toBe('手动触发')
     expect(vm.triggeredByLabel('scheduler')).toBe('自动触发')
     expect(vm.triggeredByLabel('test-trigger')).toBe('test-trigger')
-    expect(vm.canDelete(makeSuggestion({ status: 'draft' }))).toBe(true)
-    expect(vm.canDelete(makeSuggestion({ status: 'pushed' }))).toBe(false)
+    expect(vm.canDelete(makeSuggestion({ snapshot_count: 0 }))).toBe(true)
+    expect(vm.canDelete(makeSuggestion({ snapshot_count: 2 }))).toBe(false)
   })
 
   it('confirms deletion, deletes row and refreshes list', async () => {

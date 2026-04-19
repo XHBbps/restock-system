@@ -39,12 +39,9 @@ function makeItem(overrides: Partial<SuggestionItem> = {}): SuggestionItem {
     velocity_snapshot: null,
     sale_days_snapshot: null,
     urgent: false,
-    push_blocker: null,
-    push_status: 'pending',
-    saihu_po_number: null,
-    push_error: null,
-    push_attempt_count: 0,
-    pushed_at: null,
+    export_status: 'pending',
+    exported_snapshot_id: null,
+    exported_at: null,
     ...overrides,
   }
 }
@@ -58,8 +55,7 @@ function makeSuggestion(
     status: 'draft',
     triggered_by: 'manual',
     total_items: 1,
-    pushed_items: 0,
-    failed_items: 0,
+    snapshot_count: 0,
     global_config_snapshot: {},
     created_at: '2026-04-12T10:00:00',
     archived_at: null,
@@ -108,14 +104,14 @@ describe('SuggestionDetailView', () => {
     expect(wrapper.html()).toContain('已归档建议单不可编辑')
   })
 
-  it('shows pushed readonly tag when item is already pushed', async () => {
-    mockGetSuggestion.mockResolvedValue(makeSuggestion({}, { push_status: 'pushed' }))
+  it('shows exported readonly tag when item is already exported', async () => {
+    mockGetSuggestion.mockResolvedValue(makeSuggestion({}, { export_status: 'exported' }))
 
     const { default: View } = await import('../SuggestionDetailView.vue')
     const wrapper = shallowMount(View, { global: { stubs: STUBS } })
     await flushPromises()
 
-    expect(wrapper.html()).toContain('已推送条目不可编辑')
+    expect(wrapper.html()).toContain('已导出条目不可编辑')
   })
 
   it('loads suggestion on mount via getSuggestion API', async () => {
