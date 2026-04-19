@@ -5,6 +5,14 @@
         <el-tag v-if="suggestion" :type="statusMeta.tagType" size="small">
           {{ statusMeta.label }} · {{ suggestion.total_items }} 条
         </el-tag>
+        <el-tag
+          v-if="toggle"
+          :type="toggle.enabled ? 'success' : 'info'"
+          size="small"
+          :title="toggleTitle"
+        >
+          生成开关：{{ toggle.enabled ? '开启' : '已关闭' }}
+        </el-tag>
         <el-button @click="loadCurrent">刷新</el-button>
         <el-button v-if="auth.hasPermission('restock:operate')" type="primary" :loading="generating" @click="triggerEngine">生成补货建议</el-button>
       </template>
@@ -82,6 +90,7 @@
 <script setup lang="ts">
 import { runEngine } from '@/api/engine'
 import type { TaskRun } from '@/api/task'
+import { getGenerationToggle, type GenerationToggle } from '@/api/config'
 import { getCurrentSuggestion, type SuggestionDetail, type SuggestionItem } from '@/api/suggestion'
 import PageSectionCard from '@/components/PageSectionCard.vue'
 import SkuCard from '@/components/SkuCard.vue'
@@ -98,7 +107,7 @@ import {
 } from '@/utils/tableSort'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage } from 'element-plus'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onActivated, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
@@ -111,6 +120,15 @@ const page = ref(1)
 const pageSize = ref(20)
 const loading = ref(false)
 const sortState = ref<SortState>({})
+
+const toggle = ref<GenerationToggle | null>(null)
+
+const toggleTitle = computed(() => {
+  if (!toggle.value) return ''
+  const by = toggle.value.updated_by_name ?? '—'
+  const at = toggle.value.updated_at ?? '—'
+  return `最近操作：${by} @ ${at}`
+})
 
 const statusMeta = computed(() =>
   suggestion.value ? getSuggestionStatusMeta(suggestion.value.status) : { label: '暂无', tagType: 'info' as const },
@@ -209,7 +227,22 @@ function goDetail(id: number): void {
   router.push(`/restock/suggestions/${suggestion.value.id}?item=${id}`)
 }
 
-onMounted(loadCurrent)
+async function loadToggle(): Promise<void> {
+  try {
+    toggle.value = await getGenerationToggle()
+  } catch {
+    // 无权限或后端异常时保持上一次状态，不阻断主流程
+  }
+}
+
+onMounted(() => {
+  void loadCurrent()
+  void loadToggle()
+})
+
+onActivated(() => {
+  void loadToggle()
+})
 </script>
 
 <style lang="scss" scoped>
