@@ -362,17 +362,23 @@ async function handleExport(): Promise<void> {
     return
   }
   exporting.value = true
+  let createdSnapshotId: number | null = null
   try {
     const itemIds = exportable.value.map((it) => it.id)
     const snapshot = await createSnapshot(suggestion.value.id, itemIds)
+    createdSnapshotId = snapshot.id
     const { blob, filename } = await downloadSnapshotBlob(snapshot.id)
     triggerBlobDownload(blob, filename)
     ElMessage.success('导出成功，生成开关已关闭')
-    await Promise.all([load(), loadSnapshots(), loadToggle()])
   } catch (error) {
-    ElMessage.error(getActionErrorMessage(error, '导出失败'))
+    if (createdSnapshotId !== null) {
+      ElMessage.error(getActionErrorMessage(error, '导出成功但下载失败，可在历史快照区手动重试'))
+    } else {
+      ElMessage.error(getActionErrorMessage(error, '导出失败'))
+    }
   } finally {
     exporting.value = false
+    await load()
   }
 }
 

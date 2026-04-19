@@ -14,7 +14,7 @@
       </div>
     </div>
     <div class="toggle-hint">
-      <span v-if="!auth.hasPermission('restock:new_cycle')">你没有翻开关的权限（需要 <code>restock:new_cycle</code>）。</span>
+      <span v-if="!auth.hasPermission('restock:new_cycle')">你没有操作此开关的权限（需要 <code>restock:new_cycle</code>）。</span>
       <span v-else>打开开关会归档所有草稿建议单。</span>
     </div>
   </PageSectionCard>
