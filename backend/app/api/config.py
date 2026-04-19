@@ -7,24 +7,30 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import db_session, db_session_readonly, require_permission
+from app.api.deps import UserContext, db_session, db_session_readonly, get_current_user, require_permission
 from app.core.exceptions import ConflictError, NotFound, ValidationFailed
 from app.core.permissions import (
     CONFIG_EDIT,
     CONFIG_VIEW,
     DATA_BASE_EDIT,
     DATA_BASE_VIEW,
+    RESTOCK_NEW_CYCLE,
     SYNC_OPERATE,
 )
 from app.core.query import escape_like
+from app.core.timezone import now_beijing
 from app.models.global_config import GlobalConfig
 from app.models.inventory import InventorySnapshotLatest
 from app.models.product_listing import ProductListing
 from app.models.shop import Shop
 from app.models.sku import SkuConfig
+from app.models.suggestion import Suggestion
+from app.models.sys_user import SysUser
 from app.models.warehouse import Warehouse
 from app.models.zipcode_rule import ZipcodeRule
 from app.schemas.config import (
+    GenerationToggleOut,
+    GenerationTogglePatch,
     GlobalConfigOut,
     GlobalConfigPatch,
     ShopOut,
@@ -162,6 +168,72 @@ async def patch_global(
             await reload_scheduler()
         row = (await db.execute(select(GlobalConfig).where(GlobalConfig.id == 1))).scalar_one()
     return GlobalConfigOut.model_validate(row)
+
+
+# ============================================================
+# Generation Toggle（补货建议生成总开关）
+# ============================================================
+async def _load_generation_toggle(db: AsyncSession) -> GenerationToggleOut:
+    row = (
+        await db.execute(
+            select(
+                GlobalConfig.suggestion_generation_enabled,
+                GlobalConfig.generation_toggle_updated_by,
+                GlobalConfig.generation_toggle_updated_at,
+                SysUser.display_name,
+            )
+            .outerjoin(SysUser, SysUser.id == GlobalConfig.generation_toggle_updated_by)
+            .where(GlobalConfig.id == 1)
+        )
+    ).one()
+    enabled, updated_by, updated_at, display_name = row
+    return GenerationToggleOut(
+        enabled=bool(enabled),
+        updated_by=updated_by,
+        updated_by_name=display_name,
+        updated_at=updated_at,
+    )
+
+
+@router.get("/generation-toggle", response_model=GenerationToggleOut)
+async def get_generation_toggle(
+    db: AsyncSession = Depends(db_session_readonly),
+    _: None = Depends(require_permission(CONFIG_VIEW)),
+) -> GenerationToggleOut:
+    return await _load_generation_toggle(db)
+
+
+@router.patch("/generation-toggle", response_model=GenerationToggleOut)
+async def patch_generation_toggle(
+    patch: GenerationTogglePatch,
+    db: AsyncSession = Depends(db_session),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(RESTOCK_NEW_CYCLE)),
+) -> GenerationToggleOut:
+    """翻开关。若打开（enabled=True）: 先归档所有 status='draft' 的 suggestion。"""
+    now = now_beijing()
+    if patch.enabled:
+        await db.execute(
+            update(Suggestion)
+            .where(Suggestion.status == "draft")
+            .values(
+                status="archived",
+                archived_at=now,
+                archived_by=user.id,
+                archived_trigger="admin_toggle",
+            )
+        )
+    await db.execute(
+        update(GlobalConfig)
+        .where(GlobalConfig.id == 1)
+        .values(
+            suggestion_generation_enabled=patch.enabled,
+            generation_toggle_updated_by=user.id,
+            generation_toggle_updated_at=now,
+        )
+    )
+    await db.commit()
+    return await _load_generation_toggle(db)
 
 
 # ============================================================

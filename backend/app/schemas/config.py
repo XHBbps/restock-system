@@ -1,5 +1,6 @@
 """配置相关 Pydantic DTO(contracts/config.yaml)。"""
 
+from datetime import datetime
 from typing import Literal
 
 from apscheduler.triggers.cron import CronTrigger
@@ -222,3 +223,17 @@ class ShopOut(BaseModel):
 
 class ShopPatch(BaseModel):
     sync_enabled: bool
+
+
+# ==================== Generation Toggle ====================
+class GenerationToggleOut(BaseModel):
+    enabled: bool
+    updated_by: int | None = None
+    updated_by_name: str | None = None
+    updated_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class GenerationTogglePatch(BaseModel):
+    enabled: bool

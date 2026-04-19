@@ -15,6 +15,7 @@ from app.api import config as config_api
 from app.api import data as data_api
 from app.api import metrics as metrics_api
 from app.api import monitor as monitor_api
+from app.api import snapshot as snapshot_api
 from app.api import suggestion as suggestion_api
 from app.api import sync as sync_api
 from app.api import task as task_api
@@ -28,7 +29,6 @@ from app.core.security import hash_password
 from app.db.session import async_session_factory
 from app.engine import calc_engine_job as _job_calc  # noqa: F401
 from app.models.global_config import GlobalConfig
-from app.pushback import purchase as _job_push  # noqa: F401
 from app.sync import all as _job_all  # noqa: F401
 from app.sync import inventory as _job_inv  # noqa: F401
 from app.sync import order_detail as _job_od  # noqa: F401
@@ -170,6 +170,7 @@ app.include_router(auth_api.router)
 app.include_router(auth_roles_api.router)
 app.include_router(auth_users_api.router)
 app.include_router(task_api.router)
+app.include_router(snapshot_api.router)
 app.include_router(suggestion_api.router)
 app.include_router(sync_api.router)
 app.include_router(config_api.router)

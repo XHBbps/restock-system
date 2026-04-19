@@ -61,7 +61,7 @@ class DashboardOverviewPayload(BaseModel):
     restock_sku_count: int = 0
     no_restock_sku_count: int = 0
     suggestion_item_count: int
-    pushed_count: int
+    exported_count: int
     urgent_count: int
     warning_count: int
     safe_count: int
@@ -224,7 +224,7 @@ def _empty_dashboard_payload(
         restock_sku_count=0,
         no_restock_sku_count=enabled_sku_count,
         suggestion_item_count=0,
-        pushed_count=0,
+        exported_count=0,
         urgent_count=0,
         warning_count=0,
         safe_count=0,
@@ -336,7 +336,7 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
             restock_sku_count=restock_sku_count,
             no_restock_sku_count=no_restock_sku_count,
             suggestion_item_count=0,
-            pushed_count=0,
+            exported_count=0,
             urgent_count=urgent_count,
             warning_count=warning_count,
             safe_count=safe_count,
@@ -360,7 +360,7 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
         .all()
     )
 
-    pushed_count = sum(1 for it in items if it.push_status == "pushed")
+    exported_count = sum(1 for it in items if it.export_status == "exported")
     country_restock_totals: dict[str, int] = {}
     for it in items:
         for country, qty in (it.country_breakdown or {}).items():
@@ -380,7 +380,7 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
         restock_sku_count=restock_sku_count,
         no_restock_sku_count=no_restock_sku_count,
         suggestion_item_count=len(items),
-        pushed_count=pushed_count,
+        exported_count=exported_count,
         urgent_count=urgent_count,
         warning_count=warning_count,
         safe_count=safe_count,

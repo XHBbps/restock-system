@@ -2,17 +2,14 @@
 
 工作流:
 1. 读取 sku_config (enabled=true)
-2. 加载 product_listing 建立 commodity_sku -> commodity_id 映射
-3. 加载 sku_config 的 lead_time 覆盖
-4. Step 1: 算 velocity
-5. Step 2: 加载库存 + 在途,算 sale_days
-6. Step 3: 算 country_qty
-7. Step 4: 算 total
-8. Step 5: 加载邮编规则 + 国家仓库表,对每个 SKU 每个国家分配仓
-9. Step 6: 算 timing
-10. 预检 push_blocker(commodity_id 缺失)
-11. 写 suggestion + suggestion_item
-12. 归档已存在的 draft/partial suggestion
+2. 加载 sku_config 的 lead_time 覆盖
+3. Step 1: 算 velocity
+4. Step 2: 加载库存 + 在途,算 sale_days
+5. Step 3: 算 country_qty
+6. Step 4: 算 total
+7. Step 5: 加载邮编规则 + 国家仓库表,对每个 SKU 每个国家分配仓
+8. Step 6: 算 timing
+9. 写 suggestion + suggestion_item
 """
 
 from typing import Any
@@ -20,7 +17,6 @@ from typing import Any
 from sqlalchemy import insert, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.commodity_id import resolve_commodity_id_map
 from app.core.logging import get_logger
 from app.core.restock_regions import resolve_allowed_restock_regions
 from app.core.timezone import now_beijing
@@ -60,6 +56,19 @@ async def run_engine(ctx: JobContext, *, triggered_by: str = "scheduler") -> int
         )
         # 加载全局配置
         config = (await db.execute(select(GlobalConfig).where(GlobalConfig.id == 1))).scalar_one()
+
+        # 生成开关：关闭时跳过本次引擎运行（手动/定时均受控）
+        if not config.suggestion_generation_enabled:
+            logger.warning(
+                "engine_generation_disabled",
+                extra={"triggered_by": triggered_by},
+            )
+            await ctx.progress(
+                current_step="完成",
+                step_detail="补货建议生成已关闭,跳过本次计算",
+            )
+            return None
+
         global_snapshot = _config_snapshot(config)
         allowed_countries = resolve_allowed_restock_regions(config.restock_regions)
 
@@ -131,9 +140,6 @@ async def run_engine(ctx: JobContext, *, triggered_by: str = "scheduler") -> int
             allowed_countries=allowed_countries,
         )
 
-        # 加载 commodity_id 映射(取每个 sku 任一 listing 的 commodity_id)
-        commodity_id_map = await _load_commodity_id_map(db, sku_list)
-
         # 对每个 SKU 计算最终结果
         items_to_insert: list[dict[str, Any]] = []
         processed = 0
@@ -185,15 +191,9 @@ async def run_engine(ctx: JobContext, *, triggered_by: str = "scheduler") -> int
                 lead_time_days=lead_time,
             )
 
-            # push_blocker 预检
-            commodity_id = commodity_id_map.get(sku)
-            push_blocker = None if commodity_id else "missing_commodity_id"
-            push_status = "blocked" if push_blocker else "pending"
-
             items_to_insert.append(
                 {
                     "commodity_sku": sku,
-                    "commodity_id": commodity_id,
                     "total_qty": total_qty,
                     "country_breakdown": sku_country_qty,
                     "warehouse_breakdown": warehouse_breakdown,
@@ -201,8 +201,6 @@ async def run_engine(ctx: JobContext, *, triggered_by: str = "scheduler") -> int
                     "velocity_snapshot": velocity.get(sku, {}),
                     "sale_days_snapshot": sale_days.get(sku, {}),
                     "urgent": urgency.urgent,
-                    "push_blocker": push_blocker,
-                    "push_status": push_status,
                 }
             )
 
@@ -211,6 +209,7 @@ async def run_engine(ctx: JobContext, *, triggered_by: str = "scheduler") -> int
                 await ctx.progress(step_detail=f"已处理 {processed} 条建议")
 
         await ctx.progress(current_step="Step 6: 持久化建议单")
+        await _archive_active(db)
         suggestion_id = await _persist_suggestion(
             db, global_snapshot, triggered_by, items_to_insert
         )
@@ -235,18 +234,12 @@ def _config_snapshot(config: GlobalConfig) -> dict[str, Any]:
     }
 
 
-async def _load_commodity_id_map(db: AsyncSession, skus: list[str]) -> dict[str, str | None]:
-    """Resolve commodity IDs using the shared fallback strategy."""
-    return await resolve_commodity_id_map(db, skus)
-
-
 async def _persist_suggestion(
     db: AsyncSession,
     global_snapshot: dict[str, Any],
     triggered_by: str,
     items: list[dict[str, Any]],
 ) -> int:
-    await _archive_active(db)
     sug = await db.execute(
         insert(Suggestion)
         .values(

@@ -14,7 +14,9 @@ from app.models.global_config import GlobalConfig
 from app.models.inventory import InventorySnapshotLatest
 from app.models.order import OrderDetail, OrderHeader, OrderItem
 from app.models.product_listing import ProductListing
+from app.models.role import Role
 from app.models.sku import SkuConfig
+from app.models.sys_user import SysUser
 from app.models.warehouse import Warehouse
 
 BEIJING = ZoneInfo("Asia/Shanghai")
@@ -22,6 +24,35 @@ BEIJING = ZoneInfo("Asia/Shanghai")
 # ---------------------------------------------------------------------------
 # Individual factories
 # ---------------------------------------------------------------------------
+
+
+async def seed_test_user(db: AsyncSession, user_id: int = 1) -> SysUser:
+    """Seed a superadmin role + sys_user matching the conftest override_user
+    (id=1, username=test-owner). Idempotent: skips if row already exists."""
+    role = (await db.execute(Role.__table__.select().where(Role.id == user_id))).first()
+    if role is None:
+        db.add(Role(id=user_id, name="superadmin-test", description="", is_superadmin=True))
+        await db.flush()
+    existing = (
+        await db.execute(SysUser.__table__.select().where(SysUser.id == user_id))
+    ).first()
+    if existing is None:
+        user = SysUser(
+            id=user_id,
+            username="test-owner",
+            display_name="Test Owner",
+            password_hash="placeholder",
+            role_id=user_id,
+            is_active=True,
+            perm_version=0,
+        )
+        db.add(user)
+        await db.flush()
+        return user
+    # Re-fetch the ORM instance for callers that need it
+    return (
+        await db.execute(SysUser.__table__.select().where(SysUser.id == user_id))
+    ).one()  # type: ignore[return-value]
 
 
 async def seed_global_config(db: AsyncSession, **overrides) -> GlobalConfig:

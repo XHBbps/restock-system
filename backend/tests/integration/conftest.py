@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from app.db.base import Base
 
@@ -25,7 +26,10 @@ def db_engine():
             "请使用独立测试库：TEST_DATABASE_URL=...replenish_test",
             returncode=1,
         )
-    engine = create_async_engine(url, echo=False)
+    # NullPool: 每次获取连接都新建,避免跨 event loop 复用连接导致的
+    # "Task got Future attached to a different loop" 错误
+    # (fixture 默认 session 作用域 vs test 默认 function 作用域)
+    engine = create_async_engine(url, echo=False, poolclass=NullPool)
     return engine
 
 
@@ -48,13 +52,21 @@ async def db_session(db_engine) -> AsyncIterator[AsyncSession]:
 
 @pytest.fixture
 async def client(db_engine) -> AsyncIterator[AsyncClient]:
+    from unittest.mock import patch
+
     from app.api.deps import UserContext
     from app.api.deps import db_session as dep_db_session
     from app.api.deps import db_session_readonly as dep_db_session_readonly
     from app.api.deps import get_current_user as dep_get_current_user
     from app.main import app
+    from tests.integration.factories import seed_test_user
 
     session_factory = async_sessionmaker(db_engine, expire_on_commit=False)
+
+    # 预置 role + sys_user 以满足 generation_toggle_updated_by 等 FK
+    async with session_factory() as seed_session:
+        await seed_test_user(seed_session)
+        await seed_session.commit()
 
     async def override_db():
         async with session_factory() as session:
@@ -71,12 +83,24 @@ async def client(db_engine) -> AsyncIterator[AsyncClient]:
             perm_version=0,
         )
 
+    # /readyz 依赖生产 async_session_factory + worker/reaper/scheduler 运行状态，
+    # 测试环境里这些都不可达；用短路实现让 readiness probe 走通
+    async def _fake_db_ready() -> bool:
+        return True
+
+    async def _fake_bg_ready() -> tuple[bool, dict[str, bool]]:
+        return True, {"worker": True, "reaper": True, "scheduler": True}
+
     app.dependency_overrides[dep_db_session] = override_db
     app.dependency_overrides[dep_db_session_readonly] = override_db
     app.dependency_overrides[dep_get_current_user] = override_user
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
+    with (
+        patch("app.main._database_ready", _fake_db_ready),
+        patch("app.main._background_ready", _fake_bg_ready),
+    ):
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            yield ac
     app.dependency_overrides.clear()
 
 

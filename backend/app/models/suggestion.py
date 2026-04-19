@@ -1,4 +1,4 @@
-"""建议单主表 + 条目表。"""
+"""建议单主表 + 条目表（导出模式）。"""
 
 from datetime import datetime
 from typing import Any
@@ -12,7 +12,6 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
-    Text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -27,7 +26,7 @@ class Suggestion(Base):
     __tablename__ = "suggestion"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('draft','partial','pushed','archived','error')",
+            "status IN ('draft','archived','error')",
             name="status_enum",
         ),
         Index("ix_suggestion_created_at", "created_at"),
@@ -39,15 +38,19 @@ class Suggestion(Base):
     global_config_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
 
     total_items: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    pushed_items: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    failed_items: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     triggered_by: Mapped[str] = mapped_column(String(20), nullable=False)
+
+    # 归档信息
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    archived_by: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("sys_user.id", ondelete="SET NULL"), nullable=True
+    )
+    archived_trigger: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
-    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -57,13 +60,13 @@ class Suggestion(Base):
 
 
 class SuggestionItem(Base):
-    """建议单条目:每行对应一个 commodity_sku 的完整补货建议。"""
+    """建议单条目：每行对应一个 commodity_sku 的完整补货建议。"""
 
     __tablename__ = "suggestion_item"
     __table_args__ = (
         CheckConstraint(
-            "push_status IN ('pending','pushed','push_failed','blocked')",
-            name="push_status_enum",
+            "export_status IN ('pending','exported')",
+            name="export_status_enum",
         ),
         Index("ix_suggestion_item_suggestion", "suggestion_id"),
         Index("ix_suggestion_item_sku", "commodity_sku"),
@@ -71,6 +74,11 @@ class SuggestionItem(Base):
             "ix_suggestion_item_urgent",
             "urgent",
             postgresql_where="urgent = true",
+        ),
+        Index(
+            "ix_suggestion_item_export_status",
+            "suggestion_id",
+            "export_status",
         ),
     )
 
@@ -82,7 +90,6 @@ class SuggestionItem(Base):
     )
 
     commodity_sku: Mapped[str] = mapped_column(String(100), nullable=False)
-    commodity_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     total_qty: Mapped[int] = mapped_column(Integer, nullable=False)
     country_breakdown: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
@@ -94,13 +101,14 @@ class SuggestionItem(Base):
 
     urgent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
-    # 推送相关
-    push_blocker: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    push_status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
-    saihu_po_number: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    push_error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    push_attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    pushed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # 导出状态
+    export_status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    exported_snapshot_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("suggestion_snapshot.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    exported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
