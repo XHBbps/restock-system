@@ -132,7 +132,6 @@ referencing==0.37.0
 reportlab==4.4.9
 requests==2.32.5
 requests-oauthlib==2.0.0
--e git+https://github.com/XHBbps/restock-system.git@9db556a200a7b2dc3e582468f00a808714315fe6#egg=restock_backend&subdirectory=backend
 rich==14.3.1
 rpds-py==0.30.0
 rsa==4.9.1
