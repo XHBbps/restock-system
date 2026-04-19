@@ -65,6 +65,8 @@ async def test_patch_generation_toggle_on_archives_draft_suggestions(
     assert body["updated_by"] == 1
     assert body["updated_at"] is not None
 
+    # PATCH 在另一个 session 里提交,清掉本 session 的 identity-map 缓存
+    db_session.expire_all()
     # draft 被归档，其他状态不变
     rows = {
         r.id: r

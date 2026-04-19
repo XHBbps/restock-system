@@ -58,5 +58,5 @@ async def test_patch_global_config_rejects_target_days_less_than_lead_time(
 
     resp = await client.patch("/api/config/global", json={"target_days": 40})
 
-    assert resp.status_code == 422
+    assert resp.status_code == 400
     assert resp.json()["message"] == "目标库存天数不能小于采购提前期"

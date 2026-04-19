@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import UserContext, db_session, get_current_user, require_permission
 from app.config import get_settings
 from app.core.permissions import RESTOCK_EXPORT, RESTOCK_VIEW
+from app.core.timezone import now_beijing
 from app.models.excel_export_log import ExcelExportLog
 from app.models.global_config import GlobalConfig
 from app.models.product_listing import ProductListing
@@ -169,7 +169,7 @@ async def create_snapshot(
         })
 
     # 7. 更新 suggestion_item 导出状态
-    now = datetime.utcnow()
+    now = now_beijing()
     await db.execute(
         update(SuggestionItem)
         .where(SuggestionItem.id.in_(body.item_ids))
@@ -366,7 +366,7 @@ async def download_snapshot(
         .where(SuggestionSnapshot.id == snapshot_id)
         .values(
             download_count=SuggestionSnapshot.download_count + 1,
-            last_downloaded_at=datetime.utcnow(),
+            last_downloaded_at=now_beijing(),
         )
     )
     db.add(

@@ -209,6 +209,7 @@ async def run_engine(ctx: JobContext, *, triggered_by: str = "scheduler") -> int
                 await ctx.progress(step_detail=f"已处理 {processed} 条建议")
 
         await ctx.progress(current_step="Step 6: 持久化建议单")
+        await _archive_active(db)
         suggestion_id = await _persist_suggestion(
             db, global_snapshot, triggered_by, items_to_insert
         )
