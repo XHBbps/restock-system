@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-17（大数据页服务端分页已落地，并修复 GHCR 发布链路对大小写仓库 owner 的兼容问题）
+> 最近更新：2026-04-19（Plan A 后端导出重构落地：推送赛狐链路替换为 Excel 导出 + Snapshot 版本化；24 项集成测试在 `replenish_test` 全绿）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -9,7 +9,7 @@
 
 | 维度 | 状态 |
 |---|---|
-| 主链路 | 打通 — 赛狐同步 → 补货计算 → 建议编辑 → 采购单推送 |
+| 主链路 | 打通 — 赛狐同步 → 补货计算 → 建议编辑 → Excel 导出 + Snapshot 版本化（Plan A 已替换推送赛狐） |
 | 工程化 | 运行时配置校验、健康检查、部署脚本、CI 骨架、测试覆盖已就绪 |
 | 前端 | 已统一到 `PageSectionCard`；订单、历史、商品、库存、出库记录等高增长页面已切换为后端分页模式，设计系统对齐 shadcn Zinc |
 | 后端 | 三服务进程分离（backend / worker / scheduler），TaskRun 队列稳定运行 |
@@ -93,6 +93,17 @@
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.49 Plan A 后端导出重构：推送赛狐 → Excel 导出 + Snapshot 版本化（2026-04-19）
+- 数据模型：`backend/alembic/versions/20260418_0900_redesign_to_export_model.py` 新增 `suggestion_snapshot` / `suggestion_snapshot_item` / `excel_export_log` 三张表，清空 `suggestion` / `suggestion_item` 的推送字段，追加 `export_status` / `exported_snapshot_id` / `exported_at` / `archived_trigger` / `archived_by` 等导出 & 归档审计字段；`suggestion.status` 枚举收缩为 `draft / archived / error`；`global_config` 新增 `suggestion_generation_enabled` 与 `generation_toggle_updated_by / generation_toggle_updated_at`；非生产数据采用一次性迁移。
+- ORM + DTO 同步：`backend/app/models/{suggestion,suggestion_snapshot,excel_export_log,global_config}.py`、`backend/app/schemas/{suggestion,suggestion_snapshot,config}.py` 去除全部 push 字段并新增 snapshot 相关 DTO。
+- Excel 生成：新增 `backend/app/services/excel_export.py`，基于 openpyxl 生成四 Sheet 工作簿（汇总 / 明细 / 国家 / 仓库分仓）；文件落到 `deploy/data/exports/{yyyy}/{mm}/` 容器卷，文件名由 `build_filename(suggestion_id, version, exported_at_compact)` 统一；`openpyxl>=3.1.2` 加入 `backend/pyproject.toml` 生产依赖。
+- 新增快照 API（`backend/app/api/snapshot.py`）：`POST /api/suggestions/{id}/snapshots` 创建并冻结 snapshot、生成 Excel 并将 `suggestion_generation_enabled` 翻为 OFF；`GET /api/suggestions/{id}/snapshots`、`GET /api/snapshots/{id}`、`GET /api/snapshots/{id}/download` 支持列表 / 详情 / 下载计数 + `excel_export_log` 审计；时间戳统一走 `now_beijing()`。
+- 生成开关 API（`backend/app/api/config.py`）：新增 `GET/PATCH /api/config/generation-toggle`；翻 ON 时连带归档全部 `status='draft'` 建议单并打上 `archived_trigger='admin_toggle'` + `archived_by` / `archived_at`。
+- 建议单 & 引擎清理：`backend/app/api/suggestion.py` 删除 `POST /api/suggestions/{id}/push`，`GET /api/suggestions` 注入 `snapshot_count`，删除接口校验快照归属；`backend/app/engine/runner.py` 在生成开关关闭时直接返回 `None`，`_archive_active` 现由 `run_engine` 在写入新 draft 前主动调用，移除 `commodity_id` 自动补齐；`backend/app/tasks/access.py` 及任务注册清理 `push_saihu`。
+- 权限：`backend/app/core/permissions.py` 新增 `restock:export` / `restock:new_cycle`，`superadmin` 自动继承。
+- 代码删除：`backend/app/pushback/purchase.py`、`backend/app/saihu/endpoints/purchase_create.py`、`backend/app/core/commodity_id.py` 及对应 `push_saihu` / `test_pushback_*` / `test_commodity_id.py` 等旧单测。
+- 集成测试抱真实 PostgreSQL：`backend/tests/integration/conftest.py` 采用 `NullPool` 避免跨 event loop 连接复用，client fixture 预置 role+sys_user 并以 `unittest.mock.patch` 短路 `/readyz` 的数据库 / 后台探测；`backend/tests/integration/factories.py` 新增 `seed_test_user`；`backend/pyproject.toml` 将 `asyncio_default_fixture_loop_scope` 改为 `function`；新增 `backend/tests/integration/test_export_e2e.py`、`test_generation_toggle_api.py` 等，`test_config_api.py` 同步新字段。24 项集成测试在 `replenish_test` 库全绿（`TEST_DATABASE_URL=postgresql+asyncpg://postgres@localhost:5433/replenish_test`）。
 
 ### 3.44 鉴权/RBAC 收口与快照刷新边界修复（2026-04-16）
 - `backend/app/api/config.py`、`backend/app/api/data.py`、`backend/app/api/suggestion.py` 不再使用弱化版 `get_current_session()`；改为基于 `get_current_user()` / `require_permission()` 的后端权限校验，分别对 `config:*`、`data_base:*`、`data_biz:*`、`sync:view`、`restock:*`、`history:delete` 生效
