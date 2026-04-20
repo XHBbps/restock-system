@@ -169,6 +169,7 @@ docker compose --env-file deploy/.env.dev -f deploy/docker-compose.dev.yml up -d
 
 补充说明：
 
+- `deploy/.env.dev` 默认提供 `PIP_INDEX_URL=https://pypi.org/simple`；若本机访问官方源较慢，可自行覆盖 `PIP_INDEX_URL`，并按需补充 `PIP_TRUSTED_HOST`
 - 全栈 Compose 使用独立项目名 `restock-dev`，不会影响生产 `deploy/docker-compose.yml`
 - PostgreSQL 对宿主机暴露 `5433`，避免占用本地原生开发常用的 `5432`
 - 容器名固定为 `restock-dev-*`，因此 `docker ps` 不会再出现 Compose 自动追加的 `-1`

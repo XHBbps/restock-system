@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-20（全量审查收口：导出快照并发/失败补偿、历史 display_status 下沉到后端、Dashboard 导出统计口径修正、生成开关 fail-close、TaskRun worker 租约守卫）
+> 最近更新：2026-04-20（全量审查收口：导出快照并发/失败补偿、历史 display_status 下沉到后端、Dashboard 导出统计口径修正、生成开关 fail-close、TaskRun worker 租约守卫、本地 dev 重建镜像源可配置）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -111,6 +111,9 @@
 - **测试与审查**：
   - 新增/更新 `backend/tests/unit/test_metrics_snapshot_api.py`、`backend/tests/unit/test_suggestion_list_api.py`、`backend/tests/unit/test_worker.py`、`backend/tests/integration/test_snapshot_api.py` 与 5 个前端视图单测，覆盖快照失败重试、display_status 过滤、worker 租约丢失守卫和 fail-close 行为。
   - 二次人工 review 未发现新的阻断问题；CodeRabbit CLI 当前环境未安装，未执行外部 review。
+- **本地 dev 重建稳定性**：
+  - `deploy/docker-compose.dev.yml` 不再硬编码清华镜像，改为从 `deploy/.env.dev` 读取 `PIP_INDEX_URL` / `PIP_TRUSTED_HOST`，默认回落到官方 PyPI，避免本地 `docker compose ... up -d --build` 因单一镜像源超时而直接阻断。
+  - `deploy/.env.dev.example`、`docs/deployment.md`、`docs/onboarding.md` 同步补充 pip 镜像源覆盖说明，保持本地全栈重建入口可调试。
 
 ### 3.51 Plan A 收尾 hotfix + 历史状态显示派生化（2026-04-19）
 - **后端**：`backend/app/api/metrics.py` 的 `DashboardOverviewPayload` 为 `restock_sku_count`/`no_restock_sku_count`/`exported_count` 新增 `= 0` 默认值，兼容 Plan A 之前生成的旧 `dashboard_snapshot.payload`，修复信息总览 500。

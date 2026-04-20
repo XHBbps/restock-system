@@ -2,10 +2,9 @@ FROM python:3.11-slim AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PIP_DEFAULT_TIMEOUT=120 \
-    PIP_RETRIES=8
+    PIP_DEFAULT_TIMEOUT=300 \
+    PIP_RETRIES=12
 
 WORKDIR /build
 
@@ -20,7 +19,8 @@ ARG PIP_TRUSTED_HOST=
 COPY pyproject.toml README.md ./
 COPY requirements.lock ./
 COPY app ./app
-RUN pip install --prefix=/install \
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --prefix=/install \
         --index-url "${PIP_INDEX_URL}" \
         ${PIP_TRUSTED_HOST:+--trusted-host "${PIP_TRUSTED_HOST}"} \
         -r requirements.lock
