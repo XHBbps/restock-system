@@ -12,17 +12,31 @@ const fallbackMeta = (value: string, tagType: TagType = 'info'): StatusMeta => (
 
 const suggestionStatusMap: Record<string, StatusMeta> = {
   draft: { label: '草稿', tagType: 'warning' },
-  partial: { label: '部分推送', tagType: 'warning' },
-  pushed: { label: '已推送', tagType: 'success' },
   archived: { label: '已归档', tagType: 'info' },
   error: { label: '异常', tagType: 'danger' },
 }
 
-const suggestionPushStatusMap: Record<string, StatusMeta> = {
-  pending: { label: '待推送', tagType: 'warning' },
-  pushed: { label: '已推送', tagType: 'success' },
-  push_failed: { label: '推送失败', tagType: 'danger' },
-  blocked: { label: '待处理', tagType: 'info' },
+// 派生的 4 档显示状态：未提交 / 已导出 / 已归档 / 异常
+// - draft + snapshot_count=0 → 未提交
+// - draft + snapshot_count>0 → 已导出（包含分批导出的中间态）
+// - archived → 已归档
+// - error → 异常（兜底）
+const suggestionDisplayStatusMap: Record<string, StatusMeta> = {
+  pending: { label: '未提交', tagType: 'warning' },
+  exported: { label: '已导出', tagType: 'success' },
+  archived: { label: '已归档', tagType: 'info' },
+  error: { label: '异常', tagType: 'danger' },
+}
+
+export type SuggestionDisplayStatus = 'pending' | 'exported' | 'archived' | 'error'
+
+export function deriveSuggestionDisplayStatus(
+  status: string,
+  snapshotCount: number,
+): SuggestionDisplayStatus {
+  if (status === 'archived') return 'archived'
+  if (status === 'error') return 'error'
+  return snapshotCount > 0 ? 'exported' : 'pending'
 }
 
 const syncStatusMap: Record<string, StatusMeta> = {
@@ -45,8 +59,12 @@ export function getSuggestionStatusMeta(status: string): StatusMeta {
   return suggestionStatusMap[status] || fallbackMeta(status)
 }
 
-export function getSuggestionPushStatusMeta(status: string): StatusMeta {
-  return suggestionPushStatusMap[status] || fallbackMeta(status)
+export function getSuggestionDisplayStatusMeta(
+  status: string,
+  snapshotCount: number,
+): StatusMeta {
+  const derived = deriveSuggestionDisplayStatus(status, snapshotCount)
+  return suggestionDisplayStatusMap[derived] || fallbackMeta(status)
 }
 
 export function getSyncStatusMeta(status: string | null | undefined): StatusMeta {

@@ -32,6 +32,10 @@ logger = get_logger(__name__)
 _WORKER_ID = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
 
 
+class TaskLeaseLostError(RuntimeError):
+    """任务租约已丢失，worker 不应继续写回状态。"""
+
+
 class Worker:
     """单实例后台 worker。"""
 
@@ -136,16 +140,24 @@ class Worker:
             return
 
         # 启动心跳续租
-        heartbeat_task = asyncio.create_task(self._heartbeat_loop(task_id))
+        lease_lost = asyncio.Event()
+        heartbeat_task = asyncio.create_task(self._heartbeat_loop(task_id, lease_lost))
         try:
             ctx = JobContext(
                 task_id=task_id,
                 job_name=job_name,
                 payload=payload,
-                progress_setter=self._make_progress_setter(task_id),
+                progress_setter=self._make_progress_setter(task_id, lease_lost),
             )
             await handler(ctx)
             await self._mark_success(task_id)
+        except TaskLeaseLostError:
+            logger.warning(
+                "task_lease_lost",
+                task_id=task_id,
+                job_name=job_name,
+                worker_id=_WORKER_ID,
+            )
         except Exception as exc:
             logger.exception("task_failed", task_id=task_id, job_name=job_name)
             await self._mark_failed(task_id, str(exc))
@@ -154,7 +166,7 @@ class Worker:
             with suppress(asyncio.CancelledError, Exception):
                 await heartbeat_task
 
-    async def _heartbeat_loop(self, task_id: int) -> None:
+    async def _heartbeat_loop(self, task_id: int, lease_lost: asyncio.Event) -> None:
         settings = get_settings()
         interval = settings.worker_heartbeat_seconds
         lease_seconds = settings.worker_lease_minutes * 60
@@ -162,28 +174,41 @@ class Worker:
             while True:
                 await asyncio.sleep(interval)
                 async with async_session_factory() as db:
-                    await db.execute(
+                    result = await db.execute(
                         text(
                             """
                             UPDATE task_run
                             SET heartbeat_at = now(),
                                 lease_expires_at = now() + make_interval(secs => :lease_seconds)
-                            WHERE id = :id AND status = 'running'
+                            WHERE id = :id
+                              AND status = 'running'
+                              AND worker_id = :worker_id
                             """
                         ),
-                        {"id": task_id, "lease_seconds": lease_seconds},
+                        {
+                            "id": task_id,
+                            "lease_seconds": lease_seconds,
+                            "worker_id": _WORKER_ID,
+                        },
                     )
                     await db.commit()
+                    if (result.rowcount or 0) == 0:
+                        lease_lost.set()
+                        return
         except asyncio.CancelledError:
             return
 
-    def _make_progress_setter(self, task_id: int) -> Callable[..., Awaitable[None]]:
+    def _make_progress_setter(
+        self, task_id: int, lease_lost: asyncio.Event
+    ) -> Callable[..., Awaitable[None]]:
         async def setter(
             *,
             current_step: str | None = None,
             step_detail: str | None = None,
             total_steps: int | None = None,
         ) -> None:
+            if lease_lost.is_set():
+                raise TaskLeaseLostError(f"task {task_id} lease lost before progress update")
             values: dict[str, Any] = {}
             if current_step is not None:
                 values["current_step"] = current_step
@@ -194,8 +219,19 @@ class Worker:
             if not values:
                 return
             async with async_session_factory() as db:
-                await db.execute(update(TaskRun).where(TaskRun.id == task_id).values(**values))
+                result = await db.execute(
+                    update(TaskRun)
+                    .where(
+                        TaskRun.id == task_id,
+                        TaskRun.status == "running",
+                        TaskRun.worker_id == _WORKER_ID,
+                    )
+                    .values(**values)
+                )
                 await db.commit()
+                if (result.rowcount or 0) == 0:
+                    lease_lost.set()
+                    raise TaskLeaseLostError(f"task {task_id} lease lost during progress update")
 
         return setter
 
@@ -203,7 +239,11 @@ class Worker:
         async with async_session_factory() as db:
             await db.execute(
                 update(TaskRun)
-                .where(TaskRun.id == task_id)
+                .where(
+                    TaskRun.id == task_id,
+                    TaskRun.status == "running",
+                    TaskRun.worker_id == _WORKER_ID,
+                )
                 .values(status="success", finished_at=now_beijing())
             )
             await db.commit()
@@ -212,7 +252,11 @@ class Worker:
         async with async_session_factory() as db:
             await db.execute(
                 update(TaskRun)
-                .where(TaskRun.id == task_id)
+                .where(
+                    TaskRun.id == task_id,
+                    TaskRun.status == "running",
+                    TaskRun.worker_id == _WORKER_ID,
+                )
                 .values(status="failed", error_msg=error[:5000], finished_at=now_beijing())
             )
             await db.commit()

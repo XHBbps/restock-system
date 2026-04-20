@@ -18,14 +18,15 @@ x-backend-env: &backend-env
   LOGIN_PASSWORD: ${LOGIN_PASSWORD}
   JWT_SECRET: ${JWT_SECRET}
   JWT_EXPIRES_HOURS: 24
+  EXPORT_STORAGE_DIR: /app/data/exports
   TZ: Asia/Shanghai
 
 x-backend-build: &backend-build
   context: ../backend
   dockerfile: Dockerfile
   args:
-    PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
-    PIP_TRUSTED_HOST: pypi.tuna.tsinghua.edu.cn
+    PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+    PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-}
 
 x-backend-healthcheck: &backend-healthcheck
   test:
@@ -73,6 +74,8 @@ services:
       PROCESS_ENABLE_WORKER: false
       PROCESS_ENABLE_REAPER: false
       PROCESS_ENABLE_SCHEDULER: false
+    volumes:
+      - ./data/exports:/app/data/exports
     depends_on:
       db:
         condition: service_healthy

@@ -159,3 +159,26 @@ export async function patchShop(shopId: string, syncEnabled: boolean): Promise<S
   })
   return data
 }
+
+// ========== Generation Toggle ==========
+export interface GenerationToggle {
+  enabled: boolean
+  updated_by: number | null
+  updated_by_name: string | null
+  updated_at: string | null
+}
+
+export async function getGenerationToggle(): Promise<GenerationToggle> {
+  const { data } = await client.get<GenerationToggle>('/api/config/generation-toggle', {
+    suppressForbiddenToast: true,
+  })
+  return data
+}
+
+export async function patchGenerationToggle(enabled: boolean): Promise<GenerationToggle> {
+  const { data } = await client.patch<GenerationToggle>(
+    '/api/config/generation-toggle',
+    { enabled },
+  )
+  return data
+}

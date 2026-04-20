@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-19（Plan A 后端导出重构落地：推送赛狐链路替换为 Excel 导出 + Snapshot 版本化；24 项集成测试在 `replenish_test` 全绿）
+> 最近更新：2026-04-20（全量审查收口：导出快照并发/失败补偿、历史 display_status 下沉到后端、Dashboard 导出统计口径修正、生成开关 fail-close、TaskRun worker 租约守卫、本地 dev 重建镜像源可配置）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -65,13 +65,12 @@
 
 ### 2.4 补货建议管理
 
-- **建议单**：`draft/partial/pushed/archived/error` 状态流转
+- **建议单**：`draft / archived / error` 状态流转（Plan A 后端重构后推送相关状态 `partial` / `pushed` 已随 §3.49 一并移除）
 - **跨页选择**：补货发起页的 `selectedIds` 数组跨分页保持，支持全选筛选后的所有条目
 - **编辑校验**：建议详情支持编辑 `total_qty` / `country_breakdown` / `warehouse_breakdown`；国家补货量不要求与总采购量一致，已配置仓库时仓内分量之和必须等于国家补货量；`urgent` 会随国家补货量变更按对应 SKU 的提前期重新判定
-- **历史记录删除**：历史记录页新增建议单删除入口，允许删除 `draft` / `partial` / `error` / `archived`；`pushed` 建议单保留历史追溯，不允许删除
+- **历史记录删除**：历史记录页新增建议单删除入口，删除准入统一为 `snapshot_count === 0`（尚未生成任何导出快照的建议单才可物理删除，保留快照的建议单保留历史追溯不允许删除）
 - **触发方式中文化**：历史记录页“触发方式”由原始值改为中文展示，当前口径统一为“手动触发 / 自动触发”
-- **推送到赛狐**：`pushback/purchase.py` 合并选中条目生成采购单，失败自动重试
-- **去重**：同一 suggestion 的同一组推送条目同时只有一个 push 任务（`dedupe_key="push_saihu#<id>#<sorted_item_ids>"`）
+- **Excel 导出（替代推送）**：业务人员在建议详情勾选 `export_status='pending'` 的条目，点击“导出 Excel”走一步式 `POST /api/suggestions/{id}/snapshots` + `GET /api/snapshots/{id}/download` blob 下载；服务端生成不可变 `suggestion_snapshot` + `suggestion_snapshot_item` JSONB 快照并同步落盘 Excel 文件，后续可反复下载；首次导出后 `global_config.suggestion_generation_enabled` 自动翻 OFF，业务人员在全局配置页翻回 ON 时会二次确认并归档全部 `draft` 建议单以开启下一周期
 
 ### 2.5 前端 Dashboard 体系
 
@@ -93,6 +92,45 @@
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.52 Full audit 收口修复（2026-04-20）
+- **后端并发与一致性**：
+  - `backend/app/api/snapshot.py` 为建议单、导出条目和 `global_config` 增加 `SELECT ... FOR UPDATE`，避免并发导出 / 新周期切换时出现 version 冲突或对已归档建议继续导出。
+  - `backend/app/api/snapshot.py` 将 `SuggestionItem.export_status='exported'` 延后到 Excel 文件成功落盘之后，失败分支只把 snapshot 标记为 `failed`，保留条目为 `pending` 以支持重试。
+  - `backend/app/api/auth.py` 把登录失败计数改为锁行后重算/写回，避免并发失败登录丢失增量。
+  - `backend/app/tasks/worker.py` 为 heartbeat、进度回写和终态写回统一增加 `status='running' + worker_id` 约束；租约丢失后抛 `TaskLeaseLostError` 并停止继续覆盖状态。
+- **后端查询口径**：
+  - `backend/app/api/suggestion.py` 新增 `display_status=pending|exported|archived|error`，历史记录页的状态过滤改为后端统一按 `snapshot_count` 派生，移除前端“先查 draft 再二次过滤当前页”的错位逻辑。
+  - `backend/app/api/metrics.py` 的 Dashboard 当前建议只再读取 `draft`，补充 `suggestion_snapshot_count` 与旧/异常 `dashboard_snapshot.payload` 容错，避免信息总览 500。
+  - `backend/app/api/config.py` 将 `calc_enabled` 纳入 scheduler reload 触发集合，自动计算开关切换可立即生效。
+- **前端交互**：
+  - `frontend/src/views/WorkspaceView.vue` 统一改读 `exported_count`，右侧进度文案改为“已导出”，状态 tag 基于 `suggestion_snapshot_count` 派生。
+  - `frontend/src/views/HistoryView.vue` 直接把 `display_status` 透传后端，新增“异常”筛选项并移除当前页二次过滤。
+  - `frontend/src/views/SuggestionListView.vue`、`frontend/src/views/SuggestionDetailView.vue` 将生成开关探测改为 fail-close；探测失败时禁用生成/导出按钮。
+  - `frontend/src/views/GlobalConfigView.vue` 把生成开关单独加载；全局配置主表单加载成功时不再因开关读失败而整页报错。
+- **测试与审查**：
+  - 新增/更新 `backend/tests/unit/test_metrics_snapshot_api.py`、`backend/tests/unit/test_suggestion_list_api.py`、`backend/tests/unit/test_worker.py`、`backend/tests/integration/test_snapshot_api.py` 与 5 个前端视图单测，覆盖快照失败重试、display_status 过滤、worker 租约丢失守卫和 fail-close 行为。
+  - 二次人工 review 未发现新的阻断问题；CodeRabbit CLI 当前环境未安装，未执行外部 review。
+- **本地 dev 重建稳定性**：
+  - `deploy/docker-compose.dev.yml` 不再硬编码清华镜像，改为从 `deploy/.env.dev` 读取 `PIP_INDEX_URL` / `PIP_TRUSTED_HOST`，默认回落到官方 PyPI，避免本地 `docker compose ... up -d --build` 因单一镜像源超时而直接阻断。
+  - `deploy/.env.dev.example`、`docs/deployment.md`、`docs/onboarding.md` 同步补充 pip 镜像源覆盖说明，保持本地全栈重建入口可调试。
+
+### 3.51 Plan A 收尾 hotfix + 历史状态显示派生化（2026-04-19）
+- **后端**：`backend/app/api/metrics.py` 的 `DashboardOverviewPayload` 为 `restock_sku_count`/`no_restock_sku_count`/`exported_count` 新增 `= 0` 默认值，兼容 Plan A 之前生成的旧 `dashboard_snapshot.payload`，修复信息总览 500。
+- **部署**：`deploy/docker-compose.dev.yml` 给 `backend` 服务挂载 `./data/exports:/app/data/exports` 并在 `x-backend-env` 里显式声明 `EXPORT_STORAGE_DIR`，修复 Excel 导出 PermissionError。
+- **前端 UX**：
+  - `frontend/src/api/client.ts` 新增 axios 模块扩展 `suppressForbiddenToast`，避免可选探测触发"权限不足"误报；`frontend/src/api/config.ts` 的 `getGenerationToggle` 携带该标志。
+  - `frontend/src/views/SuggestionListView.vue` 的"生成补货建议"按钮按 `toggle.enabled` 禁用 + `title` 提示，避免开关 OFF 时误导出"已刷新"成功 toast（runner 会 skip 但 task.status=success）。
+- **历史状态显示 4 档派生化**：
+  - `frontend/src/utils/status.ts` 新增 `deriveSuggestionDisplayStatus(status, snapshot_count)` + `getSuggestionDisplayStatusMeta`：`draft && snapshot_count=0 → 未提交`、`draft && snapshot_count>0 → 已导出`、`archived → 已归档`、`error → 异常` 兜底。
+  - `frontend/src/views/HistoryView.vue` 合并"状态"+"导出状态"两列为一列；状态下拉改为 3 档 `未提交 / 已导出 / 已归档`，选"未提交/已导出"发 `status=draft` 再前端二次按 `snapshot_count` 过滤。
+  - `SuggestionListView.vue` / `SuggestionDetailView.vue` 的状态 tag 同步切换到派生函数。
+  - 测试：`status.test.ts` 新增派生函数断言；`HistoryView.test.ts` 状态下拉断言切换到新 value 枚举。
+
+### 3.50 Plan A 前端收尾：导出按钮 + 历史快照区 + 生成开关 + 推送死代码清理（2026-04-19）
+- 前端：新增快照 API 客户端与 blob 下载工具；建议单详情页加导出按钮（一步式 POST+GET blob）与历史快照区；全局配置页加生成开关卡片（即时保存 + 翻 ON 二次确认）；列表页加开关只读 tag；全量清理赛狐推送时代死代码（~110 行 UI + 8 死字段 + `utils/status.ts` map + 4 个测试文件的推送相关 case）；`Suggestion.status` TS 枚举收敛为 `'draft' | 'archived' | 'error'`；`HistoryView.canDelete` 改用 `snapshot_count === 0`。
+- 后端：alembic 迁移 `20260419_0000_grant_export_and_config_view_to_business_role` 给“业务人员”角色补齐 `restock:export` + `config:view`（幂等 `ON CONFLICT DO NOTHING`）。
+- 新增/更新文件：`frontend/src/api/snapshot.ts`、`frontend/src/utils/download.ts` 新增；`frontend/src/api/suggestion.ts`、`frontend/src/api/config.ts`、`frontend/src/utils/status.ts`、`frontend/src/views/SuggestionDetailView.vue`、`frontend/src/views/SuggestionListView.vue`、`frontend/src/views/HistoryView.vue`、`frontend/src/views/GlobalConfigView.vue` 同步收敛为导出视角，并清理推送字段 / pushItems / selection 列等相关 UI 与测试分支。
 
 ### 3.49 Plan A 后端导出重构：推送赛狐 → Excel 导出 + Snapshot 版本化（2026-04-19）
 - 数据模型：`backend/alembic/versions/20260418_0900_redesign_to_export_model.py` 新增 `suggestion_snapshot` / `suggestion_snapshot_item` / `excel_export_log` 三张表，清空 `suggestion` / `suggestion_item` 的推送字段，追加 `export_status` / `exported_snapshot_id` / `exported_at` / `archived_trigger` / `archived_by` 等导出 & 归档审计字段；`suggestion.status` 枚举收缩为 `draft / archived / error`；`global_config` 新增 `suggestion_generation_enabled` 与 `generation_toggle_updated_by / generation_toggle_updated_at`；非生产数据采用一次性迁移。
@@ -497,7 +535,8 @@
 
 ### 4.1 后端
 
-- `cd backend && .\.venv\Scripts\python.exe -m pytest -p no:cacheprovider`：**213 passed, 8 skipped**
+- `cd backend && pytest -p no:cacheprovider -k "not test_workbook_writes_to_disk"`：**273 passed, 25 skipped, 1 deselected**
+- `cd backend && pytest -p no:cacheprovider tests/unit/test_excel_export_service.py::test_workbook_writes_to_disk`：**1 passed**
 - 关键测试：
   - `tests/unit/test_engine_step1.py` ~ `test_engine_step6.py`
   - `tests/unit/test_zipcode_matcher.py`

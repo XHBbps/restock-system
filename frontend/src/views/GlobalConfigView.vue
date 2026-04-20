@@ -1,4 +1,24 @@
 <template>
+  <PageSectionCard v-if="toggle" title="补货建议生成开关" class="toggle-section">
+    <div class="toggle-row">
+      <el-switch
+        v-model="toggleValue"
+        :loading="togglePatching"
+        :disabled="!auth.hasPermission('restock:new_cycle')"
+        :active-text="toggleValue ? '已开启' : '已关闭'"
+        @change="onToggleChange"
+      />
+      <div class="toggle-meta">
+        <div>最近操作人：{{ toggle.updated_by_name ?? '—' }}</div>
+        <div>最近操作时间：{{ toggle.updated_at ? formatDateTime(toggle.updated_at) : '—' }}</div>
+      </div>
+    </div>
+    <div class="toggle-hint">
+      <span v-if="!auth.hasPermission('restock:new_cycle')">你没有操作此开关的权限（需要 <code>restock:new_cycle</code>）。</span>
+      <span v-else>打开开关会归档所有草稿建议单。</span>
+    </div>
+  </PageSectionCard>
+
   <PageSectionCard v-if="form" title="全局参数">
     <template #actions>
       <el-button type="primary" :loading="saving" :disabled="!auth.hasPermission('config:edit')" @click="save">保存</el-button>
@@ -96,17 +116,33 @@
 </template>
 
 <script setup lang="ts">
-import { getGlobalConfig, patchGlobalConfig, type GlobalConfig } from '@/api/config'
+import {
+  getGenerationToggle,
+  getGlobalConfig,
+  patchGenerationToggle,
+  patchGlobalConfig,
+  type GenerationToggle,
+  type GlobalConfig,
+} from '@/api/config'
 import PageSectionCard from '@/components/PageSectionCard.vue'
 import { getActionErrorMessage } from '@/utils/apiError'
 import { COUNTRY_OPTIONS } from '@/utils/countries'
 import { useAuthStore } from '@/stores/auth'
-import { ElMessage } from 'element-plus'
+import dayjs from 'dayjs'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { onMounted, ref } from 'vue'
 
 const auth = useAuthStore()
 const form = ref<GlobalConfig | null>(null)
 const saving = ref(false)
+
+const toggle = ref<GenerationToggle | null>(null)
+const toggleValue = ref(false)
+const togglePatching = ref(false)
+
+function formatDateTime(value: string | null | undefined): string {
+  return value ? dayjs(value).format('YYYY-MM-DD HH:mm:ss') : '—'
+}
 
 let savedCalcParams = {
   target_days: 0,
@@ -177,6 +213,16 @@ function onCustomCronInput(value: string): void {
   form.value.calc_cron = value
 }
 
+async function loadToggle(): Promise<void> {
+  try {
+    const t = await getGenerationToggle()
+    toggle.value = t
+    toggleValue.value = t.enabled
+  } catch {
+    toggle.value = null
+  }
+}
+
 onMounted(async () => {
   try {
     form.value = await getGlobalConfig()
@@ -184,8 +230,39 @@ onMounted(async () => {
     initCronState()
   } catch (e) {
     ElMessage.error(getActionErrorMessage(e, '加载全局配置'))
+    return
   }
+  await loadToggle()
 })
+
+async function onToggleChange(next: boolean | string | number): Promise<void> {
+  const target = Boolean(next)
+  const prev = !target
+  if (target) {
+    try {
+      await ElMessageBox.confirm(
+        '打开开关将归档所有草稿建议单，确认继续？',
+        '打开生成开关',
+        { type: 'warning', confirmButtonText: '确认打开', cancelButtonText: '取消' },
+      )
+    } catch {
+      toggleValue.value = prev
+      return
+    }
+  }
+  togglePatching.value = true
+  try {
+    const updated = await patchGenerationToggle(target)
+    toggle.value = updated
+    toggleValue.value = updated.enabled
+    ElMessage.success(target ? '开关已打开，已归档所有草稿' : '开关已关闭')
+  } catch (err) {
+    toggleValue.value = prev
+    ElMessage.error(getActionErrorMessage(err, '开关切换失败'))
+  } finally {
+    togglePatching.value = false
+  }
+}
 
 async function save(): Promise<void> {
   if (!form.value) return
@@ -261,5 +338,29 @@ async function save(): Promise<void> {
 
 .full-width-control {
   width: 100%;
+}
+
+.toggle-section {
+  margin-bottom: $space-4;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: $space-4;
+}
+
+.toggle-meta {
+  display: flex;
+  flex-direction: column;
+  gap: $space-1;
+  color: $color-text-secondary;
+  font-size: $font-size-sm;
+}
+
+.toggle-hint {
+  margin-top: $space-3;
+  color: $color-text-secondary;
+  font-size: $font-size-xs;
 }
 </style>

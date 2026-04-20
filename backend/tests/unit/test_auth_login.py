@@ -50,6 +50,9 @@ class _FakeDb:
             self.attempts[source_key] = attempt
         return _ScalarResult(None)
 
+    def add(self, obj) -> None:
+        self.attempts[obj.source_key] = obj
+
     async def commit(self) -> None:
         self.commits += 1
 

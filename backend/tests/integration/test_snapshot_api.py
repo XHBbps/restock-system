@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from app.models.global_config import GlobalConfig
 from app.models.suggestion import Suggestion, SuggestionItem
+from app.models.suggestion_snapshot import SuggestionSnapshot
 
 
 @pytest.fixture
@@ -140,6 +141,58 @@ async def test_create_snapshot_marks_items_exported(
     status_map = dict(rows)
     for iid in item_ids[:2]:
         assert status_map[iid] == "exported"
+
+
+@pytest.mark.asyncio
+async def test_create_snapshot_excel_failure_keeps_items_pending_and_allows_retry(
+    client, seed_suggestion, ensure_global_config, db_session, tmp_path, monkeypatch
+):
+    from app import config as cfg_mod
+    from app.api import snapshot as snapshot_api
+
+    settings = cfg_mod.get_settings()
+    monkeypatch.setattr(settings, "export_storage_dir", str(tmp_path), raising=False)
+
+    class _FailingWorkbook:
+        def save(self, _target_path):
+            raise RuntimeError("disk full")
+
+    original_builder = snapshot_api.build_excel_workbook
+    monkeypatch.setattr(snapshot_api, "build_excel_workbook", lambda _ctx: _FailingWorkbook())
+
+    sid = seed_suggestion["suggestion_id"]
+    item_id = seed_suggestion["item_ids"][0]
+    failed_resp = await client.post(
+        f"/api/suggestions/{sid}/snapshots",
+        json={"item_ids": [item_id]},
+    )
+    assert failed_resp.status_code == 500
+
+    db_session.expire_all()
+    item_after_failure = (
+        await db_session.execute(select(SuggestionItem).where(SuggestionItem.id == item_id))
+    ).scalar_one()
+    failed_snapshot = (
+        await db_session.execute(
+            select(SuggestionSnapshot).where(SuggestionSnapshot.suggestion_id == sid)
+        )
+    ).scalar_one()
+    assert item_after_failure.export_status == "pending"
+    assert failed_snapshot.generation_status == "failed"
+
+    monkeypatch.setattr(snapshot_api, "build_excel_workbook", original_builder)
+    retry_resp = await client.post(
+        f"/api/suggestions/{sid}/snapshots",
+        json={"item_ids": [item_id]},
+    )
+    assert retry_resp.status_code == 201, retry_resp.text
+    assert retry_resp.json()["version"] == 2
+
+    db_session.expire_all()
+    item_after_retry = (
+        await db_session.execute(select(SuggestionItem).where(SuggestionItem.id == item_id))
+    ).scalar_one()
+    assert item_after_retry.export_status == "exported"
 
 
 @pytest.mark.asyncio

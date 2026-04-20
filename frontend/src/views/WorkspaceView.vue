@@ -98,12 +98,12 @@
             <el-progress
               :percentage="
                 data.suggestion_item_count > 0
-                  ? Math.round((data.pushed_count / data.suggestion_item_count) * 100)
+                  ? Math.round((data.exported_count / data.suggestion_item_count) * 100)
                   : 0
               "
               :stroke-width="10"
             />
-            <span class="progress-text">已推送 {{ data.pushed_count }} / 总计 {{ data.suggestion_item_count }}</span>
+            <span class="progress-text">已导出 {{ data.exported_count }} / 总计 {{ data.suggestion_item_count }}</span>
           </div>
 
           <DashboardChartCard
@@ -158,7 +158,7 @@ import DataTableCard from '@/components/dashboard/DataTableCard.vue'
 import { getActionErrorMessage } from '@/utils/apiError'
 import { formatUpdateTime } from '@/utils/format'
 import { getCountryLabel } from '@/utils/countries'
-import { getSuggestionStatusMeta } from '@/utils/status'
+import { getSuggestionDisplayStatusMeta } from '@/utils/status'
 
 const RISK_COLORS = {
   urgent: '#dc2626',
@@ -181,7 +181,10 @@ const targetDays = computed(() => data.value?.target_days ?? 60)
 
 const suggestionStatus = computed(() =>
   data.value?.suggestion_status
-    ? getSuggestionStatusMeta(data.value.suggestion_status)
+    ? getSuggestionDisplayStatusMeta(
+        data.value.suggestion_status,
+        data.value.suggestion_snapshot_count ?? 0,
+      )
     : { label: '暂无', tagType: 'info' as const },
 )
 

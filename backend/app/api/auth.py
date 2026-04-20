@@ -5,7 +5,6 @@ from datetime import timedelta
 
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy import select, update
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import UserContext, db_session, get_current_user
@@ -123,7 +122,12 @@ async def _record_failure(
 ) -> None:
     """为某维度写入一条失败记录。"""
     settings = get_settings()
-    current_failed = attempt.failed_count if attempt is not None else 0
+    current_attempt = (
+        await db.execute(
+            select(LoginAttempt).where(LoginAttempt.source_key == source_key).with_for_update()
+        )
+    ).scalar_one_or_none()
+    current_failed = current_attempt.failed_count if current_attempt is not None else 0
     new_count = current_failed + 1
     locked_until = None
     failed_count = new_count
@@ -131,21 +135,19 @@ async def _record_failure(
         failed_count = 0
         locked_until = now + timedelta(minutes=settings.login_lock_minutes)
 
-    stmt = pg_insert(LoginAttempt).values(
-        source_key=source_key,
-        failed_count=failed_count,
-        locked_until=locked_until,
-        updated_at=now,
-    )
-    stmt = stmt.on_conflict_do_update(
-        index_elements=[LoginAttempt.source_key],
-        set_={
-            "failed_count": failed_count,
-            "locked_until": locked_until,
-            "updated_at": now,
-        },
-    )
-    await db.execute(stmt)
+    if current_attempt is None:
+        db.add(
+            LoginAttempt(
+                source_key=source_key,
+                failed_count=failed_count,
+                locked_until=locked_until,
+                updated_at=now,
+            )
+        )
+    else:
+        current_attempt.failed_count = failed_count
+        current_attempt.locked_until = locked_until
+        current_attempt.updated_at = now
 
     if locked_until is not None:
         logger.warning(

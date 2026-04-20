@@ -204,7 +204,7 @@ Scheduler 保持单例避免重复触发，Worker 可水平扩展。
 | `LOGIN_PASSWORD` | 登录密码（首次启动会自动 hash） | — |
 | `JWT_SECRET` | JWT 签名密钥（建议 64 字节随机） | — |
 
-本地 dev 全栈验证复制 `deploy/.env.dev.example` 为 `deploy/.env.dev`；字段名与生产保持一致，但可使用本地占位值。
+本地 dev 全栈验证复制 `deploy/.env.dev.example` 为 `deploy/.env.dev`；字段名与生产保持一致，但可使用本地占位值。镜像构建默认走 `PIP_INDEX_URL=https://pypi.org/simple`；若本机网络更适合其他镜像，可在 `deploy/.env.dev` 覆盖 `PIP_INDEX_URL`，并按需补充 `PIP_TRUSTED_HOST`。
 
 ### 配置维护入口总表
 
@@ -234,6 +234,7 @@ Scheduler 保持单例避免重复触发，Worker 可水平扩展。
 | `SAIHU_CLIENT_SECRET` | `deploy/.env.dev` | `deploy/.env` | `backend/.env` | `deploy/docker-compose*.yml`、`backend/app/saihu/token.py` | 赛狐 access_token 申请密钥 |
 | `LOGIN_PASSWORD` | `deploy/.env.dev` | `deploy/.env` | `backend/.env` | `deploy/docker-compose*.yml`、`backend/app/config.py` | 首次登录使用的明文密码；启动后会写入 hash |
 | `JWT_SECRET` | `deploy/.env.dev` | `deploy/.env` | `backend/.env` | `deploy/docker-compose*.yml`、`backend/app/config.py` | JWT 签名密钥 |
+| `PIP_INDEX_URL` / `PIP_TRUSTED_HOST` | 可选写入 `deploy/.env.dev` | — | — | `deploy/docker-compose.dev.yml`、`backend/Dockerfile` | 仅影响本地 dev 镜像构建时的 pip 源；默认官方 PyPI，需要换镜像时再覆盖 |
 | `WORKER_POLL_INTERVAL_SECONDS` 等任务参数 | 可选写入 `deploy/.env.dev` | 可选写入 `deploy/.env` | `backend/.env` | `backend/app/config.py`、worker/scheduler 进程 | 队列轮询、租约、心跳、重试等运行参数 |
 | `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` | 可选写入 `deploy/.env.dev` | 可选写入 `deploy/.env` | `backend/.env` | `deploy/docker-compose*.yml`、`backend/app/config.py` | worker / scheduler 常按较小池配置运行 |
 | `VITE_API_PROXY_TARGET` | `frontend/.env` | — | `frontend/.env` | `frontend/vite.config.ts` | 本地前端开发代理目标，默认 `http://localhost:8000` |
@@ -268,6 +269,7 @@ Scheduler 保持单例避免重复触发，Worker 可水平扩展。
 | 你要改什么 | 至少要改的地方 | 说明 |
 |---|---|---|
 | 本地容器赛狐凭证 / 登录密码 / JWT | `deploy/.env.dev` | 改完后重建 `backend` / `worker` / `scheduler` |
+| 本地容器 pip 镜像源 | `deploy/.env.dev` | 默认使用官方 PyPI；若网络较慢可覆盖 `PIP_INDEX_URL` / `PIP_TRUSTED_HOST` 后重建 |
 | 生产赛狐凭证 / 登录密码 / JWT / 域名 | `deploy/.env` | 改完后走 `deploy.sh` 或重启相关服务 |
 | 本地容器入口端口 `8088` / `5433` | `deploy/docker-compose.dev.yml`，必要时同步 `deploy/Caddyfile.dev` | 端口改动后文档与检查脚本也应同步 |
 | 生产入口端口 `80/443` | `deploy/docker-compose.yml` | 变更后需确认防火墙与证书流程 |

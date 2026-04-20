@@ -51,7 +51,9 @@ async def create_snapshot(
 ) -> SnapshotOut:
     # 1. 建议单校验
     sug = (
-        await db.execute(select(Suggestion).where(Suggestion.id == suggestion_id))
+        await db.execute(
+            select(Suggestion).where(Suggestion.id == suggestion_id).with_for_update()
+        )
     ).scalar_one_or_none()
     if sug is None:
         raise HTTPException(status_code=404, detail="建议单不存在")
@@ -68,6 +70,8 @@ async def create_snapshot(
                     SuggestionItem.id.in_(body.item_ids),
                     SuggestionItem.suggestion_id == suggestion_id,
                 )
+                .order_by(SuggestionItem.id)
+                .with_for_update()
             )
         )
         .scalars()
@@ -88,6 +92,10 @@ async def create_snapshot(
         )
     ).scalar_one()
     next_version = int(max_version) + 1
+
+    config = (
+        await db.execute(select(GlobalConfig).where(GlobalConfig.id == 1).with_for_update())
+    ).scalar_one_or_none()
 
     # 4. 插入 snapshot（generating）
     snapshot = SuggestionSnapshot(
@@ -170,15 +178,6 @@ async def create_snapshot(
 
     # 7. 更新 suggestion_item 导出状态
     now = now_beijing()
-    await db.execute(
-        update(SuggestionItem)
-        .where(SuggestionItem.id.in_(body.item_ids))
-        .values(
-            export_status="exported",
-            exported_snapshot_id=snapshot.id,
-            exported_at=now,
-        )
-    )
 
     # 8. 生成 Excel 文件
     exported_at_text = now.strftime("%Y-%m-%d %H:%M:%S")
@@ -196,12 +195,12 @@ async def create_snapshot(
     settings = get_settings()
     storage_root = Path(settings.export_storage_dir).resolve()
     year_month = now.strftime("%Y/%m")
-    target_dir = storage_root / year_month
-    target_dir.mkdir(parents=True, exist_ok=True)
     filename = build_filename(suggestion_id, next_version, exported_at_compact)
-    target_path = target_dir / filename
 
     try:
+        target_dir = storage_root / year_month
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target_path = target_dir / filename
         wb = build_excel_workbook(ctx)
         wb.save(target_path)
         file_size = target_path.stat().st_size
@@ -214,16 +213,24 @@ async def create_snapshot(
         await db.commit()
         raise HTTPException(status_code=500, detail=f"Excel 生成失败：{exc}") from exc
 
-    # 9. 首次导出 → 翻 toggle OFF
-    config = (
-        await db.execute(select(GlobalConfig).where(GlobalConfig.id == 1))
-    ).scalar_one_or_none()
+    # 9. 文件落盘成功后，再标记 item 已导出
+    await db.execute(
+        update(SuggestionItem)
+        .where(SuggestionItem.id.in_(body.item_ids))
+        .values(
+            export_status="exported",
+            exported_snapshot_id=snapshot.id,
+            exported_at=now,
+        )
+    )
+
+    # 10. 首次导出 → 翻 toggle OFF
     if config and config.suggestion_generation_enabled:
         config.suggestion_generation_enabled = False
         config.generation_toggle_updated_by = user.id
         config.generation_toggle_updated_at = now
 
-    # 10. 写 export_log
+    # 11. 写 export_log
     db.add(
         ExcelExportLog(
             snapshot_id=snapshot.id,

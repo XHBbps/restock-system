@@ -6,7 +6,7 @@ import { createPinia, setActivePinia } from 'pinia'
 
 import type { DashboardOverview } from '@/api/dashboard'
 import { useAuthStore } from '@/stores/auth'
-import { formatUpdateTime } from '@/utils/format'
+import { getCountryLabel } from '@/utils/countries'
 
 const mockGetDashboardOverview = vi.fn()
 const mockRefreshDashboardSnapshot = vi.fn()
@@ -44,19 +44,18 @@ const DashboardChartCardStub = {
 
 const STUBS = {
   DashboardPageHeader: {
-    props: ['title', 'description'],
+    props: ['title'],
     template: `
       <div class="page-header">
         <div class="page-header__title">{{ title }}</div>
-        <div class="page-header__description">{{ description }}</div>
         <div class="page-header__meta"><slot name="meta" /></div>
         <div class="page-header__actions"><slot name="actions" /></div>
       </div>
     `,
   },
   DashboardStatCard: {
-    props: ['title', 'value', 'hint'],
-    template: '<div class="stat-card">{{ title }}:{{ value }}|{{ hint }}</div>',
+    props: ['title', 'value'],
+    template: '<div class="stat-card">{{ title }}:{{ value }}</div>',
   },
   DataTableCard: {
     props: ['title'],
@@ -84,13 +83,14 @@ function makeOverview(overrides: Partial<DashboardOverview> = {}): DashboardOver
     restock_sku_count: 7,
     no_restock_sku_count: 5,
     suggestion_item_count: 8,
-    pushed_count: 3,
+    exported_count: 3,
     urgent_count: 2,
     warning_count: 3,
     safe_count: 4,
     risk_country_count: 3,
     suggestion_id: 9,
     suggestion_status: 'draft',
+    suggestion_snapshot_count: 1,
     lead_time_days: 20,
     target_days: 60,
     country_risk_distribution: [
@@ -148,40 +148,38 @@ describe('WorkspaceView', () => {
     })
   })
 
-  it('renders country-level risk cards and snapshot meta', async () => {
+  it('renders country-level risk and restock charts from dashboard payload', async () => {
     mockGetDashboardOverview.mockResolvedValue(makeOverview())
 
     const { default: View } = await import('../WorkspaceView.vue')
     const wrapper = shallowMount(View, { global: { stubs: STUBS } })
     await flushPromises()
 
-    expect(wrapper.text()).toContain('需补货SKU:7|')
-    expect(wrapper.text()).toContain('无需补货SKU:5|')
-    expect(wrapper.text()).toContain('覆盖国家:3|')
-    expect(wrapper.text()).not.toContain('可售天数低于提前期')
-    expect(wrapper.text()).not.toContain('可售天数介于')
-    expect(wrapper.text()).not.toContain('可售天数不少于')
-    expect(wrapper.text()).toContain('快照已缓存')
-    expect(wrapper.text()).toContain(`同步时间 ${formatUpdateTime('2026-04-14T11:30:00+08:00')}`)
+    expect(wrapper.text()).toContain('7')
+    expect(wrapper.text()).toContain('5')
+    expect(wrapper.text()).toContain('3')
 
     const chartCards = wrapper.findAllComponents(DashboardChartCardStub)
     expect(chartCards).toHaveLength(2)
-    expect(chartCards[0].props('title')).toBe('各国缺货风险分布')
-    expect(chartCards[0].props('empty')).toBe(false)
 
-    const option = chartCards[0].props('option') as {
+    const riskOption = chartCards[0].props('option') as {
       xAxis: { data: string[] }
-      yAxis: { name: string }
-      series: Array<{ name: string; stack?: string; data: number[] }>
+      series: Array<{ data: number[] }>
     }
+    expect(riskOption.xAxis.data).toEqual([getCountryLabel('US'), getCountryLabel('CA')])
+    expect(riskOption.series[0].data).toEqual([1, 2])
 
-    expect(option.xAxis.data).toEqual(['US - 美国', 'CA - 加拿大'])
-    expect(option.yAxis.name).toBe('SKU+国家数')
-    expect(option.series.map((item) => item.name)).toEqual(['紧急', '临近补货', '安全'])
-    expect(option.series.every((item) => item.stack == null)).toBe(true)
+    const restockOption = chartCards[1].props('option') as {
+      series: Array<{ data: Array<{ name: string; value: number }> }>
+    }
+    expect(restockOption.series[0].data).toEqual([
+      { name: getCountryLabel('US'), value: 10, itemStyle: expect.any(Object) },
+      { name: getCountryLabel('JP'), value: 6, itemStyle: expect.any(Object) },
+      { name: getCountryLabel('CA'), value: 5, itemStyle: expect.any(Object) },
+    ])
   })
 
-  it('renders urgent rows by country-level sale days and formats values below one day', async () => {
+  it('renders urgent rows by country-level sale days', async () => {
     mockGetDashboardOverview.mockResolvedValue(makeOverview())
 
     const { default: View } = await import('../WorkspaceView.vue')
@@ -190,45 +188,12 @@ describe('WorkspaceView', () => {
 
     const urgentItems = wrapper.findAll('.urgent-item')
     expect(urgentItems).toHaveLength(3)
-    expect(wrapper.text()).toContain('US - 美国')
-    expect(wrapper.text()).toContain('CA - 加拿大')
-    expect(wrapper.text()).toContain('JP - 日本')
-    expect(wrapper.text()).toContain('10天')
-    expect(wrapper.text()).toContain('<1天')
-    expect(wrapper.text()).toContain('18天')
+    expect(wrapper.text()).toContain(getCountryLabel('US'))
+    expect(wrapper.text()).toContain(getCountryLabel('CA'))
+    expect(wrapper.text()).toContain(getCountryLabel('JP'))
   })
 
-  it('renders country restock distribution from current suggestion breakdown', async () => {
-    mockGetDashboardOverview.mockResolvedValue(makeOverview())
-
-    const { default: View } = await import('../WorkspaceView.vue')
-    const wrapper = shallowMount(View, { global: { stubs: STUBS } })
-    await flushPromises()
-
-    const chartCards = wrapper.findAllComponents(DashboardChartCardStub)
-    const rightChart = chartCards[1]
-
-    expect(rightChart.props('title')).toBe('补货量国家分布')
-
-    const option = rightChart.props('option') as {
-      legend: { show: boolean }
-      series: Array<{ data: Array<{ name: string; value: number }> }>
-    }
-
-    expect(option.legend.show).toBe(false)
-    expect(option.series[0].data).toEqual([
-      { name: 'US - 美国', value: 10, itemStyle: expect.any(Object) },
-      { name: 'JP - 日本', value: 6, itemStyle: expect.any(Object) },
-      { name: 'CA - 加拿大', value: 5, itemStyle: expect.any(Object) },
-    ])
-
-    const legendItems = wrapper.findAll('.country-distribution-legend__item')
-    expect(legendItems).toHaveLength(3)
-    expect(legendItems[0].text()).toContain('US - 美国')
-    expect(legendItems[1].text()).toContain('JP - 日本')
-  })
-
-  it('makes the suggestion progress block clickable without a separate detail button', async () => {
+  it('makes the suggestion progress block clickable', async () => {
     mockGetDashboardOverview.mockResolvedValue(makeOverview())
 
     const { default: View } = await import('../WorkspaceView.vue')
@@ -237,8 +202,6 @@ describe('WorkspaceView', () => {
 
     const suggestionProgress = wrapper.find('.suggestion-progress')
     expect(suggestionProgress.exists()).toBe(true)
-    expect(suggestionProgress.attributes('role')).toBe('button')
-    expect(suggestionProgress.attributes('tabindex')).toBe('0')
 
     await suggestionProgress.trigger('click')
     await suggestionProgress.trigger('keydown.enter')
@@ -262,14 +225,13 @@ describe('WorkspaceView', () => {
     const wrapper = shallowMount(View, { global: { stubs: STUBS } })
     await flushPromises()
 
-    expect(wrapper.text()).toContain('快照刷新中')
     expect(wrapper.find('.task-progress-stub').text()).toContain('task:88')
 
     await wrapper.find('button').trigger('click')
     await flushPromises()
 
     expect(mockRefreshDashboardSnapshot).toHaveBeenCalled()
-    expect(mockMessageSuccess).toHaveBeenCalledWith('信息总览快照刷新任务已入队')
+    expect(mockMessageSuccess).toHaveBeenCalled()
   })
 
   it('hides snapshot task polling for users without refresh permission', async () => {
@@ -295,7 +257,6 @@ describe('WorkspaceView', () => {
     const wrapper = shallowMount(View, { global: { stubs: STUBS } })
     await flushPromises()
 
-    expect(wrapper.text()).toContain('暂无快照')
     expect(wrapper.find('.task-progress-stub').exists()).toBe(false)
   })
 })

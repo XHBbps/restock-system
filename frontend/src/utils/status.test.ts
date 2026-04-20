@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { getListingOnlineStatusMeta, getOutRecordTransitStatusMeta, getSuggestionPushStatusMeta } from './status'
+import {
+  deriveSuggestionDisplayStatus,
+  getListingOnlineStatusMeta,
+  getOutRecordTransitStatusMeta,
+  getSuggestionDisplayStatusMeta,
+} from './status'
 
 describe('getListingOnlineStatusMeta', () => {
   it('treats active status case-insensitively as on sale', () => {
@@ -53,11 +58,44 @@ describe('getOutRecordTransitStatusMeta', () => {
   })
 })
 
-describe('getSuggestionPushStatusMeta', () => {
-  it('maps blocked rows to a dedicated display meta', () => {
-    expect(getSuggestionPushStatusMeta('blocked')).toEqual({
-      label: '待处理',
+describe('deriveSuggestionDisplayStatus', () => {
+  it('draft without snapshot → pending', () => {
+    expect(deriveSuggestionDisplayStatus('draft', 0)).toBe('pending')
+  })
+
+  it('draft with snapshots → exported', () => {
+    expect(deriveSuggestionDisplayStatus('draft', 1)).toBe('exported')
+    expect(deriveSuggestionDisplayStatus('draft', 5)).toBe('exported')
+  })
+
+  it('archived → archived regardless of snapshot_count', () => {
+    expect(deriveSuggestionDisplayStatus('archived', 0)).toBe('archived')
+    expect(deriveSuggestionDisplayStatus('archived', 3)).toBe('archived')
+  })
+
+  it('error → error regardless of snapshot_count', () => {
+    expect(deriveSuggestionDisplayStatus('error', 0)).toBe('error')
+    expect(deriveSuggestionDisplayStatus('error', 2)).toBe('error')
+  })
+})
+
+describe('getSuggestionDisplayStatusMeta', () => {
+  it('maps 4 display states to 中文 labels', () => {
+    expect(getSuggestionDisplayStatusMeta('draft', 0)).toEqual({
+      label: '未提交',
+      tagType: 'warning',
+    })
+    expect(getSuggestionDisplayStatusMeta('draft', 2)).toEqual({
+      label: '已导出',
+      tagType: 'success',
+    })
+    expect(getSuggestionDisplayStatusMeta('archived', 0)).toEqual({
+      label: '已归档',
       tagType: 'info',
+    })
+    expect(getSuggestionDisplayStatusMeta('error', 0)).toEqual({
+      label: '异常',
+      tagType: 'danger',
     })
   })
 })

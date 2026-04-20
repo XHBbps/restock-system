@@ -164,7 +164,7 @@ async def patch_global(
             raise ValidationFailed("目标库存天数不能小于采购提前期")
         await db.execute(update(GlobalConfig).where(GlobalConfig.id == 1).values(**updates))
         await db.commit()
-        if {"sync_interval_minutes", "calc_cron", "scheduler_enabled"} & updates.keys():
+        if {"sync_interval_minutes", "calc_cron", "scheduler_enabled", "calc_enabled"} & updates.keys():
             await reload_scheduler()
         row = (await db.execute(select(GlobalConfig).where(GlobalConfig.id == 1))).scalar_one()
     return GlobalConfigOut.model_validate(row)
@@ -212,6 +212,9 @@ async def patch_generation_toggle(
 ) -> GenerationToggleOut:
     """翻开关。若打开（enabled=True）: 先归档所有 status='draft' 的 suggestion。"""
     now = now_beijing()
+    config = (
+        await db.execute(select(GlobalConfig).where(GlobalConfig.id == 1).with_for_update())
+    ).scalar_one()
     if patch.enabled:
         await db.execute(
             update(Suggestion)
@@ -223,15 +226,9 @@ async def patch_generation_toggle(
                 archived_trigger="admin_toggle",
             )
         )
-    await db.execute(
-        update(GlobalConfig)
-        .where(GlobalConfig.id == 1)
-        .values(
-            suggestion_generation_enabled=patch.enabled,
-            generation_toggle_updated_by=user.id,
-            generation_toggle_updated_at=now,
-        )
-    )
+    config.suggestion_generation_enabled = patch.enabled
+    config.generation_toggle_updated_by = user.id
+    config.generation_toggle_updated_at = now
     await db.commit()
     return await _load_generation_toggle(db)
 

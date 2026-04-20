@@ -17,6 +17,15 @@
             </div>
           </div>
           <div class="actions">
+            <el-button
+              v-if="auth.hasPermission('restock:export') && suggestion.status === 'draft'"
+              type="primary"
+              :disabled="exportButtonDisabled"
+              :loading="exporting"
+              @click="handleExport"
+            >
+              {{ exportButtonText }}
+            </el-button>
             <el-button @click="goBack">返回</el-button>
           </div>
         </div>
@@ -31,7 +40,6 @@
                   :sku="item.commodity_sku"
                   :name="item.commodity_name"
                   :image="item.main_image"
-                  :blocker="item.push_blocker"
                 />
               </div>
               <div class="item-stats">
@@ -122,27 +130,23 @@
                   <div class="panel-header">
                     <div>
                       <div class="section-title">状态信息</div>
-                      <div class="section-desc">用于快速判断当前条目的推送状态和异常信息。</div>
+                      <div class="section-desc">用于快速判断当前条目的导出状态。</div>
                     </div>
                   </div>
                   <div class="status-grid">
                     <div class="status-row">
-                      <span class="status-label">推送状态</span>
-                      <el-tag :type="getSuggestionPushStatusMeta(item.push_status).tagType" size="small">
-                        {{ getSuggestionPushStatusMeta(item.push_status).label }}
+                      <span class="status-label">导出状态</span>
+                      <el-tag :type="item.export_status === 'exported' ? 'success' : 'warning'" size="small">
+                        {{ item.export_status === 'exported' ? '已导出' : '未导出' }}
                       </el-tag>
                     </div>
                     <div class="status-row">
-                      <span class="status-label">推送阻塞</span>
-                      <span class="status-value">{{ item.push_blocker || '-' }}</span>
+                      <span class="status-label">导出时间</span>
+                      <span class="status-value">{{ formatDateTime(item.exported_at) }}</span>
                     </div>
                     <div class="status-row">
-                      <span class="status-label">采购单号</span>
-                      <span class="status-value">{{ item.saihu_po_number || '-' }}</span>
-                    </div>
-                    <div class="status-row">
-                      <span class="status-label">失败原因</span>
-                      <span class="status-value">{{ item.push_error || '-' }}</span>
+                      <span class="status-label">所属快照</span>
+                      <span class="status-value">{{ item.exported_snapshot_id ? `v${item.exported_snapshot_id}` : '-' }}</span>
                     </div>
                   </div>
                 </section>
@@ -165,7 +169,7 @@
                       保存修改
                     </el-button>
                     <el-tag v-if="!isEditable(item)" type="info">
-                      {{ item.push_status === 'pushed' ? '已推送条目不可编辑' : '已归档建议单不可编辑' }}
+                      {{ item.export_status === 'exported' ? '已导出条目不可编辑' : '已归档建议单不可编辑' }}
                     </el-tag>
                     <span v-else-if="!hasChanges(item)" class="action-hint">修改国家补货量或仓库分量后可保存</span>
                   </div>
@@ -176,6 +180,35 @@
         </el-collapse-item>
       </el-collapse>
     </el-card>
+
+    <PageSectionCard v-if="suggestion" title="历史快照" class="snapshot-section">
+      <el-table v-loading="loadingSnapshots" :data="snapshots" empty-text="暂无导出记录">
+        <el-table-column label="版本" width="96">
+          <template #default="{ row }">v{{ row.version }}</template>
+        </el-table-column>
+        <el-table-column label="导出人" prop="exported_by_name" min-width="140">
+          <template #default="{ row }">{{ row.exported_by_name || '—' }}</template>
+        </el-table-column>
+        <el-table-column label="导出时间" min-width="180">
+          <template #default="{ row }">{{ formatDateTime(row.exported_at) }}</template>
+        </el-table-column>
+        <el-table-column label="商品数" prop="item_count" width="100" align="right" />
+        <el-table-column label="下载次数" prop="download_count" width="100" align="right" />
+        <el-table-column label="操作" width="120" align="center">
+          <template #default="{ row }">
+            <el-button
+              link
+              type="primary"
+              :disabled="row.generation_status !== 'ready'"
+              :title="row.generation_status === 'failed' ? '生成失败' : ''"
+              @click="downloadSnapshot(row.id)"
+            >
+              下载
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </PageSectionCard>
 
     <el-empty v-else-if="notFound" description="建议单不存在或已失效。" :image-size="84">
       <el-button type="primary" @click="goCurrent">返回当前建议</el-button>
@@ -197,13 +230,22 @@ import {
   type SuggestionDetail,
   type SuggestionItem,
 } from '@/api/suggestion'
+import {
+  createSnapshot,
+  downloadSnapshotBlob,
+  listSnapshots,
+  type SnapshotOut,
+} from '@/api/snapshot'
+import { getGenerationToggle } from '@/api/config'
+import PageSectionCard from '@/components/PageSectionCard.vue'
 import SkuCard from '@/components/SkuCard.vue'
 import { useAuthStore } from '@/stores/auth'
 import { getActionErrorMessage } from '@/utils/apiError'
+import { triggerBlobDownload } from '@/utils/download'
 import { allocationModeLabel, allocationModeTagType, allocationSummary } from '@/utils/allocation'
-import { getSuggestionPushStatusMeta, getSuggestionStatusMeta } from '@/utils/status'
+import { getSuggestionDisplayStatusMeta } from '@/utils/status'
 import dayjs from 'dayjs'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -231,8 +273,31 @@ const loading = ref(false)
 const notFound = ref(false)
 const loadError = ref('')
 
+const snapshots = ref<SnapshotOut[]>([])
+const loadingSnapshots = ref(false)
+const toggleEnabled = ref(false)
+const toggleStateKnown = ref(false)
+const exporting = ref(false)
+
+const exportable = computed(() =>
+  suggestion.value?.items.filter((it) => it.export_status !== 'exported') ?? [],
+)
+
+const exportButtonText = computed(() => {
+  if (!toggleStateKnown.value) return '无法确认生成开关状态'
+  if (!toggleEnabled.value) return '生成开关已关闭'
+  if (exportable.value.length === 0) return '无可导出条目'
+  return '导出 Excel'
+})
+
+const exportButtonDisabled = computed(
+  () => !toggleStateKnown.value || !toggleEnabled.value || exportable.value.length === 0,
+)
+
 const suggestionStatusMeta = computed(() =>
-  suggestion.value ? getSuggestionStatusMeta(suggestion.value.status) : { label: '暂无', tagType: 'info' as const },
+  suggestion.value
+    ? getSuggestionDisplayStatusMeta(suggestion.value.status, suggestion.value.snapshot_count ?? 0)
+    : { label: '暂无', tagType: 'info' as const },
 )
 
 const triggeredByLabel = computed(() => {
@@ -258,6 +323,7 @@ async function load(): Promise<void> {
     suggestion.value = data
     syncEditingState(data)
     await syncRouteItemFocus(data)
+    await Promise.all([loadSnapshots(), loadToggle()])
   } catch (error) {
     suggestion.value = null
     const status = (error as { response?: { status?: number } })?.response?.status
@@ -268,6 +334,71 @@ async function load(): Promise<void> {
     }
   } finally {
     loading.value = false
+  }
+}
+
+async function loadSnapshots(): Promise<void> {
+  if (!suggestion.value) return
+  loadingSnapshots.value = true
+  try {
+    snapshots.value = await listSnapshots(suggestion.value.id)
+  } catch (error) {
+    ElMessage.error(getActionErrorMessage(error, '加载快照历史失败'))
+  } finally {
+    loadingSnapshots.value = false
+  }
+}
+
+async function loadToggle(): Promise<void> {
+  try {
+    const toggle = await getGenerationToggle()
+    toggleEnabled.value = toggle.enabled
+    toggleStateKnown.value = true
+  } catch {
+    toggleEnabled.value = false
+    toggleStateKnown.value = false
+  }
+}
+
+async function handleExport(): Promise<void> {
+  if (!suggestion.value || exportable.value.length === 0) return
+  try {
+    await ElMessageBox.confirm(
+      '确认导出？导出后当前建议单的商品将无法重复导出，生成开关将自动关闭。',
+      '确认导出',
+      { type: 'warning', confirmButtonText: '确认导出', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  exporting.value = true
+  let createdSnapshotId: number | null = null
+  try {
+    const itemIds = exportable.value.map((it) => it.id)
+    const snapshot = await createSnapshot(suggestion.value.id, itemIds)
+    createdSnapshotId = snapshot.id
+    const { blob, filename } = await downloadSnapshotBlob(snapshot.id)
+    triggerBlobDownload(blob, filename)
+    ElMessage.success('导出成功，生成开关已关闭')
+  } catch (error) {
+    if (createdSnapshotId !== null) {
+      ElMessage.error(getActionErrorMessage(error, '导出成功但下载失败，可在历史快照区手动重试'))
+    } else {
+      ElMessage.error(getActionErrorMessage(error, '导出失败'))
+    }
+  } finally {
+    exporting.value = false
+    await load()
+  }
+}
+
+async function downloadSnapshot(snapshotId: number): Promise<void> {
+  try {
+    const { blob, filename } = await downloadSnapshotBlob(snapshotId)
+    triggerBlobDownload(blob, filename)
+    await loadSnapshots()
+  } catch (error) {
+    ElMessage.error(getActionErrorMessage(error, '下载失败'))
   }
 }
 
@@ -306,7 +437,7 @@ function hasChanges(item: SuggestionItem): boolean {
 }
 
 function isEditable(item: SuggestionItem): boolean {
-  return suggestion.value?.status !== 'archived' && item.push_status !== 'pushed' && auth.hasPermission('restock:operate')
+  return suggestion.value?.status !== 'archived' && item.export_status !== 'exported' && auth.hasPermission('restock:operate')
 }
 
 async function save(item: SuggestionItem): Promise<void> {
@@ -509,6 +640,10 @@ watch(
   display: flex;
   flex-direction: column;
   gap: $space-4;
+}
+
+.snapshot-section {
+  margin-top: $space-4;
 }
 
 .header-main {

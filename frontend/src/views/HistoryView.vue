@@ -19,10 +19,9 @@
         style="width: 280px"
         @change="() => reload()"
       />
-      <el-select v-model="status" placeholder="状态" clearable style="width: 140px" @change="() => reload()">
-        <el-option label="草稿" value="draft" />
-        <el-option label="部分推送" value="partial" />
-        <el-option label="已推送" value="pushed" />
+      <el-select v-model="displayStatus" placeholder="状态" clearable style="width: 140px" @change="() => reload()">
+        <el-option label="未提交" value="pending" />
+        <el-option label="已导出" value="exported" />
         <el-option label="已归档" value="archived" />
         <el-option label="异常" value="error" />
       </el-select>
@@ -40,21 +39,15 @@
           {{ triggeredByLabel(row.triggered_by) }}
         </template>
       </el-table-column>
-      <el-table-column label="状态" prop="status" width="120" sortable="custom">
+      <el-table-column label="状态" prop="status" width="120">
         <template #default="{ row }">
-          <el-tag :type="getSuggestionStatusMeta(row.status).tagType">
-            {{ getSuggestionStatusMeta(row.status).label }}
+          <el-tag :type="getSuggestionDisplayStatusMeta(row.status, row.snapshot_count).tagType">
+            {{ getSuggestionDisplayStatusMeta(row.status, row.snapshot_count).label }}
           </el-tag>
         </template>
       </el-table-column>
       <el-table-column label="条目数" prop="total_items" width="100" align="right" sortable="custom" show-overflow-tooltip />
-      <el-table-column label="已推送" prop="pushed_items" width="100" align="right" sortable="custom" show-overflow-tooltip />
-      <el-table-column label="失败数" prop="failed_items" width="100" align="right" sortable="custom" show-overflow-tooltip />
-      <el-table-column label="推送成功率" prop="success_rate" width="120" align="right" sortable="custom">
-        <template #default="{ row }">
-          {{ successRate(row) }}
-        </template>
-      </el-table-column>
+      <el-table-column label="快照数" prop="snapshot_count" width="100" align="right" sortable="custom" show-overflow-tooltip />
       <el-table-column label="操作" width="160" align="center">
         <template #default="{ row }">
           <div class="row-actions">
@@ -88,7 +81,10 @@
 import { deleteSuggestion, listSuggestions, type Suggestion } from '@/api/suggestion'
 import PageSectionCard from '@/components/PageSectionCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
-import { getSuggestionStatusMeta } from '@/utils/status'
+import {
+  getSuggestionDisplayStatusMeta,
+  type SuggestionDisplayStatus,
+} from '@/utils/status'
 import { clampPage, formatDateTime } from '@/utils/format'
 import { normalizeSortOrder, type SortChangeEvent, type SortState } from '@/utils/tableSort'
 import { getActionErrorMessage } from '@/utils/apiError'
@@ -107,7 +103,7 @@ const loading = ref(false)
 const sortState = ref<SortState>({ prop: 'created_at', order: 'desc' })
 
 const dateRange = ref<[string, string] | null>(null)
-const status = ref<string | undefined>(undefined)
+const displayStatus = ref<SuggestionDisplayStatus | undefined>(undefined)
 const sku = ref('')
 
 async function reload(resetPage = true): Promise<void> {
@@ -120,7 +116,7 @@ async function reload(resetPage = true): Promise<void> {
     const resp = await listSuggestions({
       date_from: dateRange.value?.[0],
       date_to: dateRange.value?.[1],
-      status: status.value,
+      display_status: displayStatus.value,
       sku: sku.value || undefined,
       page: page.value,
       page_size: pageSize.value,
@@ -141,12 +137,6 @@ async function reload(resetPage = true): Promise<void> {
   }
 }
 
-function successRate(row: Suggestion): string {
-  if (!row.total_items) return '-'
-  const rate = (row.pushed_items / row.total_items) * 100
-  return `${rate.toFixed(0)}%`
-}
-
 function triggeredByLabel(triggeredBy: string): string {
   if (triggeredBy === 'manual') return '手动触发'
   if (triggeredBy === 'scheduler') return '自动触发'
@@ -158,7 +148,7 @@ function goDetail(id: number): void {
 }
 
 function canDelete(row: Suggestion): boolean {
-  return row.status !== 'pushed'
+  return row.snapshot_count === 0
 }
 
 async function remove(row: Suggestion): Promise<void> {

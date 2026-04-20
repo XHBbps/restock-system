@@ -208,6 +208,7 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
             ),
             _ScalarOneOrNoneResult(SimpleNamespace(id=9, status="draft")),
             _ScalarsResult(items),
+            _ScalarOneResult(2),
         ]
     )
 
@@ -240,6 +241,7 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
         monkeypatch.undo()
 
     assert result.suggestion_id == 9
+    assert result.suggestion_snapshot_count == 2
     assert result.restock_sku_count == 4
     assert result.no_restock_sku_count == 0
     assert result.exported_count == 1
