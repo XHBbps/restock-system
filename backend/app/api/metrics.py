@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import PlainTextResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -68,6 +68,7 @@ class DashboardOverviewPayload(BaseModel):
     risk_country_count: int
     suggestion_id: int | None
     suggestion_status: str | None
+    suggestion_snapshot_count: int = 0
     lead_time_days: int
     target_days: int
     country_risk_distribution: list[CountryRiskDistribution]
@@ -231,6 +232,7 @@ def _empty_dashboard_payload(
         risk_country_count=0,
         suggestion_id=None,
         suggestion_status=None,
+        suggestion_snapshot_count=0,
         lead_time_days=lead_time_days,
         target_days=target_days,
         country_risk_distribution=[],
@@ -254,6 +256,7 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
     from app.models.global_config import GlobalConfig
     from app.models.sku import SkuConfig
     from app.models.suggestion import Suggestion, SuggestionItem
+    from app.models.suggestion_snapshot import SuggestionSnapshot
 
     enabled_skus = list(
         (
@@ -324,7 +327,7 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
     suggestion = (
         await db.execute(
             select(Suggestion)
-            .where(Suggestion.status.in_(["draft", "partial"]))
+            .where(Suggestion.status == "draft")
             .order_by(Suggestion.created_at.desc())
             .limit(1)
         )
@@ -343,6 +346,7 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
             risk_country_count=len(country_risk_distribution),
             suggestion_id=None,
             suggestion_status=None,
+            suggestion_snapshot_count=0,
             lead_time_days=lead_time_days,
             target_days=target_days,
             country_risk_distribution=country_risk_distribution,
@@ -361,6 +365,13 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
     )
 
     exported_count = sum(1 for it in items if it.export_status == "exported")
+    suggestion_snapshot_count = (
+        await db.execute(
+            select(func.count()).select_from(SuggestionSnapshot).where(
+                SuggestionSnapshot.suggestion_id == suggestion.id
+            )
+        )
+    ).scalar_one()
     country_restock_totals: dict[str, int] = {}
     for it in items:
         for country, qty in (it.country_breakdown or {}).items():
@@ -387,6 +398,7 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
         risk_country_count=len(country_risk_distribution),
         suggestion_id=suggestion.id,
         suggestion_status=suggestion.status,
+        suggestion_snapshot_count=int(suggestion_snapshot_count or 0),
         lead_time_days=lead_time_days,
         target_days=target_days,
         country_risk_distribution=country_risk_distribution,
@@ -448,7 +460,16 @@ async def get_dashboard_overview(
     ).scalar_one_or_none()
 
     if snapshot and snapshot.payload:
-        payload = DashboardOverviewPayload.model_validate(snapshot.payload)
+        try:
+            payload = DashboardOverviewPayload.model_validate(snapshot.payload)
+        except ValidationError:
+            payload = _empty_dashboard_payload(enabled_sku_count=0, lead_time_days=50, target_days=60)
+            return DashboardOverview(
+                **payload.model_dump(),
+                snapshot_status="refreshing" if active_task else "missing",
+                snapshot_updated_at=snapshot.refreshed_at or snapshot.updated_at,
+                snapshot_task_id=active_task.id if active_task else None,
+            )
         # 旧快照缺少新增字段时，Pydantic 自动填充默认值（restock_sku_count=0 等）；
         # 同时入队刷新任务，后台更新快照后下次请求即为完整数据
         needs_refresh = not _has_restock_summary_keys(snapshot.payload)

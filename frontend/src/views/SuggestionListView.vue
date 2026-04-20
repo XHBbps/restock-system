@@ -18,8 +18,8 @@
           v-if="auth.hasPermission('restock:operate')"
           type="primary"
           :loading="generating"
-          :disabled="toggle !== null && !toggle.enabled"
-          :title="toggle !== null && !toggle.enabled ? '生成开关已关闭，请先在「系统配置」中开启' : ''"
+          :disabled="engineButtonDisabled"
+          :title="engineButtonTitle"
           @click="triggerEngine"
         >生成补货建议</el-button>
       </template>
@@ -129,12 +129,27 @@ const loading = ref(false)
 const sortState = ref<SortState>({})
 
 const toggle = ref<GenerationToggle | null>(null)
+const toggleLoadError = ref(false)
 
 const toggleTitle = computed(() => {
   if (!toggle.value) return ''
   const by = toggle.value.updated_by_name ?? '—'
   const at = toggle.value.updated_at ?? '—'
   return `最近操作：${by} @ ${at}`
+})
+
+const engineButtonDisabled = computed(
+  () => toggleLoadError.value || toggle.value === null || !toggle.value.enabled,
+)
+
+const engineButtonTitle = computed(() => {
+  if (toggleLoadError.value || toggle.value === null) {
+    return '无法确认生成开关状态，请刷新页面或检查权限'
+  }
+  if (!toggle.value.enabled) {
+    return '生成开关已关闭，请先在「系统配置」中开启'
+  }
+  return ''
 })
 
 const statusMeta = computed(() =>
@@ -239,8 +254,10 @@ function goDetail(id: number): void {
 async function loadToggle(): Promise<void> {
   try {
     toggle.value = await getGenerationToggle()
+    toggleLoadError.value = false
   } catch {
-    // 无权限或后端异常时保持上一次状态，不阻断主流程
+    toggle.value = null
+    toggleLoadError.value = true
   }
 }
 

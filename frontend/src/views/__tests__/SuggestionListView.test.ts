@@ -6,17 +6,21 @@ import { createPinia, setActivePinia } from 'pinia'
 import { defineComponent, h } from 'vue'
 
 import type { SuggestionDetail, SuggestionItem } from '@/api/suggestion'
+import { useAuthStore } from '@/stores/auth'
 
 const mockGetCurrentSuggestion = vi.fn()
+const mockGetGenerationToggle = vi.fn()
 
 vi.mock('@/api/suggestion', () => ({
   getCurrentSuggestion: (...args: unknown[]) => mockGetCurrentSuggestion(...args),
 }))
 
-vi.mock('@/api/client', () => ({
-  default: {
-    post: vi.fn(),
-  },
+vi.mock('@/api/config', () => ({
+  getGenerationToggle: (...args: unknown[]) => mockGetGenerationToggle(...args),
+}))
+
+vi.mock('@/api/engine', () => ({
+  runEngine: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
@@ -129,6 +133,22 @@ describe('SuggestionListView', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    mockGetGenerationToggle.mockResolvedValue({
+      enabled: true,
+      updated_by: 1,
+      updated_by_name: 'Tester',
+      updated_at: '2026-04-19T10:00:00+08:00',
+    })
+    const auth = useAuthStore()
+    auth.setAuth('test-token', {
+      id: 1,
+      username: 'tester',
+      displayName: 'Tester',
+      roleName: 'Operator',
+      isSuperadmin: false,
+      passwordIsDefault: false,
+      permissions: ['restock:operate'],
+    })
   })
 
   it('renders the current suggestion items loaded from the API', async () => {
@@ -140,10 +160,11 @@ describe('SuggestionListView', () => {
 
     const vm = wrapper.vm as unknown as { filteredItems: SuggestionItem[] }
     expect(mockGetCurrentSuggestion).toHaveBeenCalled()
+    expect(mockGetGenerationToggle).toHaveBeenCalled()
     expect(vm.filteredItems.map((item) => item.id)).toEqual([1, 2, 3, 4])
   })
 
-  it('filters items by SKU keyword (case insensitive)', async () => {
+  it('filters items by SKU keyword case-insensitively', async () => {
     mockGetCurrentSuggestion.mockResolvedValue(makeSuggestion())
 
     const { default: View } = await import('../SuggestionListView.vue')
@@ -201,13 +222,28 @@ describe('SuggestionListView', () => {
     await flushPromises()
     vm.page = 1
     await flushPromises()
-    expect(vm.pagedItems).toHaveLength(2)
-    // Default sort: urgent first (id=4), then by id ascending -> [4, 1, 2, 3]
     expect(vm.pagedItems.map((item) => item.id)).toEqual([4, 1])
 
     vm.page = 2
     await flushPromises()
-    expect(vm.pagedItems).toHaveLength(2)
     expect(vm.pagedItems.map((item) => item.id)).toEqual([2, 3])
+  })
+
+  it('fails closed when generation toggle status cannot be loaded', async () => {
+    mockGetCurrentSuggestion.mockResolvedValue(makeSuggestion())
+    mockGetGenerationToggle.mockRejectedValue(new Error('forbidden'))
+
+    const { default: View } = await import('../SuggestionListView.vue')
+    const wrapper = shallowMount(View, createMountOptions())
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      toggle: unknown
+      toggleLoadError: boolean
+      engineButtonDisabled: boolean
+    }
+    expect(vm.toggle).toBeNull()
+    expect(vm.toggleLoadError).toBe(true)
+    expect(vm.engineButtonDisabled).toBe(true)
   })
 })

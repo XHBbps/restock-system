@@ -23,6 +23,7 @@
         <el-option label="未提交" value="pending" />
         <el-option label="已导出" value="exported" />
         <el-option label="已归档" value="archived" />
+        <el-option label="异常" value="error" />
       </el-select>
     </template>
 
@@ -38,7 +39,7 @@
           {{ triggeredByLabel(row.triggered_by) }}
         </template>
       </el-table-column>
-      <el-table-column label="状态" prop="status" width="120" sortable="custom">
+      <el-table-column label="状态" prop="status" width="120">
         <template #default="{ row }">
           <el-tag :type="getSuggestionDisplayStatusMeta(row.status, row.snapshot_count).tagType">
             {{ getSuggestionDisplayStatusMeta(row.status, row.snapshot_count).label }}
@@ -105,15 +106,6 @@ const dateRange = ref<[string, string] | null>(null)
 const displayStatus = ref<SuggestionDisplayStatus | undefined>(undefined)
 const sku = ref('')
 
-// 派生状态 → 后端 status 参数映射（未提交/已导出都发 draft，再前端二次过滤）
-function resolveBackendStatus(
-  ds: SuggestionDisplayStatus | undefined,
-): string | undefined {
-  if (ds === 'pending' || ds === 'exported') return 'draft'
-  if (ds === 'archived') return 'archived'
-  return undefined
-}
-
 async function reload(resetPage = true): Promise<void> {
   if (resetPage) {
     page.value = 1
@@ -124,21 +116,14 @@ async function reload(resetPage = true): Promise<void> {
     const resp = await listSuggestions({
       date_from: dateRange.value?.[0],
       date_to: dateRange.value?.[1],
-      status: resolveBackendStatus(displayStatus.value),
+      display_status: displayStatus.value,
       sku: sku.value || undefined,
       page: page.value,
       page_size: pageSize.value,
       sort_by: sortState.value.prop,
       sort_order: sortState.value.order,
     })
-    // 未提交/已导出：前端二次按 snapshot_count 过滤当前页
-    const ds = displayStatus.value
-    const filtered = resp.items.filter((row) => {
-      if (ds === 'pending') return row.snapshot_count === 0
-      if (ds === 'exported') return row.snapshot_count > 0
-      return true
-    })
-    rows.value = filtered
+    rows.value = resp.items
     total.value = resp.total
     const nextPage = clampPage(page.value, total.value, pageSize.value)
     if (!resetPage && requestedPage !== nextPage) {

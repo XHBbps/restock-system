@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from app.api.suggestion import delete_suggestion, patch_item
-from app.core.exceptions import ConflictError, NotFound, ValidationFailed
+from app.core.exceptions import NotFound, ValidationFailed
 from app.schemas.suggestion import SuggestionItemPatch
 
 
@@ -185,14 +185,8 @@ async def test_suggestion_delete_rejects_missing_row() -> None:
         await delete_suggestion(suggestion_id=1, db=db, _={})  # type: ignore[arg-type]
 
 
-async def test_suggestion_delete_rejects_pushed_row() -> None:
-    db = _FakeSession([_FakeSuggestion(status="pushed")])
-    with pytest.raises(ConflictError, match=r"pushed|删除"):
-        await delete_suggestion(suggestion_id=1, db=db, _={})  # type: ignore[arg-type]
-
-
-@pytest.mark.parametrize("status", ["draft", "partial", "error", "archived"])
-async def test_suggestion_delete_allows_non_pushed_rows(status: str) -> None:
+@pytest.mark.parametrize("status", ["draft", "error", "archived"])
+async def test_suggestion_delete_allows_rows_without_snapshots(status: str) -> None:
     # Results: 1) suggestion lookup, 2) snapshot count (0), 3) delete execution
     db = _FakeSession([_FakeSuggestion(status=status), 0, None])
 

@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-19（Plan A 收尾 hotfix：dashboard schema 兼容、导出卷挂载、403 toast 抑制、关闭开关时禁用生成按钮；历史状态显示改为 未提交/已导出/已归档 4 档派生）
+> 最近更新：2026-04-20（全量审查收口：导出快照并发/失败补偿、历史 display_status 下沉到后端、Dashboard 导出统计口径修正、生成开关 fail-close、TaskRun worker 租约守卫）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -92,6 +92,25 @@
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.52 Full audit 收口修复（2026-04-20）
+- **后端并发与一致性**：
+  - `backend/app/api/snapshot.py` 为建议单、导出条目和 `global_config` 增加 `SELECT ... FOR UPDATE`，避免并发导出 / 新周期切换时出现 version 冲突或对已归档建议继续导出。
+  - `backend/app/api/snapshot.py` 将 `SuggestionItem.export_status='exported'` 延后到 Excel 文件成功落盘之后，失败分支只把 snapshot 标记为 `failed`，保留条目为 `pending` 以支持重试。
+  - `backend/app/api/auth.py` 把登录失败计数改为锁行后重算/写回，避免并发失败登录丢失增量。
+  - `backend/app/tasks/worker.py` 为 heartbeat、进度回写和终态写回统一增加 `status='running' + worker_id` 约束；租约丢失后抛 `TaskLeaseLostError` 并停止继续覆盖状态。
+- **后端查询口径**：
+  - `backend/app/api/suggestion.py` 新增 `display_status=pending|exported|archived|error`，历史记录页的状态过滤改为后端统一按 `snapshot_count` 派生，移除前端“先查 draft 再二次过滤当前页”的错位逻辑。
+  - `backend/app/api/metrics.py` 的 Dashboard 当前建议只再读取 `draft`，补充 `suggestion_snapshot_count` 与旧/异常 `dashboard_snapshot.payload` 容错，避免信息总览 500。
+  - `backend/app/api/config.py` 将 `calc_enabled` 纳入 scheduler reload 触发集合，自动计算开关切换可立即生效。
+- **前端交互**：
+  - `frontend/src/views/WorkspaceView.vue` 统一改读 `exported_count`，右侧进度文案改为“已导出”，状态 tag 基于 `suggestion_snapshot_count` 派生。
+  - `frontend/src/views/HistoryView.vue` 直接把 `display_status` 透传后端，新增“异常”筛选项并移除当前页二次过滤。
+  - `frontend/src/views/SuggestionListView.vue`、`frontend/src/views/SuggestionDetailView.vue` 将生成开关探测改为 fail-close；探测失败时禁用生成/导出按钮。
+  - `frontend/src/views/GlobalConfigView.vue` 把生成开关单独加载；全局配置主表单加载成功时不再因开关读失败而整页报错。
+- **测试与审查**：
+  - 新增/更新 `backend/tests/unit/test_metrics_snapshot_api.py`、`backend/tests/unit/test_suggestion_list_api.py`、`backend/tests/unit/test_worker.py`、`backend/tests/integration/test_snapshot_api.py` 与 5 个前端视图单测，覆盖快照失败重试、display_status 过滤、worker 租约丢失守卫和 fail-close 行为。
+  - 二次人工 review 未发现新的阻断问题；CodeRabbit CLI 当前环境未安装，未执行外部 review。
 
 ### 3.51 Plan A 收尾 hotfix + 历史状态显示派生化（2026-04-19）
 - **后端**：`backend/app/api/metrics.py` 的 `DashboardOverviewPayload` 为 `restock_sku_count`/`no_restock_sku_count`/`exported_count` 新增 `= 0` 默认值，兼容 Plan A 之前生成的旧 `dashboard_snapshot.payload`，修复信息总览 500。
@@ -513,7 +532,8 @@
 
 ### 4.1 后端
 
-- `cd backend && .\.venv\Scripts\python.exe -m pytest -p no:cacheprovider`：**213 passed, 8 skipped**
+- `cd backend && pytest -p no:cacheprovider -k "not test_workbook_writes_to_disk"`：**273 passed, 25 skipped, 1 deselected**
+- `cd backend && pytest -p no:cacheprovider tests/unit/test_excel_export_service.py::test_workbook_writes_to_disk`：**1 passed**
 - 关键测试：
   - `tests/unit/test_engine_step1.py` ~ `test_engine_step6.py`
   - `tests/unit/test_zipcode_matcher.py`

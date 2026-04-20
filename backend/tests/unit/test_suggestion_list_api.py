@@ -27,8 +27,10 @@ class _RowsResult:
 class _FakeSession:
     def __init__(self, responses):
         self._responses = list(responses)
+        self.executed = []
 
     async def execute(self, _statement):
+        self.executed.append(_statement)
         return self._responses.pop(0)
 
 
@@ -73,3 +75,33 @@ async def test_list_suggestions_returns_page_metadata() -> None:
     assert result.page_size == 20
     assert result.items[0].id == 1
     assert result.items[0].snapshot_count == 2
+
+
+@pytest.mark.asyncio
+async def test_list_suggestions_filters_derived_display_status_exported() -> None:
+    db = _FakeSession(
+        [
+            _ScalarResult(0),
+            _RowsResult([]),
+        ]
+    )
+
+    await list_suggestions(
+        status=None,
+        display_status="exported",
+        date_from=None,
+        date_to=None,
+        sku=None,
+        page=1,
+        page_size=20,
+        sort_by=None,
+        sort_order="desc",
+        db=db,
+        _=None,
+    )
+
+    compiled = db.executed[0].compile()
+    sql_text = str(compiled)
+    assert "suggestion.status" in sql_text
+    assert "suggestion_snapshot" in sql_text
+    assert compiled.params["status_1"] == "draft"

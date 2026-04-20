@@ -213,17 +213,26 @@ function onCustomCronInput(value: string): void {
   form.value.calc_cron = value
 }
 
+async function loadToggle(): Promise<void> {
+  try {
+    const t = await getGenerationToggle()
+    toggle.value = t
+    toggleValue.value = t.enabled
+  } catch {
+    toggle.value = null
+  }
+}
+
 onMounted(async () => {
   try {
     form.value = await getGlobalConfig()
     snapshotCalcParams()
     initCronState()
-    const t = await getGenerationToggle()
-    toggle.value = t
-    toggleValue.value = t.enabled
   } catch (e) {
     ElMessage.error(getActionErrorMessage(e, '加载全局配置'))
+    return
   }
+  await loadToggle()
 })
 
 async function onToggleChange(next: boolean | string | number): Promise<void> {

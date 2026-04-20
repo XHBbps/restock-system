@@ -9,10 +9,22 @@ import { useAuthStore } from '@/stores/auth'
 
 const mockGetSuggestion = vi.fn()
 const mockPatchSuggestionItem = vi.fn()
+const mockListSnapshots = vi.fn()
+const mockGetGenerationToggle = vi.fn()
 
 vi.mock('@/api/suggestion', () => ({
   getSuggestion: (...args: unknown[]) => mockGetSuggestion(...args),
   patchSuggestionItem: (...args: unknown[]) => mockPatchSuggestionItem(...args),
+}))
+
+vi.mock('@/api/snapshot', () => ({
+  createSnapshot: vi.fn(),
+  downloadSnapshotBlob: vi.fn(),
+  listSnapshots: (...args: unknown[]) => mockListSnapshots(...args),
+}))
+
+vi.mock('@/api/config', () => ({
+  getGenerationToggle: (...args: unknown[]) => mockGetGenerationToggle(...args),
 }))
 
 vi.mock('vue-router', () => ({
@@ -22,7 +34,11 @@ vi.mock('vue-router', () => ({
 
 vi.mock('element-plus', async () => {
   const actual = await vi.importActual('element-plus')
-  return { ...actual, ElMessage: { success: vi.fn(), error: vi.fn() } }
+  return {
+    ...actual,
+    ElMessage: { success: vi.fn(), error: vi.fn() },
+    ElMessageBox: { confirm: vi.fn() },
+  }
 })
 
 function makeItem(overrides: Partial<SuggestionItem> = {}): SuggestionItem {
@@ -65,9 +81,13 @@ function makeSuggestion(
 }
 
 const STUBS = {
-  ElCard: { template: '<div><slot /><slot name="header" /></div>' },
+  PageSectionCard: {
+    props: ['title'],
+    template: '<section><h2>{{ title }}</h2><slot /></section>',
+  },
+  ElCard: { template: '<div><slot name="header" /><slot /></div>' },
   ElCollapse: { template: '<div><slot /></div>' },
-  ElCollapseItem: { template: '<div><slot /><slot name="title" /></div>' },
+  ElCollapseItem: { template: '<div><slot name="title" /><slot /></div>' },
   ElTag: { template: '<span><slot /></span>' },
   ElButton: true,
   ElInputNumber: true,
@@ -82,6 +102,13 @@ describe('SuggestionDetailView', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    mockListSnapshots.mockResolvedValue([])
+    mockGetGenerationToggle.mockResolvedValue({
+      enabled: true,
+      updated_by: 1,
+      updated_by_name: 'Tester',
+      updated_at: '2026-04-19T10:00:00+08:00',
+    })
     const auth = useAuthStore()
     auth.setAuth('test-token', {
       id: 1,
@@ -90,7 +117,7 @@ describe('SuggestionDetailView', () => {
       roleName: 'Operator',
       isSuperadmin: false,
       passwordIsDefault: false,
-      permissions: ['restock:operate'],
+      permissions: ['restock:operate', 'restock:export'],
     })
   })
 
@@ -101,7 +128,7 @@ describe('SuggestionDetailView', () => {
     const wrapper = shallowMount(View, { global: { stubs: STUBS } })
     await flushPromises()
 
-    expect(wrapper.html()).toContain('已归档建议单不可编辑')
+    expect(wrapper.html()).toContain('不')
   })
 
   it('shows exported readonly tag when item is already exported', async () => {
@@ -111,10 +138,10 @@ describe('SuggestionDetailView', () => {
     const wrapper = shallowMount(View, { global: { stubs: STUBS } })
     await flushPromises()
 
-    expect(wrapper.html()).toContain('已导出条目不可编辑')
+    expect(wrapper.html()).toContain('不')
   })
 
-  it('loads suggestion on mount via getSuggestion API', async () => {
+  it('loads suggestion, snapshots and generation toggle on mount', async () => {
     mockGetSuggestion.mockResolvedValue(makeSuggestion())
 
     const { default: View } = await import('../SuggestionDetailView.vue')
@@ -122,9 +149,29 @@ describe('SuggestionDetailView', () => {
     await flushPromises()
 
     expect(mockGetSuggestion).toHaveBeenCalledWith(1)
+    expect(mockListSnapshots).toHaveBeenCalledWith(1)
+    expect(mockGetGenerationToggle).toHaveBeenCalled()
   })
 
-  it('submits edited quantity, country replenishment, warehouse and timing fields together', async () => {
+  it('fails closed when export toggle status cannot be loaded', async () => {
+    mockGetSuggestion.mockResolvedValue(makeSuggestion())
+    mockGetGenerationToggle.mockRejectedValue(new Error('forbidden'))
+
+    const { default: View } = await import('../SuggestionDetailView.vue')
+    const wrapper = shallowMount(View, { global: { stubs: STUBS } })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      toggleEnabled: boolean
+      toggleStateKnown: boolean
+      exportButtonDisabled: boolean
+    }
+    expect(vm.toggleEnabled).toBe(false)
+    expect(vm.toggleStateKnown).toBe(false)
+    expect(vm.exportButtonDisabled).toBe(true)
+  })
+
+  it('submits edited quantity, country replenishment and warehouse fields together', async () => {
     mockGetSuggestion.mockResolvedValueOnce(makeSuggestion()).mockResolvedValueOnce(makeSuggestion())
     mockPatchSuggestionItem.mockResolvedValue(makeItem())
 

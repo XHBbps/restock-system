@@ -26,13 +26,14 @@ export interface DashboardOverview {
   restock_sku_count: number
   no_restock_sku_count: number
   suggestion_item_count: number
-  pushed_count: number
+  exported_count: number
   urgent_count: number
   warning_count: number
   safe_count: number
   risk_country_count: number
   suggestion_id: number | null
   suggestion_status: string | null
+  suggestion_snapshot_count: number
   lead_time_days: number
   target_days: number
   country_risk_distribution: CountryRiskDistribution[]

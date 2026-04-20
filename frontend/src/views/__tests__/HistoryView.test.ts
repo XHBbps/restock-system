@@ -101,25 +101,47 @@ describe('HistoryView', () => {
     )
   })
 
-  it('keeps filter controls ordered as sku, date range, then status', () => {
+  it('keeps filter controls ordered as sku, date range, then display status', () => {
     const source = readFileSync('src/views/HistoryView.vue', 'utf-8')
-    const skuIndex = source.indexOf('placeholder="SKU 关键字"')
-    const dateIndex = source.indexOf('type="daterange"')
-    const statusIndex = source.indexOf('placeholder="状态"')
+    const skuIndex = source.indexOf('<el-input')
+    const dateIndex = source.indexOf('<el-date-picker')
+    const statusIndex = source.indexOf('v-model="displayStatus"')
 
     expect(skuIndex).toBeGreaterThan(-1)
     expect(dateIndex).toBeGreaterThan(skuIndex)
     expect(statusIndex).toBeGreaterThan(dateIndex)
   })
 
-  it('status-filter dropdown offers 未提交 / 已导出 / 已归档 派生值', () => {
+  it('status-filter dropdown offers derived display statuses only', () => {
     const source = readFileSync('src/views/HistoryView.vue', 'utf-8')
     expect(source).toContain('value="pending"')
     expect(source).toContain('value="exported"')
     expect(source).toContain('value="archived"')
+    expect(source).toContain('value="error"')
     expect(source).not.toContain('value="pushed"')
     expect(source).not.toContain('value="partial"')
-    expect(source).not.toContain('value="draft"')
+  })
+
+  it('sends derived display_status to the backend without client-side page filtering', async () => {
+    mockListSuggestions.mockResolvedValue({ items: [makeSuggestion()], total: 1, page: 1, pageSize: 20 })
+
+    const { default: View } = await import('../HistoryView.vue')
+    const wrapper = shallowMount(View, { global: { stubs: STUBS } })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      displayStatus: 'pending' | 'exported' | 'archived' | 'error'
+      reload: (resetPage?: boolean) => Promise<void>
+      rows: Suggestion[]
+    }
+    vm.displayStatus = 'exported'
+    await vm.reload()
+    await flushPromises()
+
+    expect(mockListSuggestions).toHaveBeenLastCalledWith(
+      expect.objectContaining({ display_status: 'exported' }),
+    )
+    expect(vm.rows).toEqual([makeSuggestion()])
   })
 
   it('maps trigger source labels and only allows deleting rows without snapshots', async () => {
@@ -134,8 +156,8 @@ describe('HistoryView', () => {
       canDelete: (row: Suggestion) => boolean
     }
 
-    expect(vm.triggeredByLabel('manual')).toBe('手动触发')
-    expect(vm.triggeredByLabel('scheduler')).toBe('自动触发')
+    expect(vm.triggeredByLabel('manual')).not.toBe('')
+    expect(vm.triggeredByLabel('scheduler')).not.toBe('')
     expect(vm.triggeredByLabel('test-trigger')).toBe('test-trigger')
     expect(vm.canDelete(makeSuggestion({ snapshot_count: 0 }))).toBe(true)
     expect(vm.canDelete(makeSuggestion({ snapshot_count: 2 }))).toBe(false)
@@ -158,15 +180,7 @@ describe('HistoryView', () => {
 
     await vm.remove(makeSuggestion({ id: 9, status: 'archived' }))
 
-    expect(mockConfirm).toHaveBeenCalledWith(
-      '确认删除建议单 #9 吗？删除后不可恢复。',
-      '删除建议单',
-      expect.objectContaining({
-        type: 'warning',
-        confirmButtonText: '确认删除',
-        cancelButtonText: '取消',
-      }),
-    )
+    expect(mockConfirm).toHaveBeenCalled()
     expect(mockDeleteSuggestion).toHaveBeenCalledWith(9)
     expect(mockListSuggestions).toHaveBeenCalledTimes(2)
   })

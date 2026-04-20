@@ -38,6 +38,7 @@ async def test_dashboard_returns_cached_snapshot_payload_without_recomputing(mon
         "risk_country_count": 3,
         "suggestion_id": 10,
         "suggestion_status": "draft",
+        "suggestion_snapshot_count": 2,
         "lead_time_days": 20,
         "target_days": 60,
         "country_risk_distribution": [],
@@ -69,6 +70,7 @@ async def test_dashboard_returns_cached_snapshot_payload_without_recomputing(mon
     assert result.urgent_count == 5
     assert result.warning_count == 2
     assert result.suggestion_id == 10
+    assert result.suggestion_snapshot_count == 2
 
 
 @pytest.mark.asyncio
@@ -87,6 +89,7 @@ async def test_dashboard_marks_cached_snapshot_as_refreshing_when_task_exists(mo
         "risk_country_count": 2,
         "suggestion_id": None,
         "suggestion_status": None,
+        "suggestion_snapshot_count": 0,
         "lead_time_days": 20,
         "target_days": 60,
         "country_risk_distribution": [],
@@ -188,6 +191,34 @@ async def test_dashboard_returns_old_snapshot_with_defaults_without_enqueue(monk
     # 旧快照已有字段正常返回
     assert result.enabled_sku_count == 6
     assert result.urgent_count == 1
+
+
+@pytest.mark.asyncio
+async def test_dashboard_handles_malformed_cached_snapshot_without_500(monkeypatch) -> None:
+    import app.api.metrics as metrics_module
+
+    db = _FakeDb(
+        [
+            _ScalarOneOrNoneResult(None),
+            _ScalarOneOrNoneResult(
+                SimpleNamespace(
+                    id=1,
+                    payload={"enabled_sku_count": "bad"},
+                    refreshed_at=datetime(2026, 4, 14, 12, 0, 0),
+                    updated_at=datetime(2026, 4, 14, 12, 0, 0),
+                )
+            ),
+        ]
+    )
+
+    monkeypatch.setattr(metrics_module, "enqueue_task", pytest.fail)
+
+    result = await get_dashboard_overview(db=db, _={})  # type: ignore[arg-type]
+
+    assert result.snapshot_status == "missing"
+    assert result.snapshot_task_id is None
+    assert result.enabled_sku_count == 0
+    assert result.suggestion_snapshot_count == 0
 
 
 @pytest.mark.asyncio

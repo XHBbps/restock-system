@@ -20,7 +20,7 @@
             <el-button
               v-if="auth.hasPermission('restock:export') && suggestion.status === 'draft'"
               type="primary"
-              :disabled="!toggleEnabled || exportable.length === 0"
+              :disabled="exportButtonDisabled"
               :loading="exporting"
               @click="handleExport"
             >
@@ -275,7 +275,8 @@ const loadError = ref('')
 
 const snapshots = ref<SnapshotOut[]>([])
 const loadingSnapshots = ref(false)
-const toggleEnabled = ref(true)
+const toggleEnabled = ref(false)
+const toggleStateKnown = ref(false)
 const exporting = ref(false)
 
 const exportable = computed(() =>
@@ -283,10 +284,15 @@ const exportable = computed(() =>
 )
 
 const exportButtonText = computed(() => {
+  if (!toggleStateKnown.value) return '无法确认生成开关状态'
   if (!toggleEnabled.value) return '生成开关已关闭'
   if (exportable.value.length === 0) return '无可导出条目'
   return '导出 Excel'
 })
+
+const exportButtonDisabled = computed(
+  () => !toggleStateKnown.value || !toggleEnabled.value || exportable.value.length === 0,
+)
 
 const suggestionStatusMeta = computed(() =>
   suggestion.value
@@ -347,8 +353,10 @@ async function loadToggle(): Promise<void> {
   try {
     const toggle = await getGenerationToggle()
     toggleEnabled.value = toggle.enabled
+    toggleStateKnown.value = true
   } catch {
-    toggleEnabled.value = true
+    toggleEnabled.value = false
+    toggleStateKnown.value = false
   }
 }
 

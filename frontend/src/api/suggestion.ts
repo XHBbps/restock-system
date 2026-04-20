@@ -52,6 +52,7 @@ export interface SuggestionItemPatch {
 
 export async function listSuggestions(params: {
   status?: string
+  display_status?: 'pending' | 'exported' | 'archived' | 'error'
   date_from?: string
   date_to?: string
   sku?: string

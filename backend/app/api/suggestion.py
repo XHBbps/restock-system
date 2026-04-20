@@ -2,6 +2,7 @@
 
 from datetime import date as date_type
 from datetime import datetime, timedelta
+from typing import Literal
 from typing import Any
 
 from fastapi import APIRouter, Depends, Path, Query
@@ -30,10 +31,8 @@ router = APIRouter(prefix="/api/suggestions", tags=["suggestion"])
 
 SUGGESTION_STATUS_SORT_ORDER: dict[str, int] = {
     "draft": 0,
-    "partial": 1,
-    "pushed": 2,
-    "archived": 3,
-    "error": 4,
+    "archived": 1,
+    "error": 2,
 }
 
 
@@ -65,6 +64,7 @@ def _apply_suggestion_sort(stmt, sort_by: str | None, sort_order: str):
 @router.get("", response_model=SuggestionListOut)
 async def list_suggestions(
     status: str | None = Query(default=None),
+    display_status: Literal["pending", "exported", "archived", "error"] | None = Query(default=None),
     date_from: date_type | None = Query(default=None),
     date_to: date_type | None = Query(default=None),
     sku: str | None = Query(default=None),
@@ -76,7 +76,21 @@ async def list_suggestions(
     _: None = Depends(require_permission(RESTOCK_VIEW)),
 ) -> SuggestionListOut:
     base = select(Suggestion)
-    if status:
+    snapshot_count_sq = (
+        select(func.count(SuggestionSnapshot.id))
+        .where(SuggestionSnapshot.suggestion_id == Suggestion.id)
+        .correlate(Suggestion)
+        .scalar_subquery()
+    )
+    if display_status == "pending":
+        base = base.where(Suggestion.status == "draft", snapshot_count_sq == 0)
+    elif display_status == "exported":
+        base = base.where(Suggestion.status == "draft", snapshot_count_sq > 0)
+    elif display_status == "archived":
+        base = base.where(Suggestion.status == "archived")
+    elif display_status == "error":
+        base = base.where(Suggestion.status == "error")
+    elif status:
         base = base.where(Suggestion.status == status)
     if date_from:
         base = base.where(
@@ -100,13 +114,7 @@ async def list_suggestions(
     count_stmt = base.with_only_columns(func.count()).order_by(None)
     total = (await db.execute(count_stmt)).scalar_one()
 
-    snap_count_sq = (
-        select(func.count(SuggestionSnapshot.id))
-        .where(SuggestionSnapshot.suggestion_id == Suggestion.id)
-        .correlate(Suggestion)
-        .scalar_subquery()
-    )
-    data_stmt = base.add_columns(snap_count_sq.label("snapshot_count"))
+    data_stmt = base.add_columns(snapshot_count_sq.label("snapshot_count"))
     rows = (
         await db.execute(data_stmt.offset((page - 1) * page_size).limit(page_size))
     ).all()
@@ -133,7 +141,7 @@ async def get_current_suggestion(
     row = (
         await db.execute(
             select(Suggestion)
-            .where(Suggestion.status.in_(("draft", "partial")))
+            .where(Suggestion.status == "draft")
             .order_by(Suggestion.created_at.desc())
             .limit(1)
         )
@@ -271,8 +279,6 @@ async def delete_suggestion(
     ).scalar_one_or_none()
     if sug is None:
         raise NotFound(f"建议单 {suggestion_id} 不存在")
-    if sug.status == "pushed":
-        raise ConflictError("已推送的建议单不可删除")
 
     snap_count = (
         await db.execute(

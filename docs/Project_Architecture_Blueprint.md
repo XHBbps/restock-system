@@ -209,7 +209,7 @@ CREATE INDEX ix_task_run_lease
 - **Reaper**：每 60 秒扫描 `lease_expires_at < now()` 的 running 任务，标记为 failed（worker 死亡回收）
 - **Heartbeat**：每 30 秒延长 `lease_expires_at`，约束 `heartbeat × 2 < lease_minutes × 60`
 
-**进度追踪**：`TaskRun.current_step / step_detail / total_steps` 由 worker 在执行中写入，前端 `TaskProgress` 组件轮询 `/api/tasks/{id}`。`sync_order_detail` / `refetch_order_detail` 直接按目标订单数回写精确进度；店铺、仓库、商品、库存、订单、出库等分页同步任务则复用赛狐分页响应里的 `totalPage` 输出“第 P / N 页”进度，不额外发起预扫描请求。
+**进度追踪**：`TaskRun.current_step / step_detail / total_steps` 由 worker 在执行中写入，前端 `TaskProgress` 组件轮询 `/api/tasks/{id}`。`sync_order_detail` / `refetch_order_detail` 直接按目标订单数回写精确进度；店铺、仓库、商品、库存、订单、出库等分页同步任务则复用赛狐分页响应里的 `totalPage` 输出“第 P / N 页”进度，不额外发起预扫描请求。自 2026-04-20 起，worker 的 heartbeat、进度更新和 success/failed 终态回写都带 `status='running' + worker_id` 条件；若租约已被 reaper 回收，则抛 `TaskLeaseLostError` 并停止继续覆盖状态。
 **信息总览快照任务**：`refresh_dashboard_snapshot` 也是标准 TaskRun 任务，复用现有去重、轮询和失败回写机制；它在后台调用 `build_dashboard_payload()` 生成 `dashboard_snapshot` 单例缓存，页面刷新时优先消费该缓存而不是重复现算。
 **任务权限注册表**：`app/tasks/access.py` 统一维护 TaskRun 作业清单，以及查看/操作权限映射；通用 `POST /api/tasks` 只允许创建显式白名单里的任务。`push_saihu` 作业与推送链路已随 §3.6 的导出快照子系统一同删除。
 
@@ -285,17 +285,20 @@ _ENDPOINT_RATE_OVERRIDES = {
 **导出流程**（`POST /api/suggestions/{id}/snapshots`）：
 
 ```
-1. 校验 suggestion.status == 'draft'
-2. 校验 item_ids 属于该建议且未被其它 snapshot 导出
-3. SELECT max(version) + 1 作为新 version
-4. INSERT suggestion_snapshot（generation_status='generating'）
-5. 拉取 product_listing 名称/主图 + warehouse 名字映射
-6. 批量 INSERT suggestion_snapshot_item + 冻结 context
-7. UPDATE suggestion_item SET export_status='exported', exported_snapshot_id=..., exported_at=now_beijing()
-8. services/excel_export.build_excel_workbook(ctx) → 落盘到 deploy/data/exports/{yyyy}/{mm}/<filename>
-9. UPDATE suggestion_snapshot SET generation_status='ready', file_path, file_size_bytes
-10. 首次导出时把 global_config.suggestion_generation_enabled 翻 OFF（强制用户先回顾再开新周期）
-11. INSERT excel_export_log（action='generate'）
+1. `SELECT ... FOR UPDATE` 锁定目标 `suggestion`、导出条目和 `global_config(id=1)`
+2. 校验 suggestion.status == 'draft'
+3. 校验 item_ids 属于该建议且未被其它 snapshot 导出
+4. 锁内计算 `SELECT max(version) + 1` 作为新 version
+5. INSERT suggestion_snapshot（generation_status='generating'）
+6. 拉取 product_listing 名称/主图 + warehouse 名字映射
+7. 批量 INSERT suggestion_snapshot_item + 冻结 context
+8. `services/excel_export.build_excel_workbook(ctx)` → 落盘到 `deploy/data/exports/{yyyy}/{mm}/<filename>`
+9. 文件成功落盘后，才 UPDATE suggestion_item SET `export_status='exported'`, `exported_snapshot_id=...`, `exported_at=now_beijing()`
+10. UPDATE suggestion_snapshot SET `generation_status='ready'`, `file_path`, `file_size_bytes`
+11. 首次导出时把 `global_config.suggestion_generation_enabled` 翻 OFF（强制用户先回顾再开新周期）
+12. INSERT `excel_export_log`（`action='generate'`）
+
+**失败补偿**：若 Excel 生成或文件落盘失败，则 snapshot 记为 `generation_status='failed'`，但不修改 `suggestion_item.export_status`，业务人员可以直接重试导出。
 ```
 
 **生成开关**（`GET/PATCH /api/config/generation-toggle`）：
@@ -395,7 +398,7 @@ client.interceptors.response.use(undefined, (error) => {
 
 `snapshot.ts`（对接 `app/api/snapshot.py`）提供 `createSnapshot` / `listSnapshots`（返回按 `version` 降序）/ `getSnapshot` / `downloadSnapshotBlob`（解析 `Content-Disposition` 拿文件名）等函数；`utils/download.ts` 提供 `triggerBlobDownload(blob, filename)` 浏览器落盘工具，被 `SuggestionDetailView` 的导出按钮与"历史快照区下载"共享复用。
 
-`dashboard.ts` 当前消费 `GET /api/metrics/dashboard` 和 `POST /api/metrics/dashboard/refresh`。信息总览页默认优先读取 `dashboard_snapshot` 缓存，并在页面头部展示快照状态与同步时间；当缓存缺失或读到缺少新字段的旧快照时，后端返回 `snapshot_status="missing"`，不会自动入队刷新，前端仅在具备 `home:refresh` 时展示 `TaskProgress` 轮询与“刷新快照”按钮。缓存 payload 由 `build_dashboard_payload()` 统一生成，其中首行卡片使用 `restock_sku_count`、`no_restock_sku_count`、`risk_country_count` 展示“需补货SKU / 无需补货SKU / 覆盖国家”；左侧“各国缺货风险分布”和“急需补货SKU”继续基于 SKU+国家维度的实时 `sale_days` 计算结果；右侧国家分布继续汇总当前建议单全部条目的 `country_breakdown`。
+`dashboard.ts` 当前消费 `GET /api/metrics/dashboard` 和 `POST /api/metrics/dashboard/refresh`。信息总览页默认优先读取 `dashboard_snapshot` 缓存，并在页面头部展示快照状态与同步时间；当缓存缺失、读到缺少新字段的旧快照，或 payload 结构已损坏无法通过 Pydantic 校验时，后端统一降级返回 `snapshot_status="missing"`（或存在活跃任务时为 `refreshing`），不会自动入队刷新，前端仅在具备 `home:refresh` 时展示 `TaskProgress` 轮询与“刷新快照”按钮。缓存 payload 由 `build_dashboard_payload()` 统一生成，其中首行卡片使用 `restock_sku_count`、`no_restock_sku_count`、`risk_country_count` 展示“需补货SKU / 无需补货SKU / 覆盖国家”；右侧当前建议进度改用 `exported_count` 与 `suggestion_snapshot_count`；左侧“各国缺货风险分布”和“急需补货SKU”继续基于 SKU+国家维度的实时 `sale_days` 计算结果；右侧国家分布继续汇总当前建议单全部条目的 `country_breakdown`。
 
 ### 4.5 数据流模式
 
@@ -421,7 +424,7 @@ async function reload() {
 
 当前已按该模式迁移：
 - `DataOrdersView.vue`：订单列表按页返回，并仅对当前页补查 `item_count` / `has_detail`
-- `HistoryView.vue`：建议单历史页直接消费 `GET /api/suggestions` 的 `items/total/page/page_size`；状态列使用 `getSuggestionDisplayStatusMeta(status, snapshot_count)` 派生 4 档显示标签（`未提交 / 已导出 / 已归档 / 异常`），状态下拉收敛为 3 档（`未提交 / 已导出 / 已归档`）——`未提交`/`已导出` 均向后端发 `status=draft`，前端再按 `snapshot_count` 二次过滤；`canDelete(row)` 规则为 `row.snapshot_count === 0`。派生逻辑定义在 `frontend/src/utils/status.ts::deriveSuggestionDisplayStatus`，`SuggestionListView` 与 `SuggestionDetailView` 的状态 tag 共用该函数，避免多处硬编码映射。
+- `HistoryView.vue`：建议单历史页直接消费 `GET /api/suggestions` 的 `items/total/page/page_size`；状态列使用 `getSuggestionDisplayStatusMeta(status, snapshot_count)` 派生 4 档显示标签（`未提交 / 已导出 / 已归档 / 异常`），状态下拉对应后端 `display_status=pending|exported|archived|error`，由后端统一按 `snapshot_count` 派生过滤，避免前端只过滤当前页造成 `items` 与 `total` 错位；`canDelete(row)` 规则为 `row.snapshot_count === 0`。派生逻辑定义在 `frontend/src/utils/status.ts::deriveSuggestionDisplayStatus`，`SuggestionListView` 与 `SuggestionDetailView` 的状态 tag 共用该函数，避免多处硬编码映射。
 - `DataProductsView.vue`：商品页通过 `listSkuOverview()` 下推 SKU、启用状态和分页参数
 - `DataInventoryView.vue`：库存页通过 `GET /api/data/inventory/warehouse-groups` 做仓库分组分页，保持仓库展开明细交互
 - `DataOutRecordsView.vue`：出库记录页将 SKU、仓库单号、国家、类型、在途状态、排序和分页下推到后端
@@ -487,7 +490,7 @@ async function reload() {
 | 视图 | 职责 |
 |---|---|
 | `SuggestionListView` | 顶部 `PageSectionCard.actions` 展示生成开关只读状态 tag（`loadToggle()` + `onMounted` + `onActivated` 双钩子保证切页回来也刷新）；只读标签不可切换（翻开关由 `GlobalConfigView` 负责）。已移除推送时代的选择列、推送按钮、`pushTaskId` 轮询、`selectedIds` / `handleSelection` / `handleSelectAll` / `syncTableSelection` / `handlePush` / `PUSH_STATUS_SORT_ORDER` / `filterPushStatus` 等死代码。 |
-| `SuggestionDetailView` | 勾选 `export_status='pending'` 的条目 → “导出 Excel”按钮走一步式 `POST /api/suggestions/{id}/snapshots` + `GET /api/snapshots/{id}/download` blob 流程（失败时仍在 `finally` 中 `await load()` 刷新快照历史，并区分”导出成功但下载失败”的独立错误文案）；右侧新增”历史快照区”`PageSectionCard`（6 列，按 `version` 降序，可重复下载）；`SkuCard` 停止传入 `:blocker`（组件 prop 仍保留但所有调用点不再传值）；条目 `isEditable` 改为 `export_status !== 'exported'`（对应 snapshot 条目不可变的约束，见 §9.5 Don'ts）。 |
+| `SuggestionDetailView` | 勾选 `export_status='pending'` 的条目 → “导出 Excel”按钮走一步式 `POST /api/suggestions/{id}/snapshots` + `GET /api/snapshots/{id}/download` blob 流程（失败时仍在 `finally` 中 `await load()` 刷新快照历史，并区分”导出成功但下载失败”的独立错误文案）；右侧新增”历史快照区”`PageSectionCard`（6 列，按 `version` 降序，可重复下载）；导出前会先探测生成开关，探测失败时按 fail-close 禁用按钮；`SkuCard` 停止传入 `:blocker`（组件 prop 仍保留但所有调用点不再传值）；条目 `isEditable` 改为 `export_status !== 'exported'`（对应 snapshot 条目不可变的约束，见 §9.5 Don'ts）。 |
 | `GlobalConfigView` | 新增”生成开关卡片”：`el-switch` 即时保存，翻 ON 时弹 `ElMessageBox` 二次确认”将归档全部 draft”，`PATCH` 失败时回滚开关状态并提示；无 `config:edit` 时控件只读并提示”无权限操作此开关”。 |
 | `HistoryView` | 参见 §4.5 — 状态筛选 3 项，快照数 + 导出状态列，`canDelete` 基于 `snapshot_count === 0`。 |
 
