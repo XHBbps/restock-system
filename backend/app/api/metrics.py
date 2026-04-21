@@ -300,6 +300,7 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
             velocity_for_sku=velocity.get(sku, {}),
             local_stock_for_sku=local_stock.get(sku),
             buffer_days=getattr(config, "buffer_days", 15) if config else 15,
+            safety_stock_days=getattr(config, "safety_stock_days", 0) if config else 0,
         )
         if total_qty > 0:
             restock_sku_count += 1
@@ -364,7 +365,14 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
         .all()
     )
 
-    exported_count = sum(1 for it in items if it.export_status == "exported")
+    exported_count = sum(
+        1
+        for it in items
+        if (
+            getattr(it, "procurement_export_status", "pending") == "exported"
+            or getattr(it, "restock_export_status", "pending") == "exported"
+        )
+    )
     suggestion_snapshot_count = (
         await db.execute(
             select(func.count()).select_from(SuggestionSnapshot).where(

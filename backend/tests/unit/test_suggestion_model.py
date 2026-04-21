@@ -1,4 +1,4 @@
-"""验证 Suggestion / SuggestionItem 模型字段对齐 migration。"""
+"""Verify Suggestion / SuggestionItem model fields stay aligned."""
 
 from app.models.suggestion import Suggestion, SuggestionItem
 
@@ -7,15 +7,22 @@ def test_suggestion_has_new_archive_fields():
     cols = {c.name for c in Suggestion.__table__.columns}
     assert "archived_by" in cols
     assert "archived_trigger" in cols
+    assert "procurement_item_count" in cols
+    assert "restock_item_count" in cols
     assert "pushed_items" not in cols
     assert "failed_items" not in cols
 
 
 def test_suggestion_item_export_fields():
     cols = {c.name for c in SuggestionItem.__table__.columns}
-    assert "export_status" in cols
-    assert "exported_snapshot_id" in cols
-    assert "exported_at" in cols
+    assert "purchase_qty" in cols
+    assert "purchase_date" in cols
+    assert "procurement_export_status" in cols
+    assert "procurement_exported_snapshot_id" in cols
+    assert "procurement_exported_at" in cols
+    assert "restock_export_status" in cols
+    assert "restock_exported_snapshot_id" in cols
+    assert "restock_exported_at" in cols
     assert "push_status" not in cols
     assert "saihu_po_number" not in cols
     assert "commodity_id" not in cols

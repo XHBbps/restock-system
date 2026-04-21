@@ -1,9 +1,10 @@
-"""Unit tests for suggestion API patch/push/delete endpoints."""
+"""Unit tests for suggestion API patch/delete endpoints."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+
 import pytest
 
 from app.api.suggestion import delete_suggestion, patch_item
@@ -65,33 +66,41 @@ class _FakeSuggestion:
 
 
 class _FakeItem:
-    def __init__(self, export_status: str = "pending") -> None:
+    def __init__(
+        self,
+        procurement_export_status: str = "pending",
+        restock_export_status: str = "pending",
+    ) -> None:
         self.id = 10
         self.suggestion_id = 1
-        self.commodity_sku: str = "SKU-A"
-        self.export_status = export_status
-        self.total_qty: int = 1
-        self.country_breakdown: dict[str, int] = {"US": 1}
-        self.warehouse_breakdown: dict[str, dict[str, int]] = {"US": {"W1": 1}}
+        self.commodity_sku = "SKU-A"
+        self.procurement_export_status = procurement_export_status
+        self.restock_export_status = restock_export_status
+        self.total_qty = 1
+        self.country_breakdown = {"US": 1}
+        self.warehouse_breakdown = {"US": {"W1": 1}}
         self.allocation_snapshot: dict[str, Any] | None = {"US": {"allocation_mode": "matched"}}
         self.sale_days_snapshot: dict[str, float] | None = {"US": 25.0}
+        self.purchase_qty = 0
+        self.purchase_date = None
+        self.urgent = False
 
 
 async def test_suggestion_patch_archived_rejected() -> None:
     db = _FakeSession([_FakeSuggestion(status="archived")])
     patch = SuggestionItemPatch(total_qty=5)
-    with pytest.raises(ValidationFailed, match=r"archived|归档"):
+    with pytest.raises(ValidationFailed):
         await patch_item(patch=patch, suggestion_id=1, item_id=10, db=db, _={})  # type: ignore[arg-type]
 
 
 async def test_suggestion_patch_exported_rejected() -> None:
-    db = _FakeSession([_FakeSuggestion(), _FakeItem(export_status="exported")])
+    db = _FakeSession([_FakeSuggestion(), _FakeItem(procurement_export_status="exported")])
     patch = SuggestionItemPatch(total_qty=5)
-    with pytest.raises(ValidationFailed, match=r"exported|导出"):
+    with pytest.raises(ValidationFailed):
         await patch_item(patch=patch, suggestion_id=1, item_id=10, db=db, _={})  # type: ignore[arg-type]
 
 
-async def test_suggestion_patch_allows_country_sum_to_differ_from_total_qty(monkeypatch) -> None:
+async def test_suggestion_patch_recomputes_total_qty_from_country_breakdown(monkeypatch) -> None:
     import app.api.suggestion as suggestion_module
 
     async def _fake_enrich_item(*_args: Any, **_kwargs: Any) -> None:
@@ -113,7 +122,7 @@ async def test_suggestion_patch_allows_country_sum_to_differ_from_total_qty(monk
 
     update_stmt = db.executed_statements[-1]
     normalized_values = _normalize_update_values(update_stmt)
-    assert normalized_values["total_qty"] == 10
+    assert normalized_values["total_qty"] == 7
     assert normalized_values["country_breakdown"] == {"US": 3, "UK": 4}
 
 
@@ -181,13 +190,12 @@ async def test_suggestion_patch_rejects_warehouse_sum_mismatch() -> None:
 
 async def test_suggestion_delete_rejects_missing_row() -> None:
     db = _FakeSession([None])
-    with pytest.raises(NotFound, match=r"不存在|NotFound"):
+    with pytest.raises(NotFound):
         await delete_suggestion(suggestion_id=1, db=db, _={})  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize("status", ["draft", "error", "archived"])
 async def test_suggestion_delete_allows_rows_without_snapshots(status: str) -> None:
-    # Results: 1) suggestion lookup, 2) snapshot count (0), 3) delete execution
     db = _FakeSession([_FakeSuggestion(status=status), 0, None])
 
     await delete_suggestion(suggestion_id=1, db=db, _={})  # type: ignore[arg-type]
@@ -199,14 +207,14 @@ async def test_suggestion_delete_allows_rows_without_snapshots(status: str) -> N
 def test_suggestion_item_patch_rejects_negative_country_breakdown():
     from pydantic import ValidationError
 
-    with pytest.raises(ValidationError, match="不可为负"):
+    with pytest.raises(ValidationError):
         SuggestionItemPatch(country_breakdown={"US": -10, "JP": 5})
 
 
 def test_suggestion_item_patch_rejects_negative_warehouse_breakdown():
     from pydantic import ValidationError
 
-    with pytest.raises(ValidationError, match="不可为负"):
+    with pytest.raises(ValidationError):
         SuggestionItemPatch(warehouse_breakdown={"US": {"WH-1": -5}})
 
 

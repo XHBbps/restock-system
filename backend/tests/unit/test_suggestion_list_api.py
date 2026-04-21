@@ -29,8 +29,8 @@ class _FakeSession:
         self._responses = list(responses)
         self.executed = []
 
-    async def execute(self, _statement):
-        self.executed.append(_statement)
+    async def execute(self, statement):
+        self.executed.append(statement)
         return self._responses.pop(0)
 
 
@@ -40,6 +40,8 @@ def _suggestion_row():
         status="draft",
         triggered_by="manual",
         total_items=10,
+        procurement_item_count=4,
+        restock_item_count=6,
         global_config_snapshot={},
         archived_trigger=None,
         created_at=datetime(2026, 4, 17, 10, 0, 0),
@@ -49,16 +51,16 @@ def _suggestion_row():
 
 @pytest.mark.asyncio
 async def test_list_suggestions_returns_page_metadata() -> None:
-    # 第 1 次 execute: count → total；第 2 次 execute: data → (suggestion, snapshot_count) 元组列表
     db = _FakeSession(
         [
             _ScalarResult(1),
-            _RowsResult([(_suggestion_row(), 2)]),
+            _RowsResult([(_suggestion_row(), 2, 3)]),
         ]
     )
 
     result = await list_suggestions(
         status=None,
+        display_status=None,
         date_from=None,
         date_to=None,
         sku=None,
@@ -74,7 +76,8 @@ async def test_list_suggestions_returns_page_metadata() -> None:
     assert result.page == 3
     assert result.page_size == 20
     assert result.items[0].id == 1
-    assert result.items[0].snapshot_count == 2
+    assert result.items[0].procurement_snapshot_count == 2
+    assert result.items[0].restock_snapshot_count == 3
 
 
 @pytest.mark.asyncio

@@ -141,7 +141,8 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
             urgent=True,
             total_qty=12,
             country_breakdown={"US": 12, "CA": 4},
-            export_status="pending",
+            procurement_export_status="pending",
+            restock_export_status="pending",
         ),
         SimpleNamespace(
             commodity_sku="SKU-2",
@@ -149,7 +150,8 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
             urgent=False,
             total_qty=8,
             country_breakdown={"CA": 8},
-            export_status="exported",
+            procurement_export_status="exported",
+            restock_export_status="pending",
         ),
         SimpleNamespace(
             commodity_sku="SKU-3",
@@ -157,7 +159,8 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
             urgent=True,
             total_qty=5,
             country_breakdown={"JP": 5},
-            export_status="pending",
+            procurement_export_status="pending",
+            restock_export_status="pending",
         ),
         SimpleNamespace(
             commodity_sku="SKU-4",
@@ -165,7 +168,8 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
             urgent=True,
             total_qty=3,
             country_breakdown={"US": 3},
-            export_status="pending",
+            procurement_export_status="pending",
+            restock_export_status="pending",
         ),
         SimpleNamespace(
             commodity_sku="SKU-5",
@@ -173,7 +177,8 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
             urgent=False,
             total_qty=4,
             country_breakdown={"US": 4},
-            export_status="pending",
+            procurement_export_status="pending",
+            restock_export_status="pending",
         ),
         SimpleNamespace(
             commodity_sku="SKU-6",
@@ -181,7 +186,8 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
             urgent=False,
             total_qty=6,
             country_breakdown={"CA": 6, "JP": 2},
-            export_status="pending",
+            procurement_export_status="pending",
+            restock_export_status="pending",
         ),
         SimpleNamespace(
             commodity_sku="SKU-7",
@@ -189,7 +195,8 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
             urgent=True,
             total_qty=10,
             country_breakdown={"US": 4, "CA": 6},
-            export_status="pending",
+            procurement_export_status="pending",
+            restock_export_status="pending",
         ),
     ]
     db = _FakeDb(

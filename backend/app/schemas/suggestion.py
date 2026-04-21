@@ -1,6 +1,8 @@
-"""建议单相关 Pydantic DTO(对应 contracts/suggestion.yaml)。"""
+"""Suggestion-related DTOs."""
 
-from datetime import datetime
+from __future__ import annotations
+
+from datetime import date, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
@@ -18,7 +20,10 @@ class SuggestionOut(BaseModel):
     status: str
     triggered_by: str
     total_items: int
-    snapshot_count: int = 0  # 由 API 层 JOIN suggestion_snapshot 注入
+    procurement_item_count: int = 0
+    restock_item_count: int = 0
+    procurement_snapshot_count: int = 0
+    restock_snapshot_count: int = 0
     archived_trigger: str | None = None
     global_config_snapshot: dict[str, Any]
     created_at: datetime
@@ -30,7 +35,7 @@ class SuggestionOut(BaseModel):
 class SuggestionItemOut(BaseModel):
     id: int
     commodity_sku: str
-    commodity_name: str | None = None  # 由 API 层 JOIN product_listing 注入
+    commodity_name: str | None = None
     main_image: str | None = None
     total_qty: int
     country_breakdown: dict[str, Any]
@@ -39,9 +44,14 @@ class SuggestionItemOut(BaseModel):
     velocity_snapshot: dict[str, Any] | None = None
     sale_days_snapshot: dict[str, Any] | None = None
     urgent: bool
-    export_status: str
-    exported_snapshot_id: int | None = None
-    exported_at: datetime | None = None
+    purchase_qty: int
+    purchase_date: date | None = None
+    procurement_export_status: str
+    procurement_exported_snapshot_id: int | None = None
+    procurement_exported_at: datetime | None = None
+    restock_export_status: str
+    restock_exported_snapshot_id: int | None = None
+    restock_exported_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -58,23 +68,21 @@ class SuggestionListOut(BaseModel):
 
 
 class SuggestionItemPatch(BaseModel):
-    """编辑建议条目(FR-026 全字段可改 + 非负校验)。"""
-
     total_qty: int | None = Field(default=None, ge=0)
+    purchase_qty: int | None = None
+    purchase_date: date | None = None
     country_breakdown: dict[str, int] | None = None
     warehouse_breakdown: dict[str, dict[str, int]] | None = None
 
     @model_validator(mode="after")
     def _values_non_negative(self) -> "SuggestionItemPatch":
         if self.country_breakdown:
-            for k, v in self.country_breakdown.items():
-                if v < 0:
-                    raise ValueError(f"country_breakdown[{k}] 不可为负")
+            for country, qty in self.country_breakdown.items():
+                if qty < 0:
+                    raise ValueError(f"country_breakdown[{country}] 不可为负")
         if self.warehouse_breakdown:
-            for country, wh_dict in self.warehouse_breakdown.items():
-                for wid, qty in wh_dict.items():
+            for country, warehouse_map in self.warehouse_breakdown.items():
+                for warehouse_id, qty in warehouse_map.items():
                     if qty < 0:
-                        raise ValueError(
-                            f"warehouse_breakdown[{country}][{wid}] 不可为负"
-                        )
+                        raise ValueError(f"warehouse_breakdown[{country}][{warehouse_id}] 不可为负")
         return self
