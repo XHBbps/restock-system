@@ -46,11 +46,21 @@
         </template>
       </el-table-column>
     </el-table>
+
+    <TablePaginationBar
+      v-model:current-page="page"
+      v-model:page-size="pageSize"
+      :total="total"
+      :page-sizes="[20, 50, 100, 200]"
+      @current-change="load"
+      @size-change="onSizeChange"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import SuggestionDetailDialog from '@/components/SuggestionDetailDialog.vue'
+import TablePaginationBar from '@/components/TablePaginationBar.vue'
 import { deleteSuggestion, listSuggestions, type Suggestion } from '@/api/suggestion'
 import { getActionErrorMessage } from '@/utils/apiError'
 import { formatDateTime } from '@/utils/format'
@@ -58,6 +68,9 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { onMounted, ref } from 'vue'
 
 const rows = ref<Suggestion[]>([])
+const total = ref(0)
+const page = ref(1)
+const pageSize = ref(20)
 const loading = ref(false)
 const deletingId = ref<number | null>(null)
 const dialogVisible = ref(false)
@@ -79,17 +92,23 @@ async function load(): Promise<void> {
   loading.value = true
   try {
     const resp = await listSuggestions({
-      page: 1,
-      page_size: 5000,
+      page: page.value,
+      page_size: pageSize.value,
       sort_by: 'created_at',
       sort_order: 'desc',
     })
     rows.value = resp.items
+    total.value = resp.total
   } catch (error) {
     ElMessage.error(getActionErrorMessage(error, '加载补货历史失败'))
   } finally {
     loading.value = false
   }
+}
+
+function onSizeChange(): void {
+  page.value = 1
+  void load()
 }
 
 function openDetail(suggestionId: number): void {
@@ -112,6 +131,9 @@ async function deleteOne(row: Suggestion): Promise<void> {
   try {
     await deleteSuggestion(row.id)
     ElMessage.success('已删除')
+    if (rows.value.length === 1 && page.value > 1) {
+      page.value -= 1
+    }
     await load()
   } catch (error) {
     ElMessage.error(getActionErrorMessage(error, '删除失败'))
