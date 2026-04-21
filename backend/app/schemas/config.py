@@ -3,7 +3,6 @@
 from datetime import datetime
 from typing import Literal
 
-from apscheduler.triggers.cron import CronTrigger
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 from app.core.restock_regions import normalize_restock_regions

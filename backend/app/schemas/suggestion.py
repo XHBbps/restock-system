@@ -75,7 +75,7 @@ class SuggestionItemPatch(BaseModel):
     warehouse_breakdown: dict[str, dict[str, int]] | None = None
 
     @model_validator(mode="after")
-    def _values_non_negative(self) -> "SuggestionItemPatch":
+    def _values_non_negative(self) -> SuggestionItemPatch:
         if self.country_breakdown:
             for country, qty in self.country_breakdown.items():
                 if qty < 0:

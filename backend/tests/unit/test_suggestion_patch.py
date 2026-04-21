@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from app.api.suggestion import delete_suggestion, patch_item
 from app.core.exceptions import NotFound, ValidationFailed
@@ -88,7 +89,7 @@ class _FakeItem:
 
 def test_suggestion_item_patch_rejects_negative_purchase_qty() -> None:
     """purchase_qty 必须 >=0，否则 Pydantic 校验直接拒绝。"""
-    with pytest.raises(Exception):  # ValidationError from pydantic
+    with pytest.raises(ValidationError):
         SuggestionItemPatch(purchase_qty=-1)
 
 

@@ -45,7 +45,7 @@ class _FakeSessionFactory:
     def __init__(self, db: _FakeDb) -> None:
         self._db = db
 
-    def __call__(self) -> "_FakeSessionFactory":
+    def __call__(self) -> _FakeSessionFactory:
         return self
 
     async def __aenter__(self) -> _FakeDb:
