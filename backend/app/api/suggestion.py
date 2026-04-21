@@ -11,7 +11,7 @@ from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.api.deps import db_session, require_permission
+from app.api.deps import UserContext, db_session, get_current_user, require_permission
 from app.core.exceptions import ConflictError, NotFound, ValidationFailed
 from app.core.permissions import HISTORY_DELETE, RESTOCK_OPERATE, RESTOCK_VIEW
 from app.core.query import escape_like
@@ -284,6 +284,38 @@ async def delete_suggestion(
         raise ConflictError(f"建议单已存在 {snapshot_count} 个快照，不可删除")
 
     await db.execute(delete(Suggestion).where(Suggestion.id == suggestion_id))
+
+
+@router.post("/{suggestion_id}/void", status_code=204)
+async def void_suggestion(
+    suggestion_id: int = Path(..., ge=1),
+    db: AsyncSession = Depends(db_session),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(HISTORY_DELETE)),
+) -> None:
+    """作废建议单：status=draft → archived + archived_trigger='voided'。
+
+    作废后建议单从"发起页"消失，保留在"历史记录"里显示为"已作废"状态。
+    和删除不同：作废保留记录（包括已导出的 snapshot）；删除彻底抹除。
+    """
+    suggestion = (
+        await db.execute(select(Suggestion).where(Suggestion.id == suggestion_id))
+    ).scalar_one_or_none()
+    if suggestion is None:
+        raise NotFound(f"建议单 {suggestion_id} 不存在")
+    if suggestion.status != "draft":
+        raise ConflictError(f"只有 draft 状态的建议单可作废，当前状态={suggestion.status}")
+
+    await db.execute(
+        update(Suggestion)
+        .where(Suggestion.id == suggestion_id)
+        .values(
+            status="archived",
+            archived_trigger="voided",
+            archived_by=user.id,
+            archived_at=now_beijing(),
+        )
+    )
 
 
 async def _resolve_effective_lead_time_days(

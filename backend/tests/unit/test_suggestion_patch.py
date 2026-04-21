@@ -8,8 +8,8 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from app.api.suggestion import delete_suggestion, patch_item
-from app.core.exceptions import NotFound, ValidationFailed
+from app.api.suggestion import delete_suggestion, patch_item, void_suggestion
+from app.core.exceptions import ConflictError, NotFound, ValidationFailed
 from app.schemas.suggestion import SuggestionItemPatch
 
 
@@ -245,3 +245,34 @@ async def test_suggestion_patch_clears_allocation_snapshot_on_allocation_edit(mo
     update_stmt = db.executed_statements[-1]
     normalized_values = _normalize_update_values(update_stmt)
     assert normalized_values["allocation_snapshot"] is None
+
+
+# ============================================================
+# Void suggestion
+# ============================================================
+class _FakeUserCtx:
+    id = 77
+
+
+async def test_void_suggestion_rejects_missing_row() -> None:
+    db = _FakeSession([None])
+    with pytest.raises(NotFound):
+        await void_suggestion(suggestion_id=1, db=db, user=_FakeUserCtx(), _=None)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("status", ["archived", "error"])
+async def test_void_suggestion_rejects_non_draft(status: str) -> None:
+    db = _FakeSession([_FakeSuggestion(status=status)])
+    with pytest.raises(ConflictError):
+        await void_suggestion(suggestion_id=1, db=db, user=_FakeUserCtx(), _=None)  # type: ignore[arg-type]
+
+
+async def test_void_suggestion_marks_draft_as_voided() -> None:
+    db = _FakeSession([_FakeSuggestion(status="draft"), None])
+    await void_suggestion(suggestion_id=1, db=db, user=_FakeUserCtx(), _=None)  # type: ignore[arg-type]
+
+    update_stmt = db.executed_statements[-1]
+    values = _normalize_update_values(update_stmt)
+    assert values["status"] == "archived"
+    assert values["archived_trigger"] == "voided"
+    assert values["archived_by"] == 77
