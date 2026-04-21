@@ -69,7 +69,7 @@ class SuggestionListOut(BaseModel):
 
 class SuggestionItemPatch(BaseModel):
     total_qty: int | None = Field(default=None, ge=0)
-    purchase_qty: int | None = None
+    purchase_qty: int | None = Field(default=None, ge=0)
     purchase_date: date | None = None
     country_breakdown: dict[str, int] | None = None
     warehouse_breakdown: dict[str, dict[str, int]] | None = None

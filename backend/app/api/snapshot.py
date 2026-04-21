@@ -279,7 +279,7 @@ async def _create_snapshot(
 @router.get("/suggestions/{suggestion_id}/snapshots", response_model=list[SnapshotOut])
 async def list_snapshots(
     suggestion_id: int,
-    type: str | None = Query(default=None, pattern="^(procurement|restock)?$"),
+    type: str | None = Query(default=None, pattern="^(procurement|restock)$"),
     _: None = Depends(require_permission(RESTOCK_VIEW)),
     db: AsyncSession = Depends(db_session),
 ) -> list[SnapshotOut]:

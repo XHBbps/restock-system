@@ -7,7 +7,13 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import UserContext, db_session, db_session_readonly, get_current_user, require_permission
+from app.api.deps import (
+    UserContext,
+    db_session,
+    db_session_readonly,
+    get_current_user,
+    require_permission,
+)
 from app.core.exceptions import ConflictError, NotFound, UnprocessableError, ValidationFailed
 from app.core.permissions import (
     CONFIG_EDIT,
@@ -177,7 +183,10 @@ async def patch_global(
 async def _compute_can_enable(db: AsyncSession) -> tuple[bool, str | None]:
     draft = (
         await db.execute(
-            select(Suggestion).where(Suggestion.status == "draft").order_by(Suggestion.id.desc()).limit(1)
+            select(Suggestion)
+            .where(Suggestion.status == "draft")
+            .order_by(Suggestion.created_at.desc())
+            .limit(1)
         )
     ).scalar_one_or_none()
     if draft is None:

@@ -86,6 +86,12 @@ class _FakeItem:
         self.urgent = False
 
 
+def test_suggestion_item_patch_rejects_negative_purchase_qty() -> None:
+    """purchase_qty 必须 >=0，否则 Pydantic 校验直接拒绝。"""
+    with pytest.raises(Exception):  # ValidationError from pydantic
+        SuggestionItemPatch(purchase_qty=-1)
+
+
 async def test_suggestion_patch_archived_rejected() -> None:
     db = _FakeSession([_FakeSuggestion(status="archived")])
     patch = SuggestionItemPatch(total_qty=5)
