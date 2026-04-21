@@ -183,4 +183,6 @@ addopts = [
 ]
 filterwarnings = [
     "error",
+    "ignore:Exception ignored in.*<socket\\.socket.*:pytest.PytestUnraisableExceptionWarning",
+    "ignore:Exception ignored in.*BaseEventLoop\\.__del__.*:pytest.PytestUnraisableExceptionWarning",
 ]
