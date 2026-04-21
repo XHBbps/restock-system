@@ -24,6 +24,15 @@
         >
           生成采补建议
         </el-button>
+        <el-button
+          v-if="canDelete"
+          type="danger"
+          plain
+          :loading="deleting"
+          @click="handleDelete"
+        >
+          删除整单
+        </el-button>
       </template>
 
       <TaskProgress v-if="genTaskId" :task-id="genTaskId" @terminal="onGenDone" />
@@ -54,21 +63,51 @@
 import { runEngine } from '@/api/engine'
 import type { TaskRun } from '@/api/task'
 import { getGenerationToggle, type GenerationToggle } from '@/api/config'
-import { getCurrentSuggestion, type SuggestionDetail } from '@/api/suggestion'
+import { deleteSuggestion, getCurrentSuggestion, type SuggestionDetail } from '@/api/suggestion'
 import PageSectionCard from '@/components/PageSectionCard.vue'
 import SuggestionTabBar from '@/components/SuggestionTabBar.vue'
 import TaskProgress from '@/components/TaskProgress.vue'
 import { getActionErrorMessage } from '@/utils/apiError'
 import { getSuggestionDisplayStatusMeta } from '@/utils/status'
 import { useAuthStore } from '@/stores/auth'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, onActivated, onMounted, ref } from 'vue'
 
 const auth = useAuthStore()
 const suggestion = ref<SuggestionDetail | null>(null)
 const generating = ref(false)
+const deleting = ref(false)
 const genTaskId = ref<number | null>(null)
 const loading = ref(false)
+
+const canDelete = computed(() => {
+  const sug = suggestion.value
+  if (!sug || sug.status !== 'draft') return false
+  return (sug.procurement_snapshot_count || 0) + (sug.restock_snapshot_count || 0) === 0
+})
+
+async function handleDelete(): Promise<void> {
+  if (!suggestion.value) return
+  try {
+    await ElMessageBox.confirm(
+      '删除后无法恢复，且会同时移除采购和补货视图（采补同属一个建议单）。确定删除？',
+      '确认删除整个采补建议单',
+      { type: 'warning', confirmButtonText: '确定删除', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  deleting.value = true
+  try {
+    await deleteSuggestion(suggestion.value.id)
+    ElMessage.success('已删除')
+    await loadCurrent()
+  } catch (error) {
+    ElMessage.error(getActionErrorMessage(error, '删除失败'))
+  } finally {
+    deleting.value = false
+  }
+}
 
 const toggle = ref<GenerationToggle | null>(null)
 const toggleLoadError = ref(false)

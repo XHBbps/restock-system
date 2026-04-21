@@ -9,15 +9,6 @@
       <el-input v-model="skuFilter" placeholder="SKU 搜索" clearable style="width: 220px" />
       <div class="table-toolbar__actions">
         <el-button
-          v-if="canDelete"
-          type="danger"
-          plain
-          :loading="deleting"
-          @click="handleDelete"
-        >
-          删除整单
-        </el-button>
-        <el-button
           v-if="editable"
           type="primary"
           :disabled="selectedIds.length === 0"
@@ -120,14 +111,14 @@
 
 <script setup lang="ts">
 import { listWarehouses, type Warehouse } from '@/api/config'
-import { deleteSuggestion, type SuggestionDetail, type SuggestionItem } from '@/api/suggestion'
+import type { SuggestionDetail, SuggestionItem } from '@/api/suggestion'
 import { createRestockSnapshot, downloadSnapshotBlob } from '@/api/snapshot'
 import SkuCard from '@/components/SkuCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
 import { getActionErrorMessage } from '@/utils/apiError'
 import { getCountryLabel } from '@/utils/countries'
 import { triggerBlobDownload } from '@/utils/download'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { computed, onMounted, ref, watch } from 'vue'
 
 interface CountryRow {
@@ -151,7 +142,6 @@ const page = ref(1)
 const pageSize = ref(20)
 const selectedIds = ref<number[]>([])
 const exporting = ref(false)
-const deleting = ref(false)
 const warehouseMap = ref<Record<string, string>>({})
 
 watch(skuFilter, () => {
@@ -177,36 +167,6 @@ onMounted(async () => {
 })
 
 const editable = computed(() => props.suggestion?.status === 'draft')
-
-// 删除整单：draft + 采购/补货都未导出过才允许
-const canDelete = computed(() => {
-  const sug = props.suggestion
-  if (!sug || sug.status !== 'draft') return false
-  return (sug.procurement_snapshot_count || 0) + (sug.restock_snapshot_count || 0) === 0
-})
-
-async function handleDelete(): Promise<void> {
-  if (!props.suggestion) return
-  try {
-    await ElMessageBox.confirm(
-      '删除后无法恢复，且会同时移除采购和补货视图，是否确定？',
-      '确认删除整个采补建议单',
-      { type: 'warning', confirmButtonText: '确定删除', cancelButtonText: '取消' },
-    )
-  } catch {
-    return
-  }
-  deleting.value = true
-  try {
-    await deleteSuggestion(props.suggestion.id)
-    ElMessage.success('已删除')
-    emit('refresh')
-  } catch (error) {
-    ElMessage.error(getActionErrorMessage(error, '删除失败'))
-  } finally {
-    deleting.value = false
-  }
-}
 
 function restockTotal(item: SuggestionItem): number {
   return Object.values(item.country_breakdown || {}).reduce((sum, qty) => sum + Number(qty || 0), 0)
