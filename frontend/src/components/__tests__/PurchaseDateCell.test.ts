@@ -41,4 +41,21 @@ describe('PurchaseDateCell', () => {
     })
     expect(wrapper.text()).toContain('逾期 2 天')
   })
+
+  it('renders loose note for 31-90 days', () => {
+    const date = dayjs().add(60, 'day').format('YYYY-MM-DD')
+    const wrapper = mount(PurchaseDateCell, { props: { date } })
+    expect(wrapper.classes()).toContain('is-loose')
+    expect(wrapper.text()).toContain('宽松')
+  })
+
+  it('renders not-urgent badge for > 90 days', () => {
+    const date = dayjs().add(200, 'day').format('YYYY-MM-DD')
+    const wrapper = mount(PurchaseDateCell, {
+      props: { date },
+      global: { stubs: { ElTag: { template: '<span><slot /></span>' } } },
+    })
+    expect(wrapper.classes()).toContain('is-not-urgent')
+    expect(wrapper.text()).toContain('不紧急')
+  })
 })

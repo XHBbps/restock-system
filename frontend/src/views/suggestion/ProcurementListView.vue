@@ -6,7 +6,13 @@
   />
   <div v-else class="procurement-list">
     <div class="table-toolbar">
-      <el-input v-model="skuFilter" placeholder="SKU 搜索" clearable style="width: 220px" />
+      <div class="table-toolbar__filters">
+        <el-input v-model="skuFilter" placeholder="SKU 搜索" clearable style="width: 220px" />
+        <label class="urgent-only-switch">
+          <el-switch v-model="urgentOnly" />
+          <span>仅显示紧急 (≤30 天)</span>
+        </label>
+      </div>
       <div class="table-toolbar__actions">
         <el-button
           v-if="canDelete"
@@ -104,6 +110,7 @@ const emit = defineEmits<{
 }>()
 
 const skuFilter = ref('')
+const urgentOnly = ref(false)
 const selectedIds = ref<number[]>([])
 const exporting = ref(false)
 const deleting = ref(false)
@@ -153,8 +160,24 @@ const procurementItems = computed(() =>
 
 const filteredItems = computed(() => {
   const keyword = skuFilter.value.trim().toLowerCase()
-  if (!keyword) return procurementItems.value
-  return procurementItems.value.filter((item) => item.commodity_sku.toLowerCase().includes(keyword))
+  let list = procurementItems.value
+  if (keyword) {
+    list = list.filter((item) => item.commodity_sku.toLowerCase().includes(keyword))
+  }
+  if (urgentOnly.value) {
+    // 仅紧急：purchase_date 在今天 + 30 天之内（含过期的，排除 > 30 天的宽松/不紧急）
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const threshold = new Date(today)
+    threshold.setDate(threshold.getDate() + 30)
+    list = list.filter((item) => {
+      if (!item.purchase_date) return false
+      const pd = new Date(item.purchase_date)
+      pd.setHours(0, 0, 0, 0)
+      return pd <= threshold
+    })
+  }
+  return list
 })
 
 function draftValue<T extends keyof SuggestionItemPatch>(
@@ -238,6 +261,21 @@ async function handleExport(): Promise<void> {
   align-items: center;
   gap: $space-3;
   margin-bottom: $space-4;
+}
+
+.table-toolbar__filters {
+  display: flex;
+  gap: $space-4;
+  align-items: center;
+}
+
+.urgent-only-switch {
+  display: inline-flex;
+  gap: $space-2;
+  align-items: center;
+  font-size: $font-size-sm;
+  color: $color-text-secondary;
+  cursor: pointer;
 }
 
 .table-toolbar__actions {
