@@ -151,7 +151,7 @@ onMounted(() => {
 }
 
 .mono {
-  font-family: $font-mono, monospace;
+  font-family: $font-family-mono;
   font-weight: 600;
 }
 </style>

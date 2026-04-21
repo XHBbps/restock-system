@@ -38,28 +38,44 @@
       <el-table-column v-if="editable" type="selection" width="48" />
       <el-table-column type="expand" width="48">
         <template #default="{ row }">
-          <div class="breakdown-panel">
-            <div
-              v-for="country in countryRows(row)"
-              :key="country.country"
-              class="country-row"
-            >
-              <div class="country-title">
-                <strong>{{ country.country }}</strong>
-                <span>{{ country.qty }}</span>
-              </div>
-              <div class="warehouse-list">
-                <span
-                  v-for="warehouse in country.warehouses"
-                  :key="warehouse.id"
-                  class="warehouse-chip"
-                >
-                  {{ warehouse.id }}: {{ warehouse.qty }}
-                </span>
-                <span v-if="country.warehouses.length === 0" class="muted">未拆仓</span>
-              </div>
-            </div>
-          </div>
+          <table class="breakdown-table">
+            <thead>
+              <tr>
+                <th class="breakdown-col-country">国家</th>
+                <th class="breakdown-col-qty">补货量</th>
+                <th class="breakdown-col-warehouses">仓库分配</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="country in countryRows(row)"
+                :key="country.country"
+                class="breakdown-row"
+              >
+                <td class="breakdown-col-country">
+                  <span class="breakdown-country-label">{{ getCountryLabel(country.country) }}</span>
+                </td>
+                <td class="breakdown-col-qty">
+                  <span class="breakdown-qty-value">{{ country.qty }}</span>
+                </td>
+                <td class="breakdown-col-warehouses">
+                  <template v-if="country.warehouses.length > 0">
+                    <el-tag
+                      v-for="warehouse in country.warehouses"
+                      :key="warehouse.id"
+                      size="small"
+                      class="breakdown-warehouse-chip"
+                    >
+                      {{ warehouseLabel(warehouse.id) }} · {{ warehouse.qty }}
+                    </el-tag>
+                  </template>
+                  <el-tag v-else type="warning" effect="plain" size="small">
+                    ⚠ 未拆仓（{{ country.qty }} 件待分配）
+                  </el-tag>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </template>
       </el-table-column>
       <el-table-column label="商品信息" min-width="260">
@@ -95,13 +111,15 @@
 </template>
 
 <script setup lang="ts">
+import { listWarehouses, type Warehouse } from '@/api/config'
 import { deleteSuggestion, type SuggestionDetail, type SuggestionItem } from '@/api/suggestion'
 import { createRestockSnapshot, downloadSnapshotBlob } from '@/api/snapshot'
 import SkuCard from '@/components/SkuCard.vue'
 import { getActionErrorMessage } from '@/utils/apiError'
+import { getCountryLabel } from '@/utils/countries'
 import { triggerBlobDownload } from '@/utils/download'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 
 interface CountryRow {
   country: string
@@ -123,6 +141,25 @@ const skuFilter = ref('')
 const selectedIds = ref<number[]>([])
 const exporting = ref(false)
 const deleting = ref(false)
+const warehouseMap = ref<Record<string, string>>({})
+
+function warehouseLabel(warehouseId: string): string {
+  const name = warehouseMap.value[warehouseId]
+  return name ? `${name} (${warehouseId})` : warehouseId
+}
+
+onMounted(async () => {
+  try {
+    const warehouses = await listWarehouses()
+    const map: Record<string, string> = {}
+    for (const w of warehouses as Warehouse[]) {
+      map[w.id] = w.name
+    }
+    warehouseMap.value = map
+  } catch {
+    // 静默失败：仓库名加载不了时退化为仅显示 id
+  }
+})
 
 const editable = computed(() => props.suggestion?.status === 'draft')
 
@@ -228,42 +265,67 @@ async function handleExport(): Promise<void> {
   align-items: center;
 }
 
-.country-chips,
-.warehouse-list {
+.country-chips {
   display: flex;
   flex-wrap: wrap;
   gap: $space-2;
 }
 
-.breakdown-panel {
-  display: flex;
-  flex-direction: column;
-  gap: $space-3;
-  padding: $space-3 $space-6;
+.breakdown-table {
+  width: 100%;
+  margin: $space-3 $space-4;
+  border-collapse: separate;
+  border-spacing: 0;
   background: $color-bg-subtle;
+  border: 1px solid $color-border-subtle;
+  border-radius: $radius-md;
+  overflow: hidden;
+
+  th,
+  td {
+    padding: $space-2 $space-3;
+    text-align: left;
+    vertical-align: middle;
+  }
+
+  thead th {
+    font-size: $font-size-xs;
+    font-weight: 600;
+    color: $color-text-secondary;
+    background: $color-bg-base;
+    border-bottom: 1px solid $color-border-subtle;
+  }
+
+  .breakdown-row + .breakdown-row td {
+    border-top: 1px dashed $color-border-subtle;
+  }
 }
 
-.country-row {
-  display: flex;
-  flex-direction: column;
-  gap: $space-2;
+.breakdown-col-country {
+  width: 180px;
 }
 
-.country-title {
-  display: flex;
-  align-items: center;
-  gap: $space-3;
+.breakdown-col-qty {
+  width: 110px;
+  text-align: right !important;
 }
 
-.warehouse-chip {
-  padding: 2px 8px;
-  border-radius: $radius-pill;
-  background: $color-brand-primary-soft;
+.breakdown-col-warehouses {
+  min-width: 320px;
+}
+
+.breakdown-country-label {
+  font-weight: 600;
+  color: $color-text-primary;
+}
+
+.breakdown-qty-value {
+  font-family: $font-family-mono;
+  font-weight: 600;
   color: $color-brand-primary;
-  font-size: $font-size-xs;
 }
 
-.muted {
-  color: $color-text-secondary;
+.breakdown-warehouse-chip {
+  margin: 2px 4px 2px 0;
 }
 </style>
