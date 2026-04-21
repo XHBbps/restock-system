@@ -7,15 +7,26 @@
   <div v-else class="restock-list">
     <div class="table-toolbar">
       <el-input v-model="skuFilter" placeholder="SKU 搜索" clearable style="width: 220px" />
-      <el-button
-        v-if="editable"
-        type="primary"
-        :disabled="selectedIds.length === 0"
-        :loading="exporting"
-        @click="handleExport"
-      >
-        导出补货单 Excel
-      </el-button>
+      <div class="table-toolbar__actions">
+        <el-button
+          v-if="canDelete"
+          type="danger"
+          plain
+          :loading="deleting"
+          @click="handleDelete"
+        >
+          删除整单
+        </el-button>
+        <el-button
+          v-if="editable"
+          type="primary"
+          :disabled="selectedIds.length === 0"
+          :loading="exporting"
+          @click="handleExport"
+        >
+          导出补货单 Excel
+        </el-button>
+      </div>
     </div>
 
     <el-table
@@ -84,12 +95,12 @@
 </template>
 
 <script setup lang="ts">
-import type { SuggestionDetail, SuggestionItem } from '@/api/suggestion'
+import { deleteSuggestion, type SuggestionDetail, type SuggestionItem } from '@/api/suggestion'
 import { createRestockSnapshot, downloadSnapshotBlob } from '@/api/snapshot'
 import SkuCard from '@/components/SkuCard.vue'
 import { getActionErrorMessage } from '@/utils/apiError'
 import { triggerBlobDownload } from '@/utils/download'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, ref } from 'vue'
 
 interface CountryRow {
@@ -111,8 +122,39 @@ const emit = defineEmits<{
 const skuFilter = ref('')
 const selectedIds = ref<number[]>([])
 const exporting = ref(false)
+const deleting = ref(false)
 
 const editable = computed(() => props.suggestion?.status === 'draft')
+
+// 删除整单：draft + 采购/补货都未导出过才允许
+const canDelete = computed(() => {
+  const sug = props.suggestion
+  if (!sug || sug.status !== 'draft') return false
+  return (sug.procurement_snapshot_count || 0) + (sug.restock_snapshot_count || 0) === 0
+})
+
+async function handleDelete(): Promise<void> {
+  if (!props.suggestion) return
+  try {
+    await ElMessageBox.confirm(
+      '删除后无法恢复，且会同时移除采购和补货视图，是否确定？',
+      '确认删除整个采补建议单',
+      { type: 'warning', confirmButtonText: '确定删除', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  deleting.value = true
+  try {
+    await deleteSuggestion(props.suggestion.id)
+    ElMessage.success('已删除')
+    emit('refresh')
+  } catch (error) {
+    ElMessage.error(getActionErrorMessage(error, '删除失败'))
+  } finally {
+    deleting.value = false
+  }
+}
 
 function restockTotal(item: SuggestionItem): number {
   return Object.values(item.country_breakdown || {}).reduce((sum, qty) => sum + Number(qty || 0), 0)
@@ -178,6 +220,12 @@ async function handleExport(): Promise<void> {
   align-items: center;
   gap: $space-3;
   margin-bottom: $space-4;
+}
+
+.table-toolbar__actions {
+  display: flex;
+  gap: $space-2;
+  align-items: center;
 }
 
 .country-chips,
