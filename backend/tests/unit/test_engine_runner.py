@@ -148,6 +148,60 @@ async def test_run_engine_writes_purchase_fields_and_item_counts() -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_engine_velocity_unaffected_by_restock_regions() -> None:
+    """回归测试：restock_regions 白名单不应影响 Σvelocity 的取值。
+
+    场景：SKU-001 在 US（白名单内）动销 3/天，在 JP（白名单外）动销 2/天。
+    采购量公式：Σcountry_qty + Σvelocity × (buffer + safety) - local
+             = 180        + 5       × (30 + 15)       - 0 = 405
+    country_qty 只保留 US（180），但 Σvelocity 必须覆盖所有国家（=5）。
+    """
+    config = _make_config(restock_regions=["US"])
+    db = _FakeDb([None, _ScalarResult(config), _ScalarResult([("SKU-001", 50)])])
+    captured: dict[str, Any] = {}
+
+    async def fake_persist(_db: Any, **kwargs: Any) -> int:
+        captured.update(kwargs)
+        return 123
+
+    step1_mock = AsyncMock(return_value={"SKU-001": {"US": 3.0, "JP": 2.0}})
+
+    with (
+        patch("app.engine.runner.async_session_factory", _FakeSessionFactory(db)),
+        patch("app.engine.runner.run_step1", step1_mock),
+        patch(
+            "app.engine.runner.run_step2",
+            AsyncMock(return_value=({"SKU-001": {"US": 30.0, "JP": 30.0}}, {"SKU-001": {}})),
+        ),
+        # 不 mock compute_country_qty，让真实 step3 基于 velocity 算出两国 qty
+        patch("app.engine.runner.load_local_inventory", AsyncMock(return_value={"SKU-001": {"available": 0, "reserved": 0}})),
+        patch("app.engine.runner.load_country_warehouses", AsyncMock(return_value={})),
+        patch("app.engine.runner.load_zipcode_rules", AsyncMock(return_value=[])),
+        patch("app.engine.runner.load_all_sku_country_orders", AsyncMock(return_value={})),
+        patch("app.engine.runner._persist_suggestion", fake_persist),
+    ):
+        result = await run_engine(_FakeContext())  # type: ignore[arg-type]
+
+    # step1 必须以全量 velocity 被调用（不传 allowed_countries）
+    step1_mock.assert_awaited_once()
+    call_kwargs = step1_mock.await_args.kwargs
+    assert call_kwargs.get("allowed_countries") is None, (
+        f"run_step1 不应接收 allowed_countries 过滤 velocity，实际传了: {call_kwargs}"
+    )
+
+    assert result == 123
+    item = captured["items"][0]
+    # country_qty 只保留白名单（US: 180），JP 被过滤
+    assert item["country_breakdown"] == {"US": 180}
+    assert item["total_qty"] == 180
+    # purchase_qty = 180 + (3+2)*30 - 0 + (3+2)*15 = 405
+    # 关键：Σvelocity 含 JP 的 2/天，否则会少算 (2*30 + 2*15)=90，结果变 315
+    assert item["purchase_qty"] == 405, (
+        "purchase_qty 应覆盖所有国家动销；若仅算白名单则为 315"
+    )
+
+
+@pytest.mark.asyncio
 async def test_run_engine_returns_none_when_all_items_empty() -> None:
     config = _make_config()
     db = _FakeDb([None, _ScalarResult(config), _ScalarResult([("SKU-001", None)])])

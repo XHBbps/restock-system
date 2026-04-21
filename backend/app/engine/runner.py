@@ -82,13 +82,22 @@ async def run_engine(ctx: JobContext, *, triggered_by: str = "scheduler") -> int
             return None
 
         await ctx.progress(current_step="Step 1: 计算 velocity", total_steps=7)
-        velocity = await run_step1(db, sku_list, today, allowed_countries=allowed_countries)
+        # Σvelocity 参与采购量（step4）计算时须覆盖所有国家（含白名单外的动销），
+        # 因此这里不按 restock_regions 过滤。白名单只作用于后续的 country_qty。
+        velocity = await run_step1(db, sku_list, today)
 
         await ctx.progress(current_step="Step 2: 计算 sale_days")
         sale_days, inventory = await run_step2(db, velocity, sku_list)
 
         await ctx.progress(current_step="Step 3: 计算各国补货量")
-        country_qty = compute_country_qty(velocity, inventory, config.target_days)
+        country_qty_all = compute_country_qty(velocity, inventory, config.target_days)
+        if allowed_countries is not None:
+            country_qty = {
+                sku: {c: q for c, q in cq.items() if c in allowed_countries}
+                for sku, cq in country_qty_all.items()
+            }
+        else:
+            country_qty = country_qty_all
 
         await ctx.progress(current_step="Step 4: 计算采购量")
         local_stock = await load_local_inventory(db, sku_list)
