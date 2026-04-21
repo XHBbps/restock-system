@@ -50,17 +50,13 @@
           <span v-else>{{ row.purchase_qty }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="采购日期" prop="purchase_date" width="180">
+      <el-table-column label="采购日期" prop="purchase_date" width="240">
         <template #default="{ row }">
-          <el-date-picker
-            v-if="editable"
-            :model-value="draftValue(row.id, 'purchase_date', row.purchase_date)"
-            type="date"
-            value-format="YYYY-MM-DD"
-            size="small"
-            @update:model-value="(value: string | null) => updateDraft(row.id, 'purchase_date', value)"
+          <PurchaseDateCell
+            :editable="editable"
+            :date="draftValue(row.id, 'purchase_date', row.purchase_date)"
+            @update:date="(value: string | null) => updateDraft(row.id, 'purchase_date', value)"
           />
-          <PurchaseDateCell v-else :date="row.purchase_date" />
         </template>
       </el-table-column>
       <el-table-column label="状态" width="110">
