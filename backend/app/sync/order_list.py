@@ -7,6 +7,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.country_mapping import apply_eu_mapping, load_eu_countries
 from app.core.logging import get_logger
 from app.core.timezone import marketplace_to_country, now_beijing, parse_saihu_time
 from app.db.session import async_session_factory
@@ -31,6 +32,7 @@ async def sync_order_list_job(ctx: JobContext) -> None:
         started = await mark_sync_running(db, JOB_NAME)
         date_start, date_end = await _compute_window(db, started)
         shop_ids = await _resolve_shop_ids(db)
+        eu_countries = await load_eu_countries(db)
 
     logger.info("sync_order_list_window", start=date_start, end=date_end, shops=len(shop_ids or []))
     if shop_ids == []:
@@ -63,7 +65,7 @@ async def sync_order_list_job(ctx: JobContext) -> None:
                 shop_ids=shop_ids,
                 on_page=_report_page,
             ):
-                ic = await _upsert_order(db, raw)
+                ic = await _upsert_order(db, raw, eu_countries)
                 order_count += 1
                 item_count += ic
                 if order_count % batch_size == 0:
@@ -114,15 +116,21 @@ async def _resolve_shop_ids(db: AsyncSession) -> list[str] | None:
     return list(rows) if rows else []
 
 
-async def _upsert_order(db: AsyncSession, raw: dict[str, Any]) -> int:
+async def _upsert_order(
+    db: AsyncSession,
+    raw: dict[str, Any],
+    eu_countries: set[str] | None = None,
+) -> int:
     shop_id = str(raw.get("shopId") or "")
     amazon_order_id = raw.get("amazonOrderId")
     if not shop_id or not amazon_order_id:
         return 0
 
     marketplace_id_raw = raw.get("marketplaceId") or ""
-    country_code = marketplace_to_country(marketplace_id_raw) or ""
-    marketplace_id = country_code or marketplace_id_raw
+    original_country_code = marketplace_to_country(marketplace_id_raw) or ""
+    mapped_country = apply_eu_mapping(original_country_code, eu_countries or set()) or ""
+    country_code = mapped_country or "ZZ"
+    marketplace_id = country_code
 
     purchase_date = parse_saihu_time(raw.get("purchaseDate"), marketplace_id_raw) or now_beijing()
     last_update_date = (
@@ -133,7 +141,8 @@ async def _upsert_order(db: AsyncSession, raw: dict[str, Any]) -> int:
         "shop_id": shop_id,
         "amazon_order_id": amazon_order_id,
         "marketplace_id": marketplace_id,
-        "country_code": country_code or "ZZ",
+        "country_code": country_code,
+        "original_country_code": original_country_code if mapped_country != original_country_code else None,
         "order_status": raw.get("orderStatus") or "Unknown",
         "order_total_currency": raw.get("orderTotalCurrency"),
         "order_total_amount": _to_decimal(raw.get("orderTotalAmount")),

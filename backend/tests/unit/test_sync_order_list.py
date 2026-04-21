@@ -34,6 +34,10 @@ class _FakeSessionFactory:
         return None
 
 
+async def _async_set() -> set[str]:
+    return set()
+
+
 async def test_sync_order_list_skips_when_no_enabled_shops(monkeypatch) -> None:
     import app.sync.order_list as order_list_module
 
@@ -62,6 +66,7 @@ async def test_sync_order_list_skips_when_no_enabled_shops(monkeypatch) -> None:
     monkeypatch.setattr(order_list_module, "_resolve_shop_ids", _fake_resolve_shop_ids)
     monkeypatch.setattr(order_list_module, "mark_sync_success", _fake_mark_sync_success)
     monkeypatch.setattr(order_list_module, "list_orders", _boom_list_orders)
+    monkeypatch.setattr(order_list_module, "load_eu_countries", lambda _db: _async_set())
 
     ctx = _FakeContext()
     await order_list_module.sync_order_list_job(ctx)  # type: ignore[arg-type]
