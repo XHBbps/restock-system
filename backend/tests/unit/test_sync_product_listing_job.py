@@ -87,7 +87,11 @@ async def test_sync_product_listing_job_fetches_unfiltered_rows(monkeypatch) -> 
             await on_page(1, 3, 1)
         yield {"shopId": "shop-1", "marketplaceId": "US", "sku": "SELLER-1"}
 
-    async def _fake_upsert_listing(_db, raw: dict[str, object]) -> None:
+    async def _fake_upsert_listing(
+        _db,
+        raw: dict[str, object],
+        _eu_countries: set[str],
+    ) -> None:
         upserted.append(raw)
 
     async def _fake_backfill_sku_configs(_db) -> int:
@@ -99,6 +103,7 @@ async def test_sync_product_listing_job_fetches_unfiltered_rows(monkeypatch) -> 
     monkeypatch.setattr(product_listing_module, "mark_sync_success", _fake_mark_sync_success)
     monkeypatch.setattr(product_listing_module, "list_product_listings", _fake_list_product_listings)
     monkeypatch.setattr(product_listing_module, "_upsert_listing", _fake_upsert_listing)
+    monkeypatch.setattr(product_listing_module, "load_eu_countries", lambda _db: _async_set())
     monkeypatch.setattr(
         product_listing_module,
         "_backfill_sku_configs_from_synced_listings",
@@ -176,3 +181,7 @@ def _nullable_schema_rows() -> list[dict[str, object]]:
         {"column_name": "commodity_sku", "is_nullable": "YES"},
         {"column_name": "commodity_id", "is_nullable": "YES"},
     ]
+
+
+async def _async_set() -> set[str]:
+    return set()

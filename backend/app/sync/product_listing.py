@@ -6,6 +6,7 @@ from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.country_mapping import apply_eu_mapping, load_eu_countries
 from app.core.exceptions import ValidationFailed
 from app.core.logging import get_logger
 from app.core.timezone import marketplace_to_country, now_beijing
@@ -31,6 +32,7 @@ async def sync_product_listing_job(ctx: JobContext) -> None:
     try:
         async with async_session_factory() as db:
             await _ensure_product_listing_schema_compatible(db)
+            eu_countries = await load_eu_countries(db)
 
         async def _report_page(page_no: int, total_page: int, rows_count: int) -> None:
             if total_page <= 0:
@@ -46,7 +48,7 @@ async def sync_product_listing_job(ctx: JobContext) -> None:
                 only_active=False,
                 on_page=_report_page,
             ):
-                await _upsert_listing(db, raw)
+                await _upsert_listing(db, raw, eu_countries)
                 inserted += 1
             created_sku_configs = await _backfill_sku_configs_from_synced_listings(db)
             await db.commit()
@@ -114,7 +116,11 @@ def _infer_is_matched(raw: dict[str, Any]) -> bool:
     )
 
 
-async def _upsert_listing(db: AsyncSession, raw: dict[str, Any]) -> None:
+async def _upsert_listing(
+    db: AsyncSession,
+    raw: dict[str, Any],
+    eu_countries: set[str] | None = None,
+) -> None:
     shop_id = _normalize_optional_text(raw.get("shopId"))
     marketplace_id_raw = _normalize_optional_text(raw.get("marketplaceId"))
     seller_sku = _normalize_optional_text(raw.get("sku"))
@@ -124,12 +130,16 @@ async def _upsert_listing(db: AsyncSession, raw: dict[str, Any]) -> None:
     commodity_sku = _normalize_optional_text(raw.get("commoditySku"))
     commodity_id = _normalize_optional_text(raw.get("commodityId"))
     mkt_normalized = marketplace_to_country(marketplace_id_raw) or marketplace_id_raw
+    mapped_marketplace = apply_eu_mapping(mkt_normalized, eu_countries or set()) or mkt_normalized
 
     values = {
         "commodity_sku": commodity_sku,
         "commodity_id": commodity_id,
         "shop_id": shop_id,
-        "marketplace_id": mkt_normalized,
+        "marketplace_id": mapped_marketplace,
+        "original_marketplace_id": (
+            mkt_normalized if mapped_marketplace != mkt_normalized else None
+        ),
         "seller_sku": seller_sku,
         "parent_sku": _normalize_optional_text(raw.get("parentSku")),
         "commodity_name": raw.get("title") or raw.get("commodityName"),
