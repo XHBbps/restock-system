@@ -134,17 +134,34 @@ async def list_suggestions(
 
     items: list[SuggestionOut] = []
     for suggestion, procurement_snapshot_count, restock_snapshot_count in rows:
+        proc_count = int(procurement_snapshot_count or 0)
+        restock_count = int(restock_snapshot_count or 0)
         items.append(
             SuggestionOut.model_validate(
                 {
                     **suggestion.__dict__,
-                    "procurement_snapshot_count": int(procurement_snapshot_count or 0),
-                    "restock_snapshot_count": int(restock_snapshot_count or 0),
+                    "procurement_snapshot_count": proc_count,
+                    "restock_snapshot_count": restock_count,
+                    "procurement_display_status": _derive_display_status(suggestion, proc_count),
+                    "restock_display_status": _derive_display_status(suggestion, restock_count),
                 }
             )
         )
 
     return SuggestionListOut(items=items, total=int(total or 0), page=page, page_size=page_size)
+
+
+def _derive_display_status(suggestion: Suggestion, snapshot_count: int) -> str:
+    """按建议单 + 类型 snapshot 计数派生 4 档展示状态。
+
+    - 已作废：archived + archived_trigger='voided'
+    - 已归档：archived 其他触发（schema_migration / admin_toggle / 等）
+    - 已导出：draft 且该类型至少有 1 份 snapshot
+    - 未导出：draft 且该类型无 snapshot（也包括 error 状态的建议单）
+    """
+    if suggestion.status == "archived":
+        return "已作废" if suggestion.archived_trigger == "voided" else "已归档"
+    return "已导出" if snapshot_count > 0 else "未导出"
 
 
 @router.get("/current", response_model=SuggestionDetailOut)

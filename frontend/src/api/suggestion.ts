@@ -10,6 +10,8 @@ export interface AllocationExplanation {
   eligible_warehouses: string[]
 }
 
+export type SuggestionDisplayStatus = '未导出' | '已导出' | '已归档' | '已作废'
+
 export interface Suggestion {
   id: number
   status: 'draft' | 'archived' | 'error'
@@ -19,9 +21,16 @@ export interface Suggestion {
   restock_item_count: number
   procurement_snapshot_count: number
   restock_snapshot_count: number
+  archived_trigger: string | null
+  procurement_display_status: SuggestionDisplayStatus
+  restock_display_status: SuggestionDisplayStatus
   global_config_snapshot: Record<string, unknown>
   created_at: string
   archived_at: string | null
+}
+
+export async function voidSuggestion(suggestionId: number): Promise<void> {
+  await client.post(`/api/suggestions/${suggestionId}/void`)
 }
 
 export interface SuggestionItem {

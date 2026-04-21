@@ -25,6 +25,9 @@ class SuggestionOut(BaseModel):
     procurement_snapshot_count: int = 0
     restock_snapshot_count: int = 0
     archived_trigger: str | None = None
+    # 派生状态，供历史页直接展示（未导出 / 已导出 / 已归档 / 已作废）
+    procurement_display_status: str = "未导出"
+    restock_display_status: str = "未导出"
     global_config_snapshot: dict[str, Any]
     created_at: datetime
     archived_at: datetime | None = None
