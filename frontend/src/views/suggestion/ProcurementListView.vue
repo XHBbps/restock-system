@@ -37,7 +37,7 @@
 
     <el-table
       v-loading="loading"
-      :data="filteredItems"
+      :data="pagedItems"
       empty-text="本期无采购需求"
       @selection-change="onSelectionChange"
     >
@@ -80,6 +80,14 @@
         </template>
       </el-table-column>
     </el-table>
+
+    <TablePaginationBar
+      v-model:current-page="page"
+      v-model:page-size="pageSize"
+      :total="filteredItems.length"
+      :page-sizes="[20, 50, 100, 200]"
+      @size-change="page = 1"
+    />
   </div>
 </template>
 
@@ -94,10 +102,11 @@ import {
 import { createProcurementSnapshot, downloadSnapshotBlob } from '@/api/snapshot'
 import PurchaseDateCell from '@/components/PurchaseDateCell.vue'
 import SkuCard from '@/components/SkuCard.vue'
+import TablePaginationBar from '@/components/TablePaginationBar.vue'
 import { getActionErrorMessage } from '@/utils/apiError'
 import { triggerBlobDownload } from '@/utils/download'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 const props = defineProps<{
   suggestion: SuggestionDetail | null
@@ -111,10 +120,17 @@ const emit = defineEmits<{
 
 const skuFilter = ref('')
 const urgentOnly = ref(false)
+const page = ref(1)
+const pageSize = ref(20)
 const selectedIds = ref<number[]>([])
 const exporting = ref(false)
 const deleting = ref(false)
 const draftPatches = ref<Record<number, SuggestionItemPatch>>({})
+
+// 过滤条件变化时回到第一页
+watch([skuFilter, urgentOnly], () => {
+  page.value = 1
+})
 
 const editable = computed(() => props.suggestion?.status === 'draft')
 
@@ -178,6 +194,11 @@ const filteredItems = computed(() => {
     })
   }
   return list
+})
+
+const pagedItems = computed(() => {
+  const start = (page.value - 1) * pageSize.value
+  return filteredItems.value.slice(start, start + pageSize.value)
 })
 
 function draftValue<T extends keyof SuggestionItemPatch>(

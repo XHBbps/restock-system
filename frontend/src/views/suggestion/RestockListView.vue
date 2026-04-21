@@ -31,7 +31,7 @@
 
     <el-table
       v-loading="loading"
-      :data="filteredItems"
+      :data="pagedItems"
       empty-text="本期无补货需求"
       @selection-change="onSelectionChange"
     >
@@ -107,6 +107,14 @@
         </template>
       </el-table-column>
     </el-table>
+
+    <TablePaginationBar
+      v-model:current-page="page"
+      v-model:page-size="pageSize"
+      :total="filteredItems.length"
+      :page-sizes="[20, 50, 100, 200]"
+      @size-change="page = 1"
+    />
   </div>
 </template>
 
@@ -115,11 +123,12 @@ import { listWarehouses, type Warehouse } from '@/api/config'
 import { deleteSuggestion, type SuggestionDetail, type SuggestionItem } from '@/api/suggestion'
 import { createRestockSnapshot, downloadSnapshotBlob } from '@/api/snapshot'
 import SkuCard from '@/components/SkuCard.vue'
+import TablePaginationBar from '@/components/TablePaginationBar.vue'
 import { getActionErrorMessage } from '@/utils/apiError'
 import { getCountryLabel } from '@/utils/countries'
 import { triggerBlobDownload } from '@/utils/download'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 
 interface CountryRow {
   country: string
@@ -138,10 +147,16 @@ const emit = defineEmits<{
 }>()
 
 const skuFilter = ref('')
+const page = ref(1)
+const pageSize = ref(20)
 const selectedIds = ref<number[]>([])
 const exporting = ref(false)
 const deleting = ref(false)
 const warehouseMap = ref<Record<string, string>>({})
+
+watch(skuFilter, () => {
+  page.value = 1
+})
 
 function warehouseLabel(warehouseId: string): string {
   const name = warehouseMap.value[warehouseId]
@@ -219,6 +234,11 @@ const filteredItems = computed(() => {
   const keyword = skuFilter.value.trim().toLowerCase()
   if (!keyword) return restockItems.value
   return restockItems.value.filter((item) => item.commodity_sku.toLowerCase().includes(keyword))
+})
+
+const pagedItems = computed(() => {
+  const start = (page.value - 1) * pageSize.value
+  return filteredItems.value.slice(start, start + pageSize.value)
 })
 
 function onSelectionChange(rows: SuggestionItem[]): void {
