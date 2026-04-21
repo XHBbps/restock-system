@@ -1,6 +1,7 @@
-"""APScheduler 配置：定时入队任务，不直接执行具体业务。"""
+"""APScheduler setup: enqueue periodic jobs, not business logic execution."""
 
-import contextlib
+from __future__ import annotations
+
 from dataclasses import dataclass
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -19,25 +20,19 @@ from app.tasks.queue import enqueue_task
 logger = get_logger(__name__)
 
 _scheduler: AsyncIOScheduler | None = None
-_scheduler_signature: tuple[int, str, bool] | None = None
+_scheduler_signature: tuple[int] | None = None
 
 
 @dataclass(frozen=True)
 class SchedulerRuntimeConfig:
     enabled: bool
     sync_interval_minutes: int
-    calc_cron: str
-    calc_enabled: bool
 
 
 def _build_scheduler() -> AsyncIOScheduler:
     return AsyncIOScheduler(
         timezone=BEIJING,
-        job_defaults={
-            "max_instances": 1,
-            "coalesce": True,
-            "misfire_grace_time": 60,
-        },
+        job_defaults={"max_instances": 1, "coalesce": True, "misfire_grace_time": 60},
     )
 
 
@@ -54,48 +49,33 @@ async def _load_scheduler_config() -> SchedulerRuntimeConfig:
     async with async_session_factory() as db:
         row = (
             await db.execute(
-                select(
-                    GlobalConfig.scheduler_enabled,
-                    GlobalConfig.sync_interval_minutes,
-                    GlobalConfig.calc_cron,
-                    GlobalConfig.calc_enabled,
-                ).where(GlobalConfig.id == 1)
+                select(GlobalConfig.scheduler_enabled, GlobalConfig.sync_interval_minutes).where(
+                    GlobalConfig.id == 1
+                )
             )
         ).one_or_none()
     if row is None:
         return SchedulerRuntimeConfig(
             enabled=True,
             sync_interval_minutes=settings.default_sync_interval_minutes,
-            calc_cron=settings.default_calc_cron,
-            calc_enabled=True,
         )
     return SchedulerRuntimeConfig(
         enabled=bool(row.scheduler_enabled),
         sync_interval_minutes=int(row.sync_interval_minutes),
-        calc_cron=str(row.calc_cron),
-        calc_enabled=bool(row.calc_enabled),
     )
 
 
-def _register_jobs(
-    scheduler: AsyncIOScheduler,
-    *,
-    sync_interval_minutes: int,
-    calc_cron: str,
-    calc_enabled: bool,
-) -> None:
-    interval = sync_interval_minutes
-    hourly_jobs = [
+def _register_jobs(scheduler: AsyncIOScheduler, *, sync_interval_minutes: int) -> None:
+    for job_name in [
         "sync_product_listing",
         "sync_inventory",
         "sync_out_records",
         "sync_order_list",
         "sync_order_detail",
-    ]
-    for job_name in hourly_jobs:
+    ]:
         scheduler.add_job(
             _enqueue_safely,
-            trigger=IntervalTrigger(minutes=interval),
+            trigger=IntervalTrigger(minutes=sync_interval_minutes),
             args=[job_name],
             id=f"trigger_{job_name}",
             replace_existing=True,
@@ -108,7 +88,6 @@ def _register_jobs(
         id="trigger_sync_warehouse",
         replace_existing=True,
     )
-
     scheduler.add_job(
         _enqueue_safely,
         trigger=CronTrigger(hour=2, minute=0, timezone=BEIJING),
@@ -117,23 +96,11 @@ def _register_jobs(
         replace_existing=True,
     )
 
-    if calc_enabled:
-        scheduler.add_job(
-            _enqueue_safely,
-            trigger=CronTrigger.from_crontab(calc_cron, timezone=BEIJING),
-            args=["calc_engine"],
-            id="trigger_calc_engine",
-            replace_existing=True,
-        )
-    else:
-        with contextlib.suppress(Exception):
-            scheduler.remove_job("trigger_calc_engine")
-
 
 async def setup_scheduler(force_reload: bool = False) -> AsyncIOScheduler:
     global _scheduler, _scheduler_signature
     config = await _load_scheduler_config()
-    signature = (config.sync_interval_minutes, config.calc_cron, config.calc_enabled)
+    signature = (config.sync_interval_minutes,)
     if _scheduler is not None and not force_reload and _scheduler_signature == signature:
         return _scheduler
 
@@ -141,12 +108,7 @@ async def setup_scheduler(force_reload: bool = False) -> AsyncIOScheduler:
         shutdown_scheduler(clear=True)
 
     scheduler = _build_scheduler()
-    _register_jobs(
-        scheduler,
-        sync_interval_minutes=config.sync_interval_minutes,
-        calc_cron=config.calc_cron,
-        calc_enabled=config.calc_enabled,
-    )
+    _register_jobs(scheduler, sync_interval_minutes=config.sync_interval_minutes)
     _scheduler = scheduler
     _scheduler_signature = signature
     return scheduler
@@ -172,7 +134,6 @@ async def scheduler_status() -> SchedulerStatusOut:
         running=scheduler.running,
         timezone=str(BEIJING),
         sync_interval_minutes=config.sync_interval_minutes,
-        calc_cron=config.calc_cron,
         jobs=jobs,
     )
 
