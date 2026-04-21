@@ -150,17 +150,32 @@ async function saveDrafts(): Promise<void> {
 async function handleExport(): Promise<void> {
   if (!props.suggestion || selectedIds.value.length === 0) return
   exporting.value = true
-  let snapshotId: number | null = null
+  // 分阶段处理：保存失败 → 中止导出；导出失败 → 提示已保存可再次导出；下载失败 → 导出成功但下载失败
   try {
-    await saveDrafts()
-    const snapshot = await createProcurementSnapshot(props.suggestion.id, selectedIds.value)
-    snapshotId = snapshot.id
-    const { blob, filename } = await downloadSnapshotBlob(snapshot.id)
-    triggerBlobDownload(blob, filename)
-    ElMessage.success('采购单导出成功')
+    try {
+      await saveDrafts()
+    } catch (error) {
+      ElMessage.error(getActionErrorMessage(error, '保存暂存修改失败，导出未执行'))
+      return
+    }
+
+    let snapshot
+    try {
+      snapshot = await createProcurementSnapshot(props.suggestion.id, selectedIds.value)
+    } catch (error) {
+      ElMessage.error(getActionErrorMessage(error, '修改已保存，导出失败，请再次点击"导出"'))
+      emit('refresh')
+      return
+    }
+
+    try {
+      const { blob, filename } = await downloadSnapshotBlob(snapshot.id)
+      triggerBlobDownload(blob, filename)
+      ElMessage.success('采购单导出成功')
+    } catch (error) {
+      ElMessage.warning(getActionErrorMessage(error, '导出已生成，下载失败，请在历史记录重试下载'))
+    }
     emit('refresh')
-  } catch (error) {
-    ElMessage.error(getActionErrorMessage(error, snapshotId ? '导出成功但下载失败' : '采购导出失败'))
   } finally {
     exporting.value = false
   }
