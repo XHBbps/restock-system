@@ -28,7 +28,9 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/components/AppLayout.vue'),
     redirect: '/workspace',
     children: [
-      ...appPages.map((page) => ({
+      ...appPages
+        .filter((page) => !['restock/current', 'restock/history'].includes(page.path))
+        .map((page) => ({
         path: page.path,
         name: page.name,
         component: page.component,
@@ -38,12 +40,69 @@ const routes: RouteRecordRaw[] = [
           permission: page.permission,
         },
       })),
+      {
+        path: 'restock/current',
+        name: 'suggestion-list',
+        component: () => import('@/views/SuggestionListView.vue'),
+        meta: { title: '采补发起', section: 'RESTOCK', permission: 'restock:view' },
+        redirect: '/restock/current/procurement',
+        children: [
+          {
+            path: 'procurement',
+            name: 'suggestion-list-procurement',
+            component: () => import('@/views/suggestion/ProcurementListView.vue'),
+            meta: { title: '采购建议', section: 'RESTOCK', permission: 'restock:view' },
+          },
+          {
+            path: 'restock',
+            name: 'suggestion-list-restock',
+            component: () => import('@/views/suggestion/RestockListView.vue'),
+            meta: { title: '补货建议', section: 'RESTOCK', permission: 'restock:view' },
+          },
+        ],
+      },
       { path: 'restock/run', redirect: '/restock/current' },
       {
         path: 'restock/suggestions/:id',
         name: 'suggestion-detail',
         component: () => import('@/views/SuggestionDetailView.vue'),
+        redirect: (to) => `/restock/suggestions/${to.params.id}/procurement`,
+        children: [
+          {
+            path: 'procurement',
+            name: 'suggestion-detail-procurement',
+            component: () => import('@/views/suggestion/ProcurementDetailView.vue'),
+            meta: { title: '采购建议详情', section: 'RESTOCK', permission: 'restock:view' },
+          },
+          {
+            path: 'restock',
+            name: 'suggestion-detail-restock',
+            component: () => import('@/views/suggestion/RestockDetailView.vue'),
+            meta: { title: '补货建议详情', section: 'RESTOCK', permission: 'restock:view' },
+          },
+        ],
         meta: { title: '建议详情', section: 'RESTOCK', permission: 'restock:view' },
+      },
+      {
+        path: 'restock/history',
+        name: 'history',
+        component: () => import('@/views/HistoryView.vue'),
+        meta: { title: '历史记录', section: 'RESTOCK', permission: 'history:view' },
+        redirect: '/restock/history/procurement',
+        children: [
+          {
+            path: 'procurement',
+            name: 'history-procurement',
+            component: () => import('@/views/history/ProcurementHistoryView.vue'),
+            meta: { title: '采购历史', section: 'RESTOCK', permission: 'history:view' },
+          },
+          {
+            path: 'restock',
+            name: 'history-restock',
+            component: () => import('@/views/history/RestockHistoryView.vue'),
+            meta: { title: '补货历史', section: 'RESTOCK', permission: 'history:view' },
+          },
+        ],
       },
       { path: 'settings/sku', redirect: '/data/products' },
       { path: 'settings/warehouse', redirect: '/data/warehouses' },
