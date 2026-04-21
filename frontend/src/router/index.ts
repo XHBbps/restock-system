@@ -158,4 +158,18 @@ router.beforeEach(async (to) => {
   return true
 })
 
+// 捕获懒加载 chunk 失效：前端重建后旧 tab 的 chunk hash 已被新 build 删掉，
+// 点路由会 404。自动刷新页面让浏览器拿新 HTML + 新 hash 的 chunk。
+router.onError((error) => {
+  const message = String(error?.message ?? error)
+  if (
+    /Failed to fetch dynamically imported module/i.test(message) ||
+    /Loading chunk .* failed/i.test(message) ||
+    /Importing a module script failed/i.test(message)
+  ) {
+    console.warn('[router] chunk stale, reloading:', message)
+    window.location.reload()
+  }
+})
+
 export default router

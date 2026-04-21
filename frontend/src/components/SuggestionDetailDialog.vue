@@ -4,7 +4,7 @@
     :title="dialogTitle"
     width="80%"
     :close-on-click-modal="false"
-    :show-close="true"
+    :show-close="false"
     @update:model-value="(v: boolean) => emit('update:modelValue', v)"
     @closed="reset"
   >
@@ -13,16 +13,25 @@
         <span :id="titleId" :class="titleClass" class="detail-dialog-header__title">
           {{ dialogTitle }}
         </span>
-        <el-button
-          v-if="currentSnapshot"
-          type="primary"
-          size="small"
-          :loading="downloading"
-          class="detail-dialog-header__download"
-          @click="download"
-        >
-          下载 Excel
-        </el-button>
+        <div class="detail-dialog-header__actions">
+          <el-button
+            v-if="currentSnapshot"
+            type="primary"
+            size="small"
+            :loading="downloading"
+            @click="download"
+          >
+            下载 Excel
+          </el-button>
+          <button
+            type="button"
+            class="dialog-close-btn"
+            aria-label="关闭"
+            @click="closeDialog"
+          >
+            <X :size="16" />
+          </button>
+        </div>
       </div>
     </template>
 
@@ -188,6 +197,7 @@ import { getCountryLabel } from '@/utils/countries'
 import { triggerBlobDownload } from '@/utils/download'
 import { formatDateTime } from '@/utils/format'
 import { ElMessage } from 'element-plus'
+import { X } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
 
 const props = defineProps<{
@@ -305,6 +315,10 @@ function reset(): void {
   currentSnapshotId.value = null
 }
 
+function closeDialog(): void {
+  emit('update:modelValue', false)
+}
+
 watch(
   () => [props.modelValue, props.suggestionId] as const,
   ([open, id]) => {
@@ -322,7 +336,6 @@ watch(
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-right: $space-6; // 给 × 按钮预留空间
   gap: $space-3;
 
   &__title {
@@ -331,8 +344,34 @@ watch(
     color: $color-text-primary;
   }
 
-  &__download {
+  &__actions {
+    display: flex;
+    align-items: center;
+    gap: $space-3;    // 下载按钮和 × 间隔
     flex-shrink: 0;
+  }
+}
+
+.dialog-close-btn {
+  all: unset;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: $radius-md;
+  color: $color-text-secondary;
+  transition: $transition-fast;
+
+  &:hover {
+    background: $color-bg-subtle;
+    color: $color-text-primary;
+  }
+
+  &:focus-visible {
+    outline: 2px solid $color-brand-primary;
+    outline-offset: 2px;
   }
 }
 
