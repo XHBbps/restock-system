@@ -136,7 +136,8 @@ body {
   font-family: $font-family-sans;
   font-size: $font-size-sm;                   // text-sm
   font-weight: $font-weight-medium;
-  line-height: 1;
+  // line-height 稍大一点，给 CJK 字符下沉空间（line-height:1 在 "生成" "导出" 等中文按钮会视觉偏上）
+  line-height: 1.2;
   letter-spacing: 0;
   transition: $transition-fast;
   border: 1px solid transparent;

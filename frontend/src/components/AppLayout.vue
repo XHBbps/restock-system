@@ -598,7 +598,9 @@ async function handleChangePassword() {
   justify-content: center;
   font-size: 12px;
   font-weight: $font-weight-semibold;
+  // CJK 字符 baseline 偏高，用 line-height == 容器高度配合 padding 微调视觉居中
   line-height: 1;
+  padding-top: 1px;
   flex-shrink: 0;
 }
 
