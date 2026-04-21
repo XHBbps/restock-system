@@ -25,6 +25,8 @@ async def test_get_generation_toggle_returns_current_state(
     assert body["updated_by"] is None
     assert body["updated_by_name"] is None
     assert body["updated_at"] is None
+    assert body["can_enable"] is True
+    assert body["can_enable_reason"] is None
 
 
 @pytest.mark.asyncio
@@ -120,3 +122,28 @@ async def test_patch_generation_toggle_off_does_not_archive(
     assert cfg.suggestion_generation_enabled is False
     assert cfg.generation_toggle_updated_by == 1
     assert cfg.generation_toggle_updated_at is not None
+
+
+@pytest.mark.asyncio
+async def test_generation_toggle_on_blocked_when_required_snapshot_missing(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    await seed_global_config(db_session, suggestion_generation_enabled=False)
+    s_draft = Suggestion(
+        status="draft",
+        global_config_snapshot={},
+        total_items=1,
+        procurement_item_count=1,
+        restock_item_count=0,
+        triggered_by="manual",
+    )
+    db_session.add(s_draft)
+    await db_session.commit()
+
+    get_resp = await client.get("/api/config/generation-toggle")
+    assert get_resp.status_code == 200
+    assert get_resp.json()["can_enable"] is False
+    assert "采购" in get_resp.json()["can_enable_reason"]
+
+    patch_resp = await client.patch("/api/config/generation-toggle", json={"enabled": True})
+    assert patch_resp.status_code == 422

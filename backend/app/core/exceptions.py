@@ -59,6 +59,12 @@ class ConflictError(BusinessError):
     status_code = 409
 
 
+class UnprocessableError(BusinessError):
+    """422: request is valid but current business state does not allow it."""
+
+    status_code = 422
+
+
 class PushBlockedError(BusinessError):
     """建议条目带有 push_blocker,不可推送。"""
 

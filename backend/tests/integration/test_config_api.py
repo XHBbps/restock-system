@@ -11,13 +11,21 @@ from tests.integration.factories import seed_global_config
 async def test_get_global_config_returns_restock_regions(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    await seed_global_config(db_session, restock_regions=["US", "GB"])
+    await seed_global_config(
+        db_session,
+        safety_stock_days=18,
+        restock_regions=["US", "GB"],
+        eu_countries=["DE", "FR"],
+    )
     await db_session.commit()
 
     resp = await client.get("/api/config/global")
 
     assert resp.status_code == 200
-    assert resp.json()["restock_regions"] == ["US", "GB"]
+    body = resp.json()
+    assert body["safety_stock_days"] == 18
+    assert body["restock_regions"] == ["US", "GB"]
+    assert body["eu_countries"] == ["DE", "FR"]
 
 
 @pytest.mark.asyncio
@@ -34,6 +42,24 @@ async def test_patch_global_config_normalizes_restock_regions(
 
     assert resp.status_code == 200
     assert resp.json()["restock_regions"] == ["US", "GB"]
+
+
+@pytest.mark.asyncio
+async def test_patch_global_config_updates_safety_stock_and_eu_countries(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    await seed_global_config(db_session)
+    await db_session.commit()
+
+    resp = await client.patch(
+        "/api/config/global",
+        json={"safety_stock_days": 30, "eu_countries": ["de", " FR ", "", "de"]},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["safety_stock_days"] == 30
+    assert body["eu_countries"] == ["DE", "FR"]
 
 
 @pytest.mark.asyncio
