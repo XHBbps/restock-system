@@ -62,27 +62,10 @@ const routes: RouteRecordRaw[] = [
         ],
       },
       { path: 'restock/run', redirect: '/restock/current' },
-      {
-        path: 'restock/suggestions/:id',
-        name: 'suggestion-detail',
-        component: () => import('@/views/SuggestionDetailView.vue'),
-        redirect: (to) => `/restock/suggestions/${to.params.id}/procurement`,
-        children: [
-          {
-            path: 'procurement',
-            name: 'suggestion-detail-procurement',
-            component: () => import('@/views/suggestion/ProcurementDetailView.vue'),
-            meta: { title: '采购建议详情', section: 'RESTOCK', permission: 'restock:view' },
-          },
-          {
-            path: 'restock',
-            name: 'suggestion-detail-restock',
-            component: () => import('@/views/suggestion/RestockDetailView.vue'),
-            meta: { title: '补货建议详情', section: 'RESTOCK', permission: 'restock:view' },
-          },
-        ],
-        meta: { title: '建议详情', section: 'RESTOCK', permission: 'restock:view' },
-      },
+      // 建议单详情页已改为历史页弹框（SuggestionDetailDialog），路由废弃；保留 redirect 兼容旧书签
+      { path: 'restock/suggestions/:id', redirect: '/restock/history' },
+      { path: 'restock/suggestions/:id/procurement', redirect: '/restock/history/procurement' },
+      { path: 'restock/suggestions/:id/restock', redirect: '/restock/history/restock' },
       {
         path: 'restock/history',
         name: 'history',
@@ -115,9 +98,9 @@ const routes: RouteRecordRaw[] = [
       { path: 'replenishment/current', redirect: '/restock/current' },
       { path: 'replenishment/run', redirect: '/restock/run' },
       { path: 'replenishment/history', redirect: '/restock/history' },
-      { path: 'replenishment/suggestions/:id', redirect: (to) => `/restock/suggestions/${to.params.id}` },
+      { path: 'replenishment/suggestions/:id', redirect: '/restock/history' },
       { path: 'suggestions', redirect: '/restock/current' },
-      { path: 'suggestions/:id', redirect: (to) => `/restock/suggestions/${to.params.id}` },
+      { path: 'suggestions/:id', redirect: '/restock/history' },
       { path: 'history', redirect: '/restock/history' },
       { path: 'config/sku', redirect: '/settings/sku' },
       { path: 'config/global', redirect: '/settings/global' },

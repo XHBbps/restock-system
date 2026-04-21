@@ -1,5 +1,10 @@
 <template>
   <div class="history-child">
+    <SuggestionDetailDialog
+      v-model="dialogVisible"
+      :suggestion-id="dialogSuggestionId"
+      type="procurement"
+    />
     <el-table v-loading="loading" :data="rows" empty-text="暂无采购建议单">
       <el-table-column label="采购建议单号" min-width="150">
         <template #default="{ row }">
@@ -54,6 +59,7 @@
 </template>
 
 <script setup lang="ts">
+import SuggestionDetailDialog from '@/components/SuggestionDetailDialog.vue'
 import { downloadSnapshotBlob, listSnapshots } from '@/api/snapshot'
 import { listSuggestions, voidSuggestion, type Suggestion } from '@/api/suggestion'
 import { getActionErrorMessage } from '@/utils/apiError'
@@ -61,13 +67,13 @@ import { triggerBlobDownload } from '@/utils/download'
 import { formatDateTime } from '@/utils/format'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
 
-const router = useRouter()
 const rows = ref<Suggestion[]>([])
 const loading = ref(false)
 const downloadingId = ref<number | null>(null)
 const voidingId = ref<number | null>(null)
+const dialogVisible = ref(false)
+const dialogSuggestionId = ref<number | null>(null)
 
 function statusTagType(
   status: string,
@@ -101,7 +107,8 @@ async function load(): Promise<void> {
 }
 
 function openDetail(suggestionId: number): void {
-  void router.push(`/restock/suggestions/${suggestionId}/procurement`)
+  dialogSuggestionId.value = suggestionId
+  dialogVisible.value = true
 }
 
 async function downloadLatest(suggestionId: number): Promise<void> {
