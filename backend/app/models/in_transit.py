@@ -34,6 +34,8 @@ class InTransitRecord(Base):
         String(50), ForeignKey("warehouse.id", ondelete="SET NULL"), nullable=True
     )
     target_country: Mapped[str | None] = mapped_column(String(2), nullable=True)
+    # EU 合并前的原始目标国家码（审计用，不对外暴露）
+    original_target_country: Mapped[str | None] = mapped_column(String(2), nullable=True)
     update_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     type: Mapped[int | None] = mapped_column(Integer, nullable=True)
     type_name: Mapped[str | None] = mapped_column(String(100), nullable=True)

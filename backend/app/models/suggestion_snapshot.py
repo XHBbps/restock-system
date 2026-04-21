@@ -1,12 +1,13 @@
 """建议单导出快照 + 快照条目。Immutable，不可删除。"""
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -23,7 +24,11 @@ from app.db.base import Base
 
 
 class SuggestionSnapshot(Base):
-    """一次 Excel 导出操作产生的不可变快照。"""
+    """一次 Excel 导出操作产生的不可变快照。
+
+    `snapshot_type` 区分采购单（procurement）和补货单（restock），
+    两种类型的 version 独立递增。
+    """
 
     __tablename__ = "suggestion_snapshot"
     __table_args__ = (
@@ -31,8 +36,18 @@ class SuggestionSnapshot(Base):
             "generation_status IN ('generating','ready','failed')",
             name="generation_status_enum",
         ),
-        UniqueConstraint("suggestion_id", "version", name="uq_snapshot_suggestion_version"),
+        CheckConstraint(
+            "snapshot_type IN ('procurement','restock')",
+            name="snapshot_type_enum",
+        ),
+        UniqueConstraint(
+            "suggestion_id",
+            "snapshot_type",
+            "version",
+            name="uq_snapshot_suggestion_type_version",
+        ),
         Index("ix_suggestion_snapshot_suggestion", "suggestion_id"),
+        Index("ix_snapshot_type_suggestion", "snapshot_type", "suggestion_id"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -40,6 +55,9 @@ class SuggestionSnapshot(Base):
         BigInteger,
         ForeignKey("suggestion.id", ondelete="CASCADE"),
         nullable=False,
+    )
+    snapshot_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="restock"
     )
     version: Mapped[int] = mapped_column(Integer, nullable=False)
 
@@ -92,6 +110,9 @@ class SuggestionSnapshotItem(Base):
     total_qty: Mapped[int] = mapped_column(Integer, nullable=False)
     country_breakdown: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     warehouse_breakdown: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    # 采购类型快照冻结的值；补货类型快照可为 NULL。
+    purchase_qty: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    purchase_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     urgent: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
     velocity_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)

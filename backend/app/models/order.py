@@ -43,6 +43,8 @@ class OrderHeader(Base):
     amazon_order_id: Mapped[str] = mapped_column(String(50), nullable=False)
     marketplace_id: Mapped[str] = mapped_column(String(10), nullable=False)
     country_code: Mapped[str] = mapped_column(String(2), nullable=False)
+    # EU 合并前的原始国家码（审计用，不对外暴露）
+    original_country_code: Mapped[str | None] = mapped_column(String(2), nullable=True)
 
     order_status: Mapped[str] = mapped_column(String(30), nullable=False)
     order_total_currency: Mapped[str | None] = mapped_column(String(10), nullable=True)
