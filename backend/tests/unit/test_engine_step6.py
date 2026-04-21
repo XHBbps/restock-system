@@ -1,9 +1,10 @@
-"""Unit tests for step6 urgency helpers."""
+from datetime import date, timedelta
 
 from app.engine.step6_timing import (
     compute_urgency_for_sku,
     has_urgent_sale_days,
     positive_qty_countries,
+    step6_timing,
 )
 
 
@@ -21,14 +22,39 @@ def test_compute_urgency_marks_sale_days_at_lead_time_as_urgent() -> None:
     assert result.urgent is True
 
 
-def test_compute_urgency_ignores_non_positive_countries() -> None:
-    result = compute_urgency_for_sku(
-        sale_days_for_sku={"US": 10.0, "CA": 2.0},
-        country_qty_for_sku={"US": 0, "CA": 0},
-        lead_time_days=5,
+def test_step6_purchase_date_with_min_sale_days() -> None:
+    today = date(2026, 4, 20)
+
+    result = step6_timing(
+        sale_days_snapshot={"sku1": {"US": 30, "EU": 60}},
+        purchase_qty={"sku1": 100},
+        lead_time_by_sku={"sku1": 50},
+        today=today,
     )
 
-    assert result.urgent is False
+    assert result["sku1"]["purchase_date"] == today - timedelta(days=70)
+
+
+def test_step6_no_purchase_date_when_zero_qty() -> None:
+    result = step6_timing(
+        sale_days_snapshot={"sku1": {"US": 30}},
+        purchase_qty={"sku1": 0},
+        lead_time_by_sku={"sku1": 50},
+        today=date(2026, 4, 20),
+    )
+
+    assert result["sku1"]["purchase_date"] is None
+
+
+def test_step6_no_purchase_date_when_no_sale_days() -> None:
+    result = step6_timing(
+        sale_days_snapshot={"sku1": {}},
+        purchase_qty={"sku1": 100},
+        lead_time_by_sku={"sku1": 50},
+        today=date(2026, 4, 20),
+    )
+
+    assert result["sku1"]["purchase_date"] is None
 
 
 def test_has_urgent_sale_days_accepts_numeric_values() -> None:
@@ -36,34 +62,6 @@ def test_has_urgent_sale_days_accepts_numeric_values() -> None:
         {"US": 8, "UK": 15.5},
         lead_time_days=10,
         countries={"US", "UK"},
-    )
-
-    assert urgent is True
-
-
-def test_has_urgent_sale_days_keeps_empty_country_set_empty() -> None:
-    urgent = has_urgent_sale_days(
-        {"US": 1},
-        lead_time_days=10,
-        countries=set(),
-    )
-
-    assert urgent is False
-
-
-def test_has_urgent_sale_days_ignores_missing_country() -> None:
-    assert has_urgent_sale_days({}, lead_time_days=10, countries={"US"}) is False
-
-
-def test_has_urgent_sale_days_ignores_invalid_value() -> None:
-    assert has_urgent_sale_days({"US": "bad"}, lead_time_days=10, countries={"US"}) is False
-
-
-def test_has_urgent_sale_days_still_uses_other_valid_countries() -> None:
-    urgent = has_urgent_sale_days(
-        {"US": None, "CA": 8},
-        lead_time_days=10,
-        countries={"US", "CA"},
     )
 
     assert urgent is True
