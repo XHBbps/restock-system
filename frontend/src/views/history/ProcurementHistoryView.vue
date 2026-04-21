@@ -1,9 +1,9 @@
 <template>
   <div class="history-child">
     <el-table v-loading="loading" :data="rows" empty-text="暂无采购建议单">
-      <el-table-column label="单号" min-width="150">
+      <el-table-column label="采购建议单号" min-width="150">
         <template #default="{ row }">
-          <span class="mono">采购单 #{{ row.id }}</span>
+          <span class="order-id">CG-{{ row.id }}</span>
         </template>
       </el-table-column>
       <el-table-column label="状态" width="110">
@@ -13,28 +13,35 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="版本数" width="110" align="right">
-        <template #default="{ row }">{{ row.procurement_snapshot_count || '-' }}</template>
+      <el-table-column label="最新版本" width="110" align="right">
+        <template #default="{ row }">
+          <span v-if="row.procurement_snapshot_count > 0" class="version-label">
+            V{{ row.procurement_snapshot_count }}
+          </span>
+          <span v-else class="muted">-</span>
+        </template>
       </el-table-column>
       <el-table-column label="生成时间" min-width="180">
         <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
       </el-table-column>
       <el-table-column label="操作" width="230" align="center" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" @click="openDetail(row.id)">详情</el-button>
+          <el-button link type="primary" class="history-action" @click="openDetail(row.id)">详情</el-button>
           <el-button
             v-if="row.procurement_snapshot_count > 0"
             link
             type="primary"
+            class="history-action"
             :loading="downloadingId === row.id"
             @click="downloadLatest(row.id)"
           >
-            下载最新
+            下载
           </el-button>
           <el-button
             v-if="canVoid(row)"
             link
             type="danger"
+            class="history-action history-action--danger"
             :loading="voidingId === row.id"
             @click="voidOne(row)"
           >
@@ -150,8 +157,39 @@ onMounted(() => {
   gap: $space-4;
 }
 
-.mono {
+.order-id {
   font-family: $font-family-mono;
-  font-weight: 600;
+  color: $color-text-primary;
+}
+
+.version-label {
+  font-family: $font-family-mono;
+  font-weight: $font-weight-medium;
+  color: $color-brand-primary;
+}
+
+.muted {
+  color: $color-text-secondary;
+}
+
+// 操作栏按钮 hover 效果
+.history-action {
+  position: relative;
+  transition: $transition-fast;
+
+  &:hover:not(:disabled) {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    background: $color-bg-subtle;
+  }
+}
+
+.history-action--danger {
+  color: $color-danger !important;
+
+  &:hover:not(:disabled) {
+    color: #b91c1c !important;  // red-700（比 red-600 深一档）
+    background: $color-danger-soft !important;
+  }
 }
 </style>

@@ -401,7 +401,8 @@ body {
   color: $color-text-primary;
   font-size: $font-size-xs;                     // text-xs
   font-weight: $font-weight-semibold;
-  line-height: 1;
+  // CJK 字符在 line-height:1 下视觉偏上，给它下沉空间
+  line-height: 1.2;
   letter-spacing: 0;
 
   // Default
