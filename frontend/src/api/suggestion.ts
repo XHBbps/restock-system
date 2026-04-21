@@ -10,7 +10,7 @@ export interface AllocationExplanation {
   eligible_warehouses: string[]
 }
 
-export type SuggestionDisplayStatus = '未导出' | '已导出' | '已归档' | '已作废'
+export type SuggestionDisplayStatus = '未导出' | '已导出' | '已归档'
 
 export interface Suggestion {
   id: number
@@ -27,10 +27,6 @@ export interface Suggestion {
   global_config_snapshot: Record<string, unknown>
   created_at: string
   archived_at: string | null
-}
-
-export async function voidSuggestion(suggestionId: number): Promise<void> {
-  await client.post(`/api/suggestions/${suggestionId}/void`)
 }
 
 export interface SuggestionItem {

@@ -11,7 +11,7 @@ from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.api.deps import UserContext, db_session, get_current_user, require_permission
+from app.api.deps import db_session, require_permission
 from app.core.exceptions import ConflictError, NotFound, ValidationFailed
 from app.core.permissions import HISTORY_DELETE, RESTOCK_OPERATE, RESTOCK_VIEW
 from app.core.query import escape_like
@@ -152,15 +152,14 @@ async def list_suggestions(
 
 
 def _derive_display_status(suggestion: Suggestion, snapshot_count: int) -> str:
-    """按建议单 + 类型 snapshot 计数派生 4 档展示状态。
+    """按建议单 + 类型 snapshot 计数派生 3 档展示状态。
 
-    - 已作废：archived + archived_trigger='voided'
-    - 已归档：archived 其他触发（schema_migration / admin_toggle / 等）
+    - 已归档：archived（不论 trigger，含 schema_migration / admin_toggle / voided 等）
     - 已导出：draft 且该类型至少有 1 份 snapshot
     - 未导出：draft 且该类型无 snapshot（也包括 error 状态的建议单）
     """
     if suggestion.status == "archived":
-        return "已作废" if suggestion.archived_trigger == "voided" else "已归档"
+        return "已归档"
     return "已导出" if snapshot_count > 0 else "未导出"
 
 
@@ -303,36 +302,6 @@ async def delete_suggestion(
     await db.execute(delete(Suggestion).where(Suggestion.id == suggestion_id))
 
 
-@router.post("/{suggestion_id}/void", status_code=204)
-async def void_suggestion(
-    suggestion_id: int = Path(..., ge=1),
-    db: AsyncSession = Depends(db_session),
-    user: UserContext = Depends(get_current_user),
-    _: None = Depends(require_permission(HISTORY_DELETE)),
-) -> None:
-    """作废建议单：status=draft → archived + archived_trigger='voided'。
-
-    作废后建议单从"发起页"消失，保留在"历史记录"里显示为"已作废"状态。
-    和删除不同：作废保留记录（包括已导出的 snapshot）；删除彻底抹除。
-    """
-    suggestion = (
-        await db.execute(select(Suggestion).where(Suggestion.id == suggestion_id))
-    ).scalar_one_or_none()
-    if suggestion is None:
-        raise NotFound(f"建议单 {suggestion_id} 不存在")
-    if suggestion.status != "draft":
-        raise ConflictError(f"只有 draft 状态的建议单可作废，当前状态={suggestion.status}")
-
-    await db.execute(
-        update(Suggestion)
-        .where(Suggestion.id == suggestion_id)
-        .values(
-            status="archived",
-            archived_trigger="voided",
-            archived_by=user.id,
-            archived_at=now_beijing(),
-        )
-    )
 
 
 async def _resolve_effective_lead_time_days(
