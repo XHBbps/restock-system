@@ -1,9 +1,11 @@
-// 快照 API 客户端
 import client from './client'
+
+export type SnapshotType = 'procurement' | 'restock'
 
 export interface SnapshotOut {
   id: number
   suggestion_id: number
+  snapshot_type: SnapshotType
   version: number
   note: string | null
   exported_by: number | null
@@ -23,6 +25,8 @@ export interface SnapshotItemOut {
   total_qty: number
   country_breakdown: Record<string, unknown>
   warehouse_breakdown: Record<string, unknown>
+  purchase_qty: number | null
+  purchase_date: string | null
   urgent: boolean
   velocity_snapshot: Record<string, unknown> | null
   sale_days_snapshot: Record<string, unknown> | null
@@ -33,24 +37,44 @@ export interface SnapshotDetailOut extends SnapshotOut {
   global_config_snapshot: Record<string, unknown>
 }
 
-export async function createSnapshot(
+async function createTypedSnapshot(
   suggestionId: number,
+  type: SnapshotType,
   itemIds: number[],
   note?: string,
 ): Promise<SnapshotOut> {
   const { data } = await client.post<SnapshotOut>(
-    `/api/suggestions/${suggestionId}/snapshots`,
+    `/api/suggestions/${suggestionId}/snapshots/${type}`,
     { item_ids: itemIds, note },
   )
   return data
 }
 
-export async function listSnapshots(suggestionId: number): Promise<SnapshotOut[]> {
-  // 后端按 version asc 返回，前端 reverse 让最新版本在表格顶部
+export function createProcurementSnapshot(
+  suggestionId: number,
+  itemIds: number[],
+  note?: string,
+): Promise<SnapshotOut> {
+  return createTypedSnapshot(suggestionId, 'procurement', itemIds, note)
+}
+
+export function createRestockSnapshot(
+  suggestionId: number,
+  itemIds: number[],
+  note?: string,
+): Promise<SnapshotOut> {
+  return createTypedSnapshot(suggestionId, 'restock', itemIds, note)
+}
+
+export async function listSnapshots(
+  suggestionId: number,
+  type?: SnapshotType,
+): Promise<SnapshotOut[]> {
   const { data } = await client.get<SnapshotOut[]>(
     `/api/suggestions/${suggestionId}/snapshots`,
+    { params: type ? { type } : undefined },
   )
-  return [...data].reverse()
+  return data
 }
 
 export async function getSnapshot(snapshotId: number): Promise<SnapshotDetailOut> {

@@ -1,4 +1,3 @@
-// 建议单 API 客户端
 import type { SortOrder } from '@/utils/tableSort'
 
 import client from './client'
@@ -16,7 +15,10 @@ export interface Suggestion {
   status: 'draft' | 'archived' | 'error'
   triggered_by: string
   total_items: number
-  snapshot_count: number
+  procurement_item_count: number
+  restock_item_count: number
+  procurement_snapshot_count: number
+  restock_snapshot_count: number
   global_config_snapshot: Record<string, unknown>
   created_at: string
   archived_at: string | null
@@ -25,7 +27,6 @@ export interface Suggestion {
 export interface SuggestionItem {
   id: number
   commodity_sku: string
-  commodity_id: string | null
   commodity_name: string | null
   main_image: string | null
   total_qty: number
@@ -35,9 +36,14 @@ export interface SuggestionItem {
   velocity_snapshot: Record<string, number> | null
   sale_days_snapshot: Record<string, number> | null
   urgent: boolean
-  export_status: 'pending' | 'exported'
-  exported_snapshot_id: number | null
-  exported_at: string | null
+  purchase_qty: number
+  purchase_date: string | null
+  procurement_export_status: 'pending' | 'exported'
+  procurement_exported_snapshot_id: number | null
+  procurement_exported_at: string | null
+  restock_export_status: 'pending' | 'exported'
+  restock_exported_snapshot_id: number | null
+  restock_exported_at: string | null
 }
 
 export interface SuggestionDetail extends Suggestion {
@@ -46,6 +52,8 @@ export interface SuggestionDetail extends Suggestion {
 
 export interface SuggestionItemPatch {
   total_qty?: number
+  purchase_qty?: number
+  purchase_date?: string | null
   country_breakdown?: Record<string, number>
   warehouse_breakdown?: Record<string, Record<string, number>>
 }
@@ -78,11 +86,11 @@ export async function getSuggestion(id: number): Promise<SuggestionDetail> {
 export async function patchSuggestionItem(
   suggestionId: number,
   itemId: number,
-  patch: SuggestionItemPatch
+  patch: SuggestionItemPatch,
 ): Promise<SuggestionItem> {
   const { data } = await client.patch<SuggestionItem>(
     `/api/suggestions/${suggestionId}/items/${itemId}`,
-    patch
+    patch,
   )
   return data
 }
