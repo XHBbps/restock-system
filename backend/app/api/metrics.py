@@ -276,18 +276,23 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
     lead_time_days = config.lead_time_days if config else 50
     allowed_countries = resolve_allowed_restock_regions(config.restock_regions if config else [])
 
+    # velocity 口径与 runner 一致：不受 restock_regions 过滤，
+    # 保证采购量公式里的 Σvelocity 覆盖全部销售国家（含白名单外）。
     velocity = (
-        await run_step1(
-            db,
-            enabled_skus,
-            now_beijing().date(),
-            allowed_countries=allowed_countries,
-        )
+        await run_step1(db, enabled_skus, now_beijing().date())
         if enabled_skus
         else {}
     )
     all_sale_days, inventory = await run_step2(db, velocity, enabled_skus) if enabled_skus else ({}, {})
-    live_country_qty = compute_country_qty(velocity, inventory, target_days) if enabled_skus else {}
+    live_country_qty_all = compute_country_qty(velocity, inventory, target_days) if enabled_skus else {}
+    # country_qty 只保留白名单国家（和 runner 行为一致）。
+    if allowed_countries is not None:
+        live_country_qty = {
+            sku: {c: q for c, q in cq.items() if c in allowed_countries}
+            for sku, cq in live_country_qty_all.items()
+        }
+    else:
+        live_country_qty = live_country_qty_all
     local_stock = await load_local_inventory(db, enabled_skus) if enabled_skus else {}
     restock_sku_count = 0
     for sku in enabled_skus:
