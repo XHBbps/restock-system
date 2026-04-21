@@ -1,35 +1,13 @@
-"""Unit tests for app.engine.runner.
-
-Strategy chosen:
-  Option A + B hybrid.
-
-  • _config_snapshot is a pure function — tested directly with a SimpleNamespace
-    stub, no DB needed (Option A).
-  • run_engine early-return path (no enabled SKUs) — tested by mocking
-    async_session_factory so the DB returns an empty sku list (Option B).
-  • _load_commodity_id_map — tested with a _FakeDb stub (Option B).
-
-These three paths cover the most valuable/reachable lines without requiring
-a live Postgres connection.
-"""
-
 from __future__ import annotations
 
+from datetime import date, timedelta
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.engine.runner import (
-    ENGINE_RUN_ADVISORY_LOCK_KEY,
-    _config_snapshot,
-    run_engine,
-)
-
-# ---------------------------------------------------------------------------
-# Shared fake DB plumbing (mirrors pattern in test_pushback_purchase.py)
-# ---------------------------------------------------------------------------
+from app.engine.runner import ENGINE_RUN_ADVISORY_LOCK_KEY, _config_snapshot, run_engine
 
 
 class _ScalarResult:
@@ -39,12 +17,6 @@ class _ScalarResult:
     def scalar_one(self) -> Any:
         return self._value
 
-    def scalar_one_or_none(self) -> Any:
-        return self._value
-
-    def scalars(self) -> _ScalarsProxy:
-        return _ScalarsProxy(self._value)
-
     def all(self) -> list[Any]:
         if self._value is None:
             return []
@@ -53,21 +25,13 @@ class _ScalarResult:
         return [self._value]
 
 
-class _ScalarsProxy:
-    def __init__(self, values: Any) -> None:
-        self._values = values if isinstance(values, list) else [values]
-
-    def all(self) -> list[Any]:
-        return list(self._values)
-
-
 class _FakeDb:
     def __init__(self, responses: list[Any]) -> None:
         self._responses = list(responses)
         self.commits = 0
         self.executed: list[Any] = []
 
-    async def execute(self, stmt: Any, *args: Any, **kwargs: Any) -> Any:
+    async def execute(self, stmt: Any, *_args: Any, **_kwargs: Any) -> Any:
         self.executed.append(stmt)
         if self._responses:
             return self._responses.pop(0)
@@ -78,12 +42,10 @@ class _FakeDb:
 
 
 class _FakeSessionFactory:
-    """Async context manager factory that yields a pre-configured _FakeDb."""
-
     def __init__(self, db: _FakeDb) -> None:
         self._db = db
 
-    def __call__(self) -> _FakeSessionFactory:
+    def __call__(self) -> "_FakeSessionFactory":
         return self
 
     async def __aenter__(self) -> _FakeDb:
@@ -94,11 +56,7 @@ class _FakeSessionFactory:
 
 
 class _FakeContext:
-    """Minimal JobContext stub."""
-
     def __init__(self) -> None:
-        self.task_id = 1
-        self.job_name = "run_engine"
         self.payload: dict[str, Any] = {}
         self.progress_calls: list[dict[str, Any]] = []
 
@@ -120,9 +78,9 @@ def _make_config(**overrides: Any) -> SimpleNamespace:
         "buffer_days": 30,
         "target_days": 60,
         "lead_time_days": 50,
+        "safety_stock_days": 15,
         "restock_regions": [],
-        "include_tax": "0",
-        "default_purchase_warehouse_id": "WH-001",
+        "eu_countries": ["DE", "FR"],
         "shop_sync_mode": "all",
         "suggestion_generation_enabled": True,
     }
@@ -130,159 +88,123 @@ def _make_config(**overrides: Any) -> SimpleNamespace:
     return SimpleNamespace(**defaults)
 
 
-# ---------------------------------------------------------------------------
-# Option A: pure-function test for _config_snapshot
-# ---------------------------------------------------------------------------
-
-
 def test_config_snapshot_keys() -> None:
-    """_config_snapshot returns the expected set of keys."""
-    config = _make_config()
-    snapshot = _config_snapshot(config)  # type: ignore[arg-type]
+    snapshot = _config_snapshot(_make_config())  # type: ignore[arg-type]
 
     assert snapshot["buffer_days"] == 30
     assert snapshot["target_days"] == 60
     assert snapshot["lead_time_days"] == 50
+    assert snapshot["safety_stock_days"] == 15
     assert snapshot["restock_regions"] == []
-    assert snapshot["include_tax"] == "0"
-    assert snapshot["default_purchase_warehouse_id"] == "WH-001"
-    assert snapshot["shop_sync_mode"] == "all"
-    assert "snapshot_at" in snapshot
-
-
-def test_config_snapshot_overrides() -> None:
-    """_config_snapshot reflects non-default values correctly."""
-    config = _make_config(
-        buffer_days=7,
-        target_days=14,
-        lead_time_days=21,
-        restock_regions=["US", "GB"],
-    )
-    snapshot = _config_snapshot(config)  # type: ignore[arg-type]
-
-    assert snapshot["buffer_days"] == 7
-    assert snapshot["target_days"] == 14
-    assert snapshot["lead_time_days"] == 21
-    assert snapshot["restock_regions"] == ["US", "GB"]
-
-
-# ---------------------------------------------------------------------------
-# Option B: run_engine early-return when no SKUs are enabled
-# ---------------------------------------------------------------------------
+    assert snapshot["eu_countries"] == ["DE", "FR"]
+    assert "include_tax" not in snapshot
+    assert "default_purchase_warehouse_id" not in snapshot
 
 
 @pytest.mark.asyncio
 async def test_run_engine_no_enabled_skus_returns_none() -> None:
-    """run_engine returns None when no SKUs are enabled, without calling steps."""
     config = _make_config()
-
-    # DB call sequence inside run_engine (no-SKU path):
-    #   1. pg_advisory_xact_lock  -> None
-    #   2. select GlobalConfig    -> config
-    #   3. select enabled SKUs    -> [] (empty)
-    db = _FakeDb(
-        [
-            None,                      # advisory lock
-            _ScalarResult(config),     # GlobalConfig.scalar_one()
-            _ScalarResult([]),         # enabled_skus.all() — empty list
-        ]
-    )
-    factory = _FakeSessionFactory(db)
+    db = _FakeDb([None, _ScalarResult(config), _ScalarResult([])])
     ctx = _FakeContext()
 
-    with patch("app.engine.runner.async_session_factory", factory):
+    with patch("app.engine.runner.async_session_factory", _FakeSessionFactory(db)):
         result = await run_engine(ctx)  # type: ignore[arg-type]
 
     assert result is None
-    # Progress should have been called with the "完成" / skip message
-    assert any(
-        call.get("current_step") == "完成" for call in ctx.progress_calls
-    )
+    assert any(call.get("current_step") == "完成" for call in ctx.progress_calls)
 
 
 @pytest.mark.asyncio
-async def test_run_engine_forwards_restock_regions_to_step_loaders() -> None:
-    config = _make_config(restock_regions=["US", "GB"])
-    db = _FakeDb(
-        [
-            None,
-            _ScalarResult(config),
-            _ScalarResult([("SKU-001", None)]),
-        ]
-    )
-    factory = _FakeSessionFactory(db)
-    ctx = _FakeContext()
+async def test_run_engine_writes_purchase_fields_and_item_counts() -> None:
+    config = _make_config(restock_regions=["US"])
+    db = _FakeDb([None, _ScalarResult(config), _ScalarResult([("SKU-001", 50)])])
+    captured: dict[str, Any] = {}
 
-    mocked_run_step1 = AsyncMock(return_value={"SKU-001": {"US": 1.0}})
-    mocked_run_step2 = AsyncMock(
-        return_value=(
-            {"SKU-001": {"US": 3.0}},
-            {"SKU-001": {"US": {"available": 0, "reserved": 0, "in_transit": 0, "total": 0}}},
-        )
-    )
-    mocked_load_local_inventory = AsyncMock(return_value={})
-    mocked_load_country_warehouses = AsyncMock(return_value={"US": ["WH-US"]})
-    mocked_load_zipcode_rules = AsyncMock(return_value=[])
-    mocked_load_all_orders = AsyncMock(return_value={("SKU-001", "US"): []})
-    mocked_persist = AsyncMock(return_value=123)
+    async def fake_persist(_db: Any, **kwargs: Any) -> int:
+        captured.update(kwargs)
+        return 123
 
     with (
-        patch("app.engine.runner.async_session_factory", factory),
-        patch("app.engine.runner.run_step1", mocked_run_step1),
-        patch("app.engine.runner.run_step2", mocked_run_step2),
-        patch("app.engine.runner.load_local_inventory", mocked_load_local_inventory),
-        patch("app.engine.runner.load_country_warehouses", mocked_load_country_warehouses),
-        patch("app.engine.runner.load_zipcode_rules", mocked_load_zipcode_rules),
-        patch("app.engine.runner.load_all_sku_country_orders", mocked_load_all_orders),
-        patch("app.engine.runner.compute_country_qty", return_value={"SKU-001": {"US": 8}}),
-        patch("app.engine.runner.compute_total", return_value=8),
+        patch("app.engine.runner.async_session_factory", _FakeSessionFactory(db)),
+        patch("app.engine.runner.run_step1", AsyncMock(return_value={"SKU-001": {"US": 3.0}})),
         patch(
-            "app.engine.runner.compute_urgency_for_sku",
-            return_value=SimpleNamespace(urgent=False),
+            "app.engine.runner.run_step2",
+            AsyncMock(return_value=({"SKU-001": {"US": 30.0}}, {"SKU-001": {}})),
         ),
-        patch("app.engine.runner._persist_suggestion", mocked_persist),
+        patch("app.engine.runner.compute_country_qty", return_value={"SKU-001": {"US": 100}}),
+        patch("app.engine.runner.load_local_inventory", AsyncMock(return_value={"SKU-001": {"available": 0, "reserved": 0}})),
+        patch("app.engine.runner.load_country_warehouses", AsyncMock(return_value={})),
+        patch("app.engine.runner.load_zipcode_rules", AsyncMock(return_value=[])),
+        patch("app.engine.runner.load_all_sku_country_orders", AsyncMock(return_value={})),
+        patch("app.engine.runner._persist_suggestion", fake_persist),
     ):
-        result = await run_engine(ctx)  # type: ignore[arg-type]
+        result = await run_engine(_FakeContext())  # type: ignore[arg-type]
 
     assert result == 123
-    assert mocked_run_step1.await_args.kwargs["allowed_countries"] == {"US", "GB"}
-    assert mocked_load_all_orders.await_args.kwargs["allowed_countries"] == {"US", "GB"}
+    item = captured["items"][0]
+    assert item["total_qty"] == 100
+    assert item["purchase_qty"] == 235
+    assert item["purchase_date"] == date.today() - timedelta(days=70)
+
+
+@pytest.mark.asyncio
+async def test_run_engine_returns_none_when_all_items_empty() -> None:
+    config = _make_config()
+    db = _FakeDb([None, _ScalarResult(config), _ScalarResult([("SKU-001", None)])])
+    persist = AsyncMock(return_value=123)
+
+    with (
+        patch("app.engine.runner.async_session_factory", _FakeSessionFactory(db)),
+        patch("app.engine.runner.run_step1", AsyncMock(return_value={"SKU-001": {}})),
+        patch("app.engine.runner.run_step2", AsyncMock(return_value=({"SKU-001": {}}, {}))),
+        patch("app.engine.runner.compute_country_qty", return_value={"SKU-001": {}}),
+        patch("app.engine.runner.load_local_inventory", AsyncMock(return_value={})),
+        patch("app.engine.runner.load_country_warehouses", AsyncMock(return_value={})),
+        patch("app.engine.runner.load_zipcode_rules", AsyncMock(return_value=[])),
+        patch("app.engine.runner.load_all_sku_country_orders", AsyncMock(return_value={})),
+        patch("app.engine.runner._persist_suggestion", persist),
+    ):
+        result = await run_engine(_FakeContext())  # type: ignore[arg-type]
+
+    assert result is None
+    persist.assert_not_awaited()
 
 
 def test_engine_run_advisory_lock_key_is_stable() -> None:
-    """ENGINE_RUN_ADVISORY_LOCK_KEY is a fixed int (regression guard)."""
     assert ENGINE_RUN_ADVISORY_LOCK_KEY == 7429001
 
 
-# ---------------------------------------------------------------------------
-# Generation toggle off → run_engine short-circuits
-# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_calc_engine_job_turns_off_toggle_on_success(monkeypatch) -> None:
+    import app.engine.calc_engine_job as job_module
+
+    config = _make_config(suggestion_generation_enabled=True)
+    db = _FakeDb([_ScalarResult(config)])
+    ctx = _FakeContext()
+    ctx.payload = {"triggered_by": "manual"}
+
+    monkeypatch.setattr(job_module, "run_engine", AsyncMock(return_value=123))
+    monkeypatch.setattr(job_module, "async_session_factory", _FakeSessionFactory(db))
+
+    await job_module.calc_engine_job(ctx)  # type: ignore[arg-type]
+
+    assert config.suggestion_generation_enabled is False
+    assert config.generation_toggle_updated_at is not None
+    assert db.commits == 1
 
 
 @pytest.mark.asyncio
-async def test_run_engine_skips_when_generation_disabled() -> None:
-    """生成开关关闭时直接返回 None,不加载 SKU/不跑 step。"""
-    config = _make_config(suggestion_generation_enabled=False)
+async def test_calc_engine_job_keeps_toggle_on_failure(monkeypatch) -> None:
+    import app.engine.calc_engine_job as job_module
 
-    db = _FakeDb(
-        [
-            None,                      # advisory lock
-            _ScalarResult(config),     # GlobalConfig
-        ]
-    )
-    factory = _FakeSessionFactory(db)
+    config = _make_config(suggestion_generation_enabled=True)
+    db = _FakeDb([_ScalarResult(config)])
     ctx = _FakeContext()
+    monkeypatch.setattr(job_module, "run_engine", AsyncMock(side_effect=RuntimeError("boom")))
+    monkeypatch.setattr(job_module, "async_session_factory", _FakeSessionFactory(db))
 
-    mocked_run_step1 = AsyncMock()
-    with (
-        patch("app.engine.runner.async_session_factory", factory),
-        patch("app.engine.runner.run_step1", mocked_run_step1),
-    ):
-        result = await run_engine(ctx, triggered_by="manual")  # type: ignore[arg-type]
+    with pytest.raises(RuntimeError, match="boom"):
+        await job_module.calc_engine_job(ctx)  # type: ignore[arg-type]
 
-    assert result is None
-    mocked_run_step1.assert_not_called()
-    assert any(
-        "补货建议生成已关闭" in (call.get("step_detail") or "")
-        for call in ctx.progress_calls
-    )
+    assert config.suggestion_generation_enabled is True
+    assert db.commits == 0
