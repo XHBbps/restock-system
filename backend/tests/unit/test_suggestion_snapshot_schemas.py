@@ -11,9 +11,9 @@ from app.schemas.suggestion_snapshot import (
 
 
 def test_snapshot_create_request():
-    req = SnapshotCreateRequest(item_ids=[1, 2, 3], note="发给供应商 A")
+    req = SnapshotCreateRequest(item_ids=[1, 2, 3], note="supplier batch A")
     assert req.item_ids == [1, 2, 3]
-    assert req.note == "发给供应商 A"
+    assert req.note == "supplier batch A"
 
 
 def test_snapshot_create_request_note_optional():
@@ -35,6 +35,7 @@ def test_snapshot_out_fields():
     out = SnapshotOut(
         id=1,
         suggestion_id=42,
+        snapshot_type="procurement",
         version=1,
         exported_by=10,
         exported_by_name="alice",
@@ -46,4 +47,19 @@ def test_snapshot_out_fields():
         download_count=0,
     )
     assert out.version == 1
+    assert out.snapshot_type == "procurement"
     assert out.generation_status == "ready"
+
+
+def test_snapshot_item_out_accepts_purchase_fields():
+    out = SnapshotItemOut(
+        id=1,
+        commodity_sku="SKU-1",
+        total_qty=10,
+        country_breakdown={"EU": 10},
+        warehouse_breakdown={"EU": {"WH-1": 10}},
+        purchase_qty=8,
+        purchase_date=None,
+        urgent=False,
+    )
+    assert out.purchase_qty == 8
