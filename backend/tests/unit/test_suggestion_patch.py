@@ -100,11 +100,27 @@ async def test_suggestion_patch_archived_rejected() -> None:
         await patch_item(patch=patch, suggestion_id=1, item_id=10, db=db, _={})  # type: ignore[arg-type]
 
 
-async def test_suggestion_patch_exported_rejected() -> None:
-    db = _FakeSession([_FakeSuggestion(), _FakeItem(procurement_export_status="exported")])
-    patch = SuggestionItemPatch(total_qty=5)
-    with pytest.raises(ValidationFailed):
-        await patch_item(patch=patch, suggestion_id=1, item_id=10, db=db, _={})  # type: ignore[arg-type]
+async def test_suggestion_patch_exported_item_still_editable(monkeypatch) -> None:
+    """已导出的 item 仍允许编辑；编辑后下次导出会产生新 version（immutable 历史）。"""
+    import app.api.suggestion as suggestion_module
+
+    async def _fake_enrich_item(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    async def _fake_lead_time(*_args: Any, **_kwargs: Any) -> int:
+        return 20
+
+    db = _FakeSession([_FakeSuggestion(), _FakeItem(procurement_export_status="exported"), None])
+    monkeypatch.setattr(suggestion_module, "_enrich_item", _fake_enrich_item)
+    monkeypatch.setattr(suggestion_module, "_resolve_effective_lead_time_days", _fake_lead_time)
+
+    # 不抛错，应该正常更新
+    patch = SuggestionItemPatch(purchase_qty=50)
+    await patch_item(patch=patch, suggestion_id=1, item_id=10, db=db, _={})  # type: ignore[arg-type]
+
+    update_stmt = db.executed_statements[-1]
+    values = _normalize_update_values(update_stmt)
+    assert values["purchase_qty"] == 50
 
 
 async def test_suggestion_patch_recomputes_total_qty_from_country_breakdown(monkeypatch) -> None:

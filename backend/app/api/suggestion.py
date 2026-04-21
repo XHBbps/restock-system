@@ -219,8 +219,8 @@ async def patch_item(
     ).scalar_one_or_none()
     if item is None:
         raise NotFound(f"建议条目 {item_id} 不存在")
-    if item.procurement_export_status == "exported" or item.restock_export_status == "exported":
-        raise ValidationFailed("已导出的条目不可编辑")
+    # 已导出的条目仍允许继续编辑，编辑后下次导出会产生新 version。
+    # 旧 version 的 snapshot 保留不可变（immutable 快照），确保历史版本留痕。
 
     effective_country_breakdown = (
         patch.country_breakdown if patch.country_breakdown is not None else (item.country_breakdown or {})
