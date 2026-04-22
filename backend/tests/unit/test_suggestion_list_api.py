@@ -34,16 +34,16 @@ class _FakeSession:
         return self._responses.pop(0)
 
 
-def _suggestion_row():
+def _suggestion_row(*, status: str = "draft", archived_trigger: str | None = None):
     return SimpleNamespace(
         id=1,
-        status="draft",
+        status=status,
         triggered_by="manual",
         total_items=10,
         procurement_item_count=4,
         restock_item_count=6,
         global_config_snapshot={},
-        archived_trigger=None,
+        archived_trigger=archived_trigger,
         created_at=datetime(2026, 4, 17, 10, 0, 0),
         archived_at=None,
     )
@@ -78,6 +78,98 @@ async def test_list_suggestions_returns_page_metadata() -> None:
     assert result.items[0].id == 1
     assert result.items[0].procurement_snapshot_count == 2
     assert result.items[0].restock_snapshot_count == 3
+    # draft + proc_count>0 / restock_count>0 → 已导出 / exported
+    assert result.items[0].procurement_display_status == "已导出"
+    assert result.items[0].restock_display_status == "已导出"
+    assert result.items[0].procurement_display_status_code == "exported"
+    assert result.items[0].restock_display_status_code == "exported"
+
+
+@pytest.mark.asyncio
+async def test_list_suggestions_display_status_code_pending_for_draft_no_snapshots() -> None:
+    db = _FakeSession(
+        [
+            _ScalarResult(1),
+            _RowsResult([(_suggestion_row(), 0, 0)]),
+        ]
+    )
+
+    result = await list_suggestions(
+        status=None,
+        display_status=None,
+        date_from=None,
+        date_to=None,
+        sku=None,
+        page=1,
+        page_size=20,
+        sort_by=None,
+        sort_order="desc",
+        db=db,
+        _=None,
+    )
+
+    assert result.items[0].procurement_display_status == "未导出"
+    assert result.items[0].restock_display_status == "未导出"
+    assert result.items[0].procurement_display_status_code == "pending"
+    assert result.items[0].restock_display_status_code == "pending"
+
+
+@pytest.mark.asyncio
+async def test_list_suggestions_display_status_code_archived() -> None:
+    db = _FakeSession(
+        [
+            _ScalarResult(1),
+            _RowsResult([(_suggestion_row(status="archived"), 1, 2)]),
+        ]
+    )
+
+    result = await list_suggestions(
+        status=None,
+        display_status=None,
+        date_from=None,
+        date_to=None,
+        sku=None,
+        page=1,
+        page_size=20,
+        sort_by=None,
+        sort_order="desc",
+        db=db,
+        _=None,
+    )
+
+    assert result.items[0].procurement_display_status == "已归档"
+    assert result.items[0].restock_display_status == "已归档"
+    assert result.items[0].procurement_display_status_code == "archived"
+    assert result.items[0].restock_display_status_code == "archived"
+
+
+@pytest.mark.asyncio
+async def test_list_suggestions_display_status_code_error() -> None:
+    db = _FakeSession(
+        [
+            _ScalarResult(1),
+            _RowsResult([(_suggestion_row(status="error"), 0, 0)]),
+        ]
+    )
+
+    result = await list_suggestions(
+        status=None,
+        display_status=None,
+        date_from=None,
+        date_to=None,
+        sku=None,
+        page=1,
+        page_size=20,
+        sort_by=None,
+        sort_order="desc",
+        db=db,
+        _=None,
+    )
+
+    # label 保持与 pending 一致（未导出），但 code=error 供前端区分 tag 色
+    assert result.items[0].procurement_display_status == "未导出"
+    assert result.items[0].procurement_display_status_code == "error"
+    assert result.items[0].restock_display_status_code == "error"
 
 
 @pytest.mark.asyncio

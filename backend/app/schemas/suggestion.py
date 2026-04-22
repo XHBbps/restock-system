@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
+
+SuggestionDisplayStatusCode = Literal["pending", "exported", "archived", "error"]
 
 
 class AllocationExplanationOut(BaseModel):
@@ -25,9 +27,12 @@ class SuggestionOut(BaseModel):
     procurement_snapshot_count: int = 0
     restock_snapshot_count: int = 0
     archived_trigger: str | None = None
-    # 派生状态，供历史页直接展示（未导出 / 已导出 / 已归档 / 已作废）
+    # 派生状态，供历史页直接展示（未导出 / 已导出 / 已归档）
     procurement_display_status: str = "未导出"
     restock_display_status: str = "未导出"
+    # 机器可读的状态码，供前端按 code 映射 tag 色 / i18n（label 保留 UX 兼容）
+    procurement_display_status_code: SuggestionDisplayStatusCode = "pending"
+    restock_display_status_code: SuggestionDisplayStatusCode = "pending"
     global_config_snapshot: dict[str, Any]
     created_at: datetime
     archived_at: datetime | None = None

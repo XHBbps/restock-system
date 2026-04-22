@@ -23,6 +23,7 @@ from app.models.suggestion import Suggestion, SuggestionItem
 from app.models.suggestion_snapshot import SuggestionSnapshot
 from app.schemas.suggestion import (
     SuggestionDetailOut,
+    SuggestionDisplayStatusCode,
     SuggestionItemOut,
     SuggestionItemPatch,
     SuggestionListOut,
@@ -140,14 +141,18 @@ async def list_suggestions(
     for suggestion, procurement_snapshot_count, restock_snapshot_count in rows:
         proc_count = int(procurement_snapshot_count or 0)
         restock_count = int(restock_snapshot_count or 0)
+        proc_label, proc_code = _derive_display_status(suggestion, proc_count)
+        restock_label, restock_code = _derive_display_status(suggestion, restock_count)
         items.append(
             SuggestionOut.model_validate(
                 {
                     **suggestion.__dict__,
                     "procurement_snapshot_count": proc_count,
                     "restock_snapshot_count": restock_count,
-                    "procurement_display_status": _derive_display_status(suggestion, proc_count),
-                    "restock_display_status": _derive_display_status(suggestion, restock_count),
+                    "procurement_display_status": proc_label,
+                    "restock_display_status": restock_label,
+                    "procurement_display_status_code": proc_code,
+                    "restock_display_status_code": restock_code,
                 }
             )
         )
@@ -155,16 +160,25 @@ async def list_suggestions(
     return SuggestionListOut(items=items, total=int(total or 0), page=page, page_size=page_size)
 
 
-def _derive_display_status(suggestion: Suggestion, snapshot_count: int) -> str:
-    """按建议单 + 类型 snapshot 计数派生 3 档展示状态。
+def _derive_display_status(
+    suggestion: Suggestion, snapshot_count: int
+) -> tuple[str, SuggestionDisplayStatusCode]:
+    """按建议单 + 类型 snapshot 计数派生展示状态 (label, code)。
 
+    label（user-facing，保持 3 档兼容）：
     - 已归档：archived（不论 trigger，含 schema_migration / admin_toggle / voided 等）
-    - 已导出：draft 且该类型至少有 1 份 snapshot
-    - 未导出：draft 且该类型无 snapshot（也包括 error 状态的建议单）
+    - 已导出：该类型至少有 1 份 snapshot
+    - 未导出：无 snapshot
+
+    code（机器可读，4 档）：额外区分 error 状态供前端 tag 色映射。
     """
     if suggestion.status == "archived":
-        return "已归档"
-    return "已导出" if snapshot_count > 0 else "未导出"
+        return "已归档", "archived"
+    label = "已导出" if snapshot_count > 0 else "未导出"
+    if suggestion.status == "error":
+        return label, "error"
+    code: SuggestionDisplayStatusCode = "exported" if snapshot_count > 0 else "pending"
+    return label, code
 
 
 @router.get("/current", response_model=SuggestionDetailOut)
@@ -378,12 +392,18 @@ async def _build_detail(db: AsyncSession, suggestion: Suggestion) -> SuggestionD
     procurement_snapshot_count, restock_snapshot_count = await _snapshot_counts_for_suggestion(
         db, suggestion.id
     )
+    proc_label, proc_code = _derive_display_status(suggestion, procurement_snapshot_count)
+    restock_label, restock_code = _derive_display_status(suggestion, restock_snapshot_count)
     return SuggestionDetailOut(
         **SuggestionOut.model_validate(
             {
                 **suggestion.__dict__,
                 "procurement_snapshot_count": procurement_snapshot_count,
                 "restock_snapshot_count": restock_snapshot_count,
+                "procurement_display_status": proc_label,
+                "restock_display_status": restock_label,
+                "procurement_display_status_code": proc_code,
+                "restock_display_status_code": restock_code,
             }
         ).model_dump(),
         items=enriched_items,
