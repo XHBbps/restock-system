@@ -1,6 +1,7 @@
 """Sync Saihu out-records into local tracking tables."""
 
 import re
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -139,7 +140,7 @@ async def _upsert_out_record(
     db: AsyncSession,
     raw: dict[str, Any],
     warehouse_ids: set[str],
-    sync_start_time,
+    sync_start_time: datetime,
     eu_countries: set[str] | None = None,
 ) -> int:
     record_id = str(raw.get("id") or "")
@@ -211,7 +212,7 @@ async def _upsert_out_record(
     return len(items)
 
 
-async def _age_out_records(sync_start_time) -> int:
+async def _age_out_records(sync_start_time: datetime) -> int:
     """Mark active rows not seen in this run as completed."""
     async with async_session_factory() as db:
         result = await db.execute(

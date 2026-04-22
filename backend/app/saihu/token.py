@@ -142,7 +142,7 @@ class TokenManager:
                 code=body.get("code"),
             )
         data = body.get("data") or {}
-        token = data.get("access_token")
+        token: str = str(data.get("access_token") or "")
         expires_in_ms = int(data.get("expires_in", 0))
         if not token or expires_in_ms <= 0:
             raise SaihuAPIError("赛狐返回 token 字段缺失", endpoint="oauth_token")

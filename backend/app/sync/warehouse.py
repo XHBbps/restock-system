@@ -3,6 +3,7 @@
 from typing import Any
 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.core.timezone import now_beijing
@@ -49,7 +50,7 @@ async def sync_warehouse_job(ctx: JobContext) -> None:
         raise
 
 
-async def _upsert_warehouse(db, raw: dict[str, Any]) -> None:
+async def _upsert_warehouse(db: AsyncSession, raw: dict[str, Any]) -> None:
     warehouse_id = str(raw.get("id") or "")
     if not warehouse_id:
         return

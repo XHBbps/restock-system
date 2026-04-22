@@ -71,7 +71,7 @@ def _apply_suggestion_sort(stmt: Any, sort_by: str | None, sort_order: str) -> A
     return stmt.order_by(*ordered_columns, Suggestion.created_at.desc(), Suggestion.id.desc())
 
 
-def _procurement_snapshot_count_sq():
+def _procurement_snapshot_count_sq() -> Any:
     return (
         select(func.count(SuggestionSnapshot.id))
         .where(SuggestionSnapshot.suggestion_id == Suggestion.id)
@@ -81,7 +81,7 @@ def _procurement_snapshot_count_sq():
     )
 
 
-def _restock_snapshot_count_sq():
+def _restock_snapshot_count_sq() -> Any:
     return (
         select(func.count(SuggestionSnapshot.id))
         .where(SuggestionSnapshot.suggestion_id == Suggestion.id)

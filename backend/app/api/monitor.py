@@ -28,7 +28,7 @@ router = APIRouter(prefix="/api/monitor", tags=["monitor"])
 logger = get_logger(__name__)
 
 
-def _matched_order_detail_exists():
+def _matched_order_detail_exists() -> Any:
     return exists(
         select(1)
         .select_from(OrderItem)

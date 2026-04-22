@@ -1,6 +1,7 @@
 """Incremental sync and manual refetch for order details."""
 
 from datetime import timedelta
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -131,7 +132,7 @@ async def _run_fetch_job(
         raise
 
 
-def _matched_listing_subquery():
+def _matched_listing_subquery() -> Any:
     return (
         select(ProductListing.shop_id, ProductListing.seller_sku)
         .where(ProductListing.is_matched.is_(True))
