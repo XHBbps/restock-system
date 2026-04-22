@@ -1,8 +1,13 @@
 """Shared pytest fixtures for all test suites."""
 
+import asyncio
 import os
+import sys
 
 import pytest
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 
 @pytest.fixture(scope="session")

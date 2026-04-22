@@ -41,6 +41,8 @@ class InventorySnapshotLatest(Base):
         primary_key=True,
     )
     country: Mapped[str | None] = mapped_column(String(2), nullable=True)
+    # EU 合并前的原始国家码（审计用，不对外暴露）
+    original_country: Mapped[str | None] = mapped_column(String(2), nullable=True)
     available: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     reserved: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 

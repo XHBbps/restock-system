@@ -16,7 +16,6 @@ class GlobalConfig(Base):
     __tablename__ = "global_config"
     __table_args__ = (
         CheckConstraint("id = 1", name="single_row"),
-        CheckConstraint("include_tax IN ('0','1')", name="include_tax_enum"),
         CheckConstraint("shop_sync_mode IN ('all','specific')", name="shop_sync_mode_enum"),
     )
 
@@ -26,7 +25,14 @@ class GlobalConfig(Base):
     buffer_days: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
     target_days: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
     lead_time_days: Mapped[int] = mapped_column(Integer, nullable=False, default=50)
+    safety_stock_days: Mapped[int] = mapped_column(Integer, nullable=False, default=15)
     restock_regions: Mapped[list[str]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=list,
+        server_default=text("'[]'::jsonb"),
+    )
+    eu_countries: Mapped[list[str]] = mapped_column(
         JSONB,
         nullable=False,
         default=list,
@@ -36,12 +42,6 @@ class GlobalConfig(Base):
     # 调度
     sync_interval_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
     scheduler_enabled: Mapped[bool] = mapped_column(nullable=False, default=True)
-    calc_enabled: Mapped[bool] = mapped_column(nullable=False, default=True)
-    calc_cron: Mapped[str] = mapped_column(String(50), nullable=False, default="0 8 * * *")
-
-    # 推送
-    default_purchase_warehouse_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    include_tax: Mapped[str] = mapped_column(String(1), nullable=False, default="0")
 
     # 店铺同步模式
     shop_sync_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="all")

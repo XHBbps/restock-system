@@ -39,6 +39,7 @@ from app.sync import shop as _job_shop  # noqa: F401
 from app.sync import warehouse as _job_wh  # noqa: F401
 from app.tasks.jobs import daily_archive as _job_arch  # noqa: F401
 from app.tasks.jobs import dashboard_snapshot as _job_dashboard_snapshot  # noqa: F401
+from app.tasks.jobs import retention as _job_retention  # noqa: F401
 from app.tasks.reaper import get_reaper
 from app.tasks.scheduler import reload_scheduler, scheduler_status, shutdown_scheduler
 from app.tasks.worker import get_worker
@@ -61,12 +62,11 @@ async def _ensure_global_config() -> None:
             buffer_days=settings.default_buffer_days,
             target_days=settings.default_target_days,
             lead_time_days=settings.default_lead_time_days,
+            safety_stock_days=15,
             restock_regions=[],
+            eu_countries=[],
             sync_interval_minutes=settings.default_sync_interval_minutes,
             scheduler_enabled=True,
-            calc_enabled=True,
-            calc_cron=settings.default_calc_cron,
-            include_tax="0",
             shop_sync_mode="all",
             login_password_hash=hash_password(settings.login_password),
         )

@@ -240,6 +240,8 @@ class SaihuClient:
         await self._log(
             endpoint_path, started, http_status, saihu_code, saihu_msg, request_id, None, attempt_no
         )
+        # resp.json() 静态类型是 Any，运行时为 dict（前面分支已保证非 None）
+        assert isinstance(payload, dict)
         return payload
 
     async def _log(

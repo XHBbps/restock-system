@@ -1,6 +1,7 @@
 """Incremental sync and manual refetch for order details."""
 
 from datetime import timedelta
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -66,6 +67,9 @@ async def _run_fetch_job(
         async with sem:
             try:
                 detail = await get_order_detail(shop_id=shop_id, amazon_order_id=amazon_order_id)
+                # 逐订单 commit 是刻意设计：API 调用主导时延（~200ms），
+                # 单条事务开销可忽略；若批量 commit 50 条，中途失败会丢失整批
+                # 已 save 的进度（_save_detail 已 flush 但未 commit）。
                 async with async_session_factory() as db:
                     await _save_detail(db, shop_id, amazon_order_id, detail)
                     await db.commit()
@@ -128,7 +132,7 @@ async def _run_fetch_job(
         raise
 
 
-def _matched_listing_subquery():
+def _matched_listing_subquery() -> Any:
     return (
         select(ProductListing.shop_id, ProductListing.seller_sku)
         .where(ProductListing.is_matched.is_(True))
@@ -233,7 +237,10 @@ def _extract_refetch_targets(payload: dict[str, object]) -> list[tuple[str, str]
 
 def _sanitize_detail_country(detail: dict[str, object]) -> str | None:
     marketplace_id_raw = detail.get("marketplaceId") or ""
-    return marketplace_to_country(marketplace_id_raw)
+    # detail: dict[str, object] → marketplace_id_raw 类型是 object | str，
+    # marketplace_to_country 期望 str | None；运行时 detail 来自赛狐 JSON，
+    # 如果 marketplaceId 存在就是 str，否则兜底空串。显式转 str 对齐签名。
+    return marketplace_to_country(str(marketplace_id_raw) if marketplace_id_raw else None)
 
 
 def _postal_code_for_routing(detail: dict[str, object]) -> str | None:

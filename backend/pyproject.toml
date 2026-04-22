@@ -138,25 +138,9 @@ module = [
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = [
-    "app.api.data",
-    "app.api.config",
-    "app.api.suggestion",
-    "app.api.monitor",
-    "app.api.task",
-    "app.api.auth",
-    "app.sync.inventory",
-    "app.sync.out_records",
-    "app.sync.order_list",
-    "app.sync.order_detail",
-    "app.sync.warehouse",
-    "app.sync.shop",
-    "app.tasks.jobs.daily_archive",
-    "app.tasks.queue",
-    "app.tasks.scheduler",
-    "app.saihu.token",
-    "app.saihu.client",
-]
+# 历史遗留 blanket 抑制清单 — 审计 Stage 3 已全部清理。
+# 保留空段作"下次新增 blanket 时请三思"的提醒。
+module = []
 disable_error_code = [
     "dict-item",
     "attr-defined",
@@ -183,4 +167,6 @@ addopts = [
 ]
 filterwarnings = [
     "error",
+    "ignore:Exception ignored in.*<socket\\.socket.*:pytest.PytestUnraisableExceptionWarning",
+    "ignore:Exception ignored in.*BaseEventLoop\\.__del__.*:pytest.PytestUnraisableExceptionWarning",
 ]

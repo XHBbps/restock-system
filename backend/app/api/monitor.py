@@ -28,7 +28,7 @@ router = APIRouter(prefix="/api/monitor", tags=["monitor"])
 logger = get_logger(__name__)
 
 
-def _matched_order_detail_exists():
+def _matched_order_detail_exists() -> Any:
     return exists(
         select(1)
         .select_from(OrderItem)
@@ -86,7 +86,10 @@ async def get_api_calls(
     ).all()
 
     # 每个 endpoint 取最后一次记录(含错误信息)
-    last_call_per_endpoint: dict[str, ApiCallLog] = {}
+    # raw SQL (text) 返回 Row[tuple[endpoint, saihu_code, saihu_msg, error_type]]，
+    # 不是 ApiCallLog ORM 实例；显式 tuple 类型避免 mypy 把下标访问当 ORM 属性访问
+    # （类型和 # type: ignore[assignment] 一并移除）。
+    last_call_per_endpoint: dict[str, tuple[str, int, str | None, str | None]] = {}
     if rows:
         endpoint_names = [r[0] for r in rows]
         last_rows = (
@@ -104,7 +107,7 @@ async def get_api_calls(
             )
         ).all()
         for r in last_rows:
-            last_call_per_endpoint[r[0]] = r  # type: ignore[assignment]
+            last_call_per_endpoint[r[0]] = (r[0], int(r[1] or 0), r[2], r[3])
 
     endpoints = []
     for endpoint, total, succ, last_at in rows:

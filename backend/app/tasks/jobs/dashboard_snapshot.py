@@ -46,6 +46,7 @@ async def _mark_ready(payload: dict[str, Any]) -> None:
             refreshed_at=now,
             refresh_finished_at=now,
             last_refresh_error=None,
+            stale=False,
         )
         stmt = stmt.on_conflict_do_update(
             index_elements=[DashboardSnapshot.id],
@@ -55,6 +56,7 @@ async def _mark_ready(payload: dict[str, Any]) -> None:
                 "refreshed_at": now,
                 "refresh_finished_at": now,
                 "last_refresh_error": None,
+                "stale": False,
                 "updated_at": now,
             },
         )

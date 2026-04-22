@@ -11,13 +11,21 @@ from tests.integration.factories import seed_global_config
 async def test_get_global_config_returns_restock_regions(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
-    await seed_global_config(db_session, restock_regions=["US", "GB"])
+    await seed_global_config(
+        db_session,
+        safety_stock_days=18,
+        restock_regions=["US", "GB"],
+        eu_countries=["DE", "FR"],
+    )
     await db_session.commit()
 
     resp = await client.get("/api/config/global")
 
     assert resp.status_code == 200
-    assert resp.json()["restock_regions"] == ["US", "GB"]
+    body = resp.json()
+    assert body["safety_stock_days"] == 18
+    assert body["restock_regions"] == ["US", "GB"]
+    assert body["eu_countries"] == ["DE", "FR"]
 
 
 @pytest.mark.asyncio
@@ -34,6 +42,24 @@ async def test_patch_global_config_normalizes_restock_regions(
 
     assert resp.status_code == 200
     assert resp.json()["restock_regions"] == ["US", "GB"]
+
+
+@pytest.mark.asyncio
+async def test_patch_global_config_updates_safety_stock_and_eu_countries(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    await seed_global_config(db_session)
+    await db_session.commit()
+
+    resp = await client.patch(
+        "/api/config/global",
+        json={"safety_stock_days": 30, "eu_countries": ["de", " FR ", "", "de"]},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["safety_stock_days"] == 30
+    assert body["eu_countries"] == ["DE", "FR"]
 
 
 @pytest.mark.asyncio
@@ -60,3 +86,88 @@ async def test_patch_global_config_rejects_target_days_less_than_lead_time(
 
     assert resp.status_code == 400
     assert resp.json()["message"] == "目标库存天数不能小于采购提前期"
+
+
+async def _seed_dashboard_snapshot(db_session: AsyncSession, *, stale: bool = False) -> None:
+    from app.models.dashboard_snapshot import DashboardSnapshot
+
+    existing = (
+        await db_session.execute(
+            DashboardSnapshot.__table__.select().where(DashboardSnapshot.id == 1)
+        )
+    ).first()
+    if existing is None:
+        db_session.add(DashboardSnapshot(id=1, status="empty", payload=None, stale=stale))
+    else:
+        await db_session.execute(
+            DashboardSnapshot.__table__.update()
+            .where(DashboardSnapshot.id == 1)
+            .values(stale=stale)
+        )
+    await db_session.commit()
+
+
+@pytest.mark.asyncio
+async def test_patch_global_config_flips_dashboard_stale_on_sensitive_change(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    from app.models.dashboard_snapshot import DashboardSnapshot
+
+    await seed_global_config(db_session, target_days=60, lead_time_days=50, buffer_days=10)
+    await _seed_dashboard_snapshot(db_session, stale=False)
+
+    resp = await client.patch("/api/config/global", json={"buffer_days": 30})
+    assert resp.status_code == 200
+
+    db_session.expire_all()
+    snap = (
+        await db_session.execute(
+            DashboardSnapshot.__table__.select().where(DashboardSnapshot.id == 1)
+        )
+    ).one()
+    assert snap.stale is True
+
+
+@pytest.mark.asyncio
+async def test_patch_global_config_does_not_flip_stale_when_value_unchanged(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    from app.models.dashboard_snapshot import DashboardSnapshot
+
+    await seed_global_config(db_session, buffer_days=30)
+    await _seed_dashboard_snapshot(db_session, stale=False)
+
+    # 传入的 buffer_days 与现值相同，不应置 stale
+    resp = await client.patch("/api/config/global", json={"buffer_days": 30})
+    assert resp.status_code == 200
+
+    db_session.expire_all()
+    snap = (
+        await db_session.execute(
+            DashboardSnapshot.__table__.select().where(DashboardSnapshot.id == 1)
+        )
+    ).one()
+    assert snap.stale is False
+
+
+@pytest.mark.asyncio
+async def test_patch_global_config_does_not_flip_stale_for_non_sensitive_field(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    from app.models.dashboard_snapshot import DashboardSnapshot
+
+    await seed_global_config(db_session, shop_sync_mode="all")
+    await _seed_dashboard_snapshot(db_session, stale=False)
+
+    # shop_sync_mode 既不在敏感字段集合内、也不触发 reload_scheduler
+    # （后者会通过 async_session_factory 走 prod DATABASE_URL，CI 不可达）。
+    resp = await client.patch("/api/config/global", json={"shop_sync_mode": "specific"})
+    assert resp.status_code == 200
+
+    db_session.expire_all()
+    snap = (
+        await db_session.execute(
+            DashboardSnapshot.__table__.select().where(DashboardSnapshot.id == 1)
+        )
+    ).one()
+    assert snap.stale is False

@@ -19,6 +19,10 @@ class _FakeDb:
         return None
 
 
+async def _async_set() -> set[str]:
+    return set()
+
+
 def _statement_values(stmt: Any) -> dict[str, Any]:
     compiled = stmt.compile()
     return dict(compiled.params)
@@ -221,11 +225,17 @@ async def test_sync_out_records_job_runs_backfill_inside_main_flow(monkeypatch) 
     async def fake_load_warehouse_ids(_db: Any) -> set[str]:
         return set()
 
-    async def fake_upsert_out_record(_db: Any, _raw: dict[str, Any], _warehouse_ids: set[str], _sync_start: datetime) -> int:
+    async def fake_upsert_out_record(
+        _db: Any,
+        _raw: dict[str, Any],
+        _warehouse_ids: set[str],
+        _sync_start: datetime,
+        _eu_countries: set[str],
+    ) -> int:
         calls.append("upsert")
         return 2
 
-    async def fake_backfill(_db: Any) -> tuple[int, int, int]:
+    async def fake_backfill(_db: Any, _eu_countries: set[str]) -> tuple[int, int, int]:
         calls.append("backfill")
         return 5, 3, 2
 
@@ -248,6 +258,7 @@ async def test_sync_out_records_job_runs_backfill_inside_main_flow(monkeypatch) 
     monkeypatch.setattr(out_records_module, "_backfill_target_country_from_remark", fake_backfill)
     monkeypatch.setattr(out_records_module, "_age_out_records", fake_age_out_records)
     monkeypatch.setattr(out_records_module, "list_in_transit_records", fake_list_in_transit_records)
+    monkeypatch.setattr(out_records_module, "load_eu_countries", lambda _db: _async_set())
 
     ctx = out_records_module.JobContext(
         task_id=1,

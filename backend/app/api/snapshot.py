@@ -1,11 +1,11 @@
-"""Snapshot 相关 API 端点。"""
+"""Snapshot APIs for procurement/restock exports."""
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,12 +15,10 @@ from app.config import get_settings
 from app.core.permissions import RESTOCK_EXPORT, RESTOCK_VIEW
 from app.core.timezone import now_beijing
 from app.models.excel_export_log import ExcelExportLog
-from app.models.global_config import GlobalConfig
 from app.models.product_listing import ProductListing
 from app.models.suggestion import Suggestion, SuggestionItem
 from app.models.suggestion_snapshot import SuggestionSnapshot, SuggestionSnapshotItem
 from app.models.sys_user import SysUser
-from app.models.warehouse import Warehouse
 from app.schemas.suggestion_snapshot import (
     SnapshotCreateRequest,
     SnapshotDetailOut,
@@ -29,8 +27,9 @@ from app.schemas.suggestion_snapshot import (
 )
 from app.services.excel_export import (
     SnapshotExportContext,
-    build_excel_workbook,
     build_filename,
+    build_procurement_workbook,
+    build_restock_workbook,
 )
 
 router = APIRouter(prefix="/api", tags=["snapshot"])
@@ -38,10 +37,20 @@ router = APIRouter(prefix="/api", tags=["snapshot"])
 
 @router.post(
     "/suggestions/{suggestion_id}/snapshots",
+    status_code=status.HTTP_410_GONE,
+)
+async def create_snapshot_gone(suggestion_id: int) -> dict[str, str]:
+    return {
+        "message": "旧快照创建端点已废弃，请改用 /snapshots/procurement 或 /snapshots/restock",
+    }
+
+
+@router.post(
+    "/suggestions/{suggestion_id}/snapshots/procurement",
     response_model=SnapshotOut,
     status_code=status.HTTP_201_CREATED,
 )
-async def create_snapshot(
+async def create_procurement_snapshot(
     suggestion_id: int,
     body: SnapshotCreateRequest,
     request: Request,
@@ -49,163 +58,175 @@ async def create_snapshot(
     _: None = Depends(require_permission(RESTOCK_EXPORT)),
     db: AsyncSession = Depends(db_session),
 ) -> SnapshotOut:
-    # 1. 建议单校验
-    sug = (
-        await db.execute(
-            select(Suggestion).where(Suggestion.id == suggestion_id).with_for_update()
-        )
-    ).scalar_one_or_none()
-    if sug is None:
-        raise HTTPException(status_code=404, detail="建议单不存在")
-    if sug.status != "draft":
-        raise HTTPException(
-            status_code=409, detail=f"建议单状态 {sug.status}，不可导出"
-        )
+    return await _create_snapshot(
+        db=db,
+        user=user,
+        request=request,
+        suggestion_id=suggestion_id,
+        body=body,
+        snapshot_type="procurement",
+    )
 
-    # 2. items 校验
+
+@router.post(
+    "/suggestions/{suggestion_id}/snapshots/restock",
+    response_model=SnapshotOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_restock_snapshot(
+    suggestion_id: int,
+    body: SnapshotCreateRequest,
+    request: Request,
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(RESTOCK_EXPORT)),
+    db: AsyncSession = Depends(db_session),
+) -> SnapshotOut:
+    return await _create_snapshot(
+        db=db,
+        user=user,
+        request=request,
+        suggestion_id=suggestion_id,
+        body=body,
+        snapshot_type="restock",
+    )
+
+
+async def _create_snapshot(
+    *,
+    db: AsyncSession,
+    user: UserContext,
+    request: Request,
+    suggestion_id: int,
+    body: SnapshotCreateRequest,
+    snapshot_type: str,
+) -> SnapshotOut:
+    suggestion = (
+        await db.execute(select(Suggestion).where(Suggestion.id == suggestion_id).with_for_update())
+    ).scalar_one_or_none()
+    if suggestion is None:
+        raise HTTPException(status_code=404, detail="建议单不存在")
+    if suggestion.status != "draft":
+        raise HTTPException(status_code=409, detail=f"建议单状态 {suggestion.status}，不可导出")
+
     items = (
+        await db.execute(
+            select(SuggestionItem)
+            .where(SuggestionItem.id.in_(body.item_ids), SuggestionItem.suggestion_id == suggestion_id)
+            .order_by(SuggestionItem.id)
+            .with_for_update()
+        )
+    ).scalars().all()
+    if len(items) != len(body.item_ids):
+        raise HTTPException(status_code=422, detail="存在不属于当前建议单的条目")
+
+    if snapshot_type == "procurement":
+        invalid_items = [item.id for item in items if item.purchase_qty <= 0]
+        if invalid_items:
+            raise HTTPException(status_code=422, detail=f"采购快照仅允许 purchase_qty > 0 的条目：{invalid_items}")
+    else:
+        invalid_items = [item.id for item in items if sum((item.country_breakdown or {}).values()) <= 0]
+        if invalid_items:
+            raise HTTPException(status_code=422, detail=f"补货快照仅允许补货量 > 0 的条目：{invalid_items}")
+
+    next_version = int(
         (
             await db.execute(
-                select(SuggestionItem).where(
-                    SuggestionItem.id.in_(body.item_ids),
-                    SuggestionItem.suggestion_id == suggestion_id,
+                select(func.coalesce(func.max(SuggestionSnapshot.version), 0)).where(
+                    SuggestionSnapshot.suggestion_id == suggestion_id,
+                    SuggestionSnapshot.snapshot_type == snapshot_type,
                 )
-                .order_by(SuggestionItem.id)
-                .with_for_update()
             )
-        )
-        .scalars()
-        .all()
-    )
-    if len(items) != len(body.item_ids):
-        raise HTTPException(status_code=400, detail="部分 item 不属于该建议单")
-    already = [it.id for it in items if it.export_status == "exported"]
-    if already:
-        raise HTTPException(status_code=409, detail=f"以下 item 已导出：{already}")
+        ).scalar_one()
+    ) + 1
 
-    # 3. 计算 version
-    max_version = (
-        await db.execute(
-            select(func.coalesce(func.max(SuggestionSnapshot.version), 0)).where(
-                SuggestionSnapshot.suggestion_id == suggestion_id
-            )
-        )
-    ).scalar_one()
-    next_version = int(max_version) + 1
-
-    config = (
-        await db.execute(select(GlobalConfig).where(GlobalConfig.id == 1).with_for_update())
-    ).scalar_one_or_none()
-
-    # 4. 插入 snapshot（generating）
     snapshot = SuggestionSnapshot(
         suggestion_id=suggestion_id,
+        snapshot_type=snapshot_type,
         version=next_version,
         exported_by=user.id,
         exported_from_ip=request.client.host if request.client else None,
         item_count=len(items),
         note=body.note,
-        global_config_snapshot=sug.global_config_snapshot,
+        global_config_snapshot=suggestion.global_config_snapshot,
         generation_status="generating",
     )
     db.add(snapshot)
     await db.flush()
 
-    # 5. 拉取商品名/主图 + 仓库名
-    # ProductListing 实际字段：commodity_sku, commodity_name, main_image
-    skus = [it.commodity_sku for it in items]
     product_rows = (
         await db.execute(
-            select(
-                ProductListing.commodity_sku,
-                ProductListing.commodity_name,
-                ProductListing.main_image,
-            ).where(ProductListing.commodity_sku.in_(skus))
+            select(ProductListing.commodity_sku, ProductListing.commodity_name, ProductListing.main_image).where(
+                ProductListing.commodity_sku.in_([item.commodity_sku for item in items])
+            )
         )
     ).all()
-    # 同一 SKU 可能多条（多站点）；取任意一条
-    product_info: dict[str, dict[str, Any]] = {}
+    product_map: dict[str, tuple[str | None, str | None]] = {}
     for sku, name, image in product_rows:
-        if sku not in product_info:
-            product_info[sku] = {"name": name, "image": image}
+        if sku not in product_map:
+            product_map[sku] = (name, image)
 
-    # Warehouse 实际字段：id（pk）, name
-    wh_ids: set[str] = set()
-    for it in items:
-        for wh_dict in it.warehouse_breakdown.values():
-            wh_ids.update(wh_dict.keys())
-    wh_name_map: dict[str, str] = {}
-    if wh_ids:
-        wh_rows = (
-            await db.execute(
-                select(Warehouse.id, Warehouse.name).where(
-                    Warehouse.id.in_(list(wh_ids))
-                )
-            )
-        ).all()
-        wh_name_map = {str(r[0]): r[1] for r in wh_rows}
-
-    # 6. 冻结 snapshot_item + 组装 Excel context
-    snapshot_items_ctx: list[dict[str, Any]] = []
-    for it in items:
-        pinfo = product_info.get(it.commodity_sku, {})
-        db.add(
-            SuggestionSnapshotItem(
-                snapshot_id=snapshot.id,
-                commodity_sku=it.commodity_sku,
-                total_qty=it.total_qty,
-                country_breakdown=it.country_breakdown,
-                warehouse_breakdown=it.warehouse_breakdown,
-                urgent=it.urgent,
-                velocity_snapshot=it.velocity_snapshot,
-                sale_days_snapshot=it.sale_days_snapshot,
-                commodity_name=pinfo.get("name"),
-                main_image_url=pinfo.get("image"),
-            )
+    export_items: list[dict[str, Any]] = []
+    for item in items:
+        commodity_name, main_image_url = product_map.get(item.commodity_sku, (None, None))
+        snapshot_item = SuggestionSnapshotItem(
+            snapshot_id=snapshot.id,
+            commodity_sku=item.commodity_sku,
+            total_qty=item.total_qty,
+            country_breakdown=item.country_breakdown,
+            warehouse_breakdown=item.warehouse_breakdown,
+            purchase_qty=item.purchase_qty if snapshot_type == "procurement" else None,
+            purchase_date=item.purchase_date if snapshot_type == "procurement" else None,
+            urgent=item.urgent,
+            velocity_snapshot=item.velocity_snapshot,
+            sale_days_snapshot=item.sale_days_snapshot,
+            commodity_name=commodity_name,
+            main_image_url=main_image_url,
         )
-        snapshot_items_ctx.append({
-            "commodity_sku": it.commodity_sku,
-            "commodity_name": pinfo.get("name"),
-            "main_image_url": pinfo.get("image"),
-            "total_qty": it.total_qty,
-            "urgent": it.urgent,
-            "country_breakdown": it.country_breakdown,
-            "warehouse_breakdown": it.warehouse_breakdown,
-            "velocity_snapshot": it.velocity_snapshot,
-            "sale_days_snapshot": it.sale_days_snapshot,
-            "warehouse_name_map": wh_name_map,
-        })
+        db.add(snapshot_item)
+        export_items.append(
+            {
+                "commodity_sku": item.commodity_sku,
+                "commodity_name": commodity_name,
+                "main_image_url": main_image_url,
+                "total_qty": item.total_qty,
+                "country_breakdown": item.country_breakdown,
+                "warehouse_breakdown": item.warehouse_breakdown,
+                "purchase_qty": item.purchase_qty,
+                "purchase_date": item.purchase_date,
+                "urgent": item.urgent,
+                "velocity_snapshot": item.velocity_snapshot,
+                "sale_days_snapshot": item.sale_days_snapshot,
+            }
+        )
 
-    # 7. 更新 suggestion_item 导出状态
     now = now_beijing()
-
-    # 8. 生成 Excel 文件
-    exported_at_text = now.strftime("%Y-%m-%d %H:%M:%S")
-    exported_at_compact = now.strftime("%Y%m%d-%H%M%S")
-    user_name = user.display_name or user.username
     ctx = SnapshotExportContext(
         suggestion_id=suggestion_id,
+        snapshot_type=snapshot_type,
         version=next_version,
-        exported_at_text=exported_at_text,
-        exported_by_name=user_name,
+        exported_at=now,
+        exported_by_name=user.display_name or user.username,
         note=body.note,
-        global_config=sug.global_config_snapshot,
-        items=snapshot_items_ctx,
+        global_config=suggestion.global_config_snapshot,
+        items=export_items,
     )
+
     settings = get_settings()
     storage_root = Path(settings.export_storage_dir).resolve()
-    year_month = now.strftime("%Y/%m")
-    filename = build_filename(suggestion_id, next_version, exported_at_compact)
+    target_dir = storage_root / now.strftime("%Y/%m")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    filename = build_filename(suggestion_id, next_version, now, snapshot_type)
+    target_path = target_dir / filename
 
     try:
-        target_dir = storage_root / year_month
-        target_dir.mkdir(parents=True, exist_ok=True)
-        target_path = target_dir / filename
-        wb = build_excel_workbook(ctx)
-        wb.save(target_path)
-        file_size = target_path.stat().st_size
-        snapshot.file_path = str(Path(year_month) / filename).replace("\\", "/")
-        snapshot.file_size_bytes = file_size
+        workbook = (
+            build_procurement_workbook(ctx)
+            if snapshot_type == "procurement"
+            else build_restock_workbook(ctx)
+        )
+        workbook.save(target_path)
+        snapshot.file_path = str((Path(now.strftime("%Y/%m")) / filename).as_posix())
+        snapshot.file_size_bytes = target_path.stat().st_size
         snapshot.generation_status = "ready"
     except Exception as exc:
         snapshot.generation_status = "failed"
@@ -213,24 +234,21 @@ async def create_snapshot(
         await db.commit()
         raise HTTPException(status_code=500, detail=f"Excel 生成失败：{exc}") from exc
 
-    # 9. 文件落盘成功后，再标记 item 已导出
-    await db.execute(
-        update(SuggestionItem)
-        .where(SuggestionItem.id.in_(body.item_ids))
-        .values(
-            export_status="exported",
-            exported_snapshot_id=snapshot.id,
-            exported_at=now,
-        )
+    update_values = (
+        {
+            "procurement_export_status": "exported",
+            "procurement_exported_snapshot_id": snapshot.id,
+            "procurement_exported_at": now,
+        }
+        if snapshot_type == "procurement"
+        else {
+            "restock_export_status": "exported",
+            "restock_exported_snapshot_id": snapshot.id,
+            "restock_exported_at": now,
+        }
     )
+    await db.execute(update(SuggestionItem).where(SuggestionItem.id.in_(body.item_ids)).values(**update_values))
 
-    # 10. 首次导出 → 翻 toggle OFF
-    if config and config.suggestion_generation_enabled:
-        config.suggestion_generation_enabled = False
-        config.generation_toggle_updated_by = user.id
-        config.generation_toggle_updated_at = now
-
-    # 11. 写 export_log
     db.add(
         ExcelExportLog(
             snapshot_id=snapshot.id,
@@ -240,15 +258,15 @@ async def create_snapshot(
             user_agent=(request.headers.get("user-agent", "") or "")[:500] or None,
         )
     )
-
     await db.commit()
     await db.refresh(snapshot)
     return SnapshotOut(
         id=snapshot.id,
         suggestion_id=snapshot.suggestion_id,
+        snapshot_type=snapshot.snapshot_type,
         version=snapshot.version,
         exported_by=snapshot.exported_by,
-        exported_by_name=user_name,
+        exported_by_name=user.display_name or user.username,
         exported_at=snapshot.exported_at,
         item_count=snapshot.item_count,
         note=snapshot.note,
@@ -258,41 +276,37 @@ async def create_snapshot(
     )
 
 
-@router.get(
-    "/suggestions/{suggestion_id}/snapshots",
-    response_model=list[SnapshotOut],
-)
+@router.get("/suggestions/{suggestion_id}/snapshots", response_model=list[SnapshotOut])
 async def list_snapshots(
     suggestion_id: int,
+    type: str | None = Query(default=None, pattern="^(procurement|restock)$"),
     _: None = Depends(require_permission(RESTOCK_VIEW)),
     db: AsyncSession = Depends(db_session),
 ) -> list[SnapshotOut]:
-    rows = (
-        await db.execute(
-            select(
-                SuggestionSnapshot,
-                SysUser.display_name.label("exported_by_name"),
-            )
-            .outerjoin(SysUser, SysUser.id == SuggestionSnapshot.exported_by)
-            .where(SuggestionSnapshot.suggestion_id == suggestion_id)
-            .order_by(SuggestionSnapshot.version.asc())
-        )
-    ).all()
+    stmt = (
+        select(SuggestionSnapshot, SysUser.display_name.label("exported_by_name"))
+        .outerjoin(SysUser, SysUser.id == SuggestionSnapshot.exported_by)
+        .where(SuggestionSnapshot.suggestion_id == suggestion_id)
+    )
+    if type:
+        stmt = stmt.where(SuggestionSnapshot.snapshot_type == type)
+    rows = (await db.execute(stmt.order_by(SuggestionSnapshot.version.desc()))).all()
     return [
         SnapshotOut(
-            id=snap.id,
-            suggestion_id=snap.suggestion_id,
-            version=snap.version,
-            exported_by=snap.exported_by,
-            exported_by_name=name,
-            exported_at=snap.exported_at,
-            item_count=snap.item_count,
-            note=snap.note,
-            generation_status=snap.generation_status,
-            file_size_bytes=snap.file_size_bytes,
-            download_count=snap.download_count,
+            id=snapshot.id,
+            suggestion_id=snapshot.suggestion_id,
+            snapshot_type=snapshot.snapshot_type,
+            version=snapshot.version,
+            exported_by=snapshot.exported_by,
+            exported_by_name=exported_by_name,
+            exported_at=snapshot.exported_at,
+            item_count=snapshot.item_count,
+            note=snapshot.note,
+            generation_status=snapshot.generation_status,
+            file_size_bytes=snapshot.file_size_bytes,
+            download_count=snapshot.download_count,
         )
-        for snap, name in rows
+        for snapshot, exported_by_name in rows
     ]
 
 
@@ -304,42 +318,32 @@ async def get_snapshot_detail(
 ) -> SnapshotDetailOut:
     row = (
         await db.execute(
-            select(
-                SuggestionSnapshot,
-                SysUser.display_name.label("exported_by_name"),
-            )
+            select(SuggestionSnapshot, SysUser.display_name.label("exported_by_name"))
             .outerjoin(SysUser, SysUser.id == SuggestionSnapshot.exported_by)
             .where(SuggestionSnapshot.id == snapshot_id)
         )
     ).first()
     if row is None:
         raise HTTPException(status_code=404, detail="快照不存在")
-    snap, name = row
+    snapshot, exported_by_name = row
     items = (
-        (
-            await db.execute(
-                select(SuggestionSnapshotItem).where(
-                    SuggestionSnapshotItem.snapshot_id == snapshot_id
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
+        await db.execute(select(SuggestionSnapshotItem).where(SuggestionSnapshotItem.snapshot_id == snapshot_id))
+    ).scalars().all()
     return SnapshotDetailOut(
-        id=snap.id,
-        suggestion_id=snap.suggestion_id,
-        version=snap.version,
-        exported_by=snap.exported_by,
-        exported_by_name=name,
-        exported_at=snap.exported_at,
-        item_count=snap.item_count,
-        note=snap.note,
-        generation_status=snap.generation_status,
-        file_size_bytes=snap.file_size_bytes,
-        download_count=snap.download_count,
-        items=[SnapshotItemOut.model_validate(it) for it in items],
-        global_config_snapshot=snap.global_config_snapshot,
+        id=snapshot.id,
+        suggestion_id=snapshot.suggestion_id,
+        snapshot_type=snapshot.snapshot_type,
+        version=snapshot.version,
+        exported_by=snapshot.exported_by,
+        exported_by_name=exported_by_name,
+        exported_at=snapshot.exported_at,
+        item_count=snapshot.item_count,
+        note=snapshot.note,
+        generation_status=snapshot.generation_status,
+        file_size_bytes=snapshot.file_size_bytes,
+        download_count=snapshot.download_count,
+        items=[SnapshotItemOut.model_validate(item) for item in items],
+        global_config_snapshot=snapshot.global_config_snapshot,
     )
 
 
@@ -351,30 +355,40 @@ async def download_snapshot(
     _: None = Depends(require_permission(RESTOCK_EXPORT)),
     db: AsyncSession = Depends(db_session),
 ) -> FileResponse:
-    snap = (
-        await db.execute(
-            select(SuggestionSnapshot).where(SuggestionSnapshot.id == snapshot_id)
-        )
+    snapshot = (
+        await db.execute(select(SuggestionSnapshot).where(SuggestionSnapshot.id == snapshot_id))
     ).scalar_one_or_none()
-    if snap is None:
+    if snapshot is None:
         raise HTTPException(status_code=404, detail="快照不存在")
-    if snap.generation_status != "ready":
+    if snapshot.generation_status != "ready":
         raise HTTPException(status_code=409, detail="文件尚未就绪或生成失败")
 
     settings = get_settings()
     storage_root = Path(settings.export_storage_dir).resolve()
-    file_abs = storage_root / (snap.file_path or "")
-    if not snap.file_path or not file_abs.exists():
+    file_abs = storage_root / (snapshot.file_path or "")
+    if not snapshot.file_path or not file_abs.exists():
+        # 若 retention 已标记 file_purged_at，返回更明确的 410 原因供前端展示
+        purged_at = (
+            await db.execute(
+                select(ExcelExportLog.file_purged_at)
+                .where(ExcelExportLog.snapshot_id == snapshot_id)
+                .where(ExcelExportLog.action == "generate")
+                .where(ExcelExportLog.file_purged_at.is_not(None))
+                .order_by(ExcelExportLog.file_purged_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if purged_at is not None:
+            raise HTTPException(
+                status_code=410,
+                detail=f"该版本已过期清理（保留期 {settings.retention_exports_days} 天）",
+            )
         raise HTTPException(status_code=410, detail="文件已丢失")
 
-    # 更新下载计数
     await db.execute(
         update(SuggestionSnapshot)
         .where(SuggestionSnapshot.id == snapshot_id)
-        .values(
-            download_count=SuggestionSnapshot.download_count + 1,
-            last_downloaded_at=now_beijing(),
-        )
+        .values(download_count=SuggestionSnapshot.download_count + 1, last_downloaded_at=now_beijing())
     )
     db.add(
         ExcelExportLog(
@@ -387,9 +401,8 @@ async def download_snapshot(
     )
     await db.commit()
 
-    filename = Path(snap.file_path).name
     return FileResponse(
         path=file_abs,
-        filename=filename,
+        filename=Path(snapshot.file_path).name,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )

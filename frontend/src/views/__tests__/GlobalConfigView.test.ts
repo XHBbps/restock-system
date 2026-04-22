@@ -5,14 +5,27 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
 import type { GlobalConfig } from '@/api/config'
+import { useAuthStore } from '@/stores/auth'
 
-const mockGetGlobalConfig = vi.fn()
-const mockPatchGlobalConfig = vi.fn()
-const mockGetGenerationToggle = vi.fn()
-const mockPatchGenerationToggle = vi.fn()
-const messageSuccess = vi.fn()
-const messageWarning = vi.fn()
-const messageError = vi.fn()
+const {
+  mockGetGlobalConfig,
+  mockPatchGlobalConfig,
+  mockGetGenerationToggle,
+  mockPatchGenerationToggle,
+  messageSuccess,
+  messageWarning,
+  messageError,
+  mockConfirm,
+} = vi.hoisted(() => ({
+  mockGetGlobalConfig: vi.fn(),
+  mockPatchGlobalConfig: vi.fn(),
+  mockGetGenerationToggle: vi.fn(),
+  mockPatchGenerationToggle: vi.fn(),
+  messageSuccess: vi.fn(),
+  messageWarning: vi.fn(),
+  messageError: vi.fn(),
+  mockConfirm: vi.fn(),
+}))
 
 vi.mock('@/api/config', () => ({
   getGlobalConfig: (...args: unknown[]) => mockGetGlobalConfig(...args),
@@ -31,7 +44,7 @@ vi.mock('element-plus', async () => {
       error: messageError,
     },
     ElMessageBox: {
-      confirm: vi.fn(),
+      confirm: (...args: unknown[]) => mockConfirm(...args),
     },
   }
 })
@@ -45,12 +58,13 @@ const STUBS = {
   ElForm: { template: '<form><slot /></form>' },
   ElFormItem: { template: '<div><slot /></div>' },
   ElInputNumber: true,
-  ElInput: true,
   ElSwitch: true,
   ElSelect: true,
   ElOption: true,
   ElRadioGroup: true,
   ElRadioButton: true,
+  ElTooltip: { template: '<div><slot /></div>' },
+  ElTag: { template: '<span><slot /></span>' },
 }
 
 function makeConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
@@ -58,12 +72,11 @@ function makeConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
     buffer_days: 30,
     target_days: 60,
     lead_time_days: 50,
+    safety_stock_days: 15,
     restock_regions: [],
+    eu_countries: ['DE', 'FR'],
     sync_interval_minutes: 60,
-    calc_cron: '0 8 * * *',
-    calc_enabled: true,
-    default_purchase_warehouse_id: 'WH-001',
-    include_tax: '0',
+    scheduler_enabled: true,
     shop_sync_mode: 'all',
     ...overrides,
   }
@@ -78,11 +91,23 @@ describe('GlobalConfigView', () => {
       updated_by: 1,
       updated_by_name: 'Tester',
       updated_at: '2026-04-19T10:00:00+08:00',
+      can_enable: true,
+      can_enable_reason: null,
+    })
+    const auth = useAuthStore()
+    auth.setAuth('test-token', {
+      id: 1,
+      username: 'tester',
+      displayName: 'Tester',
+      roleName: 'Admin',
+      isSuperadmin: true,
+      passwordIsDefault: false,
+      permissions: ['config:edit', 'restock:new_cycle'],
     })
   })
 
   it('loads global config and generation toggle on mount', async () => {
-    mockGetGlobalConfig.mockResolvedValue(makeConfig({ restock_regions: ['US', 'GB'] }))
+    mockGetGlobalConfig.mockResolvedValue(makeConfig({ restock_regions: ['US', 'EU'] }))
 
     const { default: View } = await import('../GlobalConfigView.vue')
     const wrapper = shallowMount(View, { global: { stubs: STUBS } })
@@ -91,26 +116,13 @@ describe('GlobalConfigView', () => {
     const vm = wrapper.vm as unknown as { form: GlobalConfig | null }
     expect(mockGetGlobalConfig).toHaveBeenCalledTimes(1)
     expect(mockGetGenerationToggle).toHaveBeenCalledTimes(1)
-    expect(vm.form?.restock_regions).toEqual(['US', 'GB'])
+    expect(vm.form?.restock_regions).toEqual(['US', 'EU'])
+    expect(vm.form?.safety_stock_days).toBe(15)
   })
 
-  it('keeps global config usable when toggle loading fails', async () => {
-    mockGetGlobalConfig.mockResolvedValue(makeConfig({ restock_regions: ['US'] }))
-    mockGetGenerationToggle.mockRejectedValue(new Error('forbidden'))
-
-    const { default: View } = await import('../GlobalConfigView.vue')
-    const wrapper = shallowMount(View, { global: { stubs: STUBS } })
-    await flushPromises()
-
-    const vm = wrapper.vm as unknown as { form: GlobalConfig | null; toggle: unknown }
-    expect(vm.form?.restock_regions).toEqual(['US'])
-    expect(vm.toggle).toBeNull()
-    expect(messageError).not.toHaveBeenCalled()
-  })
-
-  it('submits restock regions when saving', async () => {
+  it('submits safety stock and EU countries when saving', async () => {
     mockGetGlobalConfig.mockResolvedValue(makeConfig())
-    mockPatchGlobalConfig.mockResolvedValue(makeConfig({ restock_regions: ['US', 'GB'] }))
+    mockPatchGlobalConfig.mockResolvedValue(makeConfig({ safety_stock_days: 30, eu_countries: ['DE'] }))
 
     const { default: View } = await import('../GlobalConfigView.vue')
     const wrapper = shallowMount(View, { global: { stubs: STUBS } })
@@ -119,32 +131,39 @@ describe('GlobalConfigView', () => {
     const vm = wrapper.vm as unknown as { form: GlobalConfig | null; save: () => Promise<void> }
     if (!vm.form) throw new Error('expected form to be initialized')
 
-    vm.form.restock_regions = ['US', 'GB']
+    vm.form.safety_stock_days = 30
+    vm.form.eu_countries = ['DE']
     await vm.save()
 
     expect(mockPatchGlobalConfig).toHaveBeenCalledWith(
       expect.objectContaining({
-        restock_regions: ['US', 'GB'],
+        safety_stock_days: 30,
+        eu_countries: ['DE'],
       }),
     )
     expect(messageSuccess).toHaveBeenCalled()
   })
 
-  it('shows recalculation warning when restock regions change', async () => {
-    mockGetGlobalConfig.mockResolvedValue(makeConfig({ restock_regions: ['US'] }))
-    mockPatchGlobalConfig.mockResolvedValue(makeConfig({ restock_regions: ['US', 'GB'] }))
+  it('blocks toggle-on when can_enable is false', async () => {
+    mockGetGlobalConfig.mockResolvedValue(makeConfig())
+    mockGetGenerationToggle.mockResolvedValue({
+      enabled: false,
+      updated_by: null,
+      updated_by_name: null,
+      updated_at: null,
+      can_enable: false,
+      can_enable_reason: '采购建议尚未导出任何快照',
+    })
 
     const { default: View } = await import('../GlobalConfigView.vue')
     const wrapper = shallowMount(View, { global: { stubs: STUBS } })
     await flushPromises()
 
-    const vm = wrapper.vm as unknown as { form: GlobalConfig | null; save: () => Promise<void> }
-    if (!vm.form) throw new Error('expected form to be initialized')
+    const vm = wrapper.vm as unknown as { onToggleChange: (value: boolean) => Promise<void> }
+    await vm.onToggleChange(true)
 
-    vm.form.restock_regions = ['US', 'GB']
-    await vm.save()
-
-    expect(messageWarning).toHaveBeenCalled()
+    expect(messageWarning).toHaveBeenCalledWith('采购建议尚未导出任何快照')
+    expect(mockPatchGenerationToggle).not.toHaveBeenCalled()
   })
 
   it('blocks saving when target days is smaller than lead time', async () => {

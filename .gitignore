@@ -36,6 +36,15 @@ coverage.xml
 *.cover
 *.py,cover
 .hypothesis/
+# pytest 运行时临时目录（宿主机 / codex 跑测试会产生）
+.tmp_pytest_run/
+.tmp_test/
+backend/.tmp_codex_pytest/
+backend/.tmp_pytest_base/
+backend/.codex_tmp/
+.codex_tmp/
+# 测试 Excel 导出产物（由 build_excel 在测试里产生到 backend/backend/.test_exports）
+backend/backend/
 
 # ========== Node / Frontend ==========
 node_modules/
@@ -63,6 +72,9 @@ frontend/coverage/
 
 # ========== Docker ==========
 # 不要忽略 deploy/docker-compose.yml / Dockerfile
+# 本地 override（每人一份，不提交）
+deploy/docker-compose.override.yml
+deploy/docker-compose.*.override.yml
 
 # ========== OS ==========
 .DS_Store
@@ -97,6 +109,11 @@ logs/
 # 临时文件
 *.tmp
 *.bak
+
+# Windows 本地开发工具（快捷方式、隧道 exe 等），严禁误 commit
+*.exe
+*.lnk
+cloudflared*
 
 # 编辑器本地配置
 .cursor/

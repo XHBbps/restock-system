@@ -38,7 +38,7 @@ async def daily_archive_job(ctx: JobContext) -> None:
             ),
             {"snapshot_date": today},
         )
-        row_count = result.rowcount or 0
+        row_count = result.rowcount or 0  # type: ignore[attr-defined]
         await db.commit()
 
     logger.info("daily_archive_done", rows=row_count, date=str(today))
@@ -51,7 +51,7 @@ async def daily_archive_job(ctx: JobContext) -> None:
                 InventorySnapshotHistory.snapshot_date < cutoff
             )
         )
-        deleted = del_result.rowcount or 0
+        deleted = del_result.rowcount or 0  # type: ignore[attr-defined]
         await db.commit()
 
     logger.info("snapshot_cleanup_done", deleted=deleted, cutoff=str(cutoff))

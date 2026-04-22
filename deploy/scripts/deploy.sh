@@ -34,7 +34,7 @@ rollback_on_failure() {
 }
 trap rollback_on_failure EXIT
 
-"$SCRIPT_DIR/validate_env.sh"
+"$SCRIPT_DIR/validate_env.sh" || exit 1
 
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" pull db caddy || true
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d db

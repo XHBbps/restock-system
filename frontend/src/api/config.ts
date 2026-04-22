@@ -1,4 +1,3 @@
-// 配置 API 客户端
 import client from './client'
 
 // ========== Global Config ==========
@@ -6,12 +5,11 @@ export interface GlobalConfig {
   buffer_days: number
   target_days: number
   lead_time_days: number
+  safety_stock_days: number
   restock_regions: string[]
+  eu_countries: string[]
   sync_interval_minutes: number
-  calc_cron: string
-  calc_enabled: boolean
-  default_purchase_warehouse_id: string | null
-  include_tax: '0' | '1'
+  scheduler_enabled: boolean
   shop_sync_mode: 'all' | 'specific'
 }
 
@@ -46,7 +44,7 @@ export async function listSkuConfigs(params: {
 
 export async function patchSkuConfig(
   commoditySku: string,
-  patch: { enabled?: boolean; lead_time_days?: number | null }
+  patch: { enabled?: boolean; lead_time_days?: number | null },
 ): Promise<SkuConfig> {
   const { data } = await client.patch<SkuConfig>(`/api/config/sku/${commoditySku}`, patch)
   return data
@@ -79,11 +77,11 @@ export async function refreshWarehouses(): Promise<{ task_id: number; existing: 
 
 export async function patchWarehouseCountry(
   warehouseId: string,
-  country: string | null
+  country: string | null,
 ): Promise<Warehouse> {
   const { data } = await client.patch<Warehouse>(
     `/api/config/warehouse/${warehouseId}/country`,
-    { country }
+    { country },
   )
   return data
 }
@@ -113,7 +111,7 @@ export type ZipcodeRuleInput = Omit<ZipcodeRule, 'id'>
 
 export async function listZipcodeRules(country?: string): Promise<ZipcodeRule[]> {
   const { data } = await client.get<ZipcodeRule[]>('/api/config/zipcode-rules', {
-    params: country ? { country } : {}
+    params: country ? { country } : {},
   })
   return data
 }
@@ -155,7 +153,7 @@ export async function refreshShops(): Promise<{ task_id: number; existing: boole
 
 export async function patchShop(shopId: string, syncEnabled: boolean): Promise<Shop> {
   const { data } = await client.patch<Shop>(`/api/config/shops/${shopId}`, {
-    sync_enabled: syncEnabled
+    sync_enabled: syncEnabled,
   })
   return data
 }
@@ -166,6 +164,8 @@ export interface GenerationToggle {
   updated_by: number | null
   updated_by_name: string | null
   updated_at: string | null
+  can_enable: boolean
+  can_enable_reason: string | null
 }
 
 export async function getGenerationToggle(): Promise<GenerationToggle> {

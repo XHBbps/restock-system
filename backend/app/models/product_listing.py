@@ -30,6 +30,8 @@ class ProductListing(Base):
     commodity_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     shop_id: Mapped[str] = mapped_column(String(50), nullable=False)
     marketplace_id: Mapped[str] = mapped_column(String(10), nullable=False)
+    # EU 合并前的原始 marketplace 值（实际是 2 字符国家码，审计用）
+    original_marketplace_id: Mapped[str | None] = mapped_column(String(10), nullable=True)
     seller_sku: Mapped[str | None] = mapped_column(String(100), nullable=True)
     parent_sku: Mapped[str | None] = mapped_column(String(100), nullable=True)
 

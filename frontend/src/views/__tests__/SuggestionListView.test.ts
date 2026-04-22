@@ -3,9 +3,8 @@
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { defineComponent, h } from 'vue'
 
-import type { SuggestionDetail, SuggestionItem } from '@/api/suggestion'
+import type { SuggestionDetail } from '@/api/suggestion'
 import { useAuthStore } from '@/stores/auth'
 
 const mockGetCurrentSuggestion = vi.fn()
@@ -23,59 +22,33 @@ vi.mock('@/api/engine', () => ({
   runEngine: vi.fn(),
 }))
 
-vi.mock('vue-router', () => ({
-  useRouter: () => ({ push: vi.fn() }),
-}))
-
 vi.mock('element-plus', async () => {
   const actual = await vi.importActual('element-plus')
   return {
     ...actual,
     ElMessage: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
-    ElMessageBox: { confirm: vi.fn() },
   }
 })
-
-function makeItem(
-  id: number,
-  overrides: Partial<SuggestionItem> = {},
-): SuggestionItem {
-  return {
-    id,
-    commodity_sku: `SKU-${id}`,
-    commodity_id: `CID-${id}`,
-    commodity_name: `Product ${id}`,
-    main_image: null,
-    total_qty: 10,
-    country_breakdown: { US: 10 },
-    warehouse_breakdown: { US: { 'WH-1': 10 } },
-    allocation_snapshot: null,
-    velocity_snapshot: null,
-    sale_days_snapshot: null,
-    urgent: false,
-    export_status: 'pending',
-    exported_snapshot_id: null,
-    exported_at: null,
-    ...overrides,
-  }
-}
 
 function makeSuggestion(): SuggestionDetail {
   return {
     id: 1,
     status: 'draft',
     triggered_by: 'manual',
-    total_items: 4,
-    snapshot_count: 0,
+    total_items: 2,
+    procurement_item_count: 1,
+    restock_item_count: 1,
+    procurement_snapshot_count: 0,
+    restock_snapshot_count: 0,
+    archived_trigger: null,
+    procurement_display_status: '未导出',
+    restock_display_status: '未导出',
+    procurement_display_status_code: 'pending',
+    restock_display_status_code: 'pending',
     global_config_snapshot: {},
     created_at: '2026-04-13T10:00:00',
     archived_at: null,
-    items: [
-      makeItem(1, { total_qty: 10, commodity_sku: 'SKU-ALPHA' }),
-      makeItem(2, { total_qty: 30, commodity_sku: 'SKU-BETA' }),
-      makeItem(3, { total_qty: 20, commodity_sku: 'SKU-GAMMA' }),
-      makeItem(4, { total_qty: 5, commodity_sku: 'SKU-DELTA', urgent: true }),
-    ],
+    items: [],
   }
 }
 
@@ -85,59 +58,31 @@ const STUBS = {
     template: '<div><h1>{{ title }}</h1><slot name="actions" /><slot /></div>',
   },
   TaskProgress: true,
-  TablePaginationBar: true,
+  SuggestionTabBar: true,
+  RouterView: {
+    template: '<div class="router-view-stub" />',
+  },
   ElEmpty: true,
   ElTag: { template: '<span><slot /></span>' },
-  ElButton: true,
-  ElInput: {
-    props: ['modelValue', 'placeholder'],
-    emits: ['update:modelValue'],
-    template: '<input :value="modelValue" :placeholder="placeholder" @input="$emit(\'update:modelValue\', $event.target.value)" />',
+  ElButton: {
+    props: ['disabled', 'loading', 'title', 'type'],
+    emits: ['click'],
+    template: '<button :disabled="disabled" :title="title" @click="$emit(\'click\')"><slot /></button>',
   },
-  ElSelect: true,
-  ElOption: true,
-  ElTable: defineComponent({
-    props: ['data', 'rowKey', 'rowClassName'],
-    emits: ['selectionChange', 'selectAll', 'sortChange'],
-    setup(_, { slots, expose }) {
-      expose({
-        clearSelection: () => undefined,
-        toggleRowSelection: () => undefined,
-      })
-      return () => h('div', slots.default?.())
-    },
-  }),
-  ElTableColumn: true,
-  ElTooltip: { template: '<div><slot /></div>' },
-  SkuCard: {
-    props: ['sku', 'name', 'image'],
-    template: '<div class="sku-card-stub">{{ sku }}</div>',
-  },
-}
-
-function createMountOptions() {
-  return {
-    global: {
-      stubs: STUBS,
-      directives: {
-        loading: {
-          mounted: () => undefined,
-          updated: () => undefined,
-        },
-      },
-    },
-  }
 }
 
 describe('SuggestionListView', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    mockGetCurrentSuggestion.mockResolvedValue(makeSuggestion())
     mockGetGenerationToggle.mockResolvedValue({
       enabled: true,
       updated_by: 1,
       updated_by_name: 'Tester',
       updated_at: '2026-04-19T10:00:00+08:00',
+      can_enable: true,
+      can_enable_reason: null,
     })
     const auth = useAuthStore()
     auth.setAuth('test-token', {
@@ -151,99 +96,25 @@ describe('SuggestionListView', () => {
     })
   })
 
-  it('renders the current suggestion items loaded from the API', async () => {
-    mockGetCurrentSuggestion.mockResolvedValue(makeSuggestion())
-
+  it('loads current suggestion and generation toggle on mount', async () => {
     const { default: View } = await import('../SuggestionListView.vue')
-    const wrapper = shallowMount(View, createMountOptions())
+    const wrapper = shallowMount(View, { global: { stubs: STUBS } })
     await flushPromises()
 
-    const vm = wrapper.vm as unknown as { filteredItems: SuggestionItem[] }
+    const vm = wrapper.vm as unknown as { suggestion: SuggestionDetail | null }
     expect(mockGetCurrentSuggestion).toHaveBeenCalled()
     expect(mockGetGenerationToggle).toHaveBeenCalled()
-    expect(vm.filteredItems.map((item) => item.id)).toEqual([1, 2, 3, 4])
+    expect(vm.suggestion?.id).toBe(1)
   })
 
-  it('filters items by SKU keyword case-insensitively', async () => {
-    mockGetCurrentSuggestion.mockResolvedValue(makeSuggestion())
-
-    const { default: View } = await import('../SuggestionListView.vue')
-    const wrapper = shallowMount(View, createMountOptions())
-    await flushPromises()
-
-    const vm = wrapper.vm as unknown as {
-      searchSku: string
-      filteredItems: SuggestionItem[]
-    }
-
-    vm.searchSku = 'beta'
-    await flushPromises()
-
-    expect(vm.filteredItems.map((item) => item.id)).toEqual([2])
-  })
-
-  it('supports sorting by total_qty via handleSortChange', async () => {
-    mockGetCurrentSuggestion.mockResolvedValue(makeSuggestion())
-
-    const { default: View } = await import('../SuggestionListView.vue')
-    const wrapper = shallowMount(View, createMountOptions())
-    await flushPromises()
-
-    const vm = wrapper.vm as unknown as {
-      handleSortChange: (event: { prop: string; order: string | null }) => void
-      pagedItems: SuggestionItem[]
-    }
-
-    vm.handleSortChange({ prop: 'total_qty', order: 'descending' })
-    await flushPromises()
-
-    expect(vm.pagedItems.map((item) => item.total_qty)).toEqual([30, 20, 10, 5])
-
-    vm.handleSortChange({ prop: 'total_qty', order: 'ascending' })
-    await flushPromises()
-
-    expect(vm.pagedItems.map((item) => item.total_qty)).toEqual([5, 10, 20, 30])
-  })
-
-  it('paginates items according to pageSize and current page', async () => {
-    mockGetCurrentSuggestion.mockResolvedValue(makeSuggestion())
-
-    const { default: View } = await import('../SuggestionListView.vue')
-    const wrapper = shallowMount(View, createMountOptions())
-    await flushPromises()
-
-    const vm = wrapper.vm as unknown as {
-      page: number
-      pageSize: number
-      pagedItems: SuggestionItem[]
-    }
-
-    vm.pageSize = 2
-    await flushPromises()
-    vm.page = 1
-    await flushPromises()
-    expect(vm.pagedItems.map((item) => item.id)).toEqual([4, 1])
-
-    vm.page = 2
-    await flushPromises()
-    expect(vm.pagedItems.map((item) => item.id)).toEqual([2, 3])
-  })
-
-  it('fails closed when generation toggle status cannot be loaded', async () => {
-    mockGetCurrentSuggestion.mockResolvedValue(makeSuggestion())
+  it('disables generate button when toggle is null', async () => {
     mockGetGenerationToggle.mockRejectedValue(new Error('forbidden'))
 
     const { default: View } = await import('../SuggestionListView.vue')
-    const wrapper = shallowMount(View, createMountOptions())
+    const wrapper = shallowMount(View, { global: { stubs: STUBS } })
     await flushPromises()
 
-    const vm = wrapper.vm as unknown as {
-      toggle: unknown
-      toggleLoadError: boolean
-      engineButtonDisabled: boolean
-    }
-    expect(vm.toggle).toBeNull()
-    expect(vm.toggleLoadError).toBe(true)
-    expect(vm.engineButtonDisabled).toBe(true)
+    const button = wrapper.findAll('button').find((item) => item.text().includes('生成采补建议'))
+    expect(button?.attributes('disabled')).toBeDefined()
   })
 })

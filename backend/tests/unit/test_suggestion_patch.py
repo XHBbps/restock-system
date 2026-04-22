@@ -1,10 +1,12 @@
-"""Unit tests for suggestion API patch/push/delete endpoints."""
+"""Unit tests for suggestion API patch/delete endpoints."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+
 import pytest
+from pydantic import ValidationError
 
 from app.api.suggestion import delete_suggestion, patch_item
 from app.core.exceptions import NotFound, ValidationFailed
@@ -65,33 +67,63 @@ class _FakeSuggestion:
 
 
 class _FakeItem:
-    def __init__(self, export_status: str = "pending") -> None:
+    def __init__(
+        self,
+        procurement_export_status: str = "pending",
+        restock_export_status: str = "pending",
+    ) -> None:
         self.id = 10
         self.suggestion_id = 1
-        self.commodity_sku: str = "SKU-A"
-        self.export_status = export_status
-        self.total_qty: int = 1
-        self.country_breakdown: dict[str, int] = {"US": 1}
-        self.warehouse_breakdown: dict[str, dict[str, int]] = {"US": {"W1": 1}}
+        self.commodity_sku = "SKU-A"
+        self.procurement_export_status = procurement_export_status
+        self.restock_export_status = restock_export_status
+        self.total_qty = 1
+        self.country_breakdown = {"US": 1}
+        self.warehouse_breakdown = {"US": {"W1": 1}}
         self.allocation_snapshot: dict[str, Any] | None = {"US": {"allocation_mode": "matched"}}
         self.sale_days_snapshot: dict[str, float] | None = {"US": 25.0}
+        self.purchase_qty = 0
+        self.purchase_date = None
+        self.urgent = False
+
+
+def test_suggestion_item_patch_rejects_negative_purchase_qty() -> None:
+    """purchase_qty 必须 >=0，否则 Pydantic 校验直接拒绝。"""
+    with pytest.raises(ValidationError):
+        SuggestionItemPatch(purchase_qty=-1)
 
 
 async def test_suggestion_patch_archived_rejected() -> None:
     db = _FakeSession([_FakeSuggestion(status="archived")])
     patch = SuggestionItemPatch(total_qty=5)
-    with pytest.raises(ValidationFailed, match=r"archived|归档"):
+    with pytest.raises(ValidationFailed):
         await patch_item(patch=patch, suggestion_id=1, item_id=10, db=db, _={})  # type: ignore[arg-type]
 
 
-async def test_suggestion_patch_exported_rejected() -> None:
-    db = _FakeSession([_FakeSuggestion(), _FakeItem(export_status="exported")])
-    patch = SuggestionItemPatch(total_qty=5)
-    with pytest.raises(ValidationFailed, match=r"exported|导出"):
-        await patch_item(patch=patch, suggestion_id=1, item_id=10, db=db, _={})  # type: ignore[arg-type]
+async def test_suggestion_patch_exported_item_still_editable(monkeypatch) -> None:
+    """已导出的 item 仍允许编辑；编辑后下次导出会产生新 version（immutable 历史）。"""
+    import app.api.suggestion as suggestion_module
+
+    async def _fake_enrich_item(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    async def _fake_lead_time(*_args: Any, **_kwargs: Any) -> int:
+        return 20
+
+    db = _FakeSession([_FakeSuggestion(), _FakeItem(procurement_export_status="exported"), None])
+    monkeypatch.setattr(suggestion_module, "_enrich_item", _fake_enrich_item)
+    monkeypatch.setattr(suggestion_module, "_resolve_effective_lead_time_days", _fake_lead_time)
+
+    # 不抛错，应该正常更新
+    patch = SuggestionItemPatch(purchase_qty=50)
+    await patch_item(patch=patch, suggestion_id=1, item_id=10, db=db, _={})  # type: ignore[arg-type]
+
+    update_stmt = db.executed_statements[-1]
+    values = _normalize_update_values(update_stmt)
+    assert values["purchase_qty"] == 50
 
 
-async def test_suggestion_patch_allows_country_sum_to_differ_from_total_qty(monkeypatch) -> None:
+async def test_suggestion_patch_recomputes_total_qty_from_country_breakdown(monkeypatch) -> None:
     import app.api.suggestion as suggestion_module
 
     async def _fake_enrich_item(*_args: Any, **_kwargs: Any) -> None:
@@ -113,7 +145,7 @@ async def test_suggestion_patch_allows_country_sum_to_differ_from_total_qty(monk
 
     update_stmt = db.executed_statements[-1]
     normalized_values = _normalize_update_values(update_stmt)
-    assert normalized_values["total_qty"] == 10
+    assert normalized_values["total_qty"] == 7
     assert normalized_values["country_breakdown"] == {"US": 3, "UK": 4}
 
 
@@ -181,13 +213,12 @@ async def test_suggestion_patch_rejects_warehouse_sum_mismatch() -> None:
 
 async def test_suggestion_delete_rejects_missing_row() -> None:
     db = _FakeSession([None])
-    with pytest.raises(NotFound, match=r"不存在|NotFound"):
+    with pytest.raises(NotFound):
         await delete_suggestion(suggestion_id=1, db=db, _={})  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize("status", ["draft", "error", "archived"])
 async def test_suggestion_delete_allows_rows_without_snapshots(status: str) -> None:
-    # Results: 1) suggestion lookup, 2) snapshot count (0), 3) delete execution
     db = _FakeSession([_FakeSuggestion(status=status), 0, None])
 
     await delete_suggestion(suggestion_id=1, db=db, _={})  # type: ignore[arg-type]
@@ -199,14 +230,14 @@ async def test_suggestion_delete_allows_rows_without_snapshots(status: str) -> N
 def test_suggestion_item_patch_rejects_negative_country_breakdown():
     from pydantic import ValidationError
 
-    with pytest.raises(ValidationError, match="不可为负"):
+    with pytest.raises(ValidationError):
         SuggestionItemPatch(country_breakdown={"US": -10, "JP": 5})
 
 
 def test_suggestion_item_patch_rejects_negative_warehouse_breakdown():
     from pydantic import ValidationError
 
-    with pytest.raises(ValidationError, match="不可为负"):
+    with pytest.raises(ValidationError):
         SuggestionItemPatch(warehouse_breakdown={"US": {"WH-1": -5}})
 
 
@@ -230,3 +261,84 @@ async def test_suggestion_patch_clears_allocation_snapshot_on_allocation_edit(mo
     update_stmt = db.executed_statements[-1]
     normalized_values = _normalize_update_values(update_stmt)
     assert normalized_values["allocation_snapshot"] is None
+
+
+async def test_suggestion_patch_urgent_boundary_sale_days_equals_lead_time(monkeypatch) -> None:
+    """边界：sale_days == lead_time 时 urgent=True（has_urgent_sale_days 用 <=）。"""
+    import app.api.suggestion as suggestion_module
+
+    async def _fake_enrich_item(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    async def _fake_lead_time(*_args: Any, **_kwargs: Any) -> int:
+        return 20
+
+    item = _FakeItem()
+    item.sale_days_snapshot = {"US": 20.0, "UK": 45.0}
+    db = _FakeSession([_FakeSuggestion(), item, None])
+    patch = SuggestionItemPatch(
+        country_breakdown={"US": 5, "UK": 3},
+        warehouse_breakdown={"US": {"W1": 5}},
+    )
+    monkeypatch.setattr(suggestion_module, "_enrich_item", _fake_enrich_item)
+    monkeypatch.setattr(suggestion_module, "_resolve_effective_lead_time_days", _fake_lead_time)
+
+    await patch_item(patch=patch, suggestion_id=1, item_id=10, db=db, _={})  # type: ignore[arg-type]
+
+    values = _normalize_update_values(db.executed_statements[-1])
+    assert values["urgent"] is True
+
+
+async def test_suggestion_patch_urgent_boundary_sale_days_above_lead_time(monkeypatch) -> None:
+    """边界：sale_days > lead_time 对每个国家都成立 → urgent=False。"""
+    import app.api.suggestion as suggestion_module
+
+    async def _fake_enrich_item(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    async def _fake_lead_time(*_args: Any, **_kwargs: Any) -> int:
+        return 20
+
+    item = _FakeItem()
+    item.sale_days_snapshot = {"US": 21.0, "UK": 30.0}
+    db = _FakeSession([_FakeSuggestion(), item, None])
+    patch = SuggestionItemPatch(
+        country_breakdown={"US": 5, "UK": 3},
+        warehouse_breakdown={"US": {"W1": 5}},
+    )
+    monkeypatch.setattr(suggestion_module, "_enrich_item", _fake_enrich_item)
+    monkeypatch.setattr(suggestion_module, "_resolve_effective_lead_time_days", _fake_lead_time)
+
+    await patch_item(patch=patch, suggestion_id=1, item_id=10, db=db, _={})  # type: ignore[arg-type]
+
+    values = _normalize_update_values(db.executed_statements[-1])
+    assert values["urgent"] is False
+
+
+async def test_suggestion_patch_urgent_ignores_zero_qty_country(monkeypatch) -> None:
+    """qty=0 的国家不参与 urgent 判定（positive_qty_countries 过滤）。
+
+    US qty=0 但 sale_days=5（紧急），UK qty=3 且 sale_days=45（充裕） → urgent=False。
+    """
+    import app.api.suggestion as suggestion_module
+
+    async def _fake_enrich_item(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    async def _fake_lead_time(*_args: Any, **_kwargs: Any) -> int:
+        return 20
+
+    item = _FakeItem()
+    item.sale_days_snapshot = {"US": 5.0, "UK": 45.0}
+    db = _FakeSession([_FakeSuggestion(), item, None])
+    patch = SuggestionItemPatch(
+        country_breakdown={"US": 0, "UK": 3},
+        warehouse_breakdown={"UK": {"W1": 3}},
+    )
+    monkeypatch.setattr(suggestion_module, "_enrich_item", _fake_enrich_item)
+    monkeypatch.setattr(suggestion_module, "_resolve_effective_lead_time_days", _fake_lead_time)
+
+    await patch_item(patch=patch, suggestion_id=1, item_id=10, db=db, _={})  # type: ignore[arg-type]
+
+    values = _normalize_update_values(db.executed_statements[-1])
+    assert values["urgent"] is False

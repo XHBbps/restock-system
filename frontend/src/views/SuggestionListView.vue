@@ -1,9 +1,9 @@
-﻿<template>
+<template>
   <div class="suggestion-list">
-    <PageSectionCard title="补货发起">
+    <PageSectionCard title="采补发起">
       <template #actions>
         <el-tag v-if="suggestion" :type="statusMeta.tagType" size="small">
-          {{ statusMeta.label }} · {{ suggestion.total_items }} 条
+          {{ statusMeta.label }} · 采购 {{ suggestion.procurement_item_count }} · 补货 {{ suggestion.restock_item_count }}
         </el-tag>
         <el-tag
           v-if="toggle"
@@ -18,77 +18,42 @@
           v-if="auth.hasPermission('restock:operate')"
           type="primary"
           :loading="generating"
-          :disabled="engineButtonDisabled"
+          :disabled="!toggle?.enabled || generating"
           :title="engineButtonTitle"
           @click="triggerEngine"
-        >生成补货建议</el-button>
+        >
+          生成采补建议
+        </el-button>
+        <el-button
+          v-if="canDelete"
+          type="danger"
+          plain
+          :loading="deleting"
+          @click="handleDelete"
+        >
+          删除整单
+        </el-button>
       </template>
 
-      <!-- TaskProgress for engine task -->
       <TaskProgress v-if="genTaskId" :task-id="genTaskId" @terminal="onGenDone" />
 
       <el-empty
         v-if="!loading && !suggestion"
-        description="当前没有活动建议单，点击上方按钮生成补货建议。"
+        description="当前没有活动建议单，点击上方按钮生成采补建议。"
         :image-size="80"
       />
 
       <template v-else>
-        <div class="table-toolbar">
-          <div class="toolbar-filters">
-            <el-input v-model="searchSku" placeholder="搜索 SKU" clearable style="width: 220px" />
-          </div>
-        </div>
-        <el-table
-          v-loading="loading"
-          :data="pagedItems"
-          :row-class-name="rowClass"
-          @sort-change="handleSortChange"
-        >
-          <el-table-column label="商品信息" min-width="320">
-            <template #default="{ row }">
-              <el-tooltip
-                placement="top-start"
-                :content="row.commodity_name || row.commodity_sku"
-                :show-after="300"
-                :hide-after="0"
-              >
-                <SkuCard
-                  :sku="row.commodity_sku"
-                  :name="row.commodity_name"
-                  :image="row.main_image"
-                />
-              </el-tooltip>
-            </template>
-          </el-table-column>
-          <el-table-column label="总采购量" prop="total_qty" width="120" align="right" sortable="custom" show-overflow-tooltip />
-          <el-table-column label="需求分布" min-width="220">
-            <template #default="{ row }">
-              <el-tooltip
-                placement="top"
-                :content="Object.entries(row.country_breakdown || {}).map(([c, q]) => `${c}:${q}`).join('  ')"
-                :hide-after="0"
-              >
-                <div class="country-chips">
-                  <el-tag v-for="(qty, country) in row.country_breakdown" :key="country" size="small">
-                    {{ country }}: {{ qty }}
-                  </el-tag>
-                </div>
-              </el-tooltip>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="100" align="center">
-            <template #default="{ row }">
-              <el-button link type="primary" @click="goDetail(row.id)">详情</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-
-        <TablePaginationBar
-          v-model:current-page="page"
-          v-model:page-size="pageSize"
-          :total="filteredItems.length"
-        />
+        <SuggestionTabBar base-path="/restock/current" />
+        <router-view v-slot="{ Component }">
+          <component
+            :is="Component"
+            :suggestion="suggestion"
+            :items="suggestion?.items ?? []"
+            :loading="loading"
+            @refresh="loadCurrent"
+          />
+        </router-view>
       </template>
     </PageSectionCard>
   </div>
@@ -98,38 +63,60 @@
 import { runEngine } from '@/api/engine'
 import type { TaskRun } from '@/api/task'
 import { getGenerationToggle, type GenerationToggle } from '@/api/config'
-import { getCurrentSuggestion, type SuggestionDetail, type SuggestionItem } from '@/api/suggestion'
+import { deleteSuggestion, getCurrentSuggestion, type SuggestionDetail } from '@/api/suggestion'
 import PageSectionCard from '@/components/PageSectionCard.vue'
-import SkuCard from '@/components/SkuCard.vue'
-import TablePaginationBar from '@/components/TablePaginationBar.vue'
+import SuggestionTabBar from '@/components/SuggestionTabBar.vue'
 import TaskProgress from '@/components/TaskProgress.vue'
 import { getActionErrorMessage } from '@/utils/apiError'
 import { getSuggestionDisplayStatusMeta } from '@/utils/status'
-import {
-  applyLocalSort,
-  compareNumber,
-  normalizeSortOrder,
-  type SortChangeEvent,
-  type SortState,
-} from '@/utils/tableSort'
 import { useAuthStore } from '@/stores/auth'
-import { ElMessage } from 'element-plus'
-import { computed, onActivated, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { computed, onActivated, onMounted, ref } from 'vue'
 
-const router = useRouter()
 const auth = useAuthStore()
 const suggestion = ref<SuggestionDetail | null>(null)
-const searchSku = ref('')
 const generating = ref(false)
+const deleting = ref(false)
 const genTaskId = ref<number | null>(null)
-const page = ref(1)
-const pageSize = ref(20)
 const loading = ref(false)
-const sortState = ref<SortState>({})
+
+const canDelete = computed(() => {
+  const sug = suggestion.value
+  if (!sug || sug.status !== 'draft') return false
+  return (sug.procurement_snapshot_count || 0) + (sug.restock_snapshot_count || 0) === 0
+})
+
+async function handleDelete(): Promise<void> {
+  if (!suggestion.value) return
+  try {
+    await ElMessageBox.confirm(
+      '删除后无法恢复，且会同时移除采购和补货视图（采补同属一个建议单）。确定删除？',
+      '确认删除整个采补建议单',
+      { type: 'warning', confirmButtonText: '确定删除', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  deleting.value = true
+  try {
+    await deleteSuggestion(suggestion.value.id)
+    ElMessage.success('已删除')
+    await loadCurrent()
+  } catch (error) {
+    ElMessage.error(getActionErrorMessage(error, '删除失败'))
+  } finally {
+    deleting.value = false
+  }
+}
 
 const toggle = ref<GenerationToggle | null>(null)
 const toggleLoadError = ref(false)
+
+const totalSnapshotCount = computed(
+  () =>
+    (suggestion.value?.procurement_snapshot_count ?? 0) +
+    (suggestion.value?.restock_snapshot_count ?? 0),
+)
 
 const toggleTitle = computed(() => {
   if (!toggle.value) return ''
@@ -138,23 +125,19 @@ const toggleTitle = computed(() => {
   return `最近操作：${by} @ ${at}`
 })
 
-const engineButtonDisabled = computed(
-  () => toggleLoadError.value || toggle.value === null || !toggle.value.enabled,
-)
-
 const engineButtonTitle = computed(() => {
   if (toggleLoadError.value || toggle.value === null) {
     return '无法确认生成开关状态，请刷新页面或检查权限'
   }
   if (!toggle.value.enabled) {
-    return '生成开关已关闭，请先在「系统配置」中开启'
+    return '生成开关已关闭，请先在「全局参数」中开启'
   }
   return ''
 })
 
 const statusMeta = computed(() =>
   suggestion.value
-    ? getSuggestionDisplayStatusMeta(suggestion.value.status, suggestion.value.snapshot_count ?? 0)
+    ? getSuggestionDisplayStatusMeta(suggestion.value.status, totalSnapshotCount.value)
     : { label: '暂无', tagType: 'info' as const },
 )
 
@@ -185,7 +168,7 @@ async function triggerEngine(): Promise<void> {
       ElMessage.success('规则引擎任务已入队')
     }
   } catch (error) {
-    ElMessage.error(getActionErrorMessage(error, '补货任务触发失败'))
+    ElMessage.error(getActionErrorMessage(error, '采补任务触发失败'))
   } finally {
     generating.value = false
   }
@@ -194,61 +177,12 @@ async function triggerEngine(): Promise<void> {
 async function onGenDone(task: TaskRun): Promise<void> {
   genTaskId.value = null
   await loadCurrent()
+  await loadToggle()
   if (task.status === 'success') {
-    ElMessage.success('补货任务已完成，当前建议已刷新')
+    ElMessage.success('采补任务已完成，当前建议已刷新')
     return
   }
-  ElMessage.error(task.error_msg || '补货任务执行失败，请查看任务详情')
-}
-
-const filteredItems = computed(() => {
-  if (!suggestion.value) return []
-  let items = suggestion.value.items
-  if (searchSku.value) {
-    const q = searchSku.value.toLowerCase()
-    items = items.filter((it) => it.commodity_sku.toLowerCase().includes(q))
-  }
-  return items
-})
-
-function defaultSuggestionComparator(left: SuggestionItem, right: SuggestionItem): number {
-  if (left.urgent !== right.urgent) return left.urgent ? -1 : 1
-  return left.id - right.id
-}
-
-const sortedItems = computed(() =>
-  applyLocalSort(
-    filteredItems.value,
-    sortState.value,
-    {
-      total_qty: (left, right) => compareNumber(left.total_qty, right.total_qty),
-    },
-    defaultSuggestionComparator,
-  ),
-)
-
-const pagedItems = computed(() => {
-  const start = (page.value - 1) * pageSize.value
-  return sortedItems.value.slice(start, start + pageSize.value)
-})
-
-watch([searchSku, pageSize], () => {
-  page.value = 1
-})
-
-function rowClass({ row }: { row: SuggestionItem }): string {
-  return row.urgent ? 'row-urgent' : ''
-}
-
-function handleSortChange({ prop, order }: SortChangeEvent): void {
-  const normalizedOrder = normalizeSortOrder(order)
-  sortState.value = normalizedOrder && prop ? { prop, order: normalizedOrder } : {}
-  page.value = 1
-}
-
-function goDetail(id: number): void {
-  if (!suggestion.value) return
-  router.push(`/restock/suggestions/${suggestion.value.id}?item=${id}`)
+  ElMessage.error(task.error_msg || '采补任务执行失败，请查看任务详情')
 }
 
 async function loadToggle(): Promise<void> {
@@ -272,60 +206,9 @@ onActivated(() => {
 </script>
 
 <style lang="scss" scoped>
-@use 'sass:color';
-
 .suggestion-list {
   display: flex;
   flex-direction: column;
   gap: $space-4;
 }
-
-.table-toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: $space-3;
-  margin-bottom: $space-4;
-
-  .toolbar-filters {
-    display: flex;
-    align-items: center;
-    gap: $space-3;
-  }
-
-  // Unify filter control heights (same as PageSectionCard .section-actions)
-  :deep(.el-input),
-  :deep(.el-select) {
-    --el-component-size: 32px;
-  }
-}
-
-.country-chips {
-  display: flex;
-  flex-wrap: nowrap;
-  gap: 4px;
-  overflow: hidden;
-}
-
-:deep(.row-urgent) {
-  background-color: $color-danger-soft !important;
-}
-
-:deep(.el-table__body tr.row-urgent > td.el-table__cell) {
-  background-color: $color-danger-soft !important;
-  color: $color-text-primary !important;
-}
-
-:deep(.el-table__body tr.row-urgent:hover > td.el-table__cell) {
-  background-color: color.mix($color-danger-soft, $color-bg-subtle, $weight: 72%) !important;
-  color: $color-text-primary !important;
-}
-
-@media (max-width: 900px) {
-  .table-toolbar {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-}
-
 </style>

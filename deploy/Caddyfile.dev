@@ -37,6 +37,16 @@
     }
 
     handle {
+        # 禁止 index.html 被浏览器缓存：重建后旧 tab 刷新即可拿到新 hash 的 JS chunk
+        @html path / /index.html
+        header @html Cache-Control "no-cache, no-store, must-revalidate"
+        header @html Pragma "no-cache"
+        header @html Expires "0"
+
+        # 带 hash 的静态资源（JS/CSS）保持长缓存（文件名唯一，安全）
+        @hashed_assets path /assets/*
+        header @hashed_assets Cache-Control "public, max-age=31536000, immutable"
+
         reverse_proxy frontend:8080
     }
 

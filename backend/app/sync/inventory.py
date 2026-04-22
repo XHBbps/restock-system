@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.country_mapping import apply_eu_mapping, load_eu_countries
 from app.core.logging import get_logger
 from app.core.timezone import now_beijing
 from app.db.session import async_session_factory
@@ -32,6 +33,7 @@ async def sync_inventory_job(ctx: JobContext) -> None:
     try:
         async with async_session_factory() as db:
             warehouse_country_map = await _load_warehouse_countries(db)
+            eu_countries = await load_eu_countries(db)
 
             async def _report_page(page_no: int, total_page: int, rows_count: int) -> None:
                 if total_page <= 0:
@@ -43,7 +45,7 @@ async def sync_inventory_job(ctx: JobContext) -> None:
 
             batch_size = 500
             async for raw in list_inventory_items(on_page=_report_page):
-                await _upsert_inventory(db, raw, warehouse_country_map)
+                await _upsert_inventory(db, raw, warehouse_country_map, eu_countries)
                 count += 1
                 if count % batch_size == 0:
                     await db.commit()
@@ -61,13 +63,16 @@ async def sync_inventory_job(ctx: JobContext) -> None:
 
 async def _load_warehouse_countries(db: AsyncSession) -> dict[str, str | None]:
     rows = (await db.execute(select(Warehouse.id, Warehouse.country))).all()
-    return dict(rows)
+    # SQLAlchemy Row 支持 tuple 解包，dict() 接受 Iterable[tuple] 即可；
+    # mypy 对 Sequence[Row] 协变报错是 stub 问题，显式 tuple 化兼容类型
+    return {row[0]: row[1] for row in rows}
 
 
 async def _upsert_inventory(
     db: AsyncSession,
     raw: dict[str, Any],
     warehouse_country_map: dict[str, str | None],
+    eu_countries: set[str] | None = None,
 ) -> None:
     commodity_sku = raw.get("commoditySku")
     warehouse_id = str(raw.get("warehouseId") or "")
@@ -78,11 +83,14 @@ async def _upsert_inventory(
 
     available = _to_int(raw.get("stockAvailable"), 0)
     reserved = _to_int(raw.get("stockOccupy"), 0)
+    original_country = warehouse_country_map.get(warehouse_id)
+    mapped_country = apply_eu_mapping(original_country, eu_countries or set())
 
     values = {
         "commodity_sku": commodity_sku,
         "warehouse_id": warehouse_id,
-        "country": warehouse_country_map.get(warehouse_id),
+        "country": mapped_country,
+        "original_country": original_country if mapped_country != original_country else None,
         "available": available,
         "reserved": reserved,
         "updated_at": now_beijing(),
@@ -93,6 +101,7 @@ async def _upsert_inventory(
         index_elements=["commodity_sku", "warehouse_id"],
         set_={
             "country": values["country"],
+            "original_country": values["original_country"],
             "available": values["available"],
             "reserved": values["reserved"],
             "updated_at": values["updated_at"],

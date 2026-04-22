@@ -101,8 +101,10 @@ OUT_RECORD_INACTIVE_SORT_ORDER = 1
 
 
 def _apply_direction(
-    columns: tuple[ColumnElement[object], ...], sort_order: str
-) -> list[ColumnElement[object]]:
+    columns: tuple[Any, ...], sort_order: str
+) -> list[Any]:
+    # 与 api/suggestion.py 同样的妥协：InstrumentedAttribute[T] 不是
+    # ColumnElement[object] 的子类（参数不协变），用 tuple[Any, ...] 最宽松
     return [column.asc() if sort_order == "asc" else column.desc() for column in columns]
 
 
@@ -143,11 +145,11 @@ def _order_status_sort_expr() -> ColumnElement[int]:
     )
 
 
-def _apply_order_sort(stmt, sort_by: str | None, sort_order: str):
+def _apply_order_sort(stmt: Any, sort_by: str | None, sort_order: str) -> Any:
     item_count_expr = _order_item_count_expr()
     has_detail_expr = _order_has_detail_expr()
     amount_expr = func.coalesce(OrderHeader.order_total_amount.cast(Float), -1.0)
-    sort_map: dict[str, tuple[ColumnElement[object], ...]] = {
+    sort_map: dict[str, tuple[Any, ...]] = {
         "amazonOrderId": (OrderHeader.amazon_order_id,),
         "shopId": (OrderHeader.shop_id,),
         "countryCode": (OrderHeader.country_code,),
@@ -168,8 +170,8 @@ def _apply_order_sort(stmt, sort_by: str | None, sort_order: str):
     )
 
 
-def _apply_inventory_sort(stmt, sort_by: str | None, sort_order: str):
-    sort_map: dict[str, tuple[ColumnElement[object], ...]] = {
+def _apply_inventory_sort(stmt: Any, sort_by: str | None, sort_order: str) -> Any:
+    sort_map: dict[str, tuple[Any, ...]] = {
         "commoditySku": (InventorySnapshotLatest.commodity_sku,),
         "warehouseName": (
             case((Warehouse.name.is_(None), 1), else_=0),
@@ -192,13 +194,13 @@ def _apply_inventory_sort(stmt, sort_by: str | None, sort_order: str):
 
 
 def _apply_inventory_filters(
-    stmt,
+    stmt: Any,
     *,
     country: str | None,
     warehouse_id: str | None = None,
     sku: str | None,
     only_nonzero: bool,
-):
+) -> Any:
     if country:
         stmt = stmt.where(InventorySnapshotLatest.country == country.upper())
     if warehouse_id:
@@ -245,11 +247,11 @@ def _out_record_status_sort_expr() -> ColumnElement[int]:
     )
 
 
-def _apply_out_record_sort(stmt, sort_by: str | None, sort_order: str):
+def _apply_out_record_sort(stmt: Any, sort_by: str | None, sort_order: str) -> Any:
     target_warehouse_name_expr = _out_record_target_warehouse_name_expr()
     item_count_expr = _out_record_item_count_expr()
     goods_total_expr = _out_record_goods_total_expr()
-    sort_map: dict[str, tuple[ColumnElement[object], ...]] = {
+    sort_map: dict[str, tuple[Any, ...]] = {
         "warehouseId": (
             case((InTransitRecord.warehouse_id.is_(None), 1), else_=0),
             InTransitRecord.warehouse_id,
@@ -741,7 +743,7 @@ async def list_out_records(
         wh_rows = (
             await db.execute(select(Warehouse.id, Warehouse.name).where(Warehouse.id.in_(wh_ids)))
         ).all()
-        wh_name_map = dict(wh_rows)
+        wh_name_map = {row[0]: row[1] for row in wh_rows}
 
     items: list[DataOutRecord] = []
     for r in rows:
@@ -940,6 +942,8 @@ async def list_sku_overview(
 
     listings_by_sku: dict[str, list[Any]] = {}
     for pl in listing_rows:
+        if pl.commodity_sku is None:
+            continue
         listings_by_sku.setdefault(pl.commodity_sku, []).append(pl)
 
     items: list[SkuOverviewItem] = []

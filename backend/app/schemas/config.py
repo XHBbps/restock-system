@@ -3,7 +3,6 @@
 from datetime import datetime
 from typing import Literal
 
-from apscheduler.triggers.cron import CronTrigger
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 from app.core.restock_regions import normalize_restock_regions
@@ -14,13 +13,11 @@ class GlobalConfigOut(BaseModel):
     buffer_days: int
     target_days: int
     lead_time_days: int
+    safety_stock_days: int = Field(default=15, ge=1, le=90)
     restock_regions: list[str] = Field(default_factory=list)
+    eu_countries: list[str] = Field(default_factory=list)
     sync_interval_minutes: int
     scheduler_enabled: bool
-    calc_enabled: bool
-    calc_cron: str
-    default_purchase_warehouse_id: str | None = None
-    include_tax: Literal["0", "1"]
     shop_sync_mode: Literal["all", "specific"]
 
     model_config = {"from_attributes": True}
@@ -35,26 +32,23 @@ class GlobalConfigPatch(BaseModel):
     buffer_days: int | None = Field(default=None, ge=1, le=365)
     target_days: int | None = Field(default=None, ge=1, le=365)
     lead_time_days: int | None = Field(default=None, ge=0, le=365)
+    safety_stock_days: int | None = Field(default=None, ge=1, le=90)
     restock_regions: list[str] | None = None
+    eu_countries: list[str] | None = None
     sync_interval_minutes: int | None = Field(default=None, ge=5, le=1440)
     scheduler_enabled: bool | None = None
-    calc_enabled: bool | None = None
-    calc_cron: str | None = None
-    default_purchase_warehouse_id: str | None = None
-    include_tax: Literal["0", "1"] | None = None
     shop_sync_mode: Literal["all", "specific"] | None = None
-
-    @field_validator("calc_cron")
-    @classmethod
-    def validate_calc_cron(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        CronTrigger.from_crontab(value)
-        return value
 
     @field_validator("restock_regions", mode="before")
     @classmethod
     def validate_restock_regions(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        return normalize_restock_regions(value)
+
+    @field_validator("eu_countries", mode="before")
+    @classmethod
+    def validate_eu_countries(cls, value: list[str] | None) -> list[str] | None:
         if value is None:
             return None
         return normalize_restock_regions(value)
@@ -231,6 +225,8 @@ class GenerationToggleOut(BaseModel):
     updated_by: int | None = None
     updated_by_name: str | None = None
     updated_at: datetime | None = None
+    can_enable: bool = True
+    can_enable_reason: str | None = None
 
     model_config = {"from_attributes": True}
 

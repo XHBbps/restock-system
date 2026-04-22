@@ -1,12 +1,13 @@
 """建议单主表 + 条目表（导出模式）。"""
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -38,6 +39,10 @@ class Suggestion(Base):
     global_config_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
 
     total_items: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # 按 purchase_qty>0 和 Σcountry_breakdown>0 分别统计的条目数量，
+    # generation-toggle 的 can_enable 校验依赖这两个计数。
+    procurement_item_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    restock_item_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     triggered_by: Mapped[str] = mapped_column(String(20), nullable=False)
 
@@ -60,13 +65,26 @@ class Suggestion(Base):
 
 
 class SuggestionItem(Base):
-    """建议单条目：每行对应一个 commodity_sku 的完整补货建议。"""
+    """建议单条目：每行对应一个 commodity_sku 的完整补货建议。
+
+    `total_qty` 语义：Σ country_breakdown.values()（补货总量）。
+    `purchase_qty` 语义：SKU 级采购量（step4 公式输出）。
+    导出状态按采购/补货拆两组：`procurement_*` 和 `restock_*`。
+    """
 
     __tablename__ = "suggestion_item"
     __table_args__ = (
         CheckConstraint(
-            "export_status IN ('pending','exported')",
-            name="export_status_enum",
+            "restock_export_status IN ('pending','exported')",
+            name="restock_export_status_enum",
+        ),
+        CheckConstraint(
+            "procurement_export_status IN ('pending','exported')",
+            name="procurement_export_status_enum",
+        ),
+        CheckConstraint(
+            "purchase_qty >= 0",
+            name="purchase_qty_non_negative",
         ),
         Index("ix_suggestion_item_suggestion", "suggestion_id"),
         Index("ix_suggestion_item_sku", "commodity_sku"),
@@ -76,9 +94,14 @@ class SuggestionItem(Base):
             postgresql_where="urgent = true",
         ),
         Index(
-            "ix_suggestion_item_export_status",
+            "ix_suggestion_item_restock_export_status",
             "suggestion_id",
-            "export_status",
+            "restock_export_status",
+        ),
+        Index(
+            "ix_suggestion_item_procurement_export_status",
+            "suggestion_id",
+            "procurement_export_status",
         ),
     )
 
@@ -101,14 +124,35 @@ class SuggestionItem(Base):
 
     urgent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
-    # 导出状态
-    export_status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
-    exported_snapshot_id: Mapped[int | None] = mapped_column(
+    # 采购字段
+    purchase_qty: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    purchase_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+    # 补货导出状态
+    restock_export_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending"
+    )
+    restock_exported_snapshot_id: Mapped[int | None] = mapped_column(
         BigInteger,
         ForeignKey("suggestion_snapshot.id", ondelete="SET NULL"),
         nullable=True,
     )
-    exported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    restock_exported_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    # 采购导出状态
+    procurement_export_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending"
+    )
+    procurement_exported_snapshot_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("suggestion_snapshot.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    procurement_exported_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

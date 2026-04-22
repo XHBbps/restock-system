@@ -184,9 +184,10 @@ docker compose -f deploy/docker-compose.yml exec db psql -U postgres -d replenis
 
 3. **全局配置检查**
    ```sql
-   SELECT scheduler_enabled, sync_interval_minutes, calc_enabled, calc_cron 
+   SELECT scheduler_enabled, sync_interval_minutes, suggestion_generation_enabled, calc_cron
    FROM global_config WHERE id = 1;
    ```
+   （`calc_enabled` 已在 Plan A 删除，由 `suggestion_generation_enabled` 负责控制是否产出建议）
 
 4. **cron 表达式**：如果 `calc_cron` 是自定义，验证格式
    - 支持 5 字段（分 时 日 月 周）和 APScheduler 扩展语法
@@ -500,6 +501,43 @@ docker compose -f deploy/docker-compose.yml restart backend
 - 生产环境直接手动 SQL 修改数据（影响快照、审计）
 - 跳过备份执行迁移
 - 在 worker 运行时手动修改 `task_run` 表状态（除非已确认 worker 已停）
+
+### 5.1 回滚 SOP（带迁移的发布失败时）
+
+`deploy.sh` 失败会自动触发 `rollback.sh` 回退应用代码 + 重启服务，但**数据库 schema 不会自动回滚**。按下列顺序处理（对照 P1-E5 审计结论）：
+
+1. **停业务流量**（确保 worker / scheduler 不在写入过期 schema 的表）
+   ```bash
+   docker compose -f deploy/docker-compose.yml stop backend worker scheduler
+   ```
+2. **判定是否已跑迁移**
+   ```bash
+   docker compose -f deploy/docker-compose.yml exec db \
+     psql -U postgres -d replenish -c "SELECT version_num FROM alembic_version;"
+   ```
+   若 `version_num` 已前进到本次发布的新迁移 → 进入第 3 步（需要 restore）
+   若仍停在上一个 revision → 跳到第 5 步（仅回退代码即可）
+3. **恢复最近备份**（覆盖当前数据库）
+   ```bash
+   ls -t deploy/data/backups/*.sql.gz | head -3      # 选最近的可信备份
+   bash deploy/scripts/restore_db.sh deploy/data/backups/replenish_<ts>.sql.gz
+   ```
+4. **确认 schema 回到目标版本**
+   ```bash
+   docker compose -f deploy/docker-compose.yml exec db \
+     psql -U postgres -d replenish -c "SELECT version_num FROM alembic_version;"
+   ```
+   应为上一版本的 revision。
+5. **回退代码 + 重启**（如 `rollback.sh` 没成功，手动做）
+   ```bash
+   bash deploy/scripts/rollback.sh <previous-git-sha>
+   ```
+6. **健康检查 + 放回流量**
+   ```bash
+   curl -fsS https://<domain>/readyz
+   ```
+
+**何时用 restore_db.sh**：只要本次发布**带迁移**且**已经跑过**，就必须 restore 后再回退代码（否则旧代码对新 schema 的字段引用会炸）。
 
 ---
 

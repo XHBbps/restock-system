@@ -28,7 +28,8 @@ cd "$REPO_DIR"
 git checkout -B "rollback-$(date +%Y%m%d-%H%M%S)" "$PREV_SHA"
 
 echo "[rollback] database schema is not downgraded automatically"
-echo "[rollback] restore the latest database backup before bringing services back if migrations already ran"
+echo "[rollback] if migrations already ran: restore the latest backup with deploy/scripts/restore_db.sh BEFORE bringing services back"
+echo "[rollback] SOP details: docs/runbook.md §回滚 SOP"
 
 echo "[rollback] rebuilding images"
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" build backend frontend

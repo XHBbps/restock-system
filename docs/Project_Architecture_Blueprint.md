@@ -101,24 +101,24 @@
 
 ### 3.1 补货计算引擎（app/engine）
 
-**职责**：将同步下来的数据（订单、库存、商品、仓库）转换为可执行的采购建议单。
+**职责**：从同步后的订单、库存、在途、商品和仓库数据中，计算一张 `draft` 建议单，同时产出采购视角（SKU 级采购数量/日期）与补货视角（SKU × 国家 × 仓库补货量）。引擎 step 只做纯数据库读取与计算，不调用赛狐 API。
 
-**流水线（runner.py）**：
+**6 步流水线**：
 
-| Step | 模块 | 输入 | 输出 | 说明 |
+| Step | 文件 | 输入 | 输出 | 规则 |
 |---|---|---|---|---|
-| 1 | `step1_velocity.py` | 近 30 天订单 | `velocity[sku][country]` | 加权日均销量：7日×0.5 + 14日×0.3 + 30日×0.2；若 `global_config.restock_regions` 非空，则仅统计这些国家的订单 |
-| 2 | `step2_sale_days.py` | velocity + 海外库存 + 在途 | `sale_days[sku][country]`, `inventory[sku][country]` | 可售天数 = 库存总和 / velocity；`load_in_transit` 聚合已同步的赛狐出库记录（`in_transit_record.is_in_transit=true` 的 `in_transit_item`）按 `(commodity_sku, target_country)` 汇总 `goods` 字段——Plan A 重构后不再依赖建议单推送状态 |
-| 3 | `step3_country_qty.py` | velocity + inventory + target_days | `country_qty[sku][country]` | `max(target × v − 库存, 0)`，纯函数无 DB |
-| 4 | `step4_total.py` | country_qty + velocity + 国内库存 + buffer_days | `total_qty[sku]` | 汇总各国补货量 + 缓冲天数 − 国内库存 |
-| 5 | `step5_warehouse_split.py` | country_qty + 订单邮编 + 邮编规则 + 国家仓库映射 | `warehouse_breakdown[country][wh_id]` | 按邮编规则分配到具体仓库，无订单时均分；若配置了 `global_config.restock_regions`，仅消费这些国家的订单明细作为分仓依据；**2026-04-11 起**同优先级 tied 均分：`match_warehouses()` 返回首批同 priority 命中列表，qty 按 `1/N` 均分（先过滤不可用仓再定 N） |
-| 6 | `step6_timing.py` | sale_days + lead_time | `urgent` | 不再计算采购日期；任一正补货国家 `sale_days <= lead_time_days` 即判定为紧急 |
+| 1 | `step1_velocity.py` | 近 30 天订单 | `velocity[sku][country]` | 加权日均销量：7日×0.5 + 14日×0.3 + 30日×0.2；若 `global_config.restock_regions` 非空，仅这些国家参与补货国家维度计算 |
+| 2 | `step2_sale_days.py` | 库存 + 在途 + velocity | `sale_days[sku][country]` | `(available + in_transit) / velocity`；velocity≤0 跳过 |
+| 3 | `step3_country_qty.py` | sale_days + target_days | `country_qty[sku][country]` | `max(0, ceil((target_days - sale_days) × velocity))` |
+| 4 | `step4_total.py` | country_qty + velocity + 国内库存 + buffer_days + safety_stock_days | `purchase_qty[sku]` | `Σcountry_qty + Σvelocity × buffer_days − (local.available + local.reserved) + Σvelocity × safety_stock_days`；`Σvelocity` 覆盖所有国家，不受 `restock_regions` 限制 |
+| 5 | `step5_warehouse_split.py` | country_qty + 订单邮编 + 邮编规则 + 国家仓库映射 | `warehouse_breakdown[country][wh_id]` | 按邮编规则分配到具体仓库，无订单时均分；若配置 `restock_regions`，仅消费这些国家的订单明细作为分仓依据；同优先级 tied 均分 |
+| 6 | `step6_timing.py` | sale_days + lead_time + purchase_qty | `urgent` + `purchase_date` | `urgent` 仍按任一正补货国家 `sale_days <= lead_time_days`；`purchase_date = today + min(sale_days by country) − 2 × lead_time_days`，`purchase_qty<=0` 或无 sale_days 时为空 |
 
-**并发控制**：通过 `pg_advisory_xact_lock(7429001)` 事务级咨询锁（`runner.py:58-61`），防止并发引擎覆盖彼此。
+**运行上下文**：`EngineContext` 包含 `target_days`、`buffer_days`、`lead_time_days`、`safety_stock_days`、`restock_regions` 和 `eu_countries`。`global_config.eu_countries` 由同步层消费，`global_config_snapshot` 会冻结这些全局参数以便追溯。
 
-**持久化**：一次完整计算作为原子事务 → `_archive_active()` 将旧的 `draft` 建议归档 → 新建 Suggestion + SuggestionItem[] 批量 INSERT。`suggestion.status` 收缩为 `draft / archived / error` 枚举；条目不再携带推送字段，推送链路已被 §3.6 的导出快照子系统取代。若 `global_config.suggestion_generation_enabled=false`，`run_engine` 会在加载配置后直接返回 `None`（scheduler / 手动触发均受控）。
+**持久化**：一次完整计算在事务内执行，受 `pg_advisory_xact_lock(7429001)` 保护；runner 会归档旧 `draft`，写入 `suggestion` / `suggestion_item`，过滤采购量和补货量都为 0 的 SKU，并统计 `procurement_item_count`、`restock_item_count`。若所有 SKU 都为空则返回 `None`；成功生成非空建议单后 `calc_engine_job` 将 `global_config.suggestion_generation_enabled` 自动翻 OFF。
 
-**快照特性**：`velocity_snapshot`、`sale_days_snapshot`、`global_config_snapshot` 均存入 JSONB 字段，支持历史追溯；其中 `global_config_snapshot` 会记录生成时的 `restock_regions`，用于说明当次建议有哪些国家订单参与了计算。
+**快照字段**：`velocity_snapshot`、`sale_days_snapshot`、`allocation_snapshot`、`global_config_snapshot` 均以 JSONB 保存；`suggestion_item.purchase_qty` / `purchase_date` 用于采购视图，`country_breakdown` / `warehouse_breakdown` 用于补货视图。
 
 ### 3.2 数据同步层（app/sync）
 
@@ -265,59 +265,38 @@ _ENDPOINT_RATE_OVERRIDES = {
 
 ### 3.6 导出快照子系统（app/services + app/api/snapshot.py）
 
-**定位**：取代原"推送采购单到赛狐"链路，改为"建议单 → 用户勾选条目 → 生成不可变 Snapshot + Excel 文件 → 用户自行下载并线下落单"的工作流。所有与 `pushback/` / `saihu/endpoints/purchase_create.py` / `core/commodity_id.py` / `push_saihu` 任务 / `POST /api/suggestions/{id}/push` 相关的代码都已物理删除。
+**定位**：取代原“推送采购单到赛狐”链路，改为“建议单 → 用户勾选采购/补货条目 → 生成不可变 Snapshot + Excel 文件 → 用户下载”的工作流。采购与补货从 API、快照版本、条目导出状态和 Excel 格式上完全拆分。
 
-**三张新表**：
+**核心表**：
 
-| 表 | 职责 | 关键约束 |
+| 表 | 职责 | 关键字段 |
 |---|---|---|
-| `suggestion_snapshot` | 一次导出即一个 snapshot；冻结 `exported_by`、`exported_from_ip`、`global_config_snapshot`、`item_count`、`generation_status`（`generating` / `ready` / `failed`）、`file_path`、`file_size_bytes`、`download_count` | FK `suggestion_id`，`UNIQUE(suggestion_id, version)` |
-| `suggestion_snapshot_item` | snapshot 冻结的条目副本：`total_qty`、`country_breakdown`、`warehouse_breakdown`、`velocity_snapshot`、`sale_days_snapshot`、`commodity_name`、`main_image_url` | FK `snapshot_id` ON DELETE CASCADE |
-| `excel_export_log` | 每次 `generate` / `download` 动作留痕：操作人、来源 IP、user_agent | FK `snapshot_id` |
+| `suggestion_snapshot` | 一次导出即一个 snapshot；冻结 `snapshot_type`、`version`、`exported_by`、`exported_from_ip`、`global_config_snapshot`、`item_count`、`generation_status`、`file_path`、`file_size_bytes`、`download_count` | FK `suggestion_id`，`UNIQUE(suggestion_id, snapshot_type, version)` |
+| `suggestion_snapshot_item` | snapshot 冻结的条目副本；采购快照保存 `purchase_qty` / `purchase_date`，补货快照保存 `total_qty` / `country_breakdown` / `warehouse_breakdown` | FK `snapshot_id` ON DELETE CASCADE |
+| `suggestion_item` | 当前 draft 可编辑条目；采购导出状态与补货导出状态独立 | `procurement_export_status` / `procurement_exported_snapshot_id` / `procurement_exported_at`，`restock_*` 同构 |
 
-**状态机变化**（对比旧设计）：
+**API 端点**：
 
-- `suggestion.status`：`draft / partial / pushed / archived / error` → `draft / archived / error`
-- `suggestion_item`：删除 `push_status` / `pushed_at` / `saihu_po_number` / `push_blocker` / `commodity_id_resolved`；新增 `export_status`（`pending` / `exported`）+ `exported_snapshot_id` + `exported_at`
-- `suggestion` 新增 `archived_trigger`（`engine` / `admin_toggle` / ...）/ `archived_by` / `archived_at`，支持溯源"谁让这张 draft 消失"
-- `global_config` 新增 `suggestion_generation_enabled`（生成开关）+ `generation_toggle_updated_by` / `generation_toggle_updated_at`
+| 端点 | 行为 |
+|---|---|
+| `POST /api/suggestions/{id}/snapshots/procurement` | 创建采购快照；选中条目必须存在 `purchase_qty > 0` |
+| `POST /api/suggestions/{id}/snapshots/restock` | 创建补货快照；选中条目必须存在 `sum(country_breakdown) > 0` |
+| `POST /api/suggestions/{id}/snapshots` | 旧端点保留为 410 Gone，避免调用方误用旧混合导出 |
+| `GET /api/suggestions/{id}/snapshots?type=procurement|restock` | 按类型过滤快照列表；不传 type 返回两类 |
+| `GET /api/snapshots/{snapshot_id}` | 读取快照详情与冻结条目 |
+| `GET /api/snapshots/{snapshot_id}/download` | 下载 Excel，同时增加下载计数 |
 
-**导出流程**（`POST /api/suggestions/{id}/snapshots`）：
+**导出流程**：
 
-```
-1. `SELECT ... FOR UPDATE` 锁定目标 `suggestion`、导出条目和 `global_config(id=1)`
-2. 校验 suggestion.status == 'draft'
-3. 校验 item_ids 属于该建议且未被其它 snapshot 导出
-4. 锁内计算 `SELECT max(version) + 1` 作为新 version
-5. INSERT suggestion_snapshot（generation_status='generating'）
-6. 拉取 product_listing 名称/主图 + warehouse 名字映射
-7. 批量 INSERT suggestion_snapshot_item + 冻结 context
-8. `services/excel_export.build_excel_workbook(ctx)` → 落盘到 `deploy/data/exports/{yyyy}/{mm}/<filename>`
-9. 文件成功落盘后，才 UPDATE suggestion_item SET `export_status='exported'`, `exported_snapshot_id=...`, `exported_at=now_beijing()`
-10. UPDATE suggestion_snapshot SET `generation_status='ready'`, `file_path`, `file_size_bytes`
-11. 首次导出时把 `global_config.suggestion_generation_enabled` 翻 OFF（强制用户先回顾再开新周期）
-12. INSERT `excel_export_log`（`action='generate'`）
+1. `SELECT ... FOR UPDATE` 锁定建议单、导出条目和 `global_config(id=1)`。
+2. 校验建议单仍为 `draft`，校验条目属于该建议单，按 `snapshot_type` 校验采购量或补货量。
+3. 按 `(suggestion_id, snapshot_type)` 独立计算下一版 `version`。
+4. INSERT `suggestion_snapshot(generation_status='generating')` 与 `suggestion_snapshot_item`。
+5. `excel_export.py` 根据类型生成不同工作簿：采购为“主数据 + 采购明细”，补货为“主数据 + SKU汇总 + SKU×国家 + SKU×国家×仓库”。
+6. 文件成功落盘后，才更新对应条目的 `{type}_export_status='exported'`、`{type}_exported_snapshot_id`、`{type}_exported_at`。
+7. 更新 `suggestion_snapshot.generation_status='ready'`、`file_path`、`file_size_bytes`。
 
-**失败补偿**：若 Excel 生成或文件落盘失败，则 snapshot 记为 `generation_status='failed'`，但不修改 `suggestion_item.export_status`，业务人员可以直接重试导出。
-```
-
-**生成开关**（`GET/PATCH /api/config/generation-toggle`）：
-
-- `PATCH {enabled: true}`：翻 ON，同时将全部 `status='draft'` 的建议单批量归档（`archived_trigger='admin_toggle'`、`archived_by=user.id`、`archived_at=now`）；隐含语义是"开新周期 → 清空当前 draft"
-- `PATCH {enabled: false}`：翻 OFF，不改动建议单；后续 `run_engine` / 定时 calc 直接短路
-- 导出 snapshot 成功后会自动翻 OFF（见上面第 10 步）
-
-**Excel 文件**：`services/excel_export.build_excel_workbook(ctx)` 生成四 Sheet 工作簿（汇总 / 明细 / 国家 / 仓库分仓），文件名由 `build_filename(suggestion_id, version, exported_at_compact)` 固化；存储根为 `settings.export_storage_dir`（默认 `deploy/data/exports/`），按 `{yyyy}/{mm}/` 归档。`GET /api/snapshots/{id}/download` 走 `FileResponse`，并原子递增 `download_count` + 写 `excel_export_log`（action='download'）。
-
-**权限码**（`app/core/permissions.py`）：
-
-- `restock:export` — 创建 snapshot / 下载文件
-- `restock:new_cycle` — 翻生成开关（含"翻 ON 时清空 draft"的隐含语义）
-- `config:view` — 读取生成开关等全局配置（`GET /api/config/*`）
-
-`superadmin` 角色自动继承全部权限。`业务人员` 角色（seed role `id=3`）除既有的 `restock:operate` / `history:delete` 等基础补货权限外，通过迁移 `20260419_0000_grant_export_and_config_view_to_business_role` 补齐 `restock:export` 与 `config:view`，因此可在建议单详情页完成"勾选条目 → 导出 Excel → 下载"闭环，并在列表页看到生成开关只读状态；翻生成开关仍由 `restock:new_cycle` 单独控制（当前仅 `superadmin` 默认持有）。
-
----
+**失败补偿**：若 Excel 生成或文件落盘失败，则 snapshot 记为 `failed`，不修改任何条目的采购/补货导出状态，用户可直接重试同类型导出。
 
 ## 4. 前端核心组件
 
@@ -371,34 +350,16 @@ src/
 
 ### 4.4 API 客户端
 
-**`src/api/client.ts`**：
-```typescript
-const client = axios.create({ baseURL: '/', timeout: 30000 })
+`frontend/src/api/*` 按后端资源拆分：
 
-// 请求拦截器：注入 Bearer token
-client.interceptors.request.use((config) => {
-  const token = useAuthStore().token
-  if (token) config.headers.Authorization = `Bearer ${token}`
-  return config
-})
+| 文件 | 职责 |
+|---|---|
+| `suggestion.ts` | 建议单列表、当前建议、详情、条目 PATCH、删除；`Suggestion` 携带 `procurement_item_count` / `restock_item_count` / `procurement_snapshot_count` / `restock_snapshot_count`，`SuggestionItem` 携带 `purchase_qty` / `purchase_date` 与两组导出状态 |
+| `snapshot.ts` | `createProcurementSnapshot()`、`createRestockSnapshot()`、`listSnapshots(id, type?)`、详情与下载；`SnapshotOut.snapshot_type` 为 `procurement` / `restock` |
+| `config.ts` | `GlobalConfig` 暴露 `safety_stock_days`、`eu_countries`、`restock_regions` 等现行字段；`GenerationToggle` 暴露 `can_enable` / `can_enable_reason` |
+| `engine.ts` / `task.ts` | 手动触发 `POST /api/engine/run` 并轮询 TaskRun 进度 |
 
-// 响应拦截器：401 自动清除 token + 跳转登录
-client.interceptors.response.use(undefined, (error) => {
-  if (error.response?.status === 401) {
-    useAuthStore().clearToken()
-    router.push('/login')
-  }
-  return Promise.reject(error)
-})
-```
-
-**按领域拆分**：`auth.ts` / `data.ts` / `suggestion.ts` / `snapshot.ts` / `config.ts` / `monitor.ts` / `sync.ts` / `task.ts` / `dashboard.ts`。每个文件导出类型定义和异步函数。
-
-`suggestion.ts` 当前负责建议单相关读写：列表查询（返回包含 `snapshot_count`）、详情读取、条目编辑，以及历史记录页使用的 `DELETE /api/suggestions/{id}` 删除接口；snapshot 相关的创建 / 列表 / 详情 / 下载由独立的 `snapshot.ts` 消费（§3.6）。TS 侧 `Suggestion.status` 枚举收敛为 `'draft' | 'archived' | 'error'`，`Suggestion` 携带 `snapshot_count: number`；`SuggestionItem` 去除全部推送字段（`push_status` / `push_blocker` / `push_error` / `push_attempt_count` / `pushed_at` / `saihu_po_number`），新增 `export_status: 'pending' | 'exported'`、`exported_snapshot_id: number | null`、`exported_at: string | null`；`utils/status.ts` 的 `suggestionStatusMap` 同步收缩到 3 项，`suggestionPushStatusMap` / `getSuggestionPushStatusMeta` 等死代码已删除。
-
-`snapshot.ts`（对接 `app/api/snapshot.py`）提供 `createSnapshot` / `listSnapshots`（返回按 `version` 降序）/ `getSnapshot` / `downloadSnapshotBlob`（解析 `Content-Disposition` 拿文件名）等函数；`utils/download.ts` 提供 `triggerBlobDownload(blob, filename)` 浏览器落盘工具，被 `SuggestionDetailView` 的导出按钮与"历史快照区下载"共享复用。
-
-`dashboard.ts` 当前消费 `GET /api/metrics/dashboard` 和 `POST /api/metrics/dashboard/refresh`。信息总览页默认优先读取 `dashboard_snapshot` 缓存，并在页面头部展示快照状态与同步时间；当缓存缺失、读到缺少新字段的旧快照，或 payload 结构已损坏无法通过 Pydantic 校验时，后端统一降级返回 `snapshot_status="missing"`（或存在活跃任务时为 `refreshing`），不会自动入队刷新，前端仅在具备 `home:refresh` 时展示 `TaskProgress` 轮询与“刷新快照”按钮。缓存 payload 由 `build_dashboard_payload()` 统一生成，其中首行卡片使用 `restock_sku_count`、`no_restock_sku_count`、`risk_country_count` 展示“需补货SKU / 无需补货SKU / 覆盖国家”；右侧当前建议进度改用 `exported_count` 与 `suggestion_snapshot_count`；左侧“各国缺货风险分布”和“急需补货SKU”继续基于 SKU+国家维度的实时 `sale_days` 计算结果；右侧国家分布继续汇总当前建议单全部条目的 `country_breakdown`。
+所有 API 客户端继续通过 `api/client.ts` 注入 Bearer token，并复用统一错误处理与 401 跳转逻辑。
 
 ### 4.5 数据流模式
 
@@ -456,13 +417,15 @@ async function reload() {
 
 ### 4.6 路由与鉴权
 
-**`src/config/appPages.ts` + `src/router/index.ts` + `src/config/navigation.ts`**：
-- `appPages` 作为页面真理源，统一维护 path / title / permission / icon / lazy component
-- router 与 navigation 都从 `appPages` 派生，特殊页（登录、403、404、建议详情、legacy redirect）继续在 `router/index.ts` 单独声明
-- 所有业务路由嵌套在 `AppLayout` 下
-- `meta.public: true` 允许未登录访问（仅 `/login`）
-- `authGuard` 在 `beforeEach` 中检查，失败时跳转 `/login?redirect=<origin>`
-- 支持 legacy redirect（旧路径自动重定向到新路径）
+路由统一定义在 `frontend/src/router/index.ts`，并通过 `RouteMeta.permission` 做前端访问控制。核心补货路由已改为嵌套 Tab：
+
+| 父路由 | 默认重定向 | 子路由 |
+|---|---|---|
+| `/restock/current` | `/restock/current/procurement` | `procurement` 当前采购建议，`restock` 当前补货建议 |
+| `/restock/suggestions/:id` | `/restock/suggestions/:id/procurement` | `procurement` 建议单采购详情，`restock` 建议单补货详情 |
+| `/restock/history` | `/restock/history/procurement` | `procurement` 采购快照历史，`restock` 补货快照历史 |
+
+`SuggestionTabBar` 根据当前路径切换子路由；父容器负责加载建议单、生成开关、任务进度和公共 header，子视图只负责采购/补货数据展示与导出动作。`authGuard` 在 `beforeEach` 中检查登录态与权限，失败时跳转 `/login?redirect=<origin>` 或 `/403`。
 
 ### 4.7 共享组件模式
 
@@ -498,132 +461,95 @@ async function reload() {
 
 ## 5. 数据流程示例
 
-### 场景 1：用户触发补货计算
+### 场景 1：用户触发采补计算
 
-```
-用户点击"生成补货建议"
-  │
-  ▼
-前端 POST /api/engine/run
-  │
-  ▼
+```text
+用户点击“生成采补建议”
+  ↓
+POST /api/engine/run
+  ↓
 api/suggestion.py: enqueue_task("calc_engine", "manual")
-  │
-  ▼
+  ↓
 task_run 表 INSERT status=pending, dedupe_key="calc_engine"
-  │
-  ▼ （2 秒内）
-Worker 轮询 → 抢占 → status=running, 启动 heartbeat
-  │
-  ▼
-runner.run_engine(ctx, "manual")
-  │
-  ├─▶ 申请 advisory lock 7429001
-  ├─▶ 读 GlobalConfig、SkuConfig（启用列表）
-  ├─▶ 若 suggestion_generation_enabled=false → progress('完成')，直接返回 None
-  ├─▶ Step 1: run_step1() → velocity
-  ├─▶ Step 2: run_step2() → sale_days, inventory（含 in_transit 来自赛狐同步的 InTransitRecord）
-  ├─▶ Step 3: compute_country_qty() → country_qty
-  ├─▶ Step 4: compute_total() → total_qty（按 SKU 循环）
-  ├─▶ Step 5: explain_country_qty_split() → warehouse_breakdown
-  ├─▶ Step 6: compute_urgency_for_sku() → urgent
-  ├─▶ _archive_active()：旧 `status='draft'` 建议归档（在新 draft 写入前）
-  └─▶ INSERT Suggestion + SuggestionItem[]（批量）
-  │
-  ▼
-Worker 标记 status=success, finished_at
-  │
-  ▼
-前端 TaskProgress 轮询到 terminal → 触发 onDone → 刷新建议单列表
+  ↓
+worker 抢占任务 → calc_engine_job
+  ↓
+run_engine 读取 global_config：target_days / buffer_days / lead_time_days / safety_stock_days / restock_regions / eu_countries
+  ↓
+pg_advisory_xact_lock(7429001)
+  ↓
+6 步流水线：velocity → sale_days → country_qty → purchase_qty → warehouse_split → urgent/purchase_date
+  ↓
+INSERT suggestion + suggestion_item[]，写入采购/补货 item_count 和配置快照
+  ↓
+成功生成非空建议单后 suggestion_generation_enabled=false
+  ↓
+前端 TaskProgress 轮询成功 → 刷新采购/补货 Tab
 ```
 
-### 场景 2：Excel 快照导出（取代旧版"推送赛狐"链路）
+### 场景 2：采购 / 补货快照独立导出
 
-```
-用户在建议详情页勾选条目，点击"导出 Excel"
-  │
-  ▼
-POST /api/suggestions/{id}/snapshots, body={ item_ids: [...], note? }
-  │
-  ▼
-api/snapshot.py: create_snapshot()
-  │
-  ├─▶ 校验建议 status == 'draft'、item_ids 归属且未导出
-  ├─▶ SELECT max(version) + 1
-  ├─▶ INSERT suggestion_snapshot（generation_status='generating'）
-  ├─▶ 拉 product_listing 名称/主图 + warehouse 名字
-  ├─▶ 批量 INSERT suggestion_snapshot_item + 组装 Excel context
-  ├─▶ UPDATE suggestion_item SET export_status='exported', exported_snapshot_id=..., exported_at=now_beijing()
-  ├─▶ services/excel_export.build_excel_workbook(ctx) → 落盘到 deploy/data/exports/{yyyy}/{mm}/<file>
-  ├─▶ UPDATE suggestion_snapshot SET generation_status='ready' / file_path / file_size_bytes
-  ├─▶ 首次导出连带 global_config.suggestion_generation_enabled=false（强制人工回顾）
-  └─▶ INSERT excel_export_log(action='generate')
-  │
-  ▼
-响应 SnapshotOut → 前端刷新列表 + 提供下载链接
-
-GET /api/snapshots/{id}/download
-  │
-  ▼
-api/snapshot.py: download_snapshot()
-  │
-  ├─▶ 校验 generation_status='ready'、文件存在
-  ├─▶ UPDATE suggestion_snapshot SET download_count += 1, last_downloaded_at=now_beijing()
-  ├─▶ INSERT excel_export_log(action='download')
-  └─▶ FileResponse 返回 Excel
+```text
+用户在采购或补货 Tab 勾选条目
+  ↓
+采购：POST /api/suggestions/{id}/snapshots/procurement
+补货：POST /api/suggestions/{id}/snapshots/restock
+  ↓
+锁定 suggestion + item + global_config
+  ↓
+按 snapshot_type 校验条目与独立递增 version
+  ↓
+INSERT suggestion_snapshot(snapshot_type, generation_status='generating')
+  ↓
+INSERT suggestion_snapshot_item[]，冻结采购字段或补货拆分字段
+  ↓
+生成采购/补货专属 Excel 工作簿并落盘
+  ↓
+UPDATE suggestion_item SET procurement_* 或 restock_* 导出状态
+  ↓
+GET /api/snapshots/{snapshot_id}/download 下载文件
 ```
 
-### 场景 3：开新周期（翻生成开关并清空 draft）
+### 场景 3：开新周期（翻生成开关并归档 draft）
 
+```text
+用户在全局参数页点击开启生成开关
+  ↓
+GET /api/config/generation-toggle 返回 can_enable / can_enable_reason
+  ↓
+PATCH /api/config/generation-toggle { enabled: true }
+  ↓
+后端事务内再次校验：若采购/补货 item_count>0，则对应类型必须已有至少 1 个 snapshot
+  ↓
+UPDATE suggestion SET status='archived', archived_trigger='admin_toggle', archived_by=<user>, archived_at=now
+  ↓
+UPDATE global_config SET suggestion_generation_enabled=true, generation_toggle_updated_by/at=...
+  ↓
+下一次手动 calc_engine 生成新 draft，并在成功后再次自动翻 OFF
 ```
-用户翻 global_config.suggestion_generation_enabled ON → PATCH /api/config/generation-toggle
-  │
-  ▼
-api/config.py: patch_generation_toggle()
-  │
-  ├─▶ UPDATE global_config SET suggestion_generation_enabled=true, 
-  │     generation_toggle_updated_by=user.id, generation_toggle_updated_at=now_beijing()
-  └─▶ UPDATE suggestion SET status='archived', archived_trigger='admin_toggle', 
-         archived_by=user.id, archived_at=now_beijing() WHERE status='draft'
-  │
-  ▼
-下一次定时 / 手动 calc_engine → run_engine 读取 toggle=true → 正常走 6 步流水线 → 
-  _archive_active() 此时已是空操作 → 生成全新 draft
-```
-
-> 注：在途量（`load_in_transit`）完全来自赛狐同步的 `InTransitRecord`（`is_in_transit=true`）。因此"刚导出的 snapshot 会不会被下次引擎当作库存"的问题由赛狐出库同步节奏决定，而不再依赖建议单自身字段。
-
----
 
 ## 6. 数据库设计
 
 ### 6.1 核心表
 
-| 表 | 职责 | 关键约束 |
+| 表 | 职责 | 关键约束 / 字段 |
 |---|---|---|
-| `global_config` | 全局配置单行表；包含 `target_days`、`buffer_days`、`lead_time_days`、`calc_cron`、`scheduler_enabled`、`restock_regions`、`suggestion_generation_enabled`（生成开关）+ `generation_toggle_updated_by / generation_toggle_updated_at` 等参数，其中 `restock_regions=[]` 表示全部国家参与补货计算，且保存时要求 `target_days >= lead_time_days` | `CHECK id=1` |
-| `sku_config` | SKU 级覆盖配置（enabled, lead_time_days）；商品同步/初始化会为全部 SKU 建立配置，但仅 active + matched 的 SKU 自动启用 | PK `commodity_sku` |
-| `warehouse` | 仓库主数据（type, country, replenish_site） | `type IN (-1,0,1,2,3)` |
-| `shop` | 店铺（同步自赛狐） | — |
-| `product_listing` | 在线商品列表（店铺 × 站点粒度） | 索引 `(commodity_sku, marketplace_id)` |
-| `order_header` | 订单头 | `purchase_date DESC` 索引 |
-| `order_item` | 订单行（含 quantity_shipped, refund_num） | — |
-| `order_detail` | 订单详情（含地址） | — |
-| `order_detail_fetch_log` | 详情拉取日志（自动同步防重复拉取；人工补拉可绕过） | — |
-| `inventory_snapshot_latest` | 当前库存快照 | 唯一键 `(commodity_sku, warehouse_id)` |
-| `in_transit_record` / `in_transit_item` | 出库记录（赛狐同步）；包含 `warehouseId`、`updateTime`、`type/typeName`、`commodityId`、`perPurchase` 等展示字段 | — |
-| `zipcode_rule` | 邮编 → 仓库分配规则 | `operator_enum` CHECK 约束；`operator String(10)`，`compare_value String(200)` |
-| `suggestion` | 补货建议单头 | `status IN ('draft','archived','error')`；`archived_trigger / archived_by / archived_at` 记录归档来源 |
-| `suggestion_item` | 补货建议条目 | `export_status IN ('pending','exported')`，`exported_snapshot_id` FK → `suggestion_snapshot`；urgent 部分索引 |
-| `suggestion_snapshot` | 导出快照头（§3.6） | `UNIQUE(suggestion_id, version)`；`generation_status IN ('generating','ready','failed')` |
-| `suggestion_snapshot_item` | 导出快照条目副本 | FK `snapshot_id` ON DELETE CASCADE |
-| `excel_export_log` | 导出 / 下载审计日志 | FK `snapshot_id`；`action IN ('generate','download')` |
-| `dashboard_snapshot` | 信息总览单例快照缓存 | PK `id=1`，保存 payload、刷新状态、时间戳和最近错误 |
-| `task_run` | 任务队列 + 执行日志 | 部分唯一索引 `dedupe_key WHERE status IN ('pending','running')` |
-| `sync_state` | 同步任务状态 | — |
-| `api_call_log` | 赛狐 API 调用日志 | — |
-| `access_token_cache` | 赛狐 token 缓存 | PK id=1 |
-| `login_attempt` | 登录尝试日志（防暴力） | — |
+| `global_config` | 全局配置单行表；包含 `target_days`、`buffer_days`、`lead_time_days`、`safety_stock_days`、`restock_regions`、`eu_countries`、`suggestion_generation_enabled`、`generation_toggle_updated_by / generation_toggle_updated_at`、同步与登录配置 | `CHECK id=1`；`safety_stock_days` 范围 1–90；`restock_regions=[]` 表示全部国家参与补货计算 |
+| `sku_config` | SKU 启用 / 禁用与业务参数 | `commodity_sku` 唯一 |
+| `warehouse` | 海外仓/国内仓基础资料 | `country` 可为空；变更仓库国家会级联更新库存最新快照口径 |
+| `order_header` / `order_item` | 订单头与订单明细 | `order_header.country_code` 保存映射后国家，`original_country_code` 保存 EU 合并前国家；按 `shop_id + purchase_date`、`order_status + purchase_date` 建索引 |
+| `product_listing` | 赛狐在线产品信息 | `marketplace_id` 保存映射后 2 字符国家码或 `EU`，`original_marketplace_id` 保存 EU 合并前国家 |
+| `inventory_snapshot_latest` | SKU × 仓库最新库存 | `country` 保存映射后国家，`original_country` 保存 EU 合并前国家；`warehouse_id + commodity_sku` 唯一 |
+| `in_transit_record` / `in_transit_item` | 出库 / 在途记录与明细 | `target_country` 保存映射后国家，`original_target_country` 保存 EU 合并前国家 |
+| `suggestion` | 建议单头 | `status IN ('draft','archived','error')`；`procurement_item_count` / `restock_item_count` 分别统计采购与补货需求 SKU 数 |
+| `suggestion_item` | 当前建议条目 | `purchase_qty` / `purchase_date` 供采购视图；`country_breakdown` / `warehouse_breakdown` 供补货视图；采购与补货各自拥有 `*_export_status`、`*_exported_snapshot_id`、`*_exported_at` |
+| `suggestion_snapshot` | 导出快照头（§3.6） | `snapshot_type IN ('procurement','restock')`；`UNIQUE(suggestion_id, snapshot_type, version)`；`generation_status IN ('generating','ready','failed')` |
+| `suggestion_snapshot_item` | 导出快照条目副本 | FK `snapshot_id` ON DELETE CASCADE；冻结 `purchase_qty` / `purchase_date` 与补货拆分 JSONB |
+| `excel_export_log` | Excel 下载审计 | 记录 snapshot、操作者、IP、User-Agent、文件大小等 |
+| `task_run` | 后台任务队列 | `dedupe_key + active status` partial unique index |
+| `dashboard_snapshot` | 信息总览缓存快照 | 单例缓存 dashboard payload、刷新状态与错误信息 |
+| `api_call_log` | 赛狐 API 调用日志 | 按时间范围查询 |
+| `login_attempt` | 登录尝试与锁定状态 | `source_key` PK |
 
 #### `zipcode_rule`（邮编→仓库规则）
 
@@ -850,8 +776,8 @@ PROCESS_ENABLE_SCHEDULER=true
 - **不要**在引擎 step 中调用外部 API，step 应是纯 DB/计算
 - **不要**在 sync job 中做业务计算，sync 只做"抓取 → 落库"
 - **不要**绕过 TaskRun 直接在请求线程中跑长任务
-- **不要**在 `suggestion_item.export_status='exported'` 后修改其 `country_breakdown` / `warehouse_breakdown`（对应 snapshot 是不可变的历史记录）
-- **不要**跳过 `global_config.suggestion_generation_enabled` 开关直接触发 `run_engine`（schedules / 手动 calc 都已接入该短路，保持一致入口）
+- **不要**在 `suggestion_item.procurement_export_status='exported'` 后修改已导出的采购字段，或在 `restock_export_status='exported'` 后修改已导出的补货拆分字段（对应 snapshot 是不可变的历史记录）
+- **不要**跳过 `global_config.suggestion_generation_enabled` 开关直接触发 `run_engine`；手动 calc 已接入该短路，且成功生成后会自动翻 OFF
 - **不要**在前端 store 中保存业务数据（仅 auth/sidebar/task），业务数据局部在 view 中
 
 ---
@@ -993,4 +919,19 @@ VITE_API_PROXY_TARGET=http://localhost:8000
 
 ---
 
+## 变更记录
+
+| 日期 | 变更 | 相关 PROGRESS 章节 |
+|---|---|---|
+| 2026-04-22 | Audit Stage 3 P0 闪电修：engine step4 clamp `purchase_qty >= 0` + DB CheckConstraint；`docs_enabled()` production 硬关忽略 env；CI 加 postgres service 让 integration tests 真跑；`.gitignore` 补 `*.exe` / `*.lnk` 防误 commit | PROGRESS.md 最近更新 |
+| 2026-04-21 | 采购/补货分拆 + 安全库存 + EU 合并 + 嵌套 Tab 视图 | §3.53 |
+| 2026-04-20 | Full audit 收口修复（并发保护 / 查询口径 / fail-close 探测 / dev 重建稳定性） | §3.52 |
+| 2026-04-19 | Plan A 后端 + 前端：推送赛狐 → Excel 导出 + Snapshot 版本化 | §3.49 / §3.50 / §3.51 |
+| 2026-04-17 及之前 | 权限系统 / 审计改造 / 数据同步基础 | §3.44 及之前 |
+
+本表只列架构级变更；小改动以 `PROGRESS.md` 各节为准。
+
+---
+
 **本架构蓝图应随架构演进同步更新。** 若发现文档与代码实际行为不符，以代码为准并回填文档。
+

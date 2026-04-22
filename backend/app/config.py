@@ -66,10 +66,20 @@ class Settings(BaseSettings):
     # Excel 导出文件根目录（相对 backend/ 或绝对路径）
     export_storage_dir: str = "../deploy/data/exports"
 
+    # Retention 保留天数（04:00 daily cron 依据，0 表示永不过期）
+    retention_task_run_days: int = 90
+    retention_inventory_history_days: int = 180
+    retention_exports_days: int = 60
+
     def docs_enabled(self) -> bool:
+        # 生产环境强制关闭 /docs 与 /openapi.json，忽略 APP_DOCS_ENABLED env
+        # override 以防止生产配置误开（安全优先于便利）。
+        # dev / test 环境：APP_DOCS_ENABLED 明确设置时按之，否则默认开启。
+        if self.app_env == "production":
+            return False
         if self.app_docs_enabled is not None:
             return self.app_docs_enabled
-        return self.app_env != "production"
+        return True
 
 
 def validate_settings(settings: Settings) -> Settings:

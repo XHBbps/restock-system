@@ -1,6 +1,7 @@
 """Sync Saihu out-records into local tracking tables."""
 
 import re
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -8,6 +9,7 @@ from sqlalchemy import delete, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.country_mapping import apply_eu_mapping, load_eu_countries
 from app.core.logging import get_logger
 from app.core.timezone import parse_saihu_time
 from app.db.session import async_session_factory
@@ -74,8 +76,15 @@ async def sync_out_records_job(ctx: JobContext) -> None:
 
         async with async_session_factory() as db:
             warehouse_ids = await _load_warehouse_ids(db)
+            eu_countries = await load_eu_countries(db)
             async for raw in list_in_transit_records(on_page=_report_page):
-                item_count += await _upsert_out_record(db, raw, warehouse_ids, sync_start_time)
+                item_count += await _upsert_out_record(
+                    db,
+                    raw,
+                    warehouse_ids,
+                    sync_start_time,
+                    eu_countries,
+                )
                 record_count += 1
             await db.commit()
 
@@ -85,7 +94,11 @@ async def sync_out_records_job(ctx: JobContext) -> None:
             step_detail="根据备注回填历史空目标国家",
         )
         async with async_session_factory() as db:
-            _, backfilled, backfill_skipped = await _backfill_target_country_from_remark(db)
+            eu_countries = await load_eu_countries(db)
+            _, backfilled, backfill_skipped = await _backfill_target_country_from_remark(
+                db,
+                eu_countries,
+            )
 
         await ctx.progress(
             current_step="老化未见记录",
@@ -127,21 +140,26 @@ async def _upsert_out_record(
     db: AsyncSession,
     raw: dict[str, Any],
     warehouse_ids: set[str],
-    sync_start_time,
+    sync_start_time: datetime,
+    eu_countries: set[str] | None = None,
 ) -> int:
     record_id = str(raw.get("id") or "")
     if not record_id:
         return 0
 
     target_warehouse_id = str(raw.get("targetFbaWarehouseId") or "") or None
-    target_country = _extract_country_from_remark(raw.get("remark"))
+    original_target_country = _extract_country_from_remark(raw.get("remark"))
+    mapped_target_country = apply_eu_mapping(original_target_country, eu_countries or set())
 
     rec_values = {
         "saihu_out_record_id": record_id,
         "warehouse_id": _to_optional_text(raw.get("warehouseId")),
         "out_warehouse_no": raw.get("outWarehouseNo"),
         "target_warehouse_id": target_warehouse_id if target_warehouse_id in warehouse_ids else None,
-        "target_country": target_country,
+        "target_country": mapped_target_country,
+        "original_target_country": (
+            original_target_country if mapped_target_country != original_target_country else None
+        ),
         "update_time": parse_saihu_time(raw.get("updateTime")),
         "type": _to_int(raw.get("type"), default=None),
         "type_name": _to_optional_text(raw.get("typeName")),
@@ -158,6 +176,7 @@ async def _upsert_out_record(
             "out_warehouse_no": rec_values["out_warehouse_no"],
             "target_warehouse_id": rec_values["target_warehouse_id"],
             "target_country": rec_values["target_country"],
+            "original_target_country": rec_values["original_target_country"],
             "update_time": rec_values["update_time"],
             "type": rec_values["type"],
             "type_name": rec_values["type_name"],
@@ -193,7 +212,7 @@ async def _upsert_out_record(
     return len(items)
 
 
-async def _age_out_records(sync_start_time) -> int:
+async def _age_out_records(sync_start_time: datetime) -> int:
     """Mark active rows not seen in this run as completed."""
     async with async_session_factory() as db:
         result = await db.execute(
@@ -214,7 +233,10 @@ async def _age_out_records(sync_start_time) -> int:
         return len(ids)
 
 
-async def _backfill_target_country_from_remark(db: AsyncSession) -> tuple[int, int, int]:
+async def _backfill_target_country_from_remark(
+    db: AsyncSession,
+    eu_countries: set[str] | None = None,
+) -> tuple[int, int, int]:
     rows = (
         await db.execute(
             select(InTransitRecord)
@@ -228,11 +250,15 @@ async def _backfill_target_country_from_remark(db: AsyncSession) -> tuple[int, i
     updated = 0
     skipped = 0
     for record in rows:
-        country = _extract_country_from_remark(record.remark)
-        if country is None:
+        original_country = _extract_country_from_remark(record.remark)
+        if original_country is None:
             skipped += 1
             continue
-        record.target_country = country
+        mapped_country = apply_eu_mapping(original_country, eu_countries or set())
+        record.target_country = mapped_country
+        record.original_target_country = (
+            original_country if mapped_country != original_country else None
+        )
         updated += 1
 
     await db.commit()

@@ -1,9 +1,11 @@
-// 快照 API 客户端
 import client from './client'
+
+export type SnapshotType = 'procurement' | 'restock'
 
 export interface SnapshotOut {
   id: number
   suggestion_id: number
+  snapshot_type: SnapshotType
   version: number
   note: string | null
   exported_by: number | null
@@ -23,6 +25,8 @@ export interface SnapshotItemOut {
   total_qty: number
   country_breakdown: Record<string, unknown>
   warehouse_breakdown: Record<string, unknown>
+  purchase_qty: number | null
+  purchase_date: string | null
   urgent: boolean
   velocity_snapshot: Record<string, unknown> | null
   sale_days_snapshot: Record<string, unknown> | null
@@ -33,24 +37,44 @@ export interface SnapshotDetailOut extends SnapshotOut {
   global_config_snapshot: Record<string, unknown>
 }
 
-export async function createSnapshot(
+async function createTypedSnapshot(
   suggestionId: number,
+  type: SnapshotType,
   itemIds: number[],
   note?: string,
 ): Promise<SnapshotOut> {
   const { data } = await client.post<SnapshotOut>(
-    `/api/suggestions/${suggestionId}/snapshots`,
+    `/api/suggestions/${suggestionId}/snapshots/${type}`,
     { item_ids: itemIds, note },
   )
   return data
 }
 
-export async function listSnapshots(suggestionId: number): Promise<SnapshotOut[]> {
-  // 后端按 version asc 返回，前端 reverse 让最新版本在表格顶部
+export function createProcurementSnapshot(
+  suggestionId: number,
+  itemIds: number[],
+  note?: string,
+): Promise<SnapshotOut> {
+  return createTypedSnapshot(suggestionId, 'procurement', itemIds, note)
+}
+
+export function createRestockSnapshot(
+  suggestionId: number,
+  itemIds: number[],
+  note?: string,
+): Promise<SnapshotOut> {
+  return createTypedSnapshot(suggestionId, 'restock', itemIds, note)
+}
+
+export async function listSnapshots(
+  suggestionId: number,
+  type?: SnapshotType,
+): Promise<SnapshotOut[]> {
   const { data } = await client.get<SnapshotOut[]>(
     `/api/suggestions/${suggestionId}/snapshots`,
+    { params: type ? { type } : undefined },
   )
-  return [...data].reverse()
+  return data
 }
 
 export async function getSnapshot(snapshotId: number): Promise<SnapshotDetailOut> {
@@ -61,11 +85,34 @@ export async function getSnapshot(snapshotId: number): Promise<SnapshotDetailOut
 export async function downloadSnapshotBlob(
   snapshotId: number,
 ): Promise<{ blob: Blob; filename: string }> {
-  const resp = await client.get(`/api/snapshots/${snapshotId}/download`, {
-    responseType: 'blob',
-  })
-  const disposition = (resp.headers['content-disposition'] as string | undefined) || ''
-  const match = disposition.match(/filename\*?=(?:UTF-8'')?["]?([^;"\r\n]+)["]?/i)
-  const filename = match ? decodeURIComponent(match[1]) : `snapshot-${snapshotId}.xlsx`
-  return { blob: resp.data as Blob, filename }
+  try {
+    const resp = await client.get(`/api/snapshots/${snapshotId}/download`, {
+      responseType: 'blob',
+    })
+    const disposition = (resp.headers['content-disposition'] as string | undefined) || ''
+    const match = disposition.match(/filename\*?=(?:UTF-8'')?["]?([^;"\r\n]+)["]?/i)
+    const filename = match ? decodeURIComponent(match[1]) : `snapshot-${snapshotId}.xlsx`
+    return { blob: resp.data as Blob, filename }
+  } catch (error) {
+    // responseType:'blob' 让 4xx/5xx 的 JSON body 也被包成 Blob，
+    // getActionErrorMessage 看不到 detail。解包成 JSON 再抛，保证友好提示
+    // （如 "该版本已过期清理" 410 Gone）。
+    await _decodeBlobErrorInPlace(error)
+    throw error
+  }
+}
+
+async function _decodeBlobErrorInPlace(error: unknown): Promise<void> {
+  const maybe = error as { response?: { data?: unknown } }
+  const data = maybe.response?.data
+  if (data instanceof Blob) {
+    try {
+      const text = await data.text()
+      if (text.trim()) {
+        maybe.response!.data = JSON.parse(text)
+      }
+    } catch {
+      // 保留原始 blob；getActionErrorMessage 会 fallback 到 "下载失败"
+    }
+  }
 }

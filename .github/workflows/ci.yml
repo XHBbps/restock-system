@@ -17,6 +17,24 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: replenish_test
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # conftest 按 TEST_DATABASE_URL 决定是否跑 integration tests，
+      # 空则全部 skip。必须指向独立 replenish_test 库（名字硬约束）
+      TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/replenish_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -51,6 +69,8 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Install frontend dependencies
         run: npm ci
+      - name: Run frontend lint
+        run: npm run lint
       - name: Run frontend build
         run: npm run build
       - name: Run frontend tests with coverage

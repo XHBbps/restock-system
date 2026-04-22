@@ -3,6 +3,7 @@
 Set TEST_DATABASE_URL=postgresql+asyncpg://user:pass@host/dbname to enable.
 """
 
+import asyncio
 from collections.abc import AsyncIterator
 
 import pytest
@@ -30,7 +31,8 @@ def db_engine():
     # "Task got Future attached to a different loop" 错误
     # (fixture 默认 session 作用域 vs test 默认 function 作用域)
     engine = create_async_engine(url, echo=False, poolclass=NullPool)
-    return engine
+    yield engine
+    asyncio.run(engine.dispose())
 
 
 @pytest.fixture(autouse=True)

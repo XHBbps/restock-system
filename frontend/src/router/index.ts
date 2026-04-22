@@ -28,7 +28,9 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/components/AppLayout.vue'),
     redirect: '/workspace',
     children: [
-      ...appPages.map((page) => ({
+      ...appPages
+        .filter((page) => !['restock/current', 'restock/history'].includes(page.path))
+        .map((page) => ({
         path: page.path,
         name: page.name,
         component: page.component,
@@ -38,12 +40,52 @@ const routes: RouteRecordRaw[] = [
           permission: page.permission,
         },
       })),
-      { path: 'restock/run', redirect: '/restock/current' },
       {
-        path: 'restock/suggestions/:id',
-        name: 'suggestion-detail',
-        component: () => import('@/views/SuggestionDetailView.vue'),
-        meta: { title: '建议详情', section: 'RESTOCK', permission: 'restock:view' },
+        path: 'restock/current',
+        name: 'suggestion-list',
+        component: () => import('@/views/SuggestionListView.vue'),
+        meta: { title: '采补发起', section: 'RESTOCK', permission: 'restock:view' },
+        redirect: '/restock/current/procurement',
+        children: [
+          {
+            path: 'procurement',
+            name: 'suggestion-list-procurement',
+            component: () => import('@/views/suggestion/ProcurementListView.vue'),
+            meta: { title: '采购建议', section: 'RESTOCK', permission: 'restock:view' },
+          },
+          {
+            path: 'restock',
+            name: 'suggestion-list-restock',
+            component: () => import('@/views/suggestion/RestockListView.vue'),
+            meta: { title: '补货建议', section: 'RESTOCK', permission: 'restock:view' },
+          },
+        ],
+      },
+      { path: 'restock/run', redirect: '/restock/current' },
+      // 建议单详情页已改为历史页弹框（SuggestionDetailDialog），路由废弃；保留 redirect 兼容旧书签
+      { path: 'restock/suggestions/:id', redirect: '/restock/history' },
+      { path: 'restock/suggestions/:id/procurement', redirect: '/restock/history/procurement' },
+      { path: 'restock/suggestions/:id/restock', redirect: '/restock/history/restock' },
+      {
+        path: 'restock/history',
+        name: 'history',
+        component: () => import('@/views/HistoryView.vue'),
+        meta: { title: '历史记录', section: 'RESTOCK', permission: 'history:view' },
+        redirect: '/restock/history/procurement',
+        children: [
+          {
+            path: 'procurement',
+            name: 'history-procurement',
+            component: () => import('@/views/history/ProcurementHistoryView.vue'),
+            meta: { title: '采购历史', section: 'RESTOCK', permission: 'history:view' },
+          },
+          {
+            path: 'restock',
+            name: 'history-restock',
+            component: () => import('@/views/history/RestockHistoryView.vue'),
+            meta: { title: '补货历史', section: 'RESTOCK', permission: 'history:view' },
+          },
+        ],
       },
       { path: 'settings/sku', redirect: '/data/products' },
       { path: 'settings/warehouse', redirect: '/data/warehouses' },
@@ -56,9 +98,9 @@ const routes: RouteRecordRaw[] = [
       { path: 'replenishment/current', redirect: '/restock/current' },
       { path: 'replenishment/run', redirect: '/restock/run' },
       { path: 'replenishment/history', redirect: '/restock/history' },
-      { path: 'replenishment/suggestions/:id', redirect: (to) => `/restock/suggestions/${to.params.id}` },
+      { path: 'replenishment/suggestions/:id', redirect: '/restock/history' },
       { path: 'suggestions', redirect: '/restock/current' },
-      { path: 'suggestions/:id', redirect: (to) => `/restock/suggestions/${to.params.id}` },
+      { path: 'suggestions/:id', redirect: '/restock/history' },
       { path: 'history', redirect: '/restock/history' },
       { path: 'config/sku', redirect: '/settings/sku' },
       { path: 'config/global', redirect: '/settings/global' },
@@ -114,6 +156,20 @@ router.beforeEach(async (to) => {
   }
 
   return true
+})
+
+// 捕获懒加载 chunk 失效：前端重建后旧 tab 的 chunk hash 已被新 build 删掉，
+// 点路由会 404。自动刷新页面让浏览器拿新 HTML + 新 hash 的 chunk。
+router.onError((error) => {
+  const message = String(error?.message ?? error)
+  if (
+    /Failed to fetch dynamically imported module/i.test(message) ||
+    /Loading chunk .* failed/i.test(message) ||
+    /Importing a module script failed/i.test(message)
+  ) {
+    console.warn('[router] chunk stale, reloading:', message)
+    window.location.reload()
+  }
 })
 
 export default router

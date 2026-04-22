@@ -11,7 +11,6 @@ class SchedulerStatusOut(BaseModel):
     running: bool
     timezone: str
     sync_interval_minutes: int
-    calc_cron: str
     jobs: list[SchedulerJobOut]
 
 

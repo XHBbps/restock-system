@@ -276,18 +276,23 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
     lead_time_days = config.lead_time_days if config else 50
     allowed_countries = resolve_allowed_restock_regions(config.restock_regions if config else [])
 
+    # velocity 口径与 runner 一致：不受 restock_regions 过滤，
+    # 保证采购量公式里的 Σvelocity 覆盖全部销售国家（含白名单外）。
     velocity = (
-        await run_step1(
-            db,
-            enabled_skus,
-            now_beijing().date(),
-            allowed_countries=allowed_countries,
-        )
+        await run_step1(db, enabled_skus, now_beijing().date())
         if enabled_skus
         else {}
     )
     all_sale_days, inventory = await run_step2(db, velocity, enabled_skus) if enabled_skus else ({}, {})
-    live_country_qty = compute_country_qty(velocity, inventory, target_days) if enabled_skus else {}
+    live_country_qty_all = compute_country_qty(velocity, inventory, target_days) if enabled_skus else {}
+    # country_qty 只保留白名单国家（和 runner 行为一致）。
+    if allowed_countries is not None:
+        live_country_qty = {
+            sku: {c: q for c, q in cq.items() if c in allowed_countries}
+            for sku, cq in live_country_qty_all.items()
+        }
+    else:
+        live_country_qty = live_country_qty_all
     local_stock = await load_local_inventory(db, enabled_skus) if enabled_skus else {}
     restock_sku_count = 0
     for sku in enabled_skus:
@@ -300,6 +305,7 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
             velocity_for_sku=velocity.get(sku, {}),
             local_stock_for_sku=local_stock.get(sku),
             buffer_days=getattr(config, "buffer_days", 15) if config else 15,
+            safety_stock_days=getattr(config, "safety_stock_days", 0) if config else 0,
         )
         if total_qty > 0:
             restock_sku_count += 1
@@ -364,7 +370,14 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
         .all()
     )
 
-    exported_count = sum(1 for it in items if it.export_status == "exported")
+    exported_count = sum(
+        1
+        for it in items
+        if (
+            getattr(it, "procurement_export_status", "pending") == "exported"
+            or getattr(it, "restock_export_status", "pending") == "exported"
+        )
+    )
     suggestion_snapshot_count = (
         await db.execute(
             select(func.count()).select_from(SuggestionSnapshot).where(
@@ -448,6 +461,19 @@ async def metrics(
     return "\n".join(lines)
 
 
+async def _ensure_dashboard_refresh_task(db: AsyncSession) -> TaskRun | None:
+    """配置变更 stale 时自动 enqueue 一条 refresh 任务（dedupe 保证同时只一条）。"""
+    task_id, _existing = await enqueue_task(
+        db,
+        job_name=REFRESH_DASHBOARD_JOB_NAME,
+        trigger_source="scheduler",
+        dedupe_key=REFRESH_DASHBOARD_JOB_NAME,
+        payload={"triggered_by": "auto_stale"},
+    )
+    result = await db.execute(select(TaskRun).where(TaskRun.id == task_id))
+    return result.scalar_one_or_none()
+
+
 @router.get("/dashboard", response_model=DashboardOverview)
 async def get_dashboard_overview(
     db: AsyncSession = Depends(db_session),
@@ -458,6 +484,11 @@ async def get_dashboard_overview(
     snapshot = (
         await db.execute(select(DashboardSnapshot).where(DashboardSnapshot.id == 1))
     ).scalar_one_or_none()
+
+    # 配置变更 → dashboard_snapshot.stale=True，若无 refresh 任务活跃则自动 enqueue
+    stale = bool(getattr(snapshot, "stale", False)) if snapshot is not None else False
+    if stale and active_task is None:
+        active_task = await _ensure_dashboard_refresh_task(db)
 
     if snapshot and snapshot.payload:
         try:
@@ -473,9 +504,15 @@ async def get_dashboard_overview(
         # 旧快照缺少新增字段时，Pydantic 自动填充默认值（restock_sku_count=0 等）；
         # 同时入队刷新任务，后台更新快照后下次请求即为完整数据
         needs_refresh = not _has_restock_summary_keys(snapshot.payload)
+        if (active_task is not None) or stale:
+            status: Literal["ready", "missing", "refreshing"] = "refreshing"
+        elif needs_refresh:
+            status = "missing"
+        else:
+            status = "ready"
         return DashboardOverview(
             **payload.model_dump(),
-            snapshot_status="refreshing" if active_task else ("missing" if needs_refresh else "ready"),
+            snapshot_status=status,
             snapshot_updated_at=snapshot.refreshed_at or snapshot.updated_at,
             snapshot_task_id=active_task.id if active_task else None,
         )

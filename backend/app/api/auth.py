@@ -1,7 +1,7 @@
 """认证路由。"""
 
 import ipaddress
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy import select, update
@@ -99,7 +99,7 @@ async def _build_user_info(
     )
 
 
-async def _check_lockout(db: AsyncSession, source_key: str, now) -> LoginAttempt | None:
+async def _check_lockout(db: AsyncSession, source_key: str, now: datetime) -> LoginAttempt | None:
     """检查某维度是否被锁定，返回该维度的 attempt 行（可能为 None）。"""
     attempt = (
         await db.execute(select(LoginAttempt).where(LoginAttempt.source_key == source_key))
@@ -118,7 +118,7 @@ async def _check_lockout(db: AsyncSession, source_key: str, now) -> LoginAttempt
 
 
 async def _record_failure(
-    db: AsyncSession, source_key: str, attempt: LoginAttempt | None, now
+    db: AsyncSession, source_key: str, attempt: LoginAttempt | None, now: datetime
 ) -> None:
     """为某维度写入一条失败记录。"""
     settings = get_settings()
@@ -165,7 +165,7 @@ async def _record_failure(
         )
 
 
-async def _clear_attempts(db: AsyncSession, source_key: str, now) -> None:
+async def _clear_attempts(db: AsyncSession, source_key: str, now: datetime) -> None:
     """登录成功后清除某维度的失败记录。"""
     await db.execute(
         update(LoginAttempt)

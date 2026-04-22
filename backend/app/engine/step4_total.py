@@ -1,14 +1,6 @@
-"""Step 4:总采购量。
+"""Step 4: calculate procurement quantity."""
 
-公式(FR-032):
-    total = Σ country_qty[国]                       仅累加 country_qty > 0 的国家
-          + Σ velocity[国] x BUFFER_DAYS            同样仅累加 country_qty > 0 的国家
-          - (本地仓 available + 本地仓 reserved)
-
-    total = max(total, 0)
-
-本地仓识别:warehouse.type = 1
-"""
+from __future__ import annotations
 
 import math
 
@@ -16,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
+from app.engine.context import EngineContext
 from app.models.inventory import InventorySnapshotLatest
 from app.models.warehouse import Warehouse
 
@@ -26,7 +19,6 @@ async def load_local_inventory(
     db: AsyncSession,
     commodity_skus: list[str] | None,
 ) -> dict[str, dict[str, int]]:
-    """加载本地仓(type=1)库存,按 SKU 聚合。"""
     stmt = (
         select(
             InventorySnapshotLatest.commodity_sku,
@@ -49,42 +41,46 @@ def compute_total(
     velocity_for_sku: dict[str, float],
     local_stock_for_sku: dict[str, int] | None,
     buffer_days: int,
+    safety_stock_days: int = 0,
 ) -> int:
-    """计算单个 SKU 的总采购量。
-
-    仅累加 `country_qty > 0` 的国家(spec 显式要求)。
-    同时显式保持 total_qty >= sum(country_breakdown),避免人工编辑后出现
-    "分国家数量之和大于总采购量" 的自相矛盾状态。
-    """
-    if not country_qty_for_sku:
-        return 0
-    sum_qty = 0
-    sum_velocity = 0.0
-    for country, qty in country_qty_for_sku.items():
-        if qty <= 0:
-            continue
-        sum_qty += qty
-        sum_velocity += velocity_for_sku.get(country, 0.0)
-
-    buffer_qty = sum_velocity * buffer_days
+    sum_qty = sum(country_qty_for_sku.values())
+    sum_velocity = sum(velocity_for_sku.values())
+    buffer_qty = math.ceil(sum_velocity * buffer_days)
+    safety_qty = math.ceil(sum_velocity * safety_stock_days)
     local_total = 0
     if local_stock_for_sku:
-        local_total = local_stock_for_sku.get("available", 0) + local_stock_for_sku.get(
-            "reserved", 0
+        local_total = int(local_stock_for_sku.get("available", 0)) + int(
+            local_stock_for_sku.get("reserved", 0)
         )
+    raw_purchase_qty = sum_qty + buffer_qty - local_total + safety_qty
+    # 本地库存过剩时公式可能为负，夹到 0（DB 侧也有 CheckConstraint 双保险）
+    purchase_qty = max(0, int(raw_purchase_qty))
+    logger.info(
+        "step4_purchase_qty_computed",
+        sku=sku,
+        sum_qty=sum_qty,
+        sum_velocity=sum_velocity,
+        buffer_qty=buffer_qty,
+        safety_qty=safety_qty,
+        local_total=local_total,
+        raw_purchase_qty=raw_purchase_qty,
+        purchase_qty=purchase_qty,
+    )
+    return purchase_qty
 
-    raw = sum_qty + buffer_qty - local_total
-    # 业务规则: 国内库存(type=1)仅用于抵消 buffer 部分,不影响各国实际补货需求。
-    # Invariant: total_qty >= sum(country_breakdown),保证人工编辑后
-    # "分国家数量之和不超过总采购量" 的约束始终成立(H4 PATCH 校验依赖)。
-    if raw < sum_qty:
-        logger.info(
-            "step4_invariant_adjusted",
-            sku=sku,
-            original_raw=raw,
-            adjusted_to=sum_qty,
-            buffer_qty=buffer_qty,
-            local_total=local_total,
-        )
-        raw = sum_qty
-    return max(math.ceil(raw), 0)
+
+def step4_total(ctx: EngineContext) -> dict[str, dict[str, int]]:
+    result: dict[str, dict[str, int]] = {}
+    all_skus = set(ctx.country_qty) | set(ctx.velocity) | set(ctx.local_stock)
+    for sku in all_skus:
+        result[sku] = {
+            "purchase_qty": compute_total(
+                sku=sku,
+                country_qty_for_sku=ctx.country_qty.get(sku, {}),
+                velocity_for_sku=ctx.velocity.get(sku, {}),
+                local_stock_for_sku=ctx.local_stock.get(sku),
+                buffer_days=ctx.buffer_days,
+                safety_stock_days=ctx.safety_stock_days,
+            )
+        }
+    return result
