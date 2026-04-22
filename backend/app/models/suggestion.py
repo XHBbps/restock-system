@@ -82,6 +82,10 @@ class SuggestionItem(Base):
             "procurement_export_status IN ('pending','exported')",
             name="procurement_export_status_enum",
         ),
+        CheckConstraint(
+            "purchase_qty >= 0",
+            name="purchase_qty_non_negative",
+        ),
         Index("ix_suggestion_item_suggestion", "suggestion_id"),
         Index("ix_suggestion_item_sku", "commodity_sku"),
         Index(

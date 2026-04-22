@@ -52,7 +52,9 @@ def compute_total(
         local_total = int(local_stock_for_sku.get("available", 0)) + int(
             local_stock_for_sku.get("reserved", 0)
         )
-    purchase_qty = sum_qty + buffer_qty - local_total + safety_qty
+    raw_purchase_qty = sum_qty + buffer_qty - local_total + safety_qty
+    # 本地库存过剩时公式可能为负，夹到 0（DB 侧也有 CheckConstraint 双保险）
+    purchase_qty = max(0, int(raw_purchase_qty))
     logger.info(
         "step4_purchase_qty_computed",
         sku=sku,
@@ -61,9 +63,10 @@ def compute_total(
         buffer_qty=buffer_qty,
         safety_qty=safety_qty,
         local_total=local_total,
+        raw_purchase_qty=raw_purchase_qty,
         purchase_qty=purchase_qty,
     )
-    return int(purchase_qty)
+    return purchase_qty
 
 
 def step4_total(ctx: EngineContext) -> dict[str, dict[str, int]]:

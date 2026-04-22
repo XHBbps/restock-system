@@ -16,7 +16,8 @@ def test_step4_new_purchase_formula() -> None:
     assert result["sku1"]["purchase_qty"] == 75
 
 
-def test_step4_allows_negative_purchase_qty() -> None:
+def test_step4_clamps_negative_purchase_qty_to_zero() -> None:
+    """本地库存过剩时 raw = -50 应被 clamp 到 0（DB 侧也有 CheckConstraint 双保险）。"""
     ctx = EngineContext(
         country_qty={"sku1": {"US": 100}},
         velocity={"sku1": {"US": 0}},
@@ -27,7 +28,7 @@ def test_step4_allows_negative_purchase_qty() -> None:
 
     result = step4_total(ctx)
 
-    assert result["sku1"]["purchase_qty"] == -50
+    assert result["sku1"]["purchase_qty"] == 0
 
 
 def test_step4_velocity_sum_includes_all_countries() -> None:
