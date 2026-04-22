@@ -49,3 +49,7 @@ class ExcelExportLog(Base):
     )
     performed_from_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
     user_agent: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # retention job 清理磁盘 Excel 后写入；下载端点据此返回 410 Gone
+    file_purged_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )

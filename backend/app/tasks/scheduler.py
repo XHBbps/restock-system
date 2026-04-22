@@ -95,6 +95,13 @@ def _register_jobs(scheduler: AsyncIOScheduler, *, sync_interval_minutes: int) -
         id="trigger_daily_archive",
         replace_existing=True,
     )
+    scheduler.add_job(
+        _enqueue_safely,
+        trigger=CronTrigger(hour=4, minute=0, timezone=BEIJING),
+        args=["retention_purge"],
+        id="trigger_retention_purge",
+        replace_existing=True,
+    )
 
 
 async def setup_scheduler(force_reload: bool = False) -> AsyncIOScheduler:

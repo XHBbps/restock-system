@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import CheckConstraint, DateTime, SmallInteger, String, Text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, SmallInteger, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
@@ -29,6 +29,11 @@ class DashboardSnapshot(Base):
     refresh_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     refresh_finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     refreshed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # 失效标记：配置变更（如 eu_countries / restock_regions / target_days /
+    # lead_time_days 等）后置 TRUE，下次 dashboard API 自动 enqueue 刷新任务。
+    stale: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
