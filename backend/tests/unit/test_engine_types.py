@@ -57,3 +57,47 @@ def test_local_stock_equality() -> None:
 
     assert LocalStock(available=5, reserved=2) == LocalStock(available=5, reserved=2)
     assert LocalStock(available=5, reserved=2) != LocalStock(available=5, reserved=3)
+
+
+def test_merge_inventory_returns_inventory_stock() -> None:
+    from app.engine.context import InventoryStock
+    from app.engine.step2_sale_days import merge_inventory
+
+    oversea = {
+        ("SKU-A", "US"): {"available": 10, "reserved": 3},
+        ("SKU-B", "GB"): {"available": 5, "reserved": 0},
+    }
+    in_transit = {
+        ("SKU-A", "US"): 7,
+        ("SKU-C", "DE"): 20,
+    }
+
+    result = merge_inventory(oversea, in_transit)
+
+    assert result["SKU-A"]["US"] == InventoryStock(available=10, reserved=3, in_transit=7)
+    assert result["SKU-B"]["GB"] == InventoryStock(available=5, reserved=0, in_transit=0)
+    assert result["SKU-C"]["DE"] == InventoryStock(available=0, reserved=0, in_transit=20)
+
+
+def test_compute_sale_days_reads_inventory_stock_total() -> None:
+    from app.engine.context import InventoryStock
+    from app.engine.step2_sale_days import compute_sale_days
+
+    velocity = {"SKU-A": {"US": 2.0}}  # 2 件/天
+    inventory = {"SKU-A": {"US": InventoryStock(available=10, reserved=5, in_transit=5)}}  # total=20
+
+    result = compute_sale_days(velocity, inventory)
+
+    assert result["SKU-A"]["US"] == pytest.approx(10.0)  # 20 / 2
+
+
+def test_compute_country_qty_reads_inventory_stock_total() -> None:
+    from app.engine.context import InventoryStock
+    from app.engine.step3_country_qty import compute_country_qty
+
+    velocity = {"SKU-A": {"US": 3.0}}  # 3 件/天
+    inventory = {"SKU-A": {"US": InventoryStock(available=10, reserved=5, in_transit=15)}}  # total=30
+    # target_days=30, raw = 30*3 - 30 = 60
+    result = compute_country_qty(velocity, inventory, target_days=30)
+
+    assert result["SKU-A"]["US"] == 60

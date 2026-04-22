@@ -13,6 +13,7 @@ from collections import defaultdict
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.engine.context import InventoryStock
 from app.models.in_transit import InTransitItem, InTransitRecord
 from app.models.inventory import InventorySnapshotLatest
 from app.models.warehouse import Warehouse
@@ -77,29 +78,27 @@ async def load_in_transit(
 def merge_inventory(
     oversea: dict[tuple[str, str], dict[str, int]],
     in_transit: dict[tuple[str, str], int],
-) -> dict[str, dict[str, dict[str, int]]]:
+) -> dict[str, dict[str, InventoryStock]]:
     """Merge overseas stock and in-transit stock into one structure.
 
-    Returns: ``{sku: {country: {available, reserved, in_transit, total}}}``
+    Returns: ``{sku: {country: InventoryStock}}``
     """
-    merged: defaultdict[str, dict[str, dict[str, int]]] = defaultdict(dict)
+    merged: defaultdict[str, dict[str, InventoryStock]] = defaultdict(dict)
     keys = set(oversea.keys()) | set(in_transit.keys())
     for sku, country in keys:
         inv = oversea.get((sku, country), {"available": 0, "reserved": 0})
         transit = in_transit.get((sku, country), 0)
-        total = inv["available"] + inv["reserved"] + transit
-        merged[sku][country] = {
-            "available": inv["available"],
-            "reserved": inv["reserved"],
-            "in_transit": transit,
-            "total": total,
-        }
+        merged[sku][country] = InventoryStock(
+            available=int(inv["available"]),
+            reserved=int(inv["reserved"]),
+            in_transit=int(transit),
+        )
     return dict(merged)
 
 
 def compute_sale_days(
     velocity: dict[str, dict[str, float]],
-    inventory: dict[str, dict[str, dict[str, int]]],
+    inventory: dict[str, dict[str, InventoryStock]],
 ) -> dict[str, dict[str, float]]:
     """Compute ``sale_days`` for each ``(sku, country)`` with positive velocity."""
     result: defaultdict[str, dict[str, float]] = defaultdict(dict)
@@ -107,8 +106,8 @@ def compute_sale_days(
         for country, v in country_map.items():
             if v <= 0:
                 continue
-            stock = inventory.get(sku, {}).get(country, {}).get("total", 0)
-            result[sku][country] = stock / v
+            stock = inventory.get(sku, {}).get(country)
+            result[sku][country] = (stock.total if stock is not None else 0) / v
     return dict(result)
 
 
@@ -116,7 +115,7 @@ async def run_step2(
     db: AsyncSession,
     velocity: dict[str, dict[str, float]],
     commodity_skus: list[str] | None,
-) -> tuple[dict[str, dict[str, float]], dict[str, dict[str, dict[str, int]]]]:
+) -> tuple[dict[str, dict[str, float]], dict[str, dict[str, InventoryStock]]]:
     oversea = await load_oversea_inventory(db, commodity_skus)
     in_transit = await load_in_transit(db, commodity_skus)
     inventory = merge_inventory(oversea, in_transit)
