@@ -919,5 +919,19 @@ VITE_API_PROXY_TARGET=http://localhost:8000
 
 ---
 
+## 变更记录
+
+| 日期 | 变更 | 相关 PROGRESS 章节 |
+|---|---|---|
+| 2026-04-22 | Audit Stage 3 P0 闪电修：engine step4 clamp `purchase_qty >= 0` + DB CheckConstraint；`docs_enabled()` production 硬关忽略 env；CI 加 postgres service 让 integration tests 真跑；`.gitignore` 补 `*.exe` / `*.lnk` 防误 commit | PROGRESS.md 最近更新 |
+| 2026-04-21 | 采购/补货分拆 + 安全库存 + EU 合并 + 嵌套 Tab 视图 | §3.53 |
+| 2026-04-20 | Full audit 收口修复（并发保护 / 查询口径 / fail-close 探测 / dev 重建稳定性） | §3.52 |
+| 2026-04-19 | Plan A 后端 + 前端：推送赛狐 → Excel 导出 + Snapshot 版本化 | §3.49 / §3.50 / §3.51 |
+| 2026-04-17 及之前 | 权限系统 / 审计改造 / 数据同步基础 | §3.44 及之前 |
+
+本表只列架构级变更；小改动以 `PROGRESS.md` 各节为准。
+
+---
+
 **本架构蓝图应随架构演进同步更新。** 若发现文档与代码实际行为不符，以代码为准并回填文档。
 
