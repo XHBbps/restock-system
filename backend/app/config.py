@@ -67,9 +67,14 @@ class Settings(BaseSettings):
     export_storage_dir: str = "../deploy/data/exports"
 
     def docs_enabled(self) -> bool:
+        # 生产环境强制关闭 /docs 与 /openapi.json，忽略 APP_DOCS_ENABLED env
+        # override 以防止生产配置误开（安全优先于便利）。
+        # dev / test 环境：APP_DOCS_ENABLED 明确设置时按之，否则默认开启。
+        if self.app_env == "production":
+            return False
         if self.app_docs_enabled is not None:
             return self.app_docs_enabled
-        return self.app_env != "production"
+        return True
 
 
 def validate_settings(settings: Settings) -> Settings:
