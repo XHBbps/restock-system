@@ -132,3 +132,30 @@ def test_compute_total_accepts_none_local_stock() -> None:
         safety_stock_days=0,
     )
     assert result == 10  # 10 + 0 - 0 + 0
+
+
+def test_step4_total_returns_flat_sku_to_int_dict() -> None:
+    from app.engine.context import EngineContext, LocalStock
+    from app.engine.step4_total import step4_total
+
+    ctx = EngineContext(
+        country_qty={"SKU-A": {"US": 100}, "SKU-B": {"GB": 40}},
+        velocity={"SKU-A": {"US": 10.0}, "SKU-B": {"GB": 4.0}},
+        local_stock={
+            "SKU-A": LocalStock(available=20, reserved=10),  # 30
+            "SKU-B": LocalStock(available=5, reserved=0),  # 5
+        },
+        buffer_days=30,
+        safety_stock_days=0,
+    )
+    result = step4_total(ctx)
+
+    # 新签名：dict[sku, int]，不再有 {"purchase_qty": int} 包裹
+    assert isinstance(result, dict)
+    assert all(isinstance(v, int) for v in result.values())
+    # SKU-A: sum_qty=100, sum_velocity=10, buffer_qty=ceil(10*30)=300, local=30, safety=0
+    #   → 100 + 300 - 30 = 370
+    assert result["SKU-A"] == 370
+    # SKU-B: sum_qty=40, sum_velocity=4, buffer_qty=ceil(4*30)=120, local=5, safety=0
+    #   → 40 + 120 - 5 = 155
+    assert result["SKU-B"] == 155

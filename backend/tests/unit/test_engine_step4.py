@@ -13,7 +13,7 @@ def test_step4_new_purchase_formula() -> None:
 
     result = step4_total(ctx)
 
-    assert result["sku1"]["purchase_qty"] == 75
+    assert result["sku1"] == 75
 
 
 def test_step4_clamps_negative_purchase_qty_to_zero() -> None:
@@ -28,7 +28,7 @@ def test_step4_clamps_negative_purchase_qty_to_zero() -> None:
 
     result = step4_total(ctx)
 
-    assert result["sku1"]["purchase_qty"] == 0
+    assert result["sku1"] == 0
 
 
 def test_step4_velocity_sum_includes_all_countries() -> None:
@@ -42,4 +42,4 @@ def test_step4_velocity_sum_includes_all_countries() -> None:
 
     result = step4_total(ctx)
 
-    assert result["sku1"]["purchase_qty"] == 225
+    assert result["sku1"] == 225

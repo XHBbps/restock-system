@@ -65,18 +65,17 @@ def compute_total(
     return purchase_qty
 
 
-def step4_total(ctx: EngineContext) -> dict[str, dict[str, int]]:
-    result: dict[str, dict[str, int]] = {}
+def step4_total(ctx: EngineContext) -> dict[str, int]:
+    """Return ``{sku: purchase_qty}`` for all SKUs with engine signals."""
+    result: dict[str, int] = {}
     all_skus = set(ctx.country_qty) | set(ctx.velocity) | set(ctx.local_stock)
     for sku in all_skus:
-        result[sku] = {
-            "purchase_qty": compute_total(
-                sku=sku,
-                country_qty_for_sku=ctx.country_qty.get(sku, {}),
-                velocity_for_sku=ctx.velocity.get(sku, {}),
-                local_stock_for_sku=ctx.local_stock.get(sku),
-                buffer_days=ctx.buffer_days,
-                safety_stock_days=ctx.safety_stock_days,
-            )
-        }
+        result[sku] = compute_total(
+            sku=sku,
+            country_qty_for_sku=ctx.country_qty.get(sku, {}),
+            velocity_for_sku=ctx.velocity.get(sku, {}),
+            local_stock_for_sku=ctx.local_stock.get(sku),
+            buffer_days=ctx.buffer_days,
+            safety_stock_days=ctx.safety_stock_days,
+        )
     return result
