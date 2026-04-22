@@ -58,7 +58,7 @@ const STUBS = {
   },
   ElOption: true,
   ElTable: { template: '<div><slot /></div>' },
-  ElTableColumn: { template: '<div><slot :row=\"{}\" /></div>' },
+  ElTableColumn: { template: '<div><slot :row="{}" /></div>' },
   ElTag: { template: '<span><slot /></span>' },
 }
 
