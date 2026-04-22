@@ -42,7 +42,11 @@ def _suggestion_status_sort_expr() -> ColumnElement[int]:
 
 
 def _apply_suggestion_sort(stmt, sort_by: str | None, sort_order: str):
-    sort_map: dict[str, tuple[ColumnElement[object], ...]] = {
+    # SQLAlchemy 的 InstrumentedAttribute[T] 运行时是 ColumnElement 子类，但
+    # mypy 类型体系下不协变（InstrumentedAttribute[int] 不是 ColumnElement[object]
+    # 的子类型）。声明 ColumnElement[Any] 容纳所有 concrete 类型，避免对每个
+    # tuple 用 cast() 或裸 # type: ignore。
+    sort_map: dict[str, tuple[ColumnElement[Any], ...]] = {
         "id": (Suggestion.id,),
         "created_at": (Suggestion.created_at,),
         "triggered_by": (Suggestion.triggered_by,),
