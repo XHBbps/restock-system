@@ -13,7 +13,7 @@
       </el-table-column>
       <el-table-column label="状态" width="110">
         <template #default="{ row }">
-          <el-tag :type="statusTagType(row[displayStatusField])" size="small">
+          <el-tag :type="statusTagType(row[displayStatusCodeField])" size="small">
             {{ row[displayStatusField] }}
           </el-tag>
         </template>
@@ -62,6 +62,7 @@
 import SuggestionDetailDialog from '@/components/SuggestionDetailDialog.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
 import { deleteSuggestion, listSuggestions, type Suggestion } from '@/api/suggestion'
+import { statusTagType } from '@/views/history/displayStatusTag'
 import { getActionErrorMessage } from '@/utils/apiError'
 import { formatDateTime } from '@/utils/format'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -95,20 +96,23 @@ const otherTypeLabel = computed(() =>
 )
 
 type DisplayStatusField = 'procurement_display_status' | 'restock_display_status'
+type DisplayStatusCodeField =
+  | 'procurement_display_status_code'
+  | 'restock_display_status_code'
 type SnapshotCountField = 'procurement_snapshot_count' | 'restock_snapshot_count'
 
 const displayStatusField = computed<DisplayStatusField>(
   () => (props.type === 'procurement' ? 'procurement_display_status' : 'restock_display_status'),
 )
+const displayStatusCodeField = computed<DisplayStatusCodeField>(
+  () =>
+    props.type === 'procurement'
+      ? 'procurement_display_status_code'
+      : 'restock_display_status_code',
+)
 const snapshotCountField = computed<SnapshotCountField>(
   () => (props.type === 'procurement' ? 'procurement_snapshot_count' : 'restock_snapshot_count'),
 )
-
-function statusTagType(status: string): 'success' | 'warning' | 'info' | 'danger' {
-  if (status === '已导出') return 'success'
-  if (status === '未导出') return 'warning'
-  return 'info' // 已归档
-}
 
 // 删除条件：整单两种快照都为 0（Q1-c：空归档可删，有快照归档不可删）
 function canDelete(row: Suggestion): boolean {

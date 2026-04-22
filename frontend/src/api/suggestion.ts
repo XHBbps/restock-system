@@ -11,6 +11,8 @@ export interface AllocationExplanation {
 }
 
 export type SuggestionDisplayStatus = '未导出' | '已导出' | '已归档'
+// 机器可读 code（4 档），供 tag 色映射 / i18n；label 保留 3 档 UX 兼容
+export type SuggestionDisplayStatusCode = 'pending' | 'exported' | 'archived' | 'error'
 
 export interface Suggestion {
   id: number
@@ -24,6 +26,8 @@ export interface Suggestion {
   archived_trigger: string | null
   procurement_display_status: SuggestionDisplayStatus
   restock_display_status: SuggestionDisplayStatus
+  procurement_display_status_code: SuggestionDisplayStatusCode
+  restock_display_status_code: SuggestionDisplayStatusCode
   global_config_snapshot: Record<string, unknown>
   created_at: string
   archived_at: string | null

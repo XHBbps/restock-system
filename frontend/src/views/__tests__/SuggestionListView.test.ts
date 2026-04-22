@@ -43,6 +43,8 @@ function makeSuggestion(): SuggestionDetail {
     archived_trigger: null,
     procurement_display_status: '未导出',
     restock_display_status: '未导出',
+    procurement_display_status_code: 'pending',
+    restock_display_status_code: 'pending',
     global_config_snapshot: {},
     created_at: '2026-04-13T10:00:00',
     archived_at: null,
