@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from app.engine.context import LocalStock
 from app.engine.runner import ENGINE_RUN_ADVISORY_LOCK_KEY, _config_snapshot, run_engine
 
 
@@ -132,7 +133,7 @@ async def test_run_engine_writes_purchase_fields_and_item_counts() -> None:
             AsyncMock(return_value=({"SKU-001": {"US": 30.0}}, {"SKU-001": {}})),
         ),
         patch("app.engine.runner.compute_country_qty", return_value={"SKU-001": {"US": 100}}),
-        patch("app.engine.runner.load_local_inventory", AsyncMock(return_value={"SKU-001": {"available": 0, "reserved": 0}})),
+        patch("app.engine.runner.load_local_inventory", AsyncMock(return_value={"SKU-001": LocalStock(available=0, reserved=0)})),
         patch("app.engine.runner.load_country_warehouses", AsyncMock(return_value={})),
         patch("app.engine.runner.load_zipcode_rules", AsyncMock(return_value=[])),
         patch("app.engine.runner.load_all_sku_country_orders", AsyncMock(return_value={})),
@@ -174,7 +175,7 @@ async def test_run_engine_velocity_unaffected_by_restock_regions() -> None:
             AsyncMock(return_value=({"SKU-001": {"US": 30.0, "JP": 30.0}}, {"SKU-001": {}})),
         ),
         # 不 mock compute_country_qty，让真实 step3 基于 velocity 算出两国 qty
-        patch("app.engine.runner.load_local_inventory", AsyncMock(return_value={"SKU-001": {"available": 0, "reserved": 0}})),
+        patch("app.engine.runner.load_local_inventory", AsyncMock(return_value={"SKU-001": LocalStock(available=0, reserved=0)})),
         patch("app.engine.runner.load_country_warehouses", AsyncMock(return_value={})),
         patch("app.engine.runner.load_zipcode_rules", AsyncMock(return_value=[])),
         patch("app.engine.runner.load_all_sku_country_orders", AsyncMock(return_value={})),

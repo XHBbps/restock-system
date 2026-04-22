@@ -1,12 +1,16 @@
 """Step 3 country_qty 单元测试:负数 clamping。"""
 
+from app.engine.context import InventoryStock
 from app.engine.step3_country_qty import compute_country_qty
 
 
 def _make_inventory(stock_map: dict[str, dict[str, int]]) -> dict:
-    """{sku: {country: total}} -> {sku: {country: {total: ...}}}"""
+    """{sku: {country: total}} -> {sku: {country: InventoryStock}}"""
     return {
-        sku: {country: {"total": total} for country, total in country_map.items()}
+        sku: {
+            country: InventoryStock(available=total, reserved=0, in_transit=0)
+            for country, total in country_map.items()
+        }
         for sku, country_map in stock_map.items()
     }
 

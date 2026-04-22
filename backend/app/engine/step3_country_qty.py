@@ -8,10 +8,12 @@
 import math
 from collections import defaultdict
 
+from app.engine.context import InventoryStock
+
 
 def compute_country_qty(
     velocity: dict[str, dict[str, float]],
-    inventory: dict[str, dict[str, dict[str, int]]],
+    inventory: dict[str, dict[str, InventoryStock]],
     target_days: int,
 ) -> dict[str, dict[str, int]]:
     """计算各 SKU 各国的补货量。
@@ -25,7 +27,8 @@ def compute_country_qty(
         for country, v in country_map.items():
             if v <= 0:
                 continue
-            stock_total = inventory.get(sku, {}).get(country, {}).get("total", 0)
+            stock = inventory.get(sku, {}).get(country)
+            stock_total = stock.total if stock is not None else 0
             raw = target_days * v - stock_total
             if raw <= 0:
                 continue
