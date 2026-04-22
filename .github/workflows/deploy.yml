@@ -52,6 +52,10 @@ jobs:
   deploy:
     needs: check-ci
     runs-on: ubuntu-latest
+    # 需在 GitHub Settings → Environments → production 配置 required reviewers，
+    # 生产部署（包括 workflow_dispatch 手动触发）在 SSH 前必须人工 approval。
+    environment:
+      name: production
     steps:
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.2.0
