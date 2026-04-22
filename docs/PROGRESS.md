@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-22（审计 fix Stage 3 启动：P0 purchase_qty clamp / docs_enabled production 硬关 / CI postgres service / gitignore 补 *.exe）
+> 最近更新：2026-04-22（审计 fix Stage 3 全量收口：5 Critical + 28 Important + 18 Minor 闭环 / mypy blanket override 全清空 109 files strict / retention 三连 + dashboard stale 自动失效 / 历史页去重 + display_status_code / 部署安全加固。详见 `docs/superpowers/reviews/2026-04-22-audit-fixes-progress-v2.md`）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
