@@ -110,6 +110,11 @@ logs/
 *.tmp
 *.bak
 
+# Windows 本地开发工具（快捷方式、隧道 exe 等），严禁误 commit
+*.exe
+*.lnk
+cloudflared*
+
 # 编辑器本地配置
 .cursor/
 .claude/settings.local.json
