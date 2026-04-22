@@ -101,3 +101,34 @@ def test_compute_country_qty_reads_inventory_stock_total() -> None:
     result = compute_country_qty(velocity, inventory, target_days=30)
 
     assert result["SKU-A"]["US"] == 60
+
+
+def test_compute_total_accepts_local_stock() -> None:
+    from app.engine.context import LocalStock
+    from app.engine.step4_total import compute_total
+
+    # sum_qty=100, sum_velocity=10, buffer=30天 → buffer_qty=300
+    # local=40+10=50, safety=0 → purchase_qty = 100 + 300 - 50 + 0 = 350
+    result = compute_total(
+        sku="SKU-A",
+        country_qty_for_sku={"US": 60, "GB": 40},
+        velocity_for_sku={"US": 6.0, "GB": 4.0},
+        local_stock_for_sku=LocalStock(available=40, reserved=10),
+        buffer_days=30,
+        safety_stock_days=0,
+    )
+    assert result == 350
+
+
+def test_compute_total_accepts_none_local_stock() -> None:
+    from app.engine.step4_total import compute_total
+
+    result = compute_total(
+        sku="SKU-B",
+        country_qty_for_sku={"US": 10},
+        velocity_for_sku={"US": 0.0},
+        local_stock_for_sku=None,
+        buffer_days=30,
+        safety_stock_days=0,
+    )
+    assert result == 10  # 10 + 0 - 0 + 0
