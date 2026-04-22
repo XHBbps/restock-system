@@ -45,7 +45,10 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: 'dist',
       sourcemap: false,
-      chunkSizeWarningLimit: 500,
+      // element-plus 与 echarts 本身就超 500KB（压缩前），已通过 manualChunks
+      // 拆出独立 chunk 并在生产走 HTTP/2 多路复用+缓存。放宽警告阈值到 1000
+      // 避免每次 build 日志里都看到误导性的 "chunk > 500KB" 警告。
+      chunkSizeWarningLimit: 1000,
       rollupOptions: {
         output: {
           manualChunks(id) {

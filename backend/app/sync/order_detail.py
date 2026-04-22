@@ -66,6 +66,9 @@ async def _run_fetch_job(
         async with sem:
             try:
                 detail = await get_order_detail(shop_id=shop_id, amazon_order_id=amazon_order_id)
+                # 逐订单 commit 是刻意设计：API 调用主导时延（~200ms），
+                # 单条事务开销可忽略；若批量 commit 50 条，中途失败会丢失整批
+                # 已 save 的进度（_save_detail 已 flush 但未 commit）。
                 async with async_session_factory() as db:
                     await _save_detail(db, shop_id, amazon_order_id, detail)
                     await db.commit()
