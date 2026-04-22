@@ -6,7 +6,9 @@
   />
   <div v-else class="restock-list">
     <div class="table-toolbar">
-      <el-input v-model="skuFilter" placeholder="SKU 搜索" clearable style="width: 220px" />
+      <div class="table-toolbar__filters">
+        <el-input v-model="skuFilter" placeholder="SKU 搜索" clearable style="width: 220px" />
+      </div>
       <div class="table-toolbar__actions">
         <el-button
           v-if="editable"
@@ -166,6 +168,9 @@ onMounted(async () => {
   }
 })
 
+// 补货视图当前无单元格编辑 UI（与 ProcurementListView 对齐保留该开关），
+// editable 目前只用于决定是否显示导出按钮和多选列。后续若需补货也支持
+// PATCH（如修改 country_breakdown），再用 editable 守护 inline-edit 组件。
 const editable = computed(() => props.suggestion?.status === 'draft')
 
 function restockTotal(item: SuggestionItem): number {
@@ -237,6 +242,12 @@ async function handleExport(): Promise<void> {
   align-items: center;
   gap: $space-3;
   margin-bottom: $space-4;
+}
+
+.table-toolbar__filters {
+  display: flex;
+  gap: $space-4;
+  align-items: center;
 }
 
 .table-toolbar__actions {

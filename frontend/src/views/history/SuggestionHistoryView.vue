@@ -225,7 +225,7 @@ onMounted(() => {
   color: $color-danger !important;
 
   &:not(.is-disabled):hover {
-    color: #b91c1c !important; // red-700
+    color: $color-danger-dark !important;
     background: $color-danger-soft !important;
     box-shadow: 0 1px 2px rgba(220, 38, 38, 0.15);
   }

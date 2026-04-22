@@ -43,7 +43,7 @@ const diffDays = computed(() => (target.value ? target.value.diff(today, 'day') 
 
 const displayDate = computed(() => (target.value ? target.value.format('YYYY-MM-DD') : '—'))
 
-// 5 档分级（和 editable 无关，始终展示紧急度徽章）：
+// 6 档分级（和 editable 无关，始终展示紧急度徽章）：
 // < 0      → 逾期（红 + 徽章）
 // = 0      → 今日到期（橙 + 徽章）
 // 1-7      → 临近（橙）

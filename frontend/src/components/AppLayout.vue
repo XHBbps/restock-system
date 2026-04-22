@@ -154,7 +154,7 @@
           <el-input v-model="pwdForm.oldPassword" type="password" placeholder="请输入旧密码" show-password />
         </el-form-item>
         <el-form-item label="新密码">
-          <el-input v-model="pwdForm.newPassword" type="password" placeholder="至少6位" show-password />
+          <el-input v-model="pwdForm.newPassword" type="password" placeholder="至少 6 位" show-password />
         </el-form-item>
         <el-form-item label="确认密码">
           <el-input v-model="pwdForm.confirmPassword" type="password" placeholder="再次输入新密码" show-password />
@@ -274,7 +274,7 @@ async function handleChangePassword() {
     return
   }
   if (pwdForm.newPassword.length < 6) {
-    ElMessage.warning('新密码至少6位')
+    ElMessage.warning('新密码至少 6 位')
     return
   }
   if (pwdForm.newPassword !== pwdForm.confirmPassword) {
