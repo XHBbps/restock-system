@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date as date_type
 from datetime import datetime, timedelta
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict
 
 from fastapi import APIRouter, Depends, Path, Query
 from sqlalchemy import case, delete, func, select, update
@@ -33,6 +33,18 @@ from app.schemas.suggestion import (
 router = APIRouter(prefix="/api/suggestions", tags=["suggestion"])
 
 SUGGESTION_STATUS_SORT_ORDER: dict[str, int] = {"draft": 0, "archived": 1, "error": 2}
+
+
+class SuggestionItemUpdates(TypedDict, total=False):
+    """patch_item 增量更新字段集合（全部 optional）。"""
+
+    total_qty: int
+    purchase_qty: int
+    purchase_date: date_type | None
+    country_breakdown: dict[str, int]
+    warehouse_breakdown: dict[str, dict[str, int]]
+    allocation_snapshot: None
+    urgent: bool
 
 
 def _suggestion_status_sort_expr() -> ColumnElement[int]:
@@ -252,7 +264,7 @@ async def patch_item(
         if warehouse_values and sum(warehouse_values) != effective_country_breakdown[country]:
             raise ValidationFailed(f"{country} 的 warehouse_breakdown 之和与 country_breakdown 不一致")
 
-    updates: dict[str, Any] = {}
+    updates: SuggestionItemUpdates = {}
     if patch.total_qty is not None:
         updates["total_qty"] = patch.total_qty
     if patch.purchase_qty is not None:

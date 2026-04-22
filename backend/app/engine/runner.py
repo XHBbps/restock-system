@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy import insert, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.locks import ENGINE_RUN_ADVISORY_LOCK_KEY
 from app.core.logging import get_logger
 from app.core.restock_regions import resolve_allowed_restock_regions
 from app.core.timezone import now_beijing
@@ -28,8 +29,6 @@ from app.models.suggestion import Suggestion, SuggestionItem
 from app.tasks.jobs import JobContext
 
 logger = get_logger(__name__)
-
-ENGINE_RUN_ADVISORY_LOCK_KEY = 7429001
 
 
 async def run_engine(ctx: JobContext, *, triggered_by: str = "scheduler") -> int | None:
