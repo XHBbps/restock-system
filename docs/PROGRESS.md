@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-21（采购/补货分拆、安全库存、采购日期、EU 合并、快照端点拆分与嵌套 Tab 视图已落地）
+> 最近更新：2026-04-22（审计 fix Stage 3 启动：P0 purchase_qty clamp / docs_enabled production 硬关 / CI postgres service / gitignore 补 *.exe）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -47,18 +47,18 @@
 - **定时任务**（cron，Asia/Shanghai）：
   - 03:30 `sync_warehouse`
   - 02:00 `daily_archive`
-  - 默认 08:00 `calc_engine`（可配置，`calc_enabled` 控制）
+  - 默认 08:00 `calc_engine`（可配置，`global_config.suggestion_generation_enabled` 控制是否实际产出建议）
 - **信息总览快照刷新任务**：`refresh_dashboard_snapshot` 通过 TaskRun 入队执行；`GET /api/metrics/dashboard` 只读返回现有快照 / 活跃任务状态，手动“刷新快照”是默认触发入口
 - **订单详情同步与详情获取**：`sync_order_detail` 当前按 2 QPS / 2 并发保守抓取；订单页提供右侧独立“详情获取”组件，仅提供天数选择与触发按钮；手动触发会优先复用活跃的 `refetch_order_detail`、`sync_order_detail` 或 `sync_all` 任务，避免并发重复抓取，且不再对手动详情获取施加单次数量上限；任务执行中会按“已完成 X / 失败 Y / 总数 N”持续回写精确进度
 
 ### 2.3 补货计算引擎
-- **采购/补货拆分**：引擎同时产出 SKU 级 purchase_qty / purchase_date 与国家/仓库级 country_breakdown / warehouse_breakdown，并分别统计 procurement_item_count、estock_item_count；成功生成后自动关闭生成开关，等待导出与人工开新周期。
+- **采购/补货拆分**：引擎同时产出 SKU 级 purchase_qty / purchase_date 与国家/仓库级 country_breakdown / warehouse_breakdown，并分别统计 procurement_item_count、restock_item_count；成功生成后自动关闭生成开关，等待导出与人工开新周期。
 
 - **6 步流水线**（`backend/app/engine/runner.py`）：
   1. `step1_velocity` — 加权日均销量（7日×0.5 + 14日×0.3 + 30日×0.2）
   2. `step2_sale_days` — 可售天数 + 库存聚合（含在途）
   3. `step3_country_qty` — 各国补货量
-  4. `step4_total` — 总采购量（扣减国内库存 + 缓冲天数）
+  4. `step4_total` — 总采购量（Σcountry_qty + Σvelocity × buffer_days − 本地库存 + Σvelocity × safety_stock_days，clamp 到 0）
   5. `step5_warehouse_split` — 按邮编规则分配到具体仓库
   6. `step6_timing` — 紧急标志（任一有效国家 `sale_days <= lead_time_days` 即为紧急）
 - **补货区域过滤**：全局参数 `restock_regions` 支持按国家多选；为空数组时表示全部国家参与计算，配置后仅这些国家的订单会参与 `step1_velocity` 销量统计和 `step5_warehouse_split` 的国家订单分仓
@@ -76,7 +76,7 @@
 - **Excel 导出（替代推送）**：业务人员在建议详情勾选 `export_status='pending'` 的条目，点击“导出 Excel”走一步式 `POST /api/suggestions/{id}/snapshots` + `GET /api/snapshots/{id}/download` blob 下载；服务端生成不可变 `suggestion_snapshot` + `suggestion_snapshot_item` JSONB 快照并同步落盘 Excel 文件，后续可反复下载；首次导出后 `global_config.suggestion_generation_enabled` 自动翻 OFF，业务人员在全局配置页翻回 ON 时会二次确认并归档全部 `draft` 建议单以开启下一周期
 
 ### 2.5 前端 Dashboard 体系
-- **嵌套路由与 Tab 视图**：当前建议、建议详情、历史记录均拆为 procurement / estock 子路由，SuggestionTabBar 统一切换；采购页默认按采购日期排序并使用 PurchaseDateCell 标注今日/逾期，补货页支持国家与仓库下钻。
+- **嵌套路由与 Tab 视图**：当前建议、建议详情、历史记录均拆为 procurement / restock 子路由，SuggestionTabBar 统一切换；采购页默认按采购日期排序并使用 PurchaseDateCell 标注今日/逾期，补货页支持国家与仓库下钻。
 
 - **统一页面容器**：所有列表页使用 `PageSectionCard`（`#title` + `#actions` slot）
 - **共享工具模块**：
@@ -113,7 +113,7 @@
 - **后端查询口径**：
   - `backend/app/api/suggestion.py` 新增 `display_status=pending|exported|archived|error`，历史记录页的状态过滤改为后端统一按 `snapshot_count` 派生，移除前端“先查 draft 再二次过滤当前页”的错位逻辑。
   - `backend/app/api/metrics.py` 的 Dashboard 当前建议只再读取 `draft`，补充 `suggestion_snapshot_count` 与旧/异常 `dashboard_snapshot.payload` 容错，避免信息总览 500。
-  - `backend/app/api/config.py` 将 `calc_enabled` 纳入 scheduler reload 触发集合，自动计算开关切换可立即生效。
+  - `backend/app/api/config.py` 将 `sync_interval_minutes` / `calc_cron` / `scheduler_enabled` 纳入 scheduler reload 触发集合，参数保存后立即生效（`calc_enabled` 字段已在 Plan A 删除）。
 - **前端交互**：
   - `frontend/src/views/WorkspaceView.vue` 统一改读 `exported_count`，右侧进度文案改为“已导出”，状态 tag 基于 `suggestion_snapshot_count` 派生。
   - `frontend/src/views/HistoryView.vue` 直接把 `display_status` 透传后端，新增“异常”筛选项并移除当前页二次过滤。
