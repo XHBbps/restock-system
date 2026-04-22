@@ -1,9 +1,23 @@
 # Feature Specification: 赛狐补货计算工具
 
+> **⚠️ Superseded by Plan A（2026-04-19）+ 采购/补货分拆（2026-04-21）**
+>
+> 本 spec 描述的"一键推送至赛狐生成采购单"交付路径已在 Plan A（`docs/PROGRESS.md §3.49`）
+> 改为 **"Excel 导出 + Snapshot 版本化"**，并在 2026-04-21 进一步拆为采购 / 补货两个
+> 独立视图（`docs/PROGRESS.md §3.53`）。User Story 1 ~ 3、Acceptance Scenarios、
+> API 列表（推送接口）均已废弃。
+>
+> 当前业务真相请参考：
+> - `docs/PROGRESS.md §3.49 + §3.53`（能力清单 + 变更记录）
+> - `docs/Project_Architecture_Blueprint.md`（架构真理源）
+> - `AGENTS.md §1`（最新核心业务流）
+>
+> 本文件保留作历史追溯，不再更新。
+
 **Feature Branch**: `001-saihu-replenishment`
 **Created**: 2026-04-07
 **Last Updated**: 2026-04-08 (接口对齐后重构)
-**Status**: Draft (modules 1–8 + API reconciliation 确认完成)
+**Status**: **Superseded by Plan A (2026-04-19)** — see banner above
 **Input**: 对接赛狐 ERP，定时拉取订单/库存/在途数据，按规则计算 SKU 级建议采购量与采购时间，人工审核后一键回写赛狐生成采购单
 **Source Docs**:
 - 业务设计：`2026-04-07-saihu-replenishment-design.md`
