@@ -184,9 +184,10 @@ docker compose -f deploy/docker-compose.yml exec db psql -U postgres -d replenis
 
 3. **全局配置检查**
    ```sql
-   SELECT scheduler_enabled, sync_interval_minutes, calc_enabled, calc_cron 
+   SELECT scheduler_enabled, sync_interval_minutes, suggestion_generation_enabled, calc_cron
    FROM global_config WHERE id = 1;
    ```
+   （`calc_enabled` 已在 Plan A 删除，由 `suggestion_generation_enabled` 负责控制是否产出建议）
 
 4. **cron 表达式**：如果 `calc_cron` 是自定义，验证格式
    - 支持 5 字段（分 时 日 月 周）和 APScheduler 扩展语法

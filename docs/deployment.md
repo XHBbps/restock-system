@@ -286,7 +286,7 @@ Scheduler 保持单例避免重复触发，Worker 可水平扩展。
 | `REAPER_INTERVAL_SECONDS` | Reaper 扫描间隔 | `60` |
 | `DB_POOL_SIZE` | 每个服务的数据库连接池大小 | `10` |
 | `DB_MAX_OVERFLOW` | 连接池可溢出上限 | `5` |
-| `PUSH_AUTO_RETRY_TIMES` | 推送采购单重试次数 | `3` |
+| `PUSH_AUTO_RETRY_TIMES` | 赛狐同步单条记录失败后的自动重试次数（env 名沿用历史，Plan A 后实际用于同步重试而非推送） | `3` |
 | `SAIHU_RATE_LIMIT_QPS` | 默认单接口 QPS | `1` |
 
 ---
