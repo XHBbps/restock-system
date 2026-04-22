@@ -70,6 +70,9 @@ class Settings(BaseSettings):
     retention_task_run_days: int = 90
     retention_inventory_history_days: int = 180
     retention_exports_days: int = 60
+    # suggestion_snapshot.generation_status='generating' 超过 N 小时视为卡死
+    # （进程崩 / OOM 场景），被 retention_purge_job 标 failed。0 表示禁用。
+    retention_stuck_generating_hours: int = 1
 
     def docs_enabled(self) -> bool:
         # 生产环境强制关闭 /docs 与 /openapi.json，忽略 APP_DOCS_ENABLED env

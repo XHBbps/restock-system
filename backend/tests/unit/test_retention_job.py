@@ -208,3 +208,38 @@ def test_now_beijing_is_tz_aware() -> None:
     assert ts.utcoffset() == timedelta(hours=8)
     _ = timezone  # 消除未使用导入告警
     _ = SimpleNamespace  # 同上
+
+
+# --------- purge_stuck_generating ---------
+
+@pytest.mark.asyncio
+async def test_purge_stuck_generating_returns_zero_when_hours_zero() -> None:
+    from app.tasks.jobs.retention import purge_stuck_generating
+
+    db = _FakeDb([])
+    result = await purge_stuck_generating(db, hours=0)
+    assert result == 0
+    assert db.executed == []
+
+
+@pytest.mark.asyncio
+async def test_purge_stuck_generating_marks_rows_failed() -> None:
+    from app.tasks.jobs.retention import purge_stuck_generating
+
+    db = _FakeDb([_RowcountResult(3)])
+    result = await purge_stuck_generating(db, hours=1)
+    assert result == 3
+    # 只执行了 1 条 UPDATE 语句
+    assert len(db.executed) == 1
+    # SQL 含 generation_status='generating' + 时间阈值
+    compiled = str(db.executed[0])
+    assert "generation_status" in compiled.lower()
+
+
+@pytest.mark.asyncio
+async def test_purge_stuck_generating_handles_null_rowcount() -> None:
+    from app.tasks.jobs.retention import purge_stuck_generating
+
+    db = _FakeDb([_RowcountResult(None)])  # type: ignore[arg-type]
+    result = await purge_stuck_generating(db, hours=1)
+    assert result == 0
