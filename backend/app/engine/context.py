@@ -23,6 +23,23 @@ class InventoryStock:
         return self.available + self.reserved + self.in_transit
 
 
+@dataclass(frozen=True, slots=True)
+class LocalStock:
+    """本地主仓（type=1）库存快照。
+
+    替换原 step4 ``load_local_inventory`` 的 ``dict[str, int]`` with keys
+    ``{"available","reserved"}``。本地仓不含 in_transit（in_transit 属于
+    出口在途，在 step2 的 InventoryStock 里表示）。
+    """
+
+    available: int
+    reserved: int
+
+    @property
+    def total(self) -> int:
+        return self.available + self.reserved
+
+
 @dataclass
 class EngineContext:
     country_qty: dict[str, dict[str, int]] = field(default_factory=dict)
