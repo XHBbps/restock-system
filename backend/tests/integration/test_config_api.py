@@ -156,11 +156,12 @@ async def test_patch_global_config_does_not_flip_stale_for_non_sensitive_field(
 ) -> None:
     from app.models.dashboard_snapshot import DashboardSnapshot
 
-    await seed_global_config(db_session, sync_interval_minutes=60)
+    await seed_global_config(db_session, shop_sync_mode="all")
     await _seed_dashboard_snapshot(db_session, stale=False)
 
-    # sync_interval_minutes 不在敏感字段集合内
-    resp = await client.patch("/api/config/global", json={"sync_interval_minutes": 30})
+    # shop_sync_mode 既不在敏感字段集合内、也不触发 reload_scheduler
+    # （后者会通过 async_session_factory 走 prod DATABASE_URL，CI 不可达）。
+    resp = await client.patch("/api/config/global", json={"shop_sync_mode": "specific"})
     assert resp.status_code == 200
 
     db_session.expire_all()
