@@ -138,6 +138,20 @@ module = [
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
+# 历史遗留 blanket 抑制清单 — 审计 Stage 3 打包 #2 Task 2.4 已从本列表
+# 永久删除（经精准 type: ignore / 参数类型收敛验证 mypy strict 通过）：
+# - app.sync.inventory
+# - app.sync.order_list
+# - app.tasks.jobs.daily_archive
+# - app.tasks.scheduler
+#
+# 下列 13 个模块仍需 blanket 抑制；backlog 逐个清理：
+# - app.api.suggestion / app.api.monitor / app.sync.order_detail 的 dict-item
+#   和 no-untyped-def 已部分修（sort_map 类型 / Row tuple / type: ignore），
+#   剩余 no-untyped-def 需逐个 helper 补 return type 注解，不在本轮 fix
+#   范围内
+# - app.api.data / config / task / auth / sync.out_records / sync.warehouse /
+#   sync.shop / tasks.queue / saihu.token / saihu.client 未整改
 module = [
     "app.api.data",
     "app.api.config",
@@ -145,15 +159,11 @@ module = [
     "app.api.monitor",
     "app.api.task",
     "app.api.auth",
-    "app.sync.inventory",
     "app.sync.out_records",
-    "app.sync.order_list",
     "app.sync.order_detail",
     "app.sync.warehouse",
     "app.sync.shop",
-    "app.tasks.jobs.daily_archive",
     "app.tasks.queue",
-    "app.tasks.scheduler",
     "app.saihu.token",
     "app.saihu.client",
 ]
