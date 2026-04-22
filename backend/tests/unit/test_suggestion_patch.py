@@ -261,3 +261,84 @@ async def test_suggestion_patch_clears_allocation_snapshot_on_allocation_edit(mo
     update_stmt = db.executed_statements[-1]
     normalized_values = _normalize_update_values(update_stmt)
     assert normalized_values["allocation_snapshot"] is None
+
+
+async def test_suggestion_patch_urgent_boundary_sale_days_equals_lead_time(monkeypatch) -> None:
+    """边界：sale_days == lead_time 时 urgent=True（has_urgent_sale_days 用 <=）。"""
+    import app.api.suggestion as suggestion_module
+
+    async def _fake_enrich_item(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    async def _fake_lead_time(*_args: Any, **_kwargs: Any) -> int:
+        return 20
+
+    item = _FakeItem()
+    item.sale_days_snapshot = {"US": 20.0, "UK": 45.0}
+    db = _FakeSession([_FakeSuggestion(), item, None])
+    patch = SuggestionItemPatch(
+        country_breakdown={"US": 5, "UK": 3},
+        warehouse_breakdown={"US": {"W1": 5}},
+    )
+    monkeypatch.setattr(suggestion_module, "_enrich_item", _fake_enrich_item)
+    monkeypatch.setattr(suggestion_module, "_resolve_effective_lead_time_days", _fake_lead_time)
+
+    await patch_item(patch=patch, suggestion_id=1, item_id=10, db=db, _={})  # type: ignore[arg-type]
+
+    values = _normalize_update_values(db.executed_statements[-1])
+    assert values["urgent"] is True
+
+
+async def test_suggestion_patch_urgent_boundary_sale_days_above_lead_time(monkeypatch) -> None:
+    """边界：sale_days > lead_time 对每个国家都成立 → urgent=False。"""
+    import app.api.suggestion as suggestion_module
+
+    async def _fake_enrich_item(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    async def _fake_lead_time(*_args: Any, **_kwargs: Any) -> int:
+        return 20
+
+    item = _FakeItem()
+    item.sale_days_snapshot = {"US": 21.0, "UK": 30.0}
+    db = _FakeSession([_FakeSuggestion(), item, None])
+    patch = SuggestionItemPatch(
+        country_breakdown={"US": 5, "UK": 3},
+        warehouse_breakdown={"US": {"W1": 5}},
+    )
+    monkeypatch.setattr(suggestion_module, "_enrich_item", _fake_enrich_item)
+    monkeypatch.setattr(suggestion_module, "_resolve_effective_lead_time_days", _fake_lead_time)
+
+    await patch_item(patch=patch, suggestion_id=1, item_id=10, db=db, _={})  # type: ignore[arg-type]
+
+    values = _normalize_update_values(db.executed_statements[-1])
+    assert values["urgent"] is False
+
+
+async def test_suggestion_patch_urgent_ignores_zero_qty_country(monkeypatch) -> None:
+    """qty=0 的国家不参与 urgent 判定（positive_qty_countries 过滤）。
+
+    US qty=0 但 sale_days=5（紧急），UK qty=3 且 sale_days=45（充裕） → urgent=False。
+    """
+    import app.api.suggestion as suggestion_module
+
+    async def _fake_enrich_item(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    async def _fake_lead_time(*_args: Any, **_kwargs: Any) -> int:
+        return 20
+
+    item = _FakeItem()
+    item.sale_days_snapshot = {"US": 5.0, "UK": 45.0}
+    db = _FakeSession([_FakeSuggestion(), item, None])
+    patch = SuggestionItemPatch(
+        country_breakdown={"US": 0, "UK": 3},
+        warehouse_breakdown={"UK": {"W1": 3}},
+    )
+    monkeypatch.setattr(suggestion_module, "_enrich_item", _fake_enrich_item)
+    monkeypatch.setattr(suggestion_module, "_resolve_effective_lead_time_days", _fake_lead_time)
+
+    await patch_item(patch=patch, suggestion_id=1, item_id=10, db=db, _={})  # type: ignore[arg-type]
+
+    values = _normalize_update_values(db.executed_statements[-1])
+    assert values["urgent"] is False
