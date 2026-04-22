@@ -25,6 +25,7 @@ from app.core.permissions import (
 )
 from app.core.query import escape_like
 from app.core.timezone import now_beijing
+from app.models.dashboard_snapshot import DashboardSnapshot
 from app.models.global_config import GlobalConfig
 from app.models.inventory import InventorySnapshotLatest
 from app.models.product_listing import ProductListing
@@ -54,6 +55,22 @@ from app.tasks.queue import enqueue_task
 from app.tasks.scheduler import reload_scheduler
 
 router = APIRouter(prefix="/api/config", tags=["config"])
+
+# 改动以下任一字段即把 dashboard_snapshot.stale 置 TRUE，下次 dashboard API
+# 自动 enqueue 刷新：
+# - restock_regions / eu_countries：直接影响 velocity 口径和国家分布
+# - target_days / lead_time_days / buffer_days / safety_stock_days：
+#   影响 compute_country_qty / compute_total / urgent 判定
+_DASHBOARD_SENSITIVE_FIELDS = frozenset(
+    {
+        "restock_regions",
+        "eu_countries",
+        "target_days",
+        "lead_time_days",
+        "buffer_days",
+        "safety_stock_days",
+    }
+)
 
 
 def _warehouse_total_stock_subquery() -> Any:
@@ -169,7 +186,19 @@ async def patch_global(
         lead_time_days = updates.get("lead_time_days", row.lead_time_days)
         if target_days < lead_time_days:
             raise ValidationFailed("目标库存天数不能小于采购提前期")
+        # 值感知前先 snapshot 旧值——一旦 execute(update(...)) 触发 ORM
+        # auto-expire，后续 getattr(row, field) 会懒加载拿到新值，无法判断变更。
+        sensitive_updates = _DASHBOARD_SENSITIVE_FIELDS & updates.keys()
+        sensitive_old = {f: getattr(row, f, None) for f in sensitive_updates}
         await db.execute(update(GlobalConfig).where(GlobalConfig.id == 1).values(**updates))
+        if sensitive_updates and any(
+            sensitive_old[f] != updates[f] for f in sensitive_updates
+        ):
+            await db.execute(
+                update(DashboardSnapshot)
+                .where(DashboardSnapshot.id == 1)
+                .values(stale=True)
+            )
         await db.commit()
         if {"sync_interval_minutes", "scheduler_enabled"} & updates.keys():
             await reload_scheduler()
@@ -498,7 +527,7 @@ async def delete_zipcode_rule(
     _: None = Depends(require_permission(CONFIG_EDIT)),
 ) -> None:
     res = await db.execute(delete(ZipcodeRule).where(ZipcodeRule.id == rule_id))
-    if res.rowcount == 0:  # type: ignore[attr-defined]
+    if res.rowcount == 0:
         raise NotFound(f"规则 {rule_id} 不存在")
     return None
 

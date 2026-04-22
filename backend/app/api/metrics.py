@@ -461,6 +461,19 @@ async def metrics(
     return "\n".join(lines)
 
 
+async def _ensure_dashboard_refresh_task(db: AsyncSession) -> TaskRun | None:
+    """配置变更 stale 时自动 enqueue 一条 refresh 任务（dedupe 保证同时只一条）。"""
+    task_id, _existing = await enqueue_task(
+        db,
+        job_name=REFRESH_DASHBOARD_JOB_NAME,
+        trigger_source="scheduler",
+        dedupe_key=REFRESH_DASHBOARD_JOB_NAME,
+        payload={"triggered_by": "auto_stale"},
+    )
+    result = await db.execute(select(TaskRun).where(TaskRun.id == task_id))
+    return result.scalar_one_or_none()
+
+
 @router.get("/dashboard", response_model=DashboardOverview)
 async def get_dashboard_overview(
     db: AsyncSession = Depends(db_session),
@@ -471,6 +484,11 @@ async def get_dashboard_overview(
     snapshot = (
         await db.execute(select(DashboardSnapshot).where(DashboardSnapshot.id == 1))
     ).scalar_one_or_none()
+
+    # 配置变更 → dashboard_snapshot.stale=True，若无 refresh 任务活跃则自动 enqueue
+    stale = bool(getattr(snapshot, "stale", False)) if snapshot is not None else False
+    if stale and active_task is None:
+        active_task = await _ensure_dashboard_refresh_task(db)
 
     if snapshot and snapshot.payload:
         try:
@@ -486,9 +504,15 @@ async def get_dashboard_overview(
         # 旧快照缺少新增字段时，Pydantic 自动填充默认值（restock_sku_count=0 等）；
         # 同时入队刷新任务，后台更新快照后下次请求即为完整数据
         needs_refresh = not _has_restock_summary_keys(snapshot.payload)
+        if (active_task is not None) or stale:
+            status: Literal["ready", "missing", "refreshing"] = "refreshing"
+        elif needs_refresh:
+            status = "missing"
+        else:
+            status = "ready"
         return DashboardOverview(
             **payload.model_dump(),
-            snapshot_status="refreshing" if active_task else ("missing" if needs_refresh else "ready"),
+            snapshot_status=status,
             snapshot_updated_at=snapshot.refreshed_at or snapshot.updated_at,
             snapshot_task_id=active_task.id if active_task else None,
         )

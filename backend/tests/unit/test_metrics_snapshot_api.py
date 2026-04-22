@@ -232,3 +232,108 @@ async def test_refresh_dashboard_snapshot_enqueues_manual_task(monkeypatch) -> N
 
     assert result.task_id == 99
     assert result.existing is True
+
+
+@pytest.mark.asyncio
+async def test_dashboard_stale_true_auto_enqueues_refresh(monkeypatch) -> None:
+    """dashboard_snapshot.stale=True + 无活跃任务 → 自动 enqueue + status=refreshing。"""
+    import app.api.metrics as metrics_module
+
+    payload = {
+        "enabled_sku_count": 12,
+        "restock_sku_count": 7,
+        "no_restock_sku_count": 5,
+        "suggestion_item_count": 8,
+        "exported_count": 3,
+        "urgent_count": 5,
+        "warning_count": 2,
+        "safe_count": 4,
+        "risk_country_count": 3,
+        "suggestion_id": 10,
+        "suggestion_status": "draft",
+        "suggestion_snapshot_count": 2,
+        "lead_time_days": 20,
+        "target_days": 60,
+        "country_risk_distribution": [],
+        "country_restock_distribution": [],
+        "top_urgent_skus": [],
+    }
+
+    async def _fake_enqueue_task(*_args, **_kwargs):
+        return 123, False
+
+    # _get_active_dashboard_refresh_task → None（第 1 次）
+    # snapshot 查询 → 带 stale=True 的 snapshot（第 2 次）
+    # _ensure_dashboard_refresh_task 在 enqueue 后 select TaskRun id=123（第 3 次）
+    db = _FakeDb(
+        [
+            _ScalarOneOrNoneResult(None),
+            _ScalarOneOrNoneResult(
+                SimpleNamespace(
+                    id=1,
+                    payload=payload,
+                    stale=True,
+                    refreshed_at=datetime(2026, 4, 14, 10, 0, 0),
+                    updated_at=datetime(2026, 4, 14, 10, 0, 0),
+                )
+            ),
+            _ScalarOneOrNoneResult(SimpleNamespace(id=123)),
+        ]
+    )
+
+    monkeypatch.setattr(metrics_module, "enqueue_task", _fake_enqueue_task)
+
+    result = await get_dashboard_overview(db=db, _={})  # type: ignore[arg-type]
+
+    assert result.snapshot_status == "refreshing"
+    assert result.snapshot_task_id == 123
+    # stale 时仍返回当前 payload（不阻塞），后台刷新后下次请求刷新
+    assert result.restock_sku_count == 7
+
+
+@pytest.mark.asyncio
+async def test_dashboard_stale_with_active_task_does_not_double_enqueue(monkeypatch) -> None:
+    """stale=True 但已有活跃任务 → 不重复 enqueue，复用现有 task_id。"""
+    import app.api.metrics as metrics_module
+
+    payload = {
+        "enabled_sku_count": 6,
+        "restock_sku_count": 1,
+        "no_restock_sku_count": 5,
+        "suggestion_item_count": 0,
+        "exported_count": 0,
+        "urgent_count": 1,
+        "warning_count": 2,
+        "safe_count": 3,
+        "risk_country_count": 2,
+        "suggestion_id": None,
+        "suggestion_status": None,
+        "suggestion_snapshot_count": 0,
+        "lead_time_days": 20,
+        "target_days": 60,
+        "country_risk_distribution": [],
+        "country_restock_distribution": [],
+        "top_urgent_skus": [],
+    }
+    db = _FakeDb(
+        [
+            _ScalarOneOrNoneResult(SimpleNamespace(id=88)),  # 已有活跃任务
+            _ScalarOneOrNoneResult(
+                SimpleNamespace(
+                    id=1,
+                    payload=payload,
+                    stale=True,
+                    refreshed_at=datetime(2026, 4, 14, 11, 0, 0),
+                    updated_at=datetime(2026, 4, 14, 11, 0, 0),
+                )
+            ),
+        ]
+    )
+
+    # 若因 bug 再次 enqueue，pytest.fail 报错
+    monkeypatch.setattr(metrics_module, "enqueue_task", pytest.fail)
+
+    result = await get_dashboard_overview(db=db, _={})  # type: ignore[arg-type]
+
+    assert result.snapshot_status == "refreshing"
+    assert result.snapshot_task_id == 88
