@@ -85,11 +85,34 @@ export async function getSnapshot(snapshotId: number): Promise<SnapshotDetailOut
 export async function downloadSnapshotBlob(
   snapshotId: number,
 ): Promise<{ blob: Blob; filename: string }> {
-  const resp = await client.get(`/api/snapshots/${snapshotId}/download`, {
-    responseType: 'blob',
-  })
-  const disposition = (resp.headers['content-disposition'] as string | undefined) || ''
-  const match = disposition.match(/filename\*?=(?:UTF-8'')?["]?([^;"\r\n]+)["]?/i)
-  const filename = match ? decodeURIComponent(match[1]) : `snapshot-${snapshotId}.xlsx`
-  return { blob: resp.data as Blob, filename }
+  try {
+    const resp = await client.get(`/api/snapshots/${snapshotId}/download`, {
+      responseType: 'blob',
+    })
+    const disposition = (resp.headers['content-disposition'] as string | undefined) || ''
+    const match = disposition.match(/filename\*?=(?:UTF-8'')?["]?([^;"\r\n]+)["]?/i)
+    const filename = match ? decodeURIComponent(match[1]) : `snapshot-${snapshotId}.xlsx`
+    return { blob: resp.data as Blob, filename }
+  } catch (error) {
+    // responseType:'blob' 让 4xx/5xx 的 JSON body 也被包成 Blob，
+    // getActionErrorMessage 看不到 detail。解包成 JSON 再抛，保证友好提示
+    // （如 "该版本已过期清理" 410 Gone）。
+    await _decodeBlobErrorInPlace(error)
+    throw error
+  }
+}
+
+async function _decodeBlobErrorInPlace(error: unknown): Promise<void> {
+  const maybe = error as { response?: { data?: unknown } }
+  const data = maybe.response?.data
+  if (data instanceof Blob) {
+    try {
+      const text = await data.text()
+      if (text.trim()) {
+        maybe.response!.data = JSON.parse(text)
+      }
+    } catch {
+      // 保留原始 blob；getActionErrorMessage 会 fallback 到 "下载失败"
+    }
+  }
 }

@@ -315,3 +315,83 @@ async def test_snapshot_download(client, seed_suggestion, ensure_global_config, 
 async def test_snapshot_download_404(client, ensure_global_config):
     resp = await client.get("/api/snapshots/99999/download")
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_snapshot_download_410_when_file_missing_without_purged_log(
+    client, seed_suggestion, ensure_global_config, db_session, monkeypatch
+):
+    """文件不在磁盘 + excel_export_log 未标记 purged → 410 "文件已丢失"。"""
+    from app.config import get_settings
+    from app.models.suggestion_snapshot import SuggestionSnapshot
+
+    _set_export_dir(monkeypatch)
+    sid = seed_suggestion["suggestion_id"]
+    item_ids = seed_suggestion["item_ids"]
+    created = (
+        await client.post(
+            f"/api/suggestions/{sid}/snapshots/restock",
+            json={"item_ids": item_ids[:1]},
+        )
+    ).json()
+    snap_id = created["id"]
+
+    snapshot = (
+        await db_session.execute(select(SuggestionSnapshot).where(SuggestionSnapshot.id == snap_id))
+    ).scalar_one()
+    settings = get_settings()
+    storage_root = Path(settings.export_storage_dir).resolve()
+    file_abs = storage_root / (snapshot.file_path or "")
+    if file_abs.exists():
+        file_abs.unlink()
+
+    resp = await client.get(f"/api/snapshots/{snap_id}/download")
+    assert resp.status_code == 410
+    assert resp.json()["detail"] == "文件已丢失"
+
+
+@pytest.mark.asyncio
+async def test_snapshot_download_410_with_purged_log_shows_retention_message(
+    client, seed_suggestion, ensure_global_config, db_session, monkeypatch
+):
+    """retention 已标记 file_purged_at → 410 带"已过期清理"明确提示。"""
+    from app.config import get_settings
+    from app.core.timezone import now_beijing
+    from app.models.excel_export_log import ExcelExportLog
+    from app.models.suggestion_snapshot import SuggestionSnapshot
+    from sqlalchemy import update
+
+    _set_export_dir(monkeypatch)
+    sid = seed_suggestion["suggestion_id"]
+    item_ids = seed_suggestion["item_ids"]
+    created = (
+        await client.post(
+            f"/api/suggestions/{sid}/snapshots/restock",
+            json={"item_ids": item_ids[:1]},
+        )
+    ).json()
+    snap_id = created["id"]
+
+    snapshot = (
+        await db_session.execute(select(SuggestionSnapshot).where(SuggestionSnapshot.id == snap_id))
+    ).scalar_one()
+    settings = get_settings()
+    storage_root = Path(settings.export_storage_dir).resolve()
+    file_abs = storage_root / (snapshot.file_path or "")
+    if file_abs.exists():
+        file_abs.unlink()
+
+    # 模拟 retention_purge 标记：写入 excel_export_log.file_purged_at
+    await db_session.execute(
+        update(ExcelExportLog)
+        .where(ExcelExportLog.snapshot_id == snap_id)
+        .where(ExcelExportLog.action == "generate")
+        .values(file_purged_at=now_beijing())
+    )
+    await db_session.commit()
+
+    resp = await client.get(f"/api/snapshots/{snap_id}/download")
+    assert resp.status_code == 410
+    detail = resp.json()["detail"]
+    assert "已过期清理" in detail
+    assert str(settings.retention_exports_days) in detail

@@ -367,6 +367,22 @@ async def download_snapshot(
     storage_root = Path(settings.export_storage_dir).resolve()
     file_abs = storage_root / (snapshot.file_path or "")
     if not snapshot.file_path or not file_abs.exists():
+        # 若 retention 已标记 file_purged_at，返回更明确的 410 原因供前端展示
+        purged_at = (
+            await db.execute(
+                select(ExcelExportLog.file_purged_at)
+                .where(ExcelExportLog.snapshot_id == snapshot_id)
+                .where(ExcelExportLog.action == "generate")
+                .where(ExcelExportLog.file_purged_at.is_not(None))
+                .order_by(ExcelExportLog.file_purged_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if purged_at is not None:
+            raise HTTPException(
+                status_code=410,
+                detail=f"该版本已过期清理（保留期 {settings.retention_exports_days} 天）",
+            )
         raise HTTPException(status_code=410, detail="文件已丢失")
 
     await db.execute(
