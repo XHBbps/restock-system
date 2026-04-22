@@ -233,7 +233,10 @@ def _extract_refetch_targets(payload: dict[str, object]) -> list[tuple[str, str]
 
 def _sanitize_detail_country(detail: dict[str, object]) -> str | None:
     marketplace_id_raw = detail.get("marketplaceId") or ""
-    return marketplace_to_country(marketplace_id_raw)
+    # detail: dict[str, object] → marketplace_id_raw 类型是 object | str，
+    # marketplace_to_country 期望 str | None；运行时 detail 来自赛狐 JSON，
+    # 如果 marketplaceId 存在就是 str，否则兜底空串。显式转 str 对齐签名。
+    return marketplace_to_country(str(marketplace_id_raw) if marketplace_id_raw else None)
 
 
 def _postal_code_for_routing(detail: dict[str, object]) -> str | None:

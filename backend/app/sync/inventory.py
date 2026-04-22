@@ -63,7 +63,9 @@ async def sync_inventory_job(ctx: JobContext) -> None:
 
 async def _load_warehouse_countries(db: AsyncSession) -> dict[str, str | None]:
     rows = (await db.execute(select(Warehouse.id, Warehouse.country))).all()
-    return dict(rows)
+    # SQLAlchemy Row 支持 tuple 解包，dict() 接受 Iterable[tuple] 即可；
+    # mypy 对 Sequence[Row] 协变报错是 stub 问题，显式 tuple 化兼容类型
+    return {row[0]: row[1] for row in rows}
 
 
 async def _upsert_inventory(

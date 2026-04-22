@@ -73,8 +73,8 @@ def compute_purchase_date(
 
 def compute_urgency_for_sku(
     *,
-    sale_days_for_sku: dict[str, float],
-    country_qty_for_sku: dict[str, int],
+    sale_days_for_sku: Mapping[str, float | int | None],
+    country_qty_for_sku: Mapping[str, int],
     lead_time_days: int,
     purchase_qty: int = 0,
     today: date | None = None,

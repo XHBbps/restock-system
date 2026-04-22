@@ -498,7 +498,7 @@ async def delete_zipcode_rule(
     _: None = Depends(require_permission(CONFIG_EDIT)),
 ) -> None:
     res = await db.execute(delete(ZipcodeRule).where(ZipcodeRule.id == rule_id))
-    if res.rowcount == 0:
+    if res.rowcount == 0:  # type: ignore[attr-defined]
         raise NotFound(f"规则 {rule_id} 不存在")
     return None
 

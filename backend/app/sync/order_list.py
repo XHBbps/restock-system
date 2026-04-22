@@ -155,7 +155,7 @@ async def _upsert_order(
     }
     header_stmt = pg_insert(OrderHeader).values(**header_values).returning(OrderHeader.id)
     update_set = {k: v for k, v in header_values.items() if k not in ("shop_id", "amazon_order_id")}
-    header_stmt = header_stmt.on_conflict_do_update(
+    header_stmt = header_stmt.on_conflict_do_update(  # type: ignore[attr-defined]
         constraint="uq_order_header_key",
         set_=update_set,
     )

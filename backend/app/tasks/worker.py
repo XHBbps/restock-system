@@ -192,7 +192,7 @@ class Worker:
                         },
                     )
                     await db.commit()
-                    if (result.rowcount or 0) == 0:
+                    if (result.rowcount or 0) == 0:  # type: ignore[attr-defined]
                         lease_lost.set()
                         return
         except asyncio.CancelledError:
@@ -229,7 +229,7 @@ class Worker:
                     .values(**values)
                 )
                 await db.commit()
-                if (result.rowcount or 0) == 0:
+                if (result.rowcount or 0) == 0:  # type: ignore[attr-defined]
                     lease_lost.set()
                     raise TaskLeaseLostError(f"task {task_id} lease lost during progress update")
 
