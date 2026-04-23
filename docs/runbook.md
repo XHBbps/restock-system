@@ -577,3 +577,124 @@ docker compose -f deploy/docker-compose.yml start backend worker scheduler
 - 架构参考：`docs/Project_Architecture_Blueprint.md`
 - 项目进度：`docs/PROGRESS.md`
 - 部署脚本源码：`deploy/scripts/`
+
+---
+
+## 8. 部署后验证（retention / dashboard stale / 410 Gone）
+
+> 首次部署或每季度演练一次。每条都是独立可跑，互不依赖。
+
+### 8.1 Retention purge 手工触发
+
+验证：04:00 cron 对应的 retention_purge 任务能被 worker 正确消费，四连（task_run / inventory_history / exports / stuck_generating）的日志都正确写入。
+
+```bash
+# 1. 手工 enqueue retention_purge 任务（dedupe_key=retention_purge 保证不重复）
+docker exec restock-dev-backend python -c "
+import asyncio
+from app.db.session import async_session_factory
+from app.tasks.queue import enqueue_task
+
+async def main():
+    async with async_session_factory() as db:
+        task_id, existing = await enqueue_task(
+            db, job_name='retention_purge', trigger_source='manual',
+            dedupe_key='retention_purge', payload={'triggered_by': 'post_deploy_verify'}
+        )
+        print(f'task_id={task_id} existing={existing}')
+
+asyncio.run(main())
+"
+
+# 2. 等 5-10s 让 worker 消费，再看 worker 日志（dev 容器用 structlog JSON）
+docker logs restock-dev-worker --since 1m 2>&1 | grep -E "retention_purge|deleted|purged|stuck"
+```
+
+**预期**：日志按顺序出现 `retention_purge_task_run deleted=N` / `retention_purge_inventory_history deleted=N` / `retention_purge_exports purged=N` / `retention_purge_stuck_generating failed=N`。首次 deploy 时 N 大概率都是 0。
+
+**可能的异常**：
+- 若日志完全没出现 `retention_purge_*`：worker 没消费，检查 `app.tasks.jobs` 导入是否包含 `retention`（应在 `backend/app/main.py` 有 `from app.tasks.jobs import retention as _job_retention`）。
+- 若某行 `deleted=N` 中 N > 100：磁盘数据可能超预期旧，检查 env 的 `RETENTION_*_DAYS` 是否设反了。
+
+### 8.2 Dashboard stale 自动失效 → 自动 refresh
+
+验证：`patch_global` 改敏感字段后，下次 GET /api/metrics/dashboard 自动入队刷新。
+
+```bash
+# 1. 先把 dashboard snapshot 刷成 ready 状态
+curl -X POST http://localhost:8088/api/metrics/dashboard/refresh \
+  -H "Authorization: Bearer <dev_token>" | jq .
+# 等 task_id 返回 → 等 10s worker 跑完
+
+# 2. GET dashboard 看 snapshot_status 应为 ready，记住 snapshot_updated_at
+curl http://localhost:8088/api/metrics/dashboard -H "Authorization: Bearer <dev_token>" | jq '.snapshot_status, .snapshot_updated_at'
+
+# 3. 改一个敏感字段（e.g. buffer_days 从 30 → 31）
+curl -X PATCH http://localhost:8088/api/config/global \
+  -H "Authorization: Bearer <dev_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"buffer_days": 31}'
+
+# 4. 再 GET dashboard — 应该看到 snapshot_status=refreshing + snapshot_task_id 非空
+curl http://localhost:8088/api/metrics/dashboard -H "Authorization: Bearer <dev_token>" | jq '.snapshot_status, .snapshot_task_id'
+
+# 5. 等 10s worker 跑完刷新，再 GET — 应回到 ready，snapshot_updated_at 更新
+```
+
+**预期**：步骤 4 返回 `refreshing` + 有 task_id；步骤 5 返回 `ready` + updated_at 比步骤 2 大。
+
+**可能的异常**：
+- 步骤 4 仍返回 `ready`：`GLOBAL_CONFIG_SENSITIVE_FIELDS`（见 `backend/app/api/config.py`）没正确检测到 `buffer_days`，或 `dashboard_snapshot.stale` 字段迁移没到。
+- 步骤 5 一直 `refreshing`：worker 没消费 `refresh_dashboard_snapshot` 任务，检查 worker 日志。
+
+### 8.3 Excel 文件 purged 后前端下载 410 提示
+
+验证：retention 清理磁盘 Excel 并写 `excel_export_log.file_purged_at` 后，前端下载端显示"已过期清理"友好提示。
+
+```bash
+# 1. 导出一个 procurement snapshot（前端 / 或 curl），记下 snapshot_id
+# 前端 → 建议单列表 → 选中 item → 导出采购单
+
+# 2. 模拟 retention 清理（开发环境快速路径）：手工删磁盘 + 标记 log
+docker exec restock-dev-backend python -c "
+import asyncio
+from datetime import datetime
+from pathlib import Path
+from sqlalchemy import update, select
+from app.config import get_settings
+from app.core.timezone import now_beijing
+from app.db.session import async_session_factory
+from app.models.excel_export_log import ExcelExportLog
+from app.models.suggestion_snapshot import SuggestionSnapshot
+
+SNAPSHOT_ID = <填刚才导出的 snapshot_id>
+
+async def main():
+    async with async_session_factory() as db:
+        snap = (await db.execute(
+            select(SuggestionSnapshot).where(SuggestionSnapshot.id == SNAPSHOT_ID)
+        )).scalar_one()
+        root = Path(get_settings().export_storage_dir).resolve()
+        path = root / (snap.file_path or '')
+        if path.exists():
+            path.unlink()
+            print(f'Deleted {path}')
+        await db.execute(
+            update(ExcelExportLog)
+            .where(ExcelExportLog.snapshot_id == SNAPSHOT_ID)
+            .where(ExcelExportLog.action == 'generate')
+            .values(file_purged_at=now_beijing())
+        )
+        await db.commit()
+
+asyncio.run(main())
+"
+
+# 3. 前端打开 /restock/history → 详情 → 版本列表 → 点刚才的版本的"下载"按钮
+```
+
+**预期**：前端弹红色 ElMessage "该版本已过期清理（保留期 60 天）"（文字含 `RETENTION_EXPORTS_DAYS` env 值）。
+
+**可能的异常**：
+- 看到通用的 "下载失败" 或后端 detail "文件已丢失"：`_decodeBlobErrorInPlace`（`frontend/src/api/snapshot.ts`）没正常解包 blob 错误，或后端 404→410 逻辑分支错了。
+- 看到 500：检查 docker exec python 脚本是否真的写入了 `file_purged_at`（用 `psql -c "SELECT file_purged_at FROM excel_export_log WHERE snapshot_id = ..."` 复核）。
