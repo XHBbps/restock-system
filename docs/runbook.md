@@ -571,6 +571,54 @@ docker compose -f deploy/docker-compose.yml start backend worker scheduler
 
 > **兜底**：从 2026-04-23 起 `restore_db.sh` 会在 DROP 前自动 dump 当前 DB 到 `<backup-file 同目录>/pre-restore-<timestamp>.sql.gz`。如 restore 结果不对，可用该兜底文件回退：`bash deploy/scripts/restore_db.sh deploy/data/backups/pre-restore-XXXX.sql.gz`。
 
+### 6.4 Secrets 恢复（`.env` 丢失）
+
+生产 `.env` 文件如果被误删 / 生产服务器整体丢失 → 系统无法启动（`validate_env.sh` 会拒绝 placeholder 密钥）。
+
+项目规模 1-5 人，**不使用 Vault / AWS Secrets Manager**（P3 backlog，未落地）。实际恢复路径基于**运维人员手头的离线副本**。
+
+#### 6.4.1 Secrets 清单
+
+`.env.production` 必须包含的敏感项（`deploy/.env.production.example` 可做模板，`deploy/scripts/validate_env.sh` 会拦截占位值）：
+
+| 变量 | 归属 / 保存位置 | 轮换影响 |
+|---|---|---|
+| `JWT_SECRET` | <由维护者在个人 password manager 保存，如 1Password / Bitwarden 等> | 所有活跃 JWT 立即失效，用户重新登录（1-5 人可接受） |
+| `LOGIN_PASSWORD` | <由维护者在个人 password manager 保存> | 用户下次登录用新密码（backend lifespan 自动重 hash 到 DB） |
+| `SAIHU_CLIENT_ID` / `SAIHU_CLIENT_SECRET` | <由赛狐 API 管理员在赛狐后台获取> | 旧凭证立即失效，赛狐同步任务重启后用新凭证 |
+| `DATABASE_URL` | 一般不含秘密（仅账号 + 本地网络），但 postgres 密码需单独记录 | DB 连接重建 |
+
+> **责任**：当前由 <维护者姓名> 保管完整 secrets 副本。变更 / 离职时必须把最新副本同步给接班人。
+
+#### 6.4.2 恢复步骤
+
+1. **从备份位置获取最新 secrets**（约定的 password manager 条目）。
+2. **复制到目标机器**：`scp <local>/.env.production user@prod:/path/to/restock_system/.env`
+3. **验证不含占位符**：
+   ```bash
+   bash deploy/scripts/validate_env.sh
+   ```
+   输出应为 "OK" 或无错误。
+4. **启动 / 重启服务**：
+   ```bash
+   bash deploy/scripts/deploy.sh
+   # 或手工 docker compose restart
+   ```
+5. **冒烟测试**：
+   ```bash
+   bash deploy/scripts/smoke_check.sh
+   ```
+
+#### 6.4.3 若 secrets 副本也丢失
+
+极端场景：所有副本丢失。恢复路径：
+- **JWT_SECRET**: 生成新值（`openssl rand -hex 32`），写入 `.env`。所有用户需重新登录。
+- **LOGIN_PASSWORD**: 设一个临时新值写入 `.env`；启动 backend 后 lifespan 会 hash 到 `global_config.login_password_hash`。用户用新密码登录后再通过 "修改密码" 弹框改成长期值。
+- **SAIHU_CLIENT_ID / SECRET**: 联系赛狐技术支持在后台重新生成（可能需要 admin 账户权限）。
+- **完成后**：立即把新 secrets 存进 password manager 并指定责任人。
+
+> 如果此情况发生：**该 incident 的事后总结必须包括"secrets 管理流程改进"项**（是否升级到 Vault，是否需要增加 2nd maintainer）。
+
 ---
 
 ## 7. 应急联系
