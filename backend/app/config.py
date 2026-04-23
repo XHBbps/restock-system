@@ -70,6 +70,9 @@ class Settings(BaseSettings):
     retention_task_run_days: int = 90
     retention_inventory_history_days: int = 180
     retention_exports_days: int = 60
+    # suggestion_snapshot.generation_status='generating' 超过 N 小时视为卡死
+    # （进程崩 / OOM 场景），被 retention_purge_job 标 failed。0 表示禁用。
+    retention_stuck_generating_hours: int = 1
 
     def docs_enabled(self) -> bool:
         # 生产环境强制关闭 /docs 与 /openapi.json，忽略 APP_DOCS_ENABLED env
@@ -93,6 +96,8 @@ def validate_settings(settings: Settings) -> Settings:
         errors.append("WORKER_HEARTBEAT_SECONDS must be less than WORKER_LEASE_MINUTES*60/2")
     if settings.push_auto_retry_times < 1:
         errors.append("PUSH_AUTO_RETRY_TIMES must be >= 1")
+    if settings.retention_stuck_generating_hours < 0:
+        errors.append("RETENTION_STUCK_GENERATING_HOURS must be >= 0 (0 disables)")
     if len(settings.jwt_secret.encode("utf-8")) < 32:
         errors.append("JWT_SECRET must be at least 32 bytes")
 

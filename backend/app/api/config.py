@@ -57,11 +57,8 @@ from app.tasks.scheduler import reload_scheduler
 router = APIRouter(prefix="/api/config", tags=["config"])
 
 # 改动以下任一字段即把 dashboard_snapshot.stale 置 TRUE，下次 dashboard API
-# 自动 enqueue 刷新：
-# - restock_regions / eu_countries：直接影响 velocity 口径和国家分布
-# - target_days / lead_time_days / buffer_days / safety_stock_days：
-#   影响 compute_country_qty / compute_total / urgent 判定
-_DASHBOARD_SENSITIVE_FIELDS = frozenset(
+# 自动 enqueue 刷新。
+GLOBAL_CONFIG_SENSITIVE_FIELDS = frozenset(
     {
         "restock_regions",
         "eu_countries",
@@ -69,6 +66,23 @@ _DASHBOARD_SENSITIVE_FIELDS = frozenset(
         "lead_time_days",
         "buffer_days",
         "safety_stock_days",
+    }
+)
+
+# 与 dashboard 展示无关、变更无需 stale 的字段。新增 GlobalConfig 字段
+# 必须在 SENSITIVE 或 NEUTRAL 任一集合中声明，否则 tripwire 测试会红。
+GLOBAL_CONFIG_NEUTRAL_FIELDS = frozenset(
+    {
+        "id",
+        "sync_interval_minutes",  # 调度触发频率，不影响 dashboard 数据
+        "scheduler_enabled",
+        "shop_sync_mode",
+        "login_password_hash",
+        "suggestion_generation_enabled",
+        "generation_toggle_updated_by",
+        "generation_toggle_updated_at",
+        "created_at",
+        "updated_at",
     }
 )
 
@@ -188,7 +202,7 @@ async def patch_global(
             raise ValidationFailed("目标库存天数不能小于采购提前期")
         # 值感知前先 snapshot 旧值——一旦 execute(update(...)) 触发 ORM
         # auto-expire，后续 getattr(row, field) 会懒加载拿到新值，无法判断变更。
-        sensitive_updates = _DASHBOARD_SENSITIVE_FIELDS & updates.keys()
+        sensitive_updates = GLOBAL_CONFIG_SENSITIVE_FIELDS & updates.keys()
         sensitive_old = {f: getattr(row, f, None) for f in sensitive_updates}
         await db.execute(update(GlobalConfig).where(GlobalConfig.id == 1).values(**updates))
         if sensitive_updates and any(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TypeAlias
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,6 +22,14 @@ class InventoryStock:
     @property
     def total(self) -> int:
         return self.available + self.reserved + self.in_transit
+
+
+# 外层 dict[sku][country] 2D lookup 的 TypeAlias，签名可读性用。
+# 不做 dataclass 是因为它是纯 lookup 没方法/派生属性，dataclass 无收益。
+VelocityMap: TypeAlias = dict[str, dict[str, float]]  # sku → country → daily rate
+SaleDaysMap: TypeAlias = dict[str, dict[str, float]]  # sku → country → days of supply
+CountryQtyMap: TypeAlias = dict[str, dict[str, int]]  # sku → country → restock qty
+InventoryMap: TypeAlias = dict[str, dict[str, InventoryStock]]  # sku → country → InventoryStock
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,8 +1,8 @@
-"""Retention purge job (task_run / inventory_history / exports)。
+"""Retention purge job (task_run / inventory_history / exports / stuck_generating)。
 
 Cron 触发时间：每天 04:00（由 scheduler 注册），也可手动 enqueue。
 
-三连：
+四连：
 - `purge_task_run`：task_run 表的 success/failed/skipped/cancelled 记录
   超过 retention_task_run_days（默认 90 天）删除。保留 pending/running（活跃状态）。
 - `purge_inventory_history`：inventory_snapshot_history 超过
@@ -12,6 +12,9 @@ Cron 触发时间：每天 04:00（由 scheduler 注册），也可手动 enqueu
 - `purge_exports`：excel_export_log 关联的 snapshot 文件超过
   retention_exports_days（默认 60 天）删除磁盘 Excel，并把对应 log 的
   file_purged_at 写 now。留 log 行作审计，下载端点据此返回 410 Gone。
+- `purge_stuck_generating`：suggestion_snapshot.generation_status='generating'
+  超过 retention_stuck_generating_hours（默认 1 小时）的行标为 failed + 写
+  generation_error。兜底 OOM / worker 被 kill 留下的永久 generating 行。
 """
 
 from __future__ import annotations
@@ -138,12 +141,33 @@ async def purge_exports(
     return purged_count
 
 
+async def purge_stuck_generating(db: AsyncSession, hours: int) -> int:
+    """把卡在 generation_status='generating' 超过 N 小时的 snapshot 标 failed。
+
+    进程崩 / OOM / worker 被 docker stop 会留下永远 generating 的 snapshot，
+    本函数提供兜底清理。
+    """
+    if hours <= 0:
+        return 0
+    cutoff = now_beijing() - timedelta(hours=hours)
+    result = await db.execute(
+        update(SuggestionSnapshot)
+        .where(SuggestionSnapshot.generation_status == "generating")
+        .where(SuggestionSnapshot.exported_at < cutoff)
+        .values(
+            generation_status="failed",
+            generation_error=f"stuck in generating > {hours}h, cleaned by retention",
+        )
+    )
+    return int(result.rowcount or 0)  # type: ignore[attr-defined]
+
+
 @register("retention_purge")
 async def retention_purge_job(ctx: JobContext) -> None:
-    """每天 04:00 Cron 清理 task_run / inventory_history / exports。"""
+    """每天 04:00 Cron 清理 task_run / inventory_history / exports / stuck_generating。"""
     settings = get_settings()
     storage_root = Path(settings.export_storage_dir).resolve()
-    await ctx.progress(current_step="开始清理 task_run", total_steps=3)
+    await ctx.progress(current_step="开始清理 task_run", total_steps=4)
 
     async with async_session_factory() as db:
         deleted_task = await purge_task_run(db, settings.retention_task_run_days)
@@ -171,10 +195,18 @@ async def retention_purge_job(ctx: JobContext) -> None:
         )
         await db.commit()
     logger.info("retention_purge_exports", purged=purged_exports)
+
+    async with async_session_factory() as db:
+        stuck_failed = await purge_stuck_generating(
+            db, settings.retention_stuck_generating_hours
+        )
+        await db.commit()
+    logger.info("retention_purge_stuck_generating", failed=stuck_failed)
+
     await ctx.progress(
         current_step="完成",
         step_detail=(
             f"task_run {deleted_task} / inventory_history {deleted_inv} / "
-            f"exports {purged_exports}"
+            f"exports {purged_exports} / stuck_generating {stuck_failed}"
         ),
     )

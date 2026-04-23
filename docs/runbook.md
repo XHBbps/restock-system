@@ -569,6 +569,56 @@ bash deploy/scripts/restore_db.sh <backup-file>
 docker compose -f deploy/docker-compose.yml start backend worker scheduler
 ```
 
+> **兜底**：从 2026-04-23 起 `restore_db.sh` 会在 DROP 前自动 dump 当前 DB 到 `<backup-file 同目录>/pre-restore-<timestamp>.sql.gz`。如 restore 结果不对，可用该兜底文件回退：`bash deploy/scripts/restore_db.sh deploy/data/backups/pre-restore-XXXX.sql.gz`。
+
+### 6.4 Secrets 恢复（`.env` 丢失）
+
+生产 `.env` 文件如果被误删 / 生产服务器整体丢失 → 系统无法启动（`validate_env.sh` 会拒绝 placeholder 密钥）。
+
+项目规模 1-5 人，**不使用 Vault / AWS Secrets Manager**（P3 backlog，未落地）。实际恢复路径基于**运维人员手头的离线副本**。
+
+#### 6.4.1 Secrets 清单
+
+`.env.production` 必须包含的敏感项（`deploy/.env.production.example` 可做模板，`deploy/scripts/validate_env.sh` 会拦截占位值）：
+
+| 变量 | 归属 / 保存位置 | 轮换影响 |
+|---|---|---|
+| `JWT_SECRET` | <由维护者在个人 password manager 保存，如 1Password / Bitwarden 等> | 所有活跃 JWT 立即失效，用户重新登录（1-5 人可接受） |
+| `LOGIN_PASSWORD` | <由维护者在个人 password manager 保存> | 用户下次登录用新密码（backend lifespan 自动重 hash 到 DB） |
+| `SAIHU_CLIENT_ID` / `SAIHU_CLIENT_SECRET` | <由赛狐 API 管理员在赛狐后台获取> | 旧凭证立即失效，赛狐同步任务重启后用新凭证 |
+| `DATABASE_URL` | 一般不含秘密（仅账号 + 本地网络），但 postgres 密码需单独记录 | DB 连接重建 |
+
+> **责任**：当前由 <填写负责人姓名或团队别名> 保管完整 secrets 副本。变更 / 离职时必须把最新副本同步给接班人。此占位符必须在交付部署前由项目负责人替换为实际姓名。
+
+#### 6.4.2 恢复步骤
+
+1. **从备份位置获取最新 secrets**（约定的 password manager 条目）。
+2. **复制到目标机器**：`scp <local>/.env.production user@prod:/path/to/restock_system/.env.production`
+3. **验证不含占位符**：
+   ```bash
+   bash deploy/scripts/validate_env.sh
+   ```
+   输出应为 "OK" 或无错误。
+4. **启动 / 重启服务**：
+   ```bash
+   bash deploy/scripts/deploy.sh
+   # 或手工 docker compose restart
+   ```
+5. **冒烟测试**：
+   ```bash
+   bash deploy/scripts/smoke_check.sh
+   ```
+
+#### 6.4.3 若 secrets 副本也丢失
+
+极端场景：所有副本丢失。恢复路径：
+- **JWT_SECRET**: 生成新值（`openssl rand -hex 32`），写入 `.env`。所有用户需重新登录。
+- **LOGIN_PASSWORD**: 设一个临时新值写入 `.env`；启动 backend 后 lifespan 会 hash 到 `global_config.login_password_hash`。用户用新密码登录后再通过 "修改密码" 弹框改成长期值。
+- **SAIHU_CLIENT_ID / SECRET**: 联系赛狐技术支持在后台重新生成（可能需要 admin 账户权限）。
+- **完成后**：立即把新 secrets 存进 password manager 并指定责任人。
+
+> 如果此情况发生：**该 incident 的事后总结必须包括"secrets 管理流程改进"项**（是否升级到 Vault，是否需要增加 2nd maintainer）。
+
 ---
 
 ## 7. 应急联系
@@ -577,3 +627,203 @@ docker compose -f deploy/docker-compose.yml start backend worker scheduler
 - 架构参考：`docs/Project_Architecture_Blueprint.md`
 - 项目进度：`docs/PROGRESS.md`
 - 部署脚本源码：`deploy/scripts/`
+
+---
+
+## 8. 部署后验证（retention / dashboard stale / 410 Gone）
+
+> 首次部署或每季度演练一次。每条都是独立可跑，互不依赖。
+
+### 8.0 命令约定
+
+本节 SOP 用 `docker compose` 语法，适合任何环境，但需先在 shell 里 export 对应 compose 文件路径：
+
+```bash
+# dev（本地）
+export COMPOSE_FILES="-f deploy/docker-compose.dev.yml -f deploy/docker-compose.dev.override.yml --env-file deploy/.env.dev"
+export API_HOST="http://localhost:8088"
+
+# prod
+export COMPOSE_FILES="-f deploy/docker-compose.yml --env-file deploy/.env.production"
+export API_HOST="https://<your-domain>"
+```
+
+下面所有命令用 `docker compose $COMPOSE_FILES exec backend ...` / `$API_HOST/api/...` 形式。若忘 export 直接跑会 fail，这是刻意的 —— 强制操作者想清楚跑哪个环境。
+
+### 8.1 Retention purge 手工触发
+
+验证：04:00 cron 对应的 retention_purge 任务能被 worker 正确消费，四连（task_run / inventory_history / exports / stuck_generating）的日志都正确写入。
+
+```bash
+# 1. 手工 enqueue retention_purge 任务（dedupe_key=retention_purge 保证不重复）
+docker compose $COMPOSE_FILES exec -T backend python -c "
+import asyncio
+from app.db.session import async_session_factory
+from app.tasks.queue import enqueue_task
+
+async def main():
+    async with async_session_factory() as db:
+        task_id, existing = await enqueue_task(
+            db, job_name='retention_purge', trigger_source='manual',
+            dedupe_key='retention_purge', payload={'triggered_by': 'post_deploy_verify'}
+        )
+        print(f'task_id={task_id} existing={existing}')
+
+asyncio.run(main())
+"
+
+# 2. 等 5-10s 让 worker 消费，再看 worker 日志（dev 容器用 structlog JSON）
+docker compose $COMPOSE_FILES logs worker --since 1m 2>&1 | grep -E "retention_purge|deleted|purged|stuck"
+```
+
+**预期**：日志按顺序出现 `retention_purge_task_run deleted=N` / `retention_purge_inventory_history deleted=N` / `retention_purge_exports purged=N` / `retention_purge_stuck_generating failed=N`。首次 deploy 时 N 大概率都是 0。
+
+**可能的异常**：
+- 若日志完全没出现 `retention_purge_*`：worker 没消费，检查 `app.tasks.jobs` 导入是否包含 `retention`（应在 `backend/app/main.py` 有 `from app.tasks.jobs import retention as _job_retention`）。
+- 若某行 `deleted=N` 中 N > 100：磁盘数据可能超预期旧，检查 env 的 `RETENTION_*_DAYS` 是否设反了。
+
+### 8.2 Dashboard stale 自动失效 → 自动 refresh
+
+验证：`patch_global` 改敏感字段后，下次 GET /api/metrics/dashboard 自动入队刷新。
+
+```bash
+# 1. 先把 dashboard snapshot 刷成 ready 状态
+curl -X POST $API_HOST/api/metrics/dashboard/refresh \
+  -H "Authorization: Bearer <token>" | jq .
+# 等 task_id 返回 → 等 10s worker 跑完
+
+# 2. GET dashboard 看 snapshot_status 应为 ready，记住 snapshot_updated_at
+curl $API_HOST/api/metrics/dashboard -H "Authorization: Bearer <token>" | jq '.snapshot_status, .snapshot_updated_at'
+
+# 3. 改一个敏感字段（e.g. buffer_days 从 30 → 31）
+curl -X PATCH $API_HOST/api/config/global \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"buffer_days": 31}'
+
+# 4. 再 GET dashboard — 应该看到 snapshot_status=refreshing + snapshot_task_id 非空
+curl $API_HOST/api/metrics/dashboard -H "Authorization: Bearer <token>" | jq '.snapshot_status, .snapshot_task_id'
+
+# 5. 等 10s worker 跑完刷新，再 GET — 应回到 ready，snapshot_updated_at 更新
+```
+
+**预期**：步骤 4 返回 `refreshing` + 有 task_id；步骤 5 返回 `ready` + updated_at 比步骤 2 大。
+
+**可能的异常**：
+- 步骤 4 仍返回 `ready`：`GLOBAL_CONFIG_SENSITIVE_FIELDS`（见 `backend/app/api/config.py`）没正确检测到 `buffer_days`，或 `dashboard_snapshot.stale` 字段迁移没到。
+- 步骤 5 一直 `refreshing`：worker 没消费 `refresh_dashboard_snapshot` 任务，检查 worker 日志。
+
+### 8.3 Excel 文件 purged 后前端下载 410 提示
+
+验证：retention 清理磁盘 Excel 并写 `excel_export_log.file_purged_at` 后，前端下载端显示"已过期清理"友好提示。
+
+```bash
+# 1. 导出一个 procurement snapshot（前端 / 或 curl），记下 snapshot_id
+# 前端 → 建议单列表 → 选中 item → 导出采购单
+
+# 2. 模拟 retention 清理（开发环境快速路径）：手工删磁盘 + 标记 log
+docker compose $COMPOSE_FILES exec -T backend python -c "
+import asyncio
+from datetime import datetime
+from pathlib import Path
+from sqlalchemy import update, select
+from app.config import get_settings
+from app.core.timezone import now_beijing
+from app.db.session import async_session_factory
+from app.models.excel_export_log import ExcelExportLog
+from app.models.suggestion_snapshot import SuggestionSnapshot
+
+SNAPSHOT_ID = <填刚才导出的 snapshot_id>
+
+async def main():
+    async with async_session_factory() as db:
+        snap = (await db.execute(
+            select(SuggestionSnapshot).where(SuggestionSnapshot.id == SNAPSHOT_ID)
+        )).scalar_one()
+        root = Path(get_settings().export_storage_dir).resolve()
+        path = root / (snap.file_path or '')
+        if path.exists():
+            path.unlink()
+            print(f'Deleted {path}')
+        await db.execute(
+            update(ExcelExportLog)
+            .where(ExcelExportLog.snapshot_id == SNAPSHOT_ID)
+            .where(ExcelExportLog.action == 'generate')
+            .values(file_purged_at=now_beijing())
+        )
+        await db.commit()
+
+asyncio.run(main())
+"
+
+# 3. 前端打开 /restock/history → 详情 → 版本列表 → 点刚才的版本的"下载"按钮
+```
+
+**预期**：前端弹红色 ElMessage "该版本已过期清理（保留期 60 天）"（文字含 `RETENTION_EXPORTS_DAYS` env 值）。
+
+**可能的异常**：
+- 看到通用的 "下载失败" 或后端 detail "文件已丢失"：`_decodeBlobErrorInPlace`（`frontend/src/api/snapshot.ts`）没正常解包 blob 错误，或后端 404→410 逻辑分支错了。
+- 看到 500：检查 docker exec python 脚本是否真的写入了 `file_purged_at`（用 `psql -c "SELECT file_purged_at FROM excel_export_log WHERE snapshot_id = ..."` 复核）。
+
+---
+
+## 9. Dependabot PR 批处理 SOP
+
+Dependabot 每月自动推出依赖更新 PR。项目 1-5 人用户规模不值得逐个审，每月或每季度批量处理一次即可。
+
+### 9.1 命令模板
+
+```bash
+# 1. 列出 open PRs + CI 状态
+gh pr list --author "app/dependabot" --state open --json number,title,mergeable --jq '.[] | "#\(.number) \(.title) \(.mergeable)"'
+
+# 2. 对每条 PR 检查 CI
+for pr in $(gh pr list --author "app/dependabot" --state open --json number --jq '.[].number'); do
+  echo "=== #$pr ==="
+  gh pr checks "$pr" 2>&1 | head -5
+done
+
+# 3. 分组决策（策略见下）并批量 merge / close
+```
+
+### 9.2 分组决策策略
+
+| 类别 | 策略 |
+|---|---|
+| `actions/*`（GitHub Actions workflow deps） | CI 绿即 merge，major bump 通常兼容 |
+| `pip/backend/*` patch / range 变化 | CI 绿即 merge |
+| `pip/backend/*` major bump | 查 changelog，有 breaking 改动就开独立分支迁移 |
+| `npm_and_yarn/*` patch | CI 绿即 merge |
+| `npm_and_yarn/*` major（如 eslint 9→10） | 查 changelog；如涉及配置迁移（如 flat config）开独立分支 |
+
+### 9.3 CI 过期的 PR
+
+如果 PR 的 CI 运行于 master 的旧版本（比如 master 后来加了 postgres service 才让 integration tests 能跑，老 PR 的 CI 不能），不要手工点 "Rerun"；让 dependabot 基于新 master 重新 rebase：
+
+```bash
+gh pr comment <num> --body "@dependabot recreate"
+```
+
+dependabot 会关掉旧 PR + 开新 PR（同 title），CI 重跑于新 base。
+
+### 9.4 关闭 + 禁用规则
+
+某个包决定暂不升级（比如 major bump 需要代码迁移）：
+
+```bash
+gh pr close <num> --comment "Deferred — see follow-up plan"
+```
+
+然后编辑 `.github/dependabot.yml` 加 ignore：
+
+```yaml
+updates:
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule: { interval: weekly }
+    ignore:
+      - dependency-name: eslint
+        update-types: ["version-update:semver-major"]
+```
+
+参考项目当前已 ignore 的包：`eslint` / `eslint-plugin-vue` / `eslint-config-prettier` / `lucide-vue-next`（都是 major bump，等专项迁移 PR）。

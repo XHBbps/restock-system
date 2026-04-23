@@ -13,7 +13,7 @@ from collections import defaultdict
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.engine.context import InventoryStock
+from app.engine.context import InventoryMap, InventoryStock, SaleDaysMap, VelocityMap
 from app.models.in_transit import InTransitItem, InTransitRecord
 from app.models.inventory import InventorySnapshotLatest
 from app.models.warehouse import Warehouse
@@ -78,7 +78,7 @@ async def load_in_transit(
 def merge_inventory(
     oversea: dict[tuple[str, str], dict[str, int]],
     in_transit: dict[tuple[str, str], int],
-) -> dict[str, dict[str, InventoryStock]]:
+) -> InventoryMap:
     """Merge overseas stock and in-transit stock into one structure.
 
     Returns: ``{sku: {country: InventoryStock}}``
@@ -97,9 +97,9 @@ def merge_inventory(
 
 
 def compute_sale_days(
-    velocity: dict[str, dict[str, float]],
-    inventory: dict[str, dict[str, InventoryStock]],
-) -> dict[str, dict[str, float]]:
+    velocity: VelocityMap,
+    inventory: InventoryMap,
+) -> SaleDaysMap:
     """Compute ``sale_days`` for each ``(sku, country)`` with positive velocity."""
     result: defaultdict[str, dict[str, float]] = defaultdict(dict)
     for sku, country_map in velocity.items():
@@ -113,9 +113,9 @@ def compute_sale_days(
 
 async def run_step2(
     db: AsyncSession,
-    velocity: dict[str, dict[str, float]],
+    velocity: VelocityMap,
     commodity_skus: list[str] | None,
-) -> tuple[dict[str, dict[str, float]], dict[str, dict[str, InventoryStock]]]:
+) -> tuple[SaleDaysMap, InventoryMap]:
     oversea = await load_oversea_inventory(db, commodity_skus)
     in_transit = await load_in_transit(db, commodity_skus)
     inventory = merge_inventory(oversea, in_transit)

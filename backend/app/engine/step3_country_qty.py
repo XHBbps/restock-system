@@ -8,14 +8,14 @@
 import math
 from collections import defaultdict
 
-from app.engine.context import InventoryStock
+from app.engine.context import CountryQtyMap, InventoryMap, VelocityMap
 
 
 def compute_country_qty(
-    velocity: dict[str, dict[str, float]],
-    inventory: dict[str, dict[str, InventoryStock]],
+    velocity: VelocityMap,
+    inventory: InventoryMap,
     target_days: int,
-) -> dict[str, dict[str, int]]:
+) -> CountryQtyMap:
     """计算各 SKU 各国的补货量。
 
     返回:

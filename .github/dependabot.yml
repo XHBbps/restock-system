@@ -19,6 +19,17 @@ updates:
     labels:
       - dependencies
       - frontend
+    ignore:
+      # Major bumps requiring focused migration PR (flat config / icon API / etc.)
+      # deferred to dedicated follow-up plans. Patch / minor bumps still tracked.
+      - dependency-name: eslint
+        update-types: ["version-update:semver-major"]
+      - dependency-name: eslint-plugin-vue
+        update-types: ["version-update:semver-major"]
+      - dependency-name: eslint-config-prettier
+        update-types: ["version-update:semver-major"]
+      - dependency-name: lucide-vue-next
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /
