@@ -13,6 +13,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -117,6 +118,9 @@ class SuggestionItem(Base):
     total_qty: Mapped[int] = mapped_column(Integer, nullable=False)
     country_breakdown: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     warehouse_breakdown: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    restock_dates: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
+    )
     allocation_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     # 可追溯快照
     velocity_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)

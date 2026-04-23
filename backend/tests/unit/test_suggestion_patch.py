@@ -84,6 +84,7 @@ class _FakeItem:
         self.sale_days_snapshot: dict[str, float] | None = {"US": 25.0}
         self.purchase_qty = 0
         self.purchase_date = None
+        self.restock_dates: dict[str, str | None] = {}
         self.urgent = False
 
 
@@ -173,6 +174,8 @@ async def test_suggestion_patch_recomputes_urgent_from_sale_days_and_lead_time(m
     update_stmt = db.executed_statements[-1]
     normalized_values = _normalize_update_values(update_stmt)
     assert normalized_values["urgent"] is True
+    assert normalized_values["restock_dates"]["US"] is not None
+    assert normalized_values["restock_dates"]["UK"] is not None
 
 
 async def test_suggestion_patch_ignores_missing_sale_days_when_recomputing_urgent(monkeypatch) -> None:
@@ -199,6 +202,8 @@ async def test_suggestion_patch_ignores_missing_sale_days_when_recomputing_urgen
     update_stmt = db.executed_statements[-1]
     normalized_values = _normalize_update_values(update_stmt)
     assert normalized_values["urgent"] is False
+    assert normalized_values["restock_dates"]["US"] is not None
+    assert normalized_values["restock_dates"]["UK"] is None
 
 
 async def test_suggestion_patch_rejects_warehouse_sum_mismatch() -> None:

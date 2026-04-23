@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-23（补货引擎口径调整：`buffer_days` 从采购量公式移除，改为参与采购日期；采购提前期继续参与紧急判断与采购日期。）
+> 最近更新：2026-04-23（补货建议新增“最晚补货日期”，并继续沿用 `buffer_days` / `lead_time_days` 新口径：`buffer_days` 参与采购日期，`lead_time_days` 同时参与采购日期与补货日期。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -96,6 +96,13 @@
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.55 补货日期（最晚补货日期）落地（2026-04-23）
+- **字段落地**：迁移 `20260423_1100` 为 `suggestion_item` 与 `suggestion_snapshot_item` 新增 JSONB 字段 `restock_dates`，按 `SKU × 国家` 冻结每个正补货国家的最晚补货日期，值为 ISO 日期字符串或 `null`。
+- **计算口径**：`backend/app/engine/step6_timing.py` 新增 `compute_restock_dates()`，公式为 `restock_date[sku][country] = today + int(sale_days[sku][country]) − lead_time_days(sku)`；仅对 `country_breakdown[country] > 0` 的国家输出，缺少 `sale_days` 时保留 `null`，且不受 `buffer_days` 影响。
+- **持久化与编辑**：`backend/app/engine/runner.py` 在生成建议单时写入 `restock_dates`；`backend/app/api/suggestion.py` 在 PATCH 修改 `country_breakdown` 后会同步重算 `total_qty`、`urgent` 与 `restock_dates`，前端保持只读展示，不提供手工编辑。
+- **快照与导出**：`backend/app/api/snapshot.py` 在补货快照中冻结 `restock_dates`；`backend/app/services/excel_export.py` 的补货工作簿在 `SKU×国家`、`SKU×国家×仓库` 两个 Sheet 新增“补货日期”列。
+- **前端展示与验证**：`frontend/src/views/suggestion/RestockListView.vue` 新增“最晚补货日期”列和展开行国家级“补货日期”列；已通过宿主机后端定向单测 `54 passed`、集成测试 `test_snapshot_api.py` `13 passed`，以及前端 `npx vue-tsc --noEmit`、`npm run test -- RestockListView`。
 
 ### 3.54 buffer_days / lead_time_days 计算口径调整（2026-04-23）
 - **引擎公式**：`backend/app/engine/step4_total.py` 的采购量改为 `purchase_qty = max(0, Σcountry_qty − (local.available + local.reserved) + ceil(Σvelocity × safety_stock_days))`；`buffer_days` 保留兼容参数但不再参与采购量。

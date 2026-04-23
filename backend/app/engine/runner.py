@@ -172,6 +172,7 @@ async def run_engine(ctx: JobContext, *, triggered_by: str = "scheduler") -> int
                     "urgent": timing.urgent,
                     "purchase_qty": purchase_qty,
                     "purchase_date": timing.purchase_date,
+                    "restock_dates": timing.restock_dates or {},
                 }
             )
 

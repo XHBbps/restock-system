@@ -14,6 +14,7 @@ function makeItem(id: number, overrides: Partial<SuggestionItem> = {}): Suggesti
     total_qty: 10,
     country_breakdown: { US: 10 },
     warehouse_breakdown: { US: { 'WH-1': 10 } },
+    restock_dates: { US: '2026-04-30' },
     allocation_snapshot: null,
     velocity_snapshot: null,
     sale_days_snapshot: null,
@@ -90,5 +91,35 @@ describe('RestockListView', () => {
     })
 
     expect(wrapper.findComponent({ name: 'ElEmpty' }).exists()).toBe(true)
+  })
+
+  it('exposes country-level restock dates and SKU summary date', async () => {
+    const { default: View } = await import('../RestockListView.vue')
+    const wrapper = shallowMount(View, {
+      props: {
+        suggestion: makeSuggestion(),
+        items: [
+          makeItem(1, {
+            country_breakdown: { US: 10, GB: 5 },
+            warehouse_breakdown: { US: { 'WH-1': 10 }, GB: { 'WH-2': 5 } },
+            restock_dates: { US: '2026-05-10', GB: '2026-05-01' },
+          }),
+        ],
+      },
+      global: { stubs: STUBS },
+    })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      countryRows: (item: SuggestionItem) => { country: string; restockDate: string | null }[]
+      restockDateSummary: (item: SuggestionItem) => string
+      filteredItems: SuggestionItem[]
+    }
+    const item = vm.filteredItems[0]
+    expect(vm.countryRows(item).map((row) => [row.country, row.restockDate])).toEqual([
+      ['US', '2026-05-10'],
+      ['GB', '2026-05-01'],
+    ])
+    expect(vm.restockDateSummary(item)).toBe('2026-05-01')
   })
 })

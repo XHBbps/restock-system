@@ -41,6 +41,7 @@ export interface SuggestionItem {
   total_qty: number
   country_breakdown: Record<string, number>
   warehouse_breakdown: Record<string, Record<string, number>>
+  restock_dates: Record<string, string | null>
   allocation_snapshot: Record<string, AllocationExplanation> | null
   velocity_snapshot: Record<string, number> | null
   sale_days_snapshot: Record<string, number> | null

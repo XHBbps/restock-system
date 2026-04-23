@@ -58,8 +58,10 @@ def test_snapshot_item_out_accepts_purchase_fields():
         total_qty=10,
         country_breakdown={"EU": 10},
         warehouse_breakdown={"EU": {"WH-1": 10}},
+        restock_dates={"EU": "2026-04-26"},
         purchase_qty=8,
         purchase_date=None,
         urgent=False,
     )
     assert out.purchase_qty == 8
+    assert out.restock_dates["EU"] == "2026-04-26"

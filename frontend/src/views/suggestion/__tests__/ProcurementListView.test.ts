@@ -44,6 +44,7 @@ function makeItem(id: number, overrides: Partial<SuggestionItem> = {}): Suggesti
     total_qty: 10,
     country_breakdown: { US: 10 },
     warehouse_breakdown: { US: { 'WH-1': 10 } },
+    restock_dates: { US: '2026-04-30' },
     allocation_snapshot: null,
     velocity_snapshot: null,
     sale_days_snapshot: null,

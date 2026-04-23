@@ -112,13 +112,13 @@
 | 3 | `step3_country_qty.py` | sale_days + target_days | `country_qty[sku][country]` | `max(0, ceil((target_days - sale_days) × velocity))` |
 | 4 | `step4_total.py` | country_qty + velocity + 国内库存 + safety_stock_days | `purchase_qty[sku]` | `max(0, Σcountry_qty − (local.available + local.reserved) + ceil(Σvelocity × safety_stock_days))`；`Σvelocity` 覆盖所有国家，不受 `restock_regions` 限制；`buffer_days` 不参与采购量 |
 | 5 | `step5_warehouse_split.py` | country_qty + 订单邮编 + 邮编规则 + 国家仓库映射 | `warehouse_breakdown[country][wh_id]` | 按邮编规则分配到具体仓库，无订单时均分；若配置 `restock_regions`，仅消费这些国家的订单明细作为分仓依据；同优先级 tied 均分 |
-| 6 | `step6_timing.py` | sale_days + lead_time + buffer_days + purchase_qty | `urgent` + `purchase_date` | `urgent` 仍按任一正补货国家 `sale_days <= lead_time_days`；`purchase_date = today + int(min_sale_days) − buffer_days − lead_time_days`，`purchase_qty<=0` 或无 sale_days 时为空 |
+| 6 | `step6_timing.py` | sale_days + lead_time + buffer_days + purchase_qty + country_qty | `urgent` + `purchase_date` + `restock_dates` | `urgent` 仍按任一正补货国家 `sale_days <= lead_time_days`；`purchase_date = today + int(min_sale_days) − buffer_days − lead_time_days`；`restock_date[sku][country] = today + int(sale_days[sku][country]) − lead_time_days`，仅对正补货国家输出，缺少 sale_days 时记为 `null` |
 
 **运行上下文**：`EngineContext` 包含 `target_days`、`buffer_days`、`lead_time_days`、`safety_stock_days`、`restock_regions` 和 `eu_countries`。`buffer_days` 表示国内仓备货时间，参与采购日期计算，不参与采购量；`global_config.eu_countries` 由同步层消费，`global_config_snapshot` 会冻结这些全局参数以便追溯。
 
 **持久化**：一次完整计算在事务内执行，受 `pg_advisory_xact_lock(7429001)` 保护；runner 会归档旧 `draft`，写入 `suggestion` / `suggestion_item`，过滤采购量和补货量都为 0 的 SKU，并统计 `procurement_item_count`、`restock_item_count`。若所有 SKU 都为空则返回 `None`；成功生成非空建议单后 `calc_engine_job` 将 `global_config.suggestion_generation_enabled` 自动翻 OFF。
 
-**快照字段**：`velocity_snapshot`、`sale_days_snapshot`、`allocation_snapshot`、`global_config_snapshot` 均以 JSONB 保存；`suggestion_item.purchase_qty` / `purchase_date` 用于采购视图，`country_breakdown` / `warehouse_breakdown` 用于补货视图。
+**快照字段**：`velocity_snapshot`、`sale_days_snapshot`、`allocation_snapshot`、`global_config_snapshot` 均以 JSONB 保存；`suggestion_item.purchase_qty` / `purchase_date` 用于采购视图，`country_breakdown` / `warehouse_breakdown` / `restock_dates` 用于补货视图。
 
 ### 3.2 数据同步层（app/sync）
 
@@ -272,8 +272,8 @@ _ENDPOINT_RATE_OVERRIDES = {
 | 表 | 职责 | 关键字段 |
 |---|---|---|
 | `suggestion_snapshot` | 一次导出即一个 snapshot；冻结 `snapshot_type`、`version`、`exported_by`、`exported_from_ip`、`global_config_snapshot`、`item_count`、`generation_status`、`file_path`、`file_size_bytes`、`download_count` | FK `suggestion_id`，`UNIQUE(suggestion_id, snapshot_type, version)` |
-| `suggestion_snapshot_item` | snapshot 冻结的条目副本；采购快照保存 `purchase_qty` / `purchase_date`，补货快照保存 `total_qty` / `country_breakdown` / `warehouse_breakdown` | FK `snapshot_id` ON DELETE CASCADE |
-| `suggestion_item` | 当前 draft 可编辑条目；采购导出状态与补货导出状态独立 | `procurement_export_status` / `procurement_exported_snapshot_id` / `procurement_exported_at`，`restock_*` 同构 |
+| `suggestion_snapshot_item` | snapshot 冻结的条目副本；采购快照保存 `purchase_qty` / `purchase_date`，补货快照保存 `total_qty` / `country_breakdown` / `warehouse_breakdown` / `restock_dates` | FK `snapshot_id` ON DELETE CASCADE |
+| `suggestion_item` | 当前 draft 可编辑条目；采购导出状态与补货导出状态独立 | `purchase_qty` / `purchase_date` 供采购视图；`country_breakdown` / `warehouse_breakdown` / `restock_dates` 供补货视图；`procurement_export_status` / `procurement_exported_snapshot_id` / `procurement_exported_at`，`restock_*` 同构 |
 
 **API 端点**：
 
@@ -292,7 +292,7 @@ _ENDPOINT_RATE_OVERRIDES = {
 2. 校验建议单仍为 `draft`，校验条目属于该建议单，按 `snapshot_type` 校验采购量或补货量。
 3. 按 `(suggestion_id, snapshot_type)` 独立计算下一版 `version`。
 4. INSERT `suggestion_snapshot(generation_status='generating')` 与 `suggestion_snapshot_item`。
-5. `excel_export.py` 根据类型生成不同工作簿：采购为“主数据 + 采购明细”，补货为“主数据 + SKU汇总 + SKU×国家 + SKU×国家×仓库”。
+5. `excel_export.py` 根据类型生成不同工作簿：采购为“主数据 + 采购明细”，补货为“主数据 + SKU汇总 + SKU×国家 + SKU×国家×仓库”；补货工作簿会在国家与仓库明细中冻结 `restock_dates` 对应的“补货日期”列。
 6. 文件成功落盘后，才更新对应条目的 `{type}_export_status='exported'`、`{type}_exported_snapshot_id`、`{type}_exported_at`。
 7. 更新 `suggestion_snapshot.generation_status='ready'`、`file_path`、`file_size_bytes`。
 
@@ -542,9 +542,9 @@ UPDATE global_config SET suggestion_generation_enabled=true, generation_toggle_u
 | `inventory_snapshot_latest` | SKU × 仓库最新库存 | `country` 保存映射后国家，`original_country` 保存 EU 合并前国家；`warehouse_id + commodity_sku` 唯一 |
 | `in_transit_record` / `in_transit_item` | 出库 / 在途记录与明细 | `target_country` 保存映射后国家，`original_target_country` 保存 EU 合并前国家 |
 | `suggestion` | 建议单头 | `status IN ('draft','archived','error')`；`procurement_item_count` / `restock_item_count` 分别统计采购与补货需求 SKU 数 |
-| `suggestion_item` | 当前建议条目 | `purchase_qty` / `purchase_date` 供采购视图；`country_breakdown` / `warehouse_breakdown` 供补货视图；采购与补货各自拥有 `*_export_status`、`*_exported_snapshot_id`、`*_exported_at` |
+| `suggestion_item` | 当前建议条目 | `purchase_qty` / `purchase_date` 供采购视图；`country_breakdown` / `warehouse_breakdown` / `restock_dates` 供补货视图；采购与补货各自拥有 `*_export_status`、`*_exported_snapshot_id`、`*_exported_at` |
 | `suggestion_snapshot` | 导出快照头（§3.6） | `snapshot_type IN ('procurement','restock')`；`UNIQUE(suggestion_id, snapshot_type, version)`；`generation_status IN ('generating','ready','failed')` |
-| `suggestion_snapshot_item` | 导出快照条目副本 | FK `snapshot_id` ON DELETE CASCADE；冻结 `purchase_qty` / `purchase_date` 与补货拆分 JSONB |
+| `suggestion_snapshot_item` | 导出快照条目副本 | FK `snapshot_id` ON DELETE CASCADE；冻结 `purchase_qty` / `purchase_date`、`restock_dates` 与补货拆分 JSONB |
 | `excel_export_log` | Excel 下载审计 | 记录 snapshot、操作者、IP、User-Agent、文件大小等 |
 | `task_run` | 后台任务队列 | `dedupe_key + active status` partial unique index |
 | `dashboard_snapshot` | 信息总览缓存快照 | 单例缓存 dashboard payload、刷新状态与错误信息 |

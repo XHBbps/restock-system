@@ -48,6 +48,7 @@ class SuggestionItemOut(BaseModel):
     total_qty: int
     country_breakdown: dict[str, Any]
     warehouse_breakdown: dict[str, Any]
+    restock_dates: dict[str, str | None] = Field(default_factory=dict)
     allocation_snapshot: dict[str, AllocationExplanationOut] | None = None
     velocity_snapshot: dict[str, Any] | None = None
     sale_days_snapshot: dict[str, Any] | None = None

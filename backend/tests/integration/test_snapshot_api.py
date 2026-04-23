@@ -48,6 +48,7 @@ async def seed_suggestion(db_session):
             purchase_date=date(2026, 4, 20 + i),
             country_breakdown={"US": 50 + i, "GB": 50},
             warehouse_breakdown={"US": {"WH-1": 50 + i}, "GB": {"WH-5": 50}},
+            restock_dates={"US": "2026-04-21", "GB": "2026-05-01"},
             urgent=(i % 2 == 0),
             velocity_snapshot={"US": 1.5, "GB": 0.8},
             sale_days_snapshot={"US": 20, "GB": 40},
@@ -287,6 +288,32 @@ async def test_snapshot_detail(client, seed_suggestion, ensure_global_config, mo
     assert body["snapshot_type"] == "procurement"
     assert len(body["items"]) == 2
     assert body["items"][0]["purchase_qty"] is not None
+    assert body["items"][0]["restock_dates"]["US"] == "2026-04-21"
+
+
+@pytest.mark.asyncio
+async def test_restock_snapshot_freezes_restock_dates(
+    client, seed_suggestion, ensure_global_config, db_session, monkeypatch
+):
+    from app.models.suggestion_snapshot import SuggestionSnapshotItem
+
+    _set_export_dir(monkeypatch)
+
+    sid = seed_suggestion["suggestion_id"]
+    item_ids = seed_suggestion["item_ids"]
+    created = (
+        await client.post(
+            f"/api/suggestions/{sid}/snapshots/restock",
+            json={"item_ids": item_ids[:1]},
+        )
+    ).json()
+
+    snapshot_item = (
+        await db_session.execute(
+            select(SuggestionSnapshotItem).where(SuggestionSnapshotItem.snapshot_id == created["id"])
+        )
+    ).scalar_one()
+    assert snapshot_item.restock_dates["US"] == "2026-04-21"
 
 
 @pytest.mark.asyncio

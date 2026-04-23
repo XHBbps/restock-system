@@ -151,17 +151,27 @@ def build_restock_workbook(ctx: SnapshotExportContext) -> Workbook:
     _autosize(sku_ws)
 
     country_ws = wb.create_sheet("SKU×国家")
-    _apply_header(country_ws, 1, ["SKU", "国家", "补货量"])
+    _apply_header(country_ws, 1, ["SKU", "国家", "补货量", "补货日期"])
     for item in ctx.items:
         for country, qty in (item.get("country_breakdown") or {}).items():
-            country_ws.append([item["commodity_sku"], country, qty])
+            country_ws.append(
+                [item["commodity_sku"], country, qty, (item.get("restock_dates") or {}).get(country) or ""]
+            )
     _autosize(country_ws)
 
     warehouse_ws = wb.create_sheet("SKU×国家×仓库")
-    _apply_header(warehouse_ws, 1, ["SKU", "国家", "仓库", "补货量"])
+    _apply_header(warehouse_ws, 1, ["SKU", "国家", "仓库", "补货量", "补货日期"])
     for item in ctx.items:
         for country, warehouse_map in (item.get("warehouse_breakdown") or {}).items():
             for warehouse_id, qty in warehouse_map.items():
-                warehouse_ws.append([item["commodity_sku"], country, warehouse_id, qty])
+                warehouse_ws.append(
+                    [
+                        item["commodity_sku"],
+                        country,
+                        warehouse_id,
+                        qty,
+                        (item.get("restock_dates") or {}).get(country) or "",
+                    ]
+                )
     _autosize(warehouse_ws)
     return wb

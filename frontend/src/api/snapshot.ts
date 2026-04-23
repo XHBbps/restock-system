@@ -25,6 +25,7 @@ export interface SnapshotItemOut {
   total_qty: number
   country_breakdown: Record<string, unknown>
   warehouse_breakdown: Record<string, unknown>
+  restock_dates: Record<string, string | null>
   purchase_qty: number | null
   purchase_date: string | null
   urgent: boolean

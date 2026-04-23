@@ -40,6 +40,7 @@ def procurement_context() -> SnapshotExportContext:
                 "urgent": True,
                 "country_breakdown": {"US": 100, "GB": 50},
                 "warehouse_breakdown": {"US": {"WH-1": 60, "WH-2": 40}, "GB": {"WH-5": 50}},
+                "restock_dates": {"US": "2026-04-23", "GB": "2026-05-13"},
                 "velocity_snapshot": {"US": 1.5, "GB": 0.8},
                 "sale_days_snapshot": {"US": 20, "GB": 40},
                 "local_stock": {"available": 12, "reserved": 3},
@@ -74,6 +75,7 @@ def restock_context() -> SnapshotExportContext:
                 "urgent": True,
                 "country_breakdown": {"US": 100, "GB": 50},
                 "warehouse_breakdown": {"US": {"WH-1": 60, "WH-2": 40}, "GB": {"WH-5": 50}},
+                "restock_dates": {"US": "2026-04-24", "GB": "2026-05-14"},
                 "velocity_snapshot": {"US": 1.5, "GB": 0.8},
                 "sale_days_snapshot": {"US": 20, "GB": 40},
             }
@@ -105,7 +107,11 @@ def test_restock_country_and_warehouse_rows(restock_context):
     country_ws = wb[wb.sheetnames[2]]
     warehouse_ws = wb[wb.sheetnames[3]]
     assert country_ws.max_row == 3
+    assert country_ws.max_column == 4
     assert warehouse_ws.max_row == 4
+    assert warehouse_ws.max_column == 5
+    assert country_ws.cell(row=2, column=4).value == "2026-04-24"
+    assert warehouse_ws.cell(row=2, column=5).value == "2026-04-24"
 
 
 def test_workbook_writes_to_bytes(restock_context):

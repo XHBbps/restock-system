@@ -38,6 +38,7 @@ class SnapshotItemOut(BaseModel):
     total_qty: int
     country_breakdown: dict[str, Any]
     warehouse_breakdown: dict[str, Any]
+    restock_dates: dict[str, str | None] = Field(default_factory=dict)
     purchase_qty: int | None = None
     purchase_date: date | None = None
     urgent: bool

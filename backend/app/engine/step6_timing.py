@@ -16,6 +16,7 @@ logger = get_logger(__name__)
 class UrgencyResult:
     urgent: bool
     purchase_date: date | None = None
+    restock_dates: dict[str, str | None] | None = None
 
 
 def positive_qty_countries(country_qty_for_sku: Mapping[str, int]) -> set[str]:
@@ -72,6 +73,30 @@ def compute_purchase_date(
     return today + timedelta(days=int(min_sale_days) - buffer_days - lead_time_days)
 
 
+def compute_restock_dates(
+    sale_days_by_country: Mapping[str, float | int | None],
+    *,
+    country_qty_for_sku: Mapping[str, int],
+    lead_time_days: int,
+    today: date,
+) -> dict[str, str | None]:
+    result: dict[str, str | None] = {}
+    for country, qty in country_qty_for_sku.items():
+        if int(qty or 0) <= 0:
+            continue
+        raw = sale_days_by_country.get(country)
+        if raw is None:
+            result[country] = None
+            continue
+        try:
+            sale_days = float(raw)
+        except (TypeError, ValueError):
+            result[country] = None
+            continue
+        result[country] = (today + timedelta(days=int(sale_days) - lead_time_days)).isoformat()
+    return result
+
+
 def compute_urgency_for_sku(
     *,
     sale_days_for_sku: Mapping[str, float | int | None],
@@ -93,6 +118,12 @@ def compute_urgency_for_sku(
             purchase_qty=purchase_qty,
             lead_time_days=lead_time_days,
             buffer_days=buffer_days,
+            today=effective_today,
+        ),
+        restock_dates=compute_restock_dates(
+            sale_days_for_sku,
+            country_qty_for_sku=country_qty_for_sku,
+            lead_time_days=lead_time_days,
             today=effective_today,
         ),
     )
@@ -122,5 +153,6 @@ def step6_timing(
         result[sku] = {
             "urgent": urgency.urgent,
             "purchase_date": urgency.purchase_date,
+            "restock_dates": urgency.restock_dates or {},
         }
     return result

@@ -146,6 +146,7 @@ async def test_run_engine_writes_purchase_fields_and_item_counts() -> None:
     assert item["total_qty"] == 100
     assert item["purchase_qty"] == 145
     assert item["purchase_date"] == date.today() - timedelta(days=50)
+    assert item["restock_dates"] == {"US": (date.today() - timedelta(days=20)).isoformat()}
 
 
 @pytest.mark.asyncio
@@ -201,6 +202,7 @@ async def test_run_engine_velocity_unaffected_by_restock_regions() -> None:
         "purchase_qty 应覆盖所有国家动销；若仅算白名单则为 225"
     )
     assert item["purchase_date"] == date.today() - timedelta(days=50)
+    assert item["restock_dates"] == {"US": (date.today() - timedelta(days=20)).isoformat()}
 
 
 @pytest.mark.asyncio

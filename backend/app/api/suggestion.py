@@ -16,7 +16,7 @@ from app.core.exceptions import ConflictError, NotFound, ValidationFailed
 from app.core.permissions import HISTORY_DELETE, RESTOCK_OPERATE, RESTOCK_VIEW
 from app.core.query import escape_like
 from app.core.timezone import BEIJING, now_beijing
-from app.engine.step6_timing import has_urgent_sale_days, positive_qty_countries
+from app.engine.step6_timing import compute_restock_dates, has_urgent_sale_days, positive_qty_countries
 from app.models.product_listing import ProductListing
 from app.models.sku import SkuConfig
 from app.models.suggestion import Suggestion, SuggestionItem
@@ -45,6 +45,7 @@ class SuggestionItemUpdates(TypedDict, total=False):
     warehouse_breakdown: dict[str, dict[str, int]]
     allocation_snapshot: None
     urgent: bool
+    restock_dates: dict[str, str | None]
 
 
 def _suggestion_status_sort_expr() -> ColumnElement[int]:
@@ -284,6 +285,12 @@ async def patch_item(
             item.sale_days_snapshot or {},
             lead_time_days=lead_time_days,
             countries=positive_qty_countries(effective_country_breakdown),
+        )
+        updates["restock_dates"] = compute_restock_dates(
+            item.sale_days_snapshot or {},
+            country_qty_for_sku=effective_country_breakdown,
+            lead_time_days=lead_time_days,
+            today=now_beijing().date(),
         )
 
     if updates:

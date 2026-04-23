@@ -15,6 +15,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -110,6 +111,9 @@ class SuggestionSnapshotItem(Base):
     total_qty: Mapped[int] = mapped_column(Integer, nullable=False)
     country_breakdown: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     warehouse_breakdown: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    restock_dates: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
+    )
     # 采购类型快照冻结的值；补货类型快照可为 NULL。
     purchase_qty: Mapped[int | None] = mapped_column(Integer, nullable=True)
     purchase_date: Mapped[date | None] = mapped_column(Date, nullable=True)
