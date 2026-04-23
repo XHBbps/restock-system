@@ -20,6 +20,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.timezone import BEIJING
+from app.engine.context import VelocityMap
 from app.models.order import OrderHeader, OrderItem
 
 VALID_STATUSES = ("Shipped", "PartiallyShipped")
@@ -44,7 +45,7 @@ def is_in_window(order_date: date, today: date, days_ago: int) -> bool:
 def aggregate_velocity_from_items(
     items: list[tuple[str, str, date, int, int]],
     today: date,
-) -> dict[str, dict[str, float]]:
+) -> VelocityMap:
     """从订单明细聚合 velocity(暴露为纯函数便于单测)。
 
     items: list of (commodity_sku, country, order_date, quantity_shipped, refund_num)
@@ -111,7 +112,7 @@ async def run_step1(
     commodity_skus: list[str] | None,
     today: date,
     allowed_countries: set[str] | None = None,
-) -> dict[str, dict[str, float]]:
+) -> VelocityMap:
     items = await load_velocity_inputs(
         db,
         commodity_skus=commodity_skus,

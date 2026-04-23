@@ -22,6 +22,7 @@ from app.api.deps import (
 from app.core.permissions import HOME_REFRESH, HOME_VIEW, MONITOR_VIEW
 from app.core.restock_regions import resolve_allowed_restock_regions
 from app.core.timezone import now_beijing
+from app.engine.context import CountryQtyMap, SaleDaysMap
 from app.engine.step1_velocity import run_step1
 from app.engine.step2_sale_days import run_step2
 from app.engine.step3_country_qty import compute_country_qty
@@ -99,7 +100,7 @@ def _country_sale_days(snapshot: dict[str, Any] | None, country: str) -> float |
 
 
 def _build_country_risk_distribution(
-    sale_days_by_sku: dict[str, dict[str, float]],
+    sale_days_by_sku: SaleDaysMap,
     *,
     lead_time_days: int,
     target_days: int,
@@ -171,8 +172,8 @@ async def _load_product_listing_map(
 async def _build_top_urgent_skus(
     db: AsyncSession,
     *,
-    sale_days_by_sku: dict[str, dict[str, float]],
-    country_qty_by_sku: dict[str, dict[str, int]],
+    sale_days_by_sku: SaleDaysMap,
+    country_qty_by_sku: CountryQtyMap,
     lead_time_days: int,
 ) -> list[UrgentSkuItem]:
     urgent_rows: list[tuple[str, str, float]] = []
