@@ -45,10 +45,9 @@ def compute_total(
 ) -> int:
     sum_qty = sum(country_qty_for_sku.values())
     sum_velocity = sum(velocity_for_sku.values())
-    buffer_qty = math.ceil(sum_velocity * buffer_days)
     safety_qty = math.ceil(sum_velocity * safety_stock_days)
     local_total = local_stock_for_sku.total if local_stock_for_sku is not None else 0
-    raw_purchase_qty = sum_qty + buffer_qty - local_total + safety_qty
+    raw_purchase_qty = sum_qty - local_total + safety_qty
     # 本地库存过剩时公式可能为负，夹到 0（DB 侧也有 CheckConstraint 双保险）
     purchase_qty = max(0, int(raw_purchase_qty))
     logger.info(
@@ -56,7 +55,6 @@ def compute_total(
         sku=sku,
         sum_qty=sum_qty,
         sum_velocity=sum_velocity,
-        buffer_qty=buffer_qty,
         safety_qty=safety_qty,
         local_total=local_total,
         raw_purchase_qty=raw_purchase_qty,

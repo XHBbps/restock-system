@@ -155,6 +155,7 @@ async def run_engine(ctx: JobContext, *, triggered_by: str = "scheduler") -> int
                 sale_days_for_sku=sale_days.get(sku, {}),
                 country_qty_for_sku=sku_country_qty,
                 lead_time_days=lead_time,
+                buffer_days=config.buffer_days,
                 purchase_qty=purchase_qty,
                 today=today,
             )

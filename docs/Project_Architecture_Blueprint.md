@@ -110,11 +110,11 @@
 | 1 | `step1_velocity.py` | 近 30 天订单 | `velocity[sku][country]` | 加权日均销量：7日×0.5 + 14日×0.3 + 30日×0.2；若 `global_config.restock_regions` 非空，仅这些国家参与补货国家维度计算 |
 | 2 | `step2_sale_days.py` | 库存 + 在途 + velocity | `sale_days[sku][country]` | `(available + in_transit) / velocity`；velocity≤0 跳过 |
 | 3 | `step3_country_qty.py` | sale_days + target_days | `country_qty[sku][country]` | `max(0, ceil((target_days - sale_days) × velocity))` |
-| 4 | `step4_total.py` | country_qty + velocity + 国内库存 + buffer_days + safety_stock_days | `purchase_qty[sku]` | `Σcountry_qty + Σvelocity × buffer_days − (local.available + local.reserved) + Σvelocity × safety_stock_days`；`Σvelocity` 覆盖所有国家，不受 `restock_regions` 限制 |
+| 4 | `step4_total.py` | country_qty + velocity + 国内库存 + safety_stock_days | `purchase_qty[sku]` | `max(0, Σcountry_qty − (local.available + local.reserved) + ceil(Σvelocity × safety_stock_days))`；`Σvelocity` 覆盖所有国家，不受 `restock_regions` 限制；`buffer_days` 不参与采购量 |
 | 5 | `step5_warehouse_split.py` | country_qty + 订单邮编 + 邮编规则 + 国家仓库映射 | `warehouse_breakdown[country][wh_id]` | 按邮编规则分配到具体仓库，无订单时均分；若配置 `restock_regions`，仅消费这些国家的订单明细作为分仓依据；同优先级 tied 均分 |
-| 6 | `step6_timing.py` | sale_days + lead_time + purchase_qty | `urgent` + `purchase_date` | `urgent` 仍按任一正补货国家 `sale_days <= lead_time_days`；`purchase_date = today + min(sale_days by country) − 2 × lead_time_days`，`purchase_qty<=0` 或无 sale_days 时为空 |
+| 6 | `step6_timing.py` | sale_days + lead_time + buffer_days + purchase_qty | `urgent` + `purchase_date` | `urgent` 仍按任一正补货国家 `sale_days <= lead_time_days`；`purchase_date = today + int(min_sale_days) − buffer_days − lead_time_days`，`purchase_qty<=0` 或无 sale_days 时为空 |
 
-**运行上下文**：`EngineContext` 包含 `target_days`、`buffer_days`、`lead_time_days`、`safety_stock_days`、`restock_regions` 和 `eu_countries`。`global_config.eu_countries` 由同步层消费，`global_config_snapshot` 会冻结这些全局参数以便追溯。
+**运行上下文**：`EngineContext` 包含 `target_days`、`buffer_days`、`lead_time_days`、`safety_stock_days`、`restock_regions` 和 `eu_countries`。`buffer_days` 表示国内仓备货时间，参与采购日期计算，不参与采购量；`global_config.eu_countries` 由同步层消费，`global_config_snapshot` 会冻结这些全局参数以便追溯。
 
 **持久化**：一次完整计算在事务内执行，受 `pg_advisory_xact_lock(7429001)` 保护；runner 会归档旧 `draft`，写入 `suggestion` / `suggestion_item`，过滤采购量和补货量都为 0 的 SKU，并统计 `procurement_item_count`、`restock_item_count`。若所有 SKU 都为空则返回 `None`；成功生成非空建议单后 `calc_engine_job` 将 `global_config.suggestion_generation_enabled` 自动翻 OFF。
 
@@ -923,6 +923,7 @@ VITE_API_PROXY_TARGET=http://localhost:8000
 
 | 日期 | 变更 | 相关 PROGRESS 章节 |
 |---|---|---|
+| 2026-04-23 | 引擎采购口径调整：`buffer_days` 作为国内仓备货时间参与 `purchase_date`，不再参与 `purchase_qty`；采购量只叠加安全库存天数 | §3.54 |
 | 2026-04-22 | Audit Stage 3 P0 闪电修：engine step4 clamp `purchase_qty >= 0` + DB CheckConstraint；`docs_enabled()` production 硬关忽略 env；CI 加 postgres service 让 integration tests 真跑；`.gitignore` 补 `*.exe` / `*.lnk` 防误 commit | PROGRESS.md 最近更新 |
 | 2026-04-21 | 采购/补货分拆 + 安全库存 + EU 合并 + 嵌套 Tab 视图 | §3.53 |
 | 2026-04-20 | Full audit 收口修复（并发保护 / 查询口径 / fail-close 探测 / dev 重建稳定性） | §3.52 |
@@ -934,4 +935,3 @@ VITE_API_PROXY_TARGET=http://localhost:8000
 ---
 
 **本架构蓝图应随架构演进同步更新。** 若发现文档与代码实际行为不符，以代码为准并回填文档。
-

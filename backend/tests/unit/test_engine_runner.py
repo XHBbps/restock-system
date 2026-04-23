@@ -144,8 +144,8 @@ async def test_run_engine_writes_purchase_fields_and_item_counts() -> None:
     assert result == 123
     item = captured["items"][0]
     assert item["total_qty"] == 100
-    assert item["purchase_qty"] == 235
-    assert item["purchase_date"] == date.today() - timedelta(days=70)
+    assert item["purchase_qty"] == 145
+    assert item["purchase_date"] == date.today() - timedelta(days=50)
 
 
 @pytest.mark.asyncio
@@ -153,8 +153,8 @@ async def test_run_engine_velocity_unaffected_by_restock_regions() -> None:
     """回归测试：restock_regions 白名单不应影响 Σvelocity 的取值。
 
     场景：SKU-001 在 US（白名单内）动销 3/天，在 JP（白名单外）动销 2/天。
-    采购量公式：Σcountry_qty + Σvelocity × (buffer + safety) - local
-             = 180        + 5       × (30 + 15)       - 0 = 405
+    采购量公式：Σcountry_qty - local + Σvelocity × safety
+             = 180        - 0     + 5       × 15     = 255
     country_qty 只保留 US（180），但 Σvelocity 必须覆盖所有国家（=5）。
     """
     config = _make_config(restock_regions=["US"])
@@ -195,11 +195,12 @@ async def test_run_engine_velocity_unaffected_by_restock_regions() -> None:
     # country_qty 只保留白名单（US: 180），JP 被过滤
     assert item["country_breakdown"] == {"US": 180}
     assert item["total_qty"] == 180
-    # purchase_qty = 180 + (3+2)*30 - 0 + (3+2)*15 = 405
-    # 关键：Σvelocity 含 JP 的 2/天，否则会少算 (2*30 + 2*15)=90，结果变 315
-    assert item["purchase_qty"] == 405, (
-        "purchase_qty 应覆盖所有国家动销；若仅算白名单则为 315"
+    # purchase_qty = 180 - 0 + (3+2)*15 = 255
+    # 关键：Σvelocity 含 JP 的 2/天，否则会少算 2*15=30，结果变 225
+    assert item["purchase_qty"] == 255, (
+        "purchase_qty 应覆盖所有国家动销；若仅算白名单则为 225"
     )
+    assert item["purchase_date"] == date.today() - timedelta(days=50)
 
 
 @pytest.mark.asyncio

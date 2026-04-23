@@ -53,6 +53,7 @@ def compute_purchase_date(
     *,
     purchase_qty: int,
     lead_time_days: int,
+    buffer_days: int = 0,
     today: date,
 ) -> date | None:
     if purchase_qty <= 0:
@@ -68,7 +69,7 @@ def compute_purchase_date(
     if not valid:
         return None
     min_sale_days = min(valid)
-    return today + timedelta(days=int(min_sale_days) - 2 * lead_time_days)
+    return today + timedelta(days=int(min_sale_days) - buffer_days - lead_time_days)
 
 
 def compute_urgency_for_sku(
@@ -76,6 +77,7 @@ def compute_urgency_for_sku(
     sale_days_for_sku: Mapping[str, float | int | None],
     country_qty_for_sku: Mapping[str, int],
     lead_time_days: int,
+    buffer_days: int = 0,
     purchase_qty: int = 0,
     today: date | None = None,
 ) -> UrgencyResult:
@@ -90,6 +92,7 @@ def compute_urgency_for_sku(
             sale_days_for_sku,
             purchase_qty=purchase_qty,
             lead_time_days=lead_time_days,
+            buffer_days=buffer_days,
             today=effective_today,
         ),
     )
@@ -100,6 +103,7 @@ def step6_timing(
     sale_days_snapshot: dict[str, dict[str, float | None]],
     purchase_qty: dict[str, int],
     lead_time_by_sku: dict[str, int],
+    buffer_days_by_sku: dict[str, int] | None = None,
     country_qty: dict[str, dict[str, int]] | None = None,
     today: date | None = None,
 ) -> dict[str, dict[str, Any]]:
@@ -111,6 +115,7 @@ def step6_timing(
             sale_days_for_sku=sale_days_snapshot.get(sku, {}),
             country_qty_for_sku=(country_qty or {}).get(sku, {}),
             lead_time_days=lead_time_by_sku.get(sku, 50),
+            buffer_days=(buffer_days_by_sku or {}).get(sku, 0),
             purchase_qty=purchase_qty.get(sku, 0),
             today=effective_today,
         )

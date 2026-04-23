@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-22（审计 fix Stage 3 全量收口：5 Critical + 28 Important + 18 Minor 闭环 / mypy blanket override 全清空 109 files strict / retention 三连 + dashboard stale 自动失效 / 历史页去重 + display_status_code / 部署安全加固。详见 `docs/superpowers/reviews/2026-04-22-audit-fixes-progress-v2.md`）
+> 最近更新：2026-04-23（补货引擎口径调整：`buffer_days` 从采购量公式移除，改为参与采购日期；采购提前期继续参与紧急判断与采购日期。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -58,9 +58,9 @@
   1. `step1_velocity` — 加权日均销量（7日×0.5 + 14日×0.3 + 30日×0.2）
   2. `step2_sale_days` — 可售天数 + 库存聚合（含在途）
   3. `step3_country_qty` — 各国补货量
-  4. `step4_total` — 总采购量（Σcountry_qty + Σvelocity × buffer_days − 本地库存 + Σvelocity × safety_stock_days，clamp 到 0）
+  4. `step4_total` — 总采购量（Σcountry_qty − 本地库存 + ceil(Σvelocity × safety_stock_days)，clamp 到 0；`buffer_days` 不参与采购量）
   5. `step5_warehouse_split` — 按邮编规则分配到具体仓库
-  6. `step6_timing` — 紧急标志（任一有效国家 `sale_days <= lead_time_days` 即为紧急）
+  6. `step6_timing` — 紧急标志与采购日期（任一有效国家 `sale_days <= lead_time_days` 即为紧急；`purchase_date = today + int(min_sale_days) − buffer_days − lead_time_days`）
 - **补货区域过滤**：全局参数 `restock_regions` 支持按国家多选；为空数组时表示全部国家参与计算，配置后仅这些国家的订单会参与 `step1_velocity` 销量统计和 `step5_warehouse_split` 的国家订单分仓
 - **并发保护**：`pg_advisory_xact_lock(7429001)` 事务级锁，阻止并发引擎覆盖彼此
 - **快照追溯**：`velocity_snapshot`、`sale_days_snapshot`、`global_config_snapshot` 存入 JSONB 字段；其中 `global_config_snapshot` 会记录 `restock_regions`
@@ -97,10 +97,16 @@
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
 
+### 3.54 buffer_days / lead_time_days 计算口径调整（2026-04-23）
+- **引擎公式**：`backend/app/engine/step4_total.py` 的采购量改为 `purchase_qty = max(0, Σcountry_qty − (local.available + local.reserved) + ceil(Σvelocity × safety_stock_days))`；`buffer_days` 保留兼容参数但不再参与采购量。
+- **采购日期**：`backend/app/engine/step6_timing.py` 改为 `purchase_date = today + int(min_sale_days) − buffer_days − lead_time_days`；`urgent` 仍只按正补货国家 `sale_days <= lead_time_days` 判定，不受 `buffer_days` 影响。
+- **追溯字段**：`backend/app/engine/runner.py` 继续在 `global_config_snapshot` 冻结 `buffer_days`，并将其传入 step6 用于采购日期计算；持久化字段仍为 `purchase_qty` / `purchase_date`。
+- **测试**：更新 `backend/tests/unit/test_engine_step4.py`、`test_engine_step6.py`、`test_engine_runner.py`、`test_engine_types.py`，覆盖新公式、本地库存扣减、`buffer_days` 不影响采购量和采购日期提前逻辑。
+
 ### 3.53 采购/补货分拆与 EU 合并（2026-04-21）
 - **数据模型**：迁移 `20260420_0900` 将采购与补货字段拆分：`global_config` 新增 `safety_stock_days` / `eu_countries`，`suggestion` 新增 `procurement_item_count` / `restock_item_count`，`suggestion_item` 新增 `purchase_qty` / `purchase_date` 与 `procurement_*`、`restock_*` 两组导出状态，`suggestion_snapshot` 新增 `snapshot_type`，同步源表补齐 `original_*` 字段用于保留 EU 合并前原国家。
 - **同步层**：`backend/app/sync/order_list.py`、`product_listing.py`、`out_records.py`、`inventory.py` 接入 `app.core.country_mapping.apply_eu_mapping()`；DE/FR/IT/ES/NL/BE/PL/SE/IE 可按全局 `eu_countries` 合并为 `EU`，GB/UK 不纳入 EU，并在发生合并时写入对应 `original_*` 字段。
-- **引擎**：`step4_total` 采购公式更新为 `purchase_qty = Σcountry_qty + Σvelocity × buffer_days − (local.available + local.reserved) + Σvelocity × safety_stock_days`，其中 `Σvelocity` 覆盖所有国家；`step6_timing` 新增 `purchase_date = today + min(sale_days by country) − 2 × lead_time_days`，runner 写入采购/补货 item_count，成功生成后自动翻 OFF。
+- **引擎**：`step4_total` 采购公式更新为 `purchase_qty = max(0, Σcountry_qty − (local.available + local.reserved) + ceil(Σvelocity × safety_stock_days))`，其中 `Σvelocity` 覆盖所有国家且 `buffer_days` 不参与采购量；`step6_timing` 新增 `purchase_date = today + int(min_sale_days) − buffer_days − lead_time_days`，runner 写入采购/补货 item_count，成功生成后自动翻 OFF。
 - **API 与导出**：全局参数 DTO 删除旧 `calc_*` / `include_tax` / 默认采购仓字段，新增 `safety_stock_days`、`eu_countries` 与 generation-toggle `can_enable`；建议单响应/PATCH 支持采购数量与采购日期；快照端点拆分为 `POST /api/suggestions/{id}/snapshots/procurement` 与 `/restock`，旧端点返回 410，Excel 采购/补货工作簿格式独立。
 - **前端**：`/restock/current`、`/restock/suggestions/:id`、`/restock/history` 改为 `procurement` / `restock` 嵌套路由；新增 `SuggestionTabBar`、`PurchaseDateCell`、采购列表、补货下钻列表、详情子视图、历史快照子视图；全局参数页新增安全库存与 EU 成员配置，`COUNTRY_OPTIONS` 增加 `EU-欧盟`。
 - **验证**：宿主机后端 `python -m pytest -v -p no:cacheprovider` 结果 `308 passed`；前端 `npx vue-tsc --noEmit`、`npx vite build`、`npm run test -- --run` 通过（26 个测试文件 / 103 个用例）；本地 dev 容器通过 `deploy/docker-compose.dev.override.yml` 将 DB 端口映射到 15433 后完成生成 → 编辑 → 采购/补货双导出 → 翻 ON 归档 → 再生成 smoke。
@@ -599,4 +605,3 @@
 - [部署指南](deployment.md) — 发布流程和环境变量
 - [运维手册](runbook.md) — 故障排查和监控
 - [新成员入门](onboarding.md) — 本地开发和工作流
-
