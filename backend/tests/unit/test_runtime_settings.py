@@ -108,3 +108,18 @@ def test_push_auto_retry_times_must_be_positive(monkeypatch) -> None:
         get_settings()
 
     get_settings.cache_clear()
+
+
+def test_retention_stuck_generating_hours_rejects_negative(monkeypatch) -> None:
+    """负值会让 cutoff 跑到未来，静默把所有 generating snapshot 标 failed。"""
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgresql+asyncpg://postgres:postgres@localhost:5432/replenish",
+    )
+    monkeypatch.setenv("RETENTION_STUCK_GENERATING_HOURS", "-1")
+    get_settings.cache_clear()
+
+    with pytest.raises(ValueError, match="RETENTION_STUCK_GENERATING_HOURS"):
+        get_settings()
+
+    get_settings.cache_clear()

@@ -96,6 +96,8 @@ def validate_settings(settings: Settings) -> Settings:
         errors.append("WORKER_HEARTBEAT_SECONDS must be less than WORKER_LEASE_MINUTES*60/2")
     if settings.push_auto_retry_times < 1:
         errors.append("PUSH_AUTO_RETRY_TIMES must be >= 1")
+    if settings.retention_stuck_generating_hours < 0:
+        errors.append("RETENTION_STUCK_GENERATING_HOURS must be >= 0 (0 disables)")
     if len(settings.jwt_secret.encode("utf-8")) < 32:
         errors.append("JWT_SECRET must be at least 32 bytes")
 
