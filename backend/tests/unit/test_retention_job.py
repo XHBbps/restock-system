@@ -231,9 +231,12 @@ async def test_purge_stuck_generating_marks_rows_failed() -> None:
     assert result == 3
     # 只执行了 1 条 UPDATE 语句
     assert len(db.executed) == 1
-    # SQL 含 generation_status='generating' + 时间阈值
-    compiled = str(db.executed[0])
-    assert "generation_status" in compiled.lower()
+    # SQL 含 generation_status='generating' + 时间阈值（exported_at < cutoff）
+    compiled = str(db.executed[0]).lower()
+    assert "generation_status" in compiled
+    assert "exported_at" in compiled, (
+        "WHERE 子句丢失 exported_at 时间阈值 → 会标所有 generating 而不管年龄"
+    )
 
 
 @pytest.mark.asyncio
