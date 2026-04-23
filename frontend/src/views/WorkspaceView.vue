@@ -1,5 +1,5 @@
 <template>
-  <div class="workspace-view">
+  <div v-loading="loading" class="workspace-view">
     <DashboardPageHeader
       title="信息总览"
     >
@@ -196,6 +196,7 @@ const snapshotTagType = computed(() => {
 })
 
 const snapshotStatusLabel = computed(() => {
+  if (loading.value) return '加载中...'
   if (data.value?.snapshot_status === 'refreshing' || currentTaskId.value != null) return '快照刷新中'
   if (data.value?.snapshot_status === 'missing') {
     return canRefreshSnapshot.value ? '快照待刷新' : '暂无快照'
