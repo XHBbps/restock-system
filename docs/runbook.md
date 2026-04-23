@@ -569,6 +569,8 @@ bash deploy/scripts/restore_db.sh <backup-file>
 docker compose -f deploy/docker-compose.yml start backend worker scheduler
 ```
 
+> **兜底**：从 2026-04-23 起 `restore_db.sh` 会在 DROP 前自动 dump 当前 DB 到 `<backup-file 同目录>/pre-restore-<timestamp>.sql.gz`。如 restore 结果不对，可用该兜底文件回退：`bash deploy/scripts/restore_db.sh deploy/data/backups/pre-restore-XXXX.sql.gz`。
+
 ---
 
 ## 7. 应急联系
