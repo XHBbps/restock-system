@@ -52,7 +52,7 @@ else
         exit 1
     fi
     echo "[safety] 兜底 dump 完成：$SAFETY_DUMP"
-    echo "[safety] 如 restore 失败，可用 bash $0 $SAFETY_DUMP 回退。"
+    echo "[safety] 如 restore 失败，可用 bash \"$0\" \"$SAFETY_DUMP\" 回退。"
 fi
 
 echo "[restore] dropping and recreating database..."
