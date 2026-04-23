@@ -109,7 +109,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and push backend
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ./backend
           push: true
@@ -117,7 +117,7 @@ jobs:
             ghcr.io/${{ steps.ghcr.outputs.owner }}/restock-backend:sha-${{ github.sha }}
             ${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && format('ghcr.io/{0}/restock-backend:latest', steps.ghcr.outputs.owner) || '' }}
       - name: Build and push frontend
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ./frontend
           push: true
