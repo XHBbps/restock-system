@@ -588,12 +588,12 @@ docker compose -f deploy/docker-compose.yml start backend worker scheduler
 | `SAIHU_CLIENT_ID` / `SAIHU_CLIENT_SECRET` | <由赛狐 API 管理员在赛狐后台获取> | 旧凭证立即失效，赛狐同步任务重启后用新凭证 |
 | `DATABASE_URL` | 一般不含秘密（仅账号 + 本地网络），但 postgres 密码需单独记录 | DB 连接重建 |
 
-> **责任**：当前由 <维护者姓名> 保管完整 secrets 副本。变更 / 离职时必须把最新副本同步给接班人。
+> **责任**：当前由 <填写负责人姓名或团队别名> 保管完整 secrets 副本。变更 / 离职时必须把最新副本同步给接班人。此占位符必须在交付部署前由项目负责人替换为实际姓名。
 
 #### 6.4.2 恢复步骤
 
 1. **从备份位置获取最新 secrets**（约定的 password manager 条目）。
-2. **复制到目标机器**：`scp <local>/.env.production user@prod:/path/to/restock_system/.env`
+2. **复制到目标机器**：`scp <local>/.env.production user@prod:/path/to/restock_system/.env.production`
 3. **验证不含占位符**：
    ```bash
    bash deploy/scripts/validate_env.sh
