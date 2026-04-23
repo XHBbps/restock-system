@@ -36,7 +36,7 @@ jobs:
       # 空则全部 skip。必须指向独立 replenish_test 库（名字硬约束）
       TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/replenish_test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -61,7 +61,7 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -81,7 +81,7 @@ jobs:
   docker-build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Build backend image
         run: docker build -t restock-backend:ci-test ./backend
       - name: Build frontend image
@@ -95,7 +95,7 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Normalize GHCR owner
         id: ghcr
         shell: bash
