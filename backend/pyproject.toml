@@ -31,7 +31,7 @@ dependencies = [
 
     # 安全
     "PyJWT>=2.9.0",
-    "bcrypt>=4.0.1,<5",
+    "bcrypt>=4.0.1,<6",
 
     # 工具
     "python-dateutil>=2.9.0",
