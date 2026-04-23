@@ -698,3 +698,66 @@ asyncio.run(main())
 **可能的异常**：
 - 看到通用的 "下载失败" 或后端 detail "文件已丢失"：`_decodeBlobErrorInPlace`（`frontend/src/api/snapshot.ts`）没正常解包 blob 错误，或后端 404→410 逻辑分支错了。
 - 看到 500：检查 docker exec python 脚本是否真的写入了 `file_purged_at`（用 `psql -c "SELECT file_purged_at FROM excel_export_log WHERE snapshot_id = ..."` 复核）。
+
+---
+
+## 9. Dependabot PR 批处理 SOP
+
+Dependabot 每月自动推出依赖更新 PR。项目 1-5 人用户规模不值得逐个审，每月或每季度批量处理一次即可。
+
+### 9.1 命令模板
+
+```bash
+# 1. 列出 open PRs + CI 状态
+gh pr list --author "app/dependabot" --state open --json number,title,mergeable --jq '.[] | "#\(.number) \(.title) \(.mergeable)"'
+
+# 2. 对每条 PR 检查 CI
+for pr in $(gh pr list --author "app/dependabot" --state open --json number --jq '.[].number'); do
+  echo "=== #$pr ==="
+  gh pr checks "$pr" 2>&1 | head -5
+done
+
+# 3. 分组决策（策略见下）并批量 merge / close
+```
+
+### 9.2 分组决策策略
+
+| 类别 | 策略 |
+|---|---|
+| `actions/*`（GitHub Actions workflow deps） | CI 绿即 merge，major bump 通常兼容 |
+| `pip/backend/*` patch / range 变化 | CI 绿即 merge |
+| `pip/backend/*` major bump | 查 changelog，有 breaking 改动就开独立分支迁移 |
+| `npm_and_yarn/*` patch | CI 绿即 merge |
+| `npm_and_yarn/*` major（如 eslint 9→10） | 查 changelog；如涉及配置迁移（如 flat config）开独立分支 |
+
+### 9.3 CI 过期的 PR
+
+如果 PR 的 CI 运行于 master 的旧版本（比如 master 后来加了 postgres service 才让 integration tests 能跑，老 PR 的 CI 不能），不要手工点 "Rerun"；让 dependabot 基于新 master 重新 rebase：
+
+```bash
+gh pr comment <num> --body "@dependabot recreate"
+```
+
+dependabot 会关掉旧 PR + 开新 PR（同 title），CI 重跑于新 base。
+
+### 9.4 关闭 + 禁用规则
+
+某个包决定暂不升级（比如 major bump 需要代码迁移）：
+
+```bash
+gh pr close <num> --comment "Deferred — see follow-up plan"
+```
+
+然后编辑 `.github/dependabot.yml` 加 ignore：
+
+```yaml
+updates:
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule: { interval: weekly }
+    ignore:
+      - dependency-name: eslint
+        update-types: ["version-update:semver-major"]
+```
+
+参考项目当前已 ignore 的包：`eslint` / `eslint-plugin-vue` / `eslint-config-prettier` / `lucide-vue-next`（都是 major bump，等专项迁移 PR）。
