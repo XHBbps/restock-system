@@ -102,7 +102,7 @@
 - **计算口径**：`backend/app/engine/step6_timing.py` 新增 `compute_restock_dates()`，公式为 `restock_date[sku][country] = today + int(sale_days[sku][country]) − lead_time_days(sku)`；仅对 `country_breakdown[country] > 0` 的国家输出，缺少 `sale_days` 时保留 `null`，且不受 `buffer_days` 影响。
 - **持久化与编辑**：`backend/app/engine/runner.py` 在生成建议单时写入 `restock_dates`；`backend/app/api/suggestion.py` 在 PATCH 修改 `country_breakdown` 后会同步重算 `total_qty`、`urgent` 与 `restock_dates`，前端保持只读展示，不提供手工编辑。
 - **快照与导出**：`backend/app/api/snapshot.py` 在补货快照中冻结 `restock_dates`；`backend/app/services/excel_export.py` 的补货工作簿在 `SKU×国家`、`SKU×国家×仓库` 两个 Sheet 新增“补货日期”列。
-- **前端展示与验证**：`frontend/src/views/suggestion/RestockListView.vue` 新增“最晚补货日期”列和展开行国家级“补货日期”列；已通过宿主机后端定向单测 `54 passed`、集成测试 `test_snapshot_api.py` `13 passed`，以及前端 `npx vue-tsc --noEmit`、`npm run test -- RestockListView`。
+- **前端展示与验证**：`frontend/src/views/suggestion/RestockListView.vue` 与 `frontend/src/components/SuggestionDetailDialog.vue` 新增“最晚补货日期”列和展开行国家级“补货日期”列；已通过宿主机后端定向单测 `54 passed`、集成测试 `test_snapshot_api.py` `13 passed`，以及前端 `npx vue-tsc --noEmit`、补货日期相关 Vitest。
 
 ### 3.54 buffer_days / lead_time_days 计算口径调整（2026-04-23）
 - **引擎公式**：`backend/app/engine/step4_total.py` 的采购量改为 `purchase_qty = max(0, Σcountry_qty − (local.available + local.reserved) + ceil(Σvelocity × safety_stock_days))`；`buffer_days` 保留兼容参数但不再参与采购量。

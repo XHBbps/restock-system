@@ -118,6 +118,7 @@
                     <tr>
                       <th class="breakdown-col-country">国家</th>
                       <th class="breakdown-col-qty">补货量</th>
+                      <th class="breakdown-col-date">补货日期</th>
                       <th class="breakdown-col-warehouses">仓库分配</th>
                     </tr>
                   </thead>
@@ -132,6 +133,9 @@
                       </td>
                       <td class="breakdown-col-qty">
                         <span class="breakdown-qty-value">{{ country.qty }}</span>
+                      </td>
+                      <td class="breakdown-col-date">
+                        <span class="breakdown-date-value">{{ country.restockDate || '—' }}</span>
                       </td>
                       <td class="breakdown-col-warehouses">
                         <template v-if="country.warehouses.length > 0">
@@ -159,6 +163,11 @@
               </template>
             </el-table-column>
             <el-table-column label="补货量" prop="total_qty" width="110" align="right" />
+            <el-table-column label="最晚补货日期" width="160">
+              <template #default="{ row }">
+                {{ restockDateSummary(row) }}
+              </template>
+            </el-table-column>
             <el-table-column label="国家分布" min-width="220">
               <template #default="{ row }">
                 <div class="country-chips">
@@ -232,6 +241,7 @@ function warehouseLabel(warehouseId: string): string {
 interface CountryRow {
   country: string
   qty: number
+  restockDate: string | null
   warehouses: { id: string; qty: number }[]
 }
 
@@ -243,10 +253,17 @@ function itemCountryRows(item: SnapshotItemOut): CountryRow[] {
     .map(([country, qty]) => ({
       country,
       qty: Number(qty),
+      restockDate: item.restock_dates?.[country] || null,
       warehouses: Object.entries(warehouseBreakdown[country] || {})
         .filter(([, wqty]) => Number(wqty) > 0)
         .map(([id, wqty]) => ({ id, qty: Number(wqty) })),
     }))
+}
+
+function restockDateSummary(item: SnapshotItemOut): string {
+  const dates = Object.values(item.restock_dates || {}).filter((value): value is string => Boolean(value))
+  if (dates.length === 0) return '—'
+  return dates.sort()[0]
 }
 
 async function loadWarehouses(): Promise<void> {
@@ -549,6 +566,10 @@ watch(
   text-align: right !important;
 }
 
+.breakdown-col-date {
+  width: 140px;
+}
+
 .breakdown-col-warehouses {
   min-width: 320px;
 }
@@ -562,6 +583,10 @@ watch(
   font-family: $font-family-mono;
   font-weight: 600;
   color: $color-brand-primary;
+}
+
+.breakdown-date-value {
+  font-family: $font-family-mono;
 }
 
 .breakdown-warehouse-chip {

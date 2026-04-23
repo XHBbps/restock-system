@@ -292,7 +292,7 @@ _ENDPOINT_RATE_OVERRIDES = {
 2. 校验建议单仍为 `draft`，校验条目属于该建议单，按 `snapshot_type` 校验采购量或补货量。
 3. 按 `(suggestion_id, snapshot_type)` 独立计算下一版 `version`。
 4. INSERT `suggestion_snapshot(generation_status='generating')` 与 `suggestion_snapshot_item`。
-5. `excel_export.py` 根据类型生成不同工作簿：采购为“主数据 + 采购明细”，补货为“主数据 + SKU汇总 + SKU×国家 + SKU×国家×仓库”；补货工作簿会在国家与仓库明细中冻结 `restock_dates` 对应的“补货日期”列。
+5. `excel_export.py` 根据类型生成不同工作簿：采购为“主数据 + 采购明细”，补货为“主数据 + SKU汇总 + SKU×国家 + SKU×国家×仓库”；补货工作簿与前端当前补货视图、历史详情弹窗都会在国家与仓库明细中展示 `restock_dates` 对应的“补货日期”。
 6. 文件成功落盘后，才更新对应条目的 `{type}_export_status='exported'`、`{type}_exported_snapshot_id`、`{type}_exported_at`。
 7. 更新 `suggestion_snapshot.generation_status='ready'`、`file_path`、`file_size_bytes`。
 
