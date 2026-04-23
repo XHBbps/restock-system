@@ -3,7 +3,7 @@
 > **审查范围：** 错误边界 / loading 超时反馈 / 表单禁用状态 / 键盘可访问性 / 三态（空/loading/错） / 前后端状态漂移（generation_status / stale）
 > **审查时间：** 2026-04-23
 > **审查者：** Claude Code（superpowers agent，Task 11）
-> **问题总数：** 12 条 / Critical: 1 / Important: 5 / Minor: 4 / Ack: 2
+> **问题总数：** 17 条 / Critical: 1 / Important: 7 / Minor: 6 / Ack: 3
 
 ---
 
@@ -206,13 +206,13 @@
 | D-2 | Important | UserConfigView / RoleConfigView | 用户/角色表单弹框无 Enter 键提交 | S |
 | F-1 | Important | SuggestionDetailDialog | generation_status=failed 快照无提示 | S-M |
 | F-3 | Important | TaskProgress + task store | networkErrors 未渲染（任务状态漂移） | S |
-| A-1 | Minor | main.ts | unhandledrejection 静默吞错 | S |
+| A-1 | Important | main.ts | unhandledrejection 静默吞错 | S |
 | A-3 | Minor | client.ts | 401 重定向有极端 race 条件 | S |
 | B-3 | Minor | apiError.ts | axios 超时错误提示语义不准确 | S |
 | C-1 | Minor | AppLayout | 修改密码弹框关闭后表单不重置 | S |
 | E-3 | Minor | SuggestionListView | 错误态后可能残留旧数据 | S |
+| D-3 | Minor | SuggestionDetailDialog | 自定义 × 按钮键盘可聚焦性 | 0 |
 | F-2 | Minor | WorkspaceView | missing+无权限快照文案不够区分 | S |
-| D-3 | Ack | SuggestionDetailDialog | 自定义 × 按钮键盘可聚焦性 | 0 |
 | A-2 | Ack | main.ts | errorHandler 全局兜底存在 | 0 |
 | C-2 | Ack | 全站表单 | 防重复提交覆盖完整 | 0 |
 | E-2 | Ack | SuggestionListView | loading/empty 隔离正确 | 0 |
