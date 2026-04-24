@@ -8,6 +8,7 @@ import pytest
 from app.engine.step5_warehouse_split import (
     explain_country_qty_split,
     load_all_sku_country_orders,
+    load_country_warehouses,
     split_country_qty,
 )
 from app.engine.zipcode_matcher import ZipcodeRule
@@ -166,6 +167,20 @@ def test_zero_data_no_warehouse_returns_empty() -> None:
         country_warehouses=[],
     )
     assert result == {}
+
+
+def test_zero_data_ignores_non_rule_warehouse() -> None:
+    """兜底均分时，只允许已配置邮编规则的仓参与。"""
+    result = split_country_qty(
+        sku="sku-A",
+        country="JP",
+        country_qty=9,
+        orders=[],
+        rules=_jp_rules(),
+        country_warehouses=["haiyuan"],
+    )
+
+    assert result == {"haiyuan": 9}
 
 
 def test_zero_country_qty() -> None:
@@ -341,12 +356,13 @@ def test_four_warehouse_ceil_regression_sum_equals_country_qty() -> None:
 
 
 class _FakeDb:
-    def __init__(self) -> None:
+    def __init__(self, rows: list[tuple[str, str]] | None = None) -> None:
         self.executed = []
+        self.rows = rows or []
 
     async def execute(self, stmt):
         self.executed.append(stmt)
-        return SimpleNamespace(all=lambda: [])
+        return SimpleNamespace(all=lambda: self.rows)
 
 
 @pytest.mark.asyncio
@@ -362,3 +378,22 @@ async def test_load_all_sku_country_orders_applies_allowed_country_filter() -> N
 
     compiled_sql = str(db.executed[0])
     assert "order_header.country_code IN" in compiled_sql
+
+
+@pytest.mark.asyncio
+async def test_load_country_warehouses_only_keeps_rule_warehouses_and_deduplicates() -> None:
+    db = _FakeDb(
+        rows=[
+            ("JP", "WH-A"),
+            ("JP", "WH-A"),
+            ("JP", "WH-B"),
+            ("US", "WH-Z"),
+        ]
+    )
+
+    result = await load_country_warehouses(db)
+
+    assert result == {
+        "JP": ["WH-A", "WH-B"],
+        "US": ["WH-Z"],
+    }

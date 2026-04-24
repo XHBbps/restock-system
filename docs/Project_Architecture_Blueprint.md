@@ -111,7 +111,7 @@
 | 2 | `step2_sale_days.py` | 库存 + 在途 + velocity | `sale_days[sku][country]` | `(available + in_transit) / velocity`；velocity≤0 跳过 |
 | 3 | `step3_country_qty.py` | sale_days + target_days | `country_qty[sku][country]` | `max(0, ceil((target_days - sale_days) × velocity))` |
 | 4 | `step4_total.py` | country_qty + velocity + 国内库存 + safety_stock_days | `purchase_qty[sku]` | `max(0, Σcountry_qty − (local.available + local.reserved) + ceil(Σvelocity × safety_stock_days))`；`Σvelocity` 覆盖所有国家，不受 `restock_regions` 限制；`buffer_days` 不参与采购量 |
-| 5 | `step5_warehouse_split.py` | country_qty + 订单邮编 + 邮编规则 + 国家仓库映射 | `warehouse_breakdown[country][wh_id]` | 按邮编规则分配到具体仓库，无订单时均分；若配置 `restock_regions`，仅消费这些国家的订单明细作为分仓依据；同优先级 tied 均分 |
+| 5 | `step5_warehouse_split.py` | country_qty + 订单邮编 + 邮编规则 + 国家规则仓映射 | `warehouse_breakdown[country][wh_id]` | 按邮编规则分配到具体仓库；仅“该国家已配置邮编规则”的仓参与分仓与均分兜底；若无规则仓则该国家不分仓；若配置 `restock_regions`，仅消费这些国家的订单明细作为分仓依据；同优先级 tied 均分 |
 | 6 | `step6_timing.py` | sale_days + lead_time + buffer_days + purchase_qty + country_qty | `urgent` + `purchase_date` + `restock_dates` | `urgent` 仍按任一正补货国家 `sale_days <= lead_time_days`；`purchase_date = today + int(min_sale_days) − buffer_days − lead_time_days`；`restock_date[sku][country] = today + int(sale_days[sku][country]) − lead_time_days`，仅对正补货国家输出，缺少 sale_days 时记为 `null` |
 
 **运行上下文**：`EngineContext` 包含 `target_days`、`buffer_days`、`lead_time_days`、`safety_stock_days`、`restock_regions` 和 `eu_countries`。`buffer_days` 表示国内仓备货时间，参与采购日期计算，不参与采购量；`global_config.eu_countries` 由同步层消费，`global_config_snapshot` 会冻结这些全局参数以便追溯。

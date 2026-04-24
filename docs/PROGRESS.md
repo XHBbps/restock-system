@@ -97,6 +97,11 @@
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
 
+### 3.56 分仓候选仓收口为“仅规则仓参与”（2026-04-24）
+- **Step5 口径调整**：`backend/app/engine/step5_warehouse_split.py` 的国家候选仓不再来自该国家全部海外仓，而是只来自“该国家下已配置邮编规则”的仓库集合。
+- **兜底逻辑**：有订单未命中规则或该国无订单时，只在规则仓集合内均分；若该国家一个规则仓都没有，则该国家 `warehouse_breakdown` 为空，不再回退到该国家全部海外仓。
+- **测试**：更新 `backend/tests/unit/test_engine_step5.py`，覆盖规则仓去重、无规则仓不参与、兜底均分仅限规则仓。
+
 ### 3.55 补货日期（最晚补货日期）落地（2026-04-23）
 - **字段落地**：迁移 `20260423_1100` 为 `suggestion_item` 与 `suggestion_snapshot_item` 新增 JSONB 字段 `restock_dates`，按 `SKU × 国家` 冻结每个正补货国家的最晚补货日期，值为 ISO 日期字符串或 `null`。
 - **计算口径**：`backend/app/engine/step6_timing.py` 新增 `compute_restock_dates()`，公式为 `restock_date[sku][country] = today + int(sale_days[sku][country]) − lead_time_days(sku)`；仅对 `country_breakdown[country] > 0` 的国家输出，缺少 `sale_days` 时保留 `null`，且不受 `buffer_days` 影响。

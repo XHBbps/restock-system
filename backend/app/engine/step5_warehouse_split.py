@@ -35,18 +35,28 @@ class CountryAllocationResult:
 async def load_country_warehouses(
     db: AsyncSession,
 ) -> dict[str, list[str]]:
-    """加载每个国家的可用海外仓 id(type ≠ 1 且已指定 country)。"""
+    """加载每个国家可参与 Step 5 的规则仓。
+
+    只有同时满足以下条件的仓才参与分仓：
+    - 海外仓（`type != 1`）
+    - 仓库已配置国家
+    - 该国家下至少存在一条邮编规则指向该仓
+    """
     rows = (
         await db.execute(
-            select(Warehouse.id, Warehouse.country)
+            select(ZipcodeRuleModel.country, ZipcodeRuleModel.warehouse_id)
+            .join(Warehouse, Warehouse.id == ZipcodeRuleModel.warehouse_id)
             .where(Warehouse.type != 1)
             .where(Warehouse.country.is_not(None))
-            .order_by(Warehouse.country, Warehouse.id)
+            .where(Warehouse.country == ZipcodeRuleModel.country)
+            .distinct()
+            .order_by(ZipcodeRuleModel.country, ZipcodeRuleModel.warehouse_id)
         )
     ).all()
     result: defaultdict[str, list[str]] = defaultdict(list)
-    for wid, country in rows:
-        result[country].append(wid)
+    for country, wid in rows:
+        if wid not in result[country]:
+            result[country].append(wid)
     return dict(result)
 
 
@@ -203,7 +213,7 @@ def explain_country_qty_split(
             eligible_warehouses=eligible_warehouses,
         )
 
-    # 零数据兜底:均分给该国所有已维护海外仓
+    # 零数据兜底:仅在该国“已配置邮编规则”的仓之间均分
     if not eligible_warehouses:
         return CountryAllocationResult(
             warehouse_breakdown={},
