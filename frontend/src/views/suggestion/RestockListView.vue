@@ -204,13 +204,13 @@ const restockItems = computed(() =>
     .sort((left, right) => left.commodity_sku.localeCompare(right.commodity_sku)),
 )
 
-const allSelectableIds = computed(() => restockItems.value.map((item) => item.id))
-
 const filteredItems = computed(() => {
   const keyword = skuFilter.value.trim().toLowerCase()
   if (!keyword) return restockItems.value
   return restockItems.value.filter((item) => item.commodity_sku.toLowerCase().includes(keyword))
 })
+
+const allSelectableIds = computed(() => filteredItems.value.map((item) => item.id))
 
 const pagedItems = computed(() => {
   const start = (page.value - 1) * pageSize.value

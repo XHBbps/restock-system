@@ -146,8 +146,13 @@ describe('RestockListView', () => {
     expect(mockCreateRestockSnapshot).toHaveBeenCalledWith(1, [1, 2, 3])
   })
 
-  it('keeps selection after filtering and lets a single row opt out', async () => {
+  it('limits select-all to filtered rows and drops hidden selections', async () => {
     mockListWarehouses.mockResolvedValue([])
+    mockCreateRestockSnapshot.mockResolvedValue({ id: 99 })
+    mockDownloadSnapshotBlob.mockResolvedValue({
+      blob: new Blob(['ok']),
+      filename: 'restock.xlsx',
+    })
 
     const { default: View } = await import('../RestockListView.vue')
     const wrapper = shallowMount(View, {
@@ -164,21 +169,21 @@ describe('RestockListView', () => {
       selectedIds: number[]
       selectedCount: number
       toggleSelectAll: (checked: boolean) => void
-      toggleRow: (id: number, checked: boolean) => void
+      handleExport: () => Promise<void>
     }
 
     vm.toggleSelectAll(true)
     vm.skuFilter = 'SKU-3'
     await flushPromises()
-    vm.toggleRow(3, false)
-    await flushPromises()
+    expect(vm.selectedIds).toEqual([3])
+    expect(vm.selectedCount).toBe(1)
 
-    expect(vm.selectedIds).toEqual([1, 2])
-    expect(vm.selectedCount).toBe(2)
-
-    vm.skuFilter = ''
+    vm.toggleSelectAll(true)
     await flushPromises()
-    expect(vm.selectedIds).toEqual([1, 2])
+    expect(vm.selectedIds).toEqual([3])
+
+    await vm.handleExport()
+    expect(mockCreateRestockSnapshot).toHaveBeenCalledWith(1, [3])
   })
 
   it('resets selection when suggestion changes', async () => {

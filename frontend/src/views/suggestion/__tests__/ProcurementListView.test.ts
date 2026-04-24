@@ -142,7 +142,13 @@ describe('ProcurementListView', () => {
     expect(mockCreateProcurementSnapshot).toHaveBeenCalledWith(1, [1, 2, 3])
   })
 
-  it('keeps cross-page selection after filtering and supports unselecting a single row', async () => {
+  it('limits select-all to filtered rows and drops hidden selections', async () => {
+    mockCreateProcurementSnapshot.mockResolvedValue({ id: 88 })
+    mockDownloadSnapshotBlob.mockResolvedValue({
+      blob: new Blob(['ok']),
+      filename: 'procurement.xlsx',
+    })
+
     const { default: View } = await import('../ProcurementListView.vue')
     const wrapper = shallowMount(View, {
       props: {
@@ -158,21 +164,21 @@ describe('ProcurementListView', () => {
       selectedIds: number[]
       selectedCount: number
       toggleSelectAll: (checked: boolean) => void
-      toggleRow: (id: number, checked: boolean) => void
+      handleExport: () => Promise<void>
     }
 
     vm.toggleSelectAll(true)
     vm.skuFilter = 'SKU-2'
     await flushPromises()
-    vm.toggleRow(2, false)
-    await flushPromises()
+    expect(vm.selectedIds).toEqual([2])
+    expect(vm.selectedCount).toBe(1)
 
-    expect(vm.selectedIds).toEqual([1, 3])
-    expect(vm.selectedCount).toBe(2)
-
-    vm.skuFilter = ''
+    vm.toggleSelectAll(true)
     await flushPromises()
-    expect(vm.selectedIds).toEqual([1, 3])
+    expect(vm.selectedIds).toEqual([2])
+
+    await vm.handleExport()
+    expect(mockCreateProcurementSnapshot).toHaveBeenCalledWith(1, [2])
   })
 
   it('resets selection when suggestion changes', async () => {

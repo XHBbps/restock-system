@@ -34,7 +34,9 @@ TASK_MANAGE_PERMISSIONS: dict[str, tuple[str, ...]] = {
 }
 
 ALL_TASK_JOB_NAMES = frozenset(TASK_VIEW_PERMISSIONS)
-MANUAL_ENQUEUE_JOB_NAMES = ALL_TASK_JOB_NAMES
+MANUAL_ENQUEUE_JOB_NAMES = frozenset(
+    job_name for job_name in TASK_VIEW_PERMISSIONS if job_name != "calc_engine"
+)
 
 
 def has_any_task_permission(permissions: frozenset[str], required: tuple[str, ...]) -> bool:

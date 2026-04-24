@@ -127,8 +127,6 @@ const procurementItems = computed(() =>
     }),
 )
 
-const allSelectableIds = computed(() => procurementItems.value.map((item) => item.id))
-
 const filteredItems = computed(() => {
   const keyword = skuFilter.value.trim().toLowerCase()
   let list = procurementItems.value
@@ -139,6 +137,8 @@ const filteredItems = computed(() => {
 
   return list
 })
+
+const allSelectableIds = computed(() => filteredItems.value.map((item) => item.id))
 
 const pagedItems = computed(() => {
   const start = (page.value - 1) * pageSize.value

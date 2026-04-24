@@ -85,9 +85,19 @@ async def test_create_task_rejects_generic_push_saihu_enqueue() -> None:
 async def test_create_task_requires_job_specific_permission() -> None:
     with pytest.raises(Forbidden):
         await create_task(
+            EnqueueRequest(job_name="sync_inventory"),
+            db=_FakeDb([]),  # type: ignore[arg-type]
+            permissions=frozenset({RESTOCK_OPERATE}),
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_task_rejects_calc_engine_generic_enqueue() -> None:
+    with pytest.raises(ConflictError, match="calc_engine"):
+        await create_task(
             EnqueueRequest(job_name="calc_engine"),
             db=_FakeDb([]),  # type: ignore[arg-type]
-            permissions=frozenset({SYNC_OPERATE}),
+            permissions=frozenset({RESTOCK_OPERATE}),
         )
 
 
