@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -54,7 +54,6 @@ class SuggestionItemOut(BaseModel):
     sale_days_snapshot: dict[str, Any] | None = None
     urgent: bool
     purchase_qty: int
-    purchase_date: date | None = None
     procurement_export_status: str
     procurement_exported_snapshot_id: int | None = None
     procurement_exported_at: datetime | None = None
@@ -79,7 +78,6 @@ class SuggestionListOut(BaseModel):
 class SuggestionItemPatch(BaseModel):
     total_qty: int | None = Field(default=None, ge=0)
     purchase_qty: int | None = Field(default=None, ge=0)
-    purchase_date: date | None = None
     country_breakdown: dict[str, int] | None = None
     warehouse_breakdown: dict[str, dict[str, int]] | None = None
 

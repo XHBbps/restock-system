@@ -31,7 +31,7 @@ vi.mock('element-plus', async () => {
   const actual = await vi.importActual('element-plus')
   return {
     ...actual,
-    ElMessage: { success: vi.fn(), error: vi.fn() },
+    ElMessage: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
   }
 })
 
@@ -50,7 +50,6 @@ function makeItem(id: number, overrides: Partial<SuggestionItem> = {}): Suggesti
     sale_days_snapshot: null,
     urgent: false,
     purchase_qty: 10,
-    purchase_date: '2026-04-30',
     procurement_export_status: 'pending',
     procurement_exported_snapshot_id: null,
     procurement_exported_at: null,
@@ -88,25 +87,132 @@ const STUBS = {
   ElEmpty: true,
   ElInput: true,
   ElButton: true,
+  ElCheckbox: true,
   ElTable: { template: '<div><slot /></div>' },
   ElTableColumn: true,
   ElInputNumber: true,
-  ElDatePicker: true,
   ElTag: { template: '<span><slot /></span>' },
   SkuCard: true,
-  PurchaseDateCell: true,
 }
 
 describe('ProcurementListView', () => {
-  it('filters out rows without purchase quantity and sorts by purchase date', async () => {
+  it('selects all procurement rows across pages and exports the global selection', async () => {
+    mockCreateProcurementSnapshot.mockResolvedValue({ id: 88 })
+    mockDownloadSnapshotBlob.mockResolvedValue({
+      blob: new Blob(['ok']),
+      filename: 'procurement.xlsx',
+    })
+
+    const { default: View } = await import('../ProcurementListView.vue')
+    const wrapper = shallowMount(View, {
+      props: {
+        suggestion: makeSuggestion({ procurement_item_count: 3 }),
+        items: [makeItem(1), makeItem(2), makeItem(3)],
+      },
+      global: { stubs: STUBS },
+    })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      page: number
+      pageSize: number
+      pagedItems: SuggestionItem[]
+      selectedIds: number[]
+      selectedCount: number
+      exportButtonLabel: string
+      toggleSelectAll: (checked: boolean) => void
+      handleExport: () => Promise<void>
+    }
+
+    vm.pageSize = 2
+    await flushPromises()
+    expect(vm.pagedItems.map((item) => item.id)).toEqual([1, 2])
+
+    vm.toggleSelectAll(true)
+    await flushPromises()
+    expect(vm.selectedIds).toEqual([1, 2, 3])
+    expect(vm.selectedCount).toBe(3)
+    expect(vm.exportButtonLabel).toBe('导出采购单 Excel (3项)')
+
+    vm.page = 2
+    await flushPromises()
+    expect(vm.pagedItems.map((item) => item.id)).toEqual([3])
+
+    await vm.handleExport()
+    expect(mockCreateProcurementSnapshot).toHaveBeenCalledWith(1, [1, 2, 3])
+  })
+
+  it('keeps cross-page selection after filtering and supports unselecting a single row', async () => {
+    const { default: View } = await import('../ProcurementListView.vue')
+    const wrapper = shallowMount(View, {
+      props: {
+        suggestion: makeSuggestion({ procurement_item_count: 3 }),
+        items: [makeItem(1), makeItem(2), makeItem(3)],
+      },
+      global: { stubs: STUBS },
+    })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      skuFilter: string
+      selectedIds: number[]
+      selectedCount: number
+      toggleSelectAll: (checked: boolean) => void
+      toggleRow: (id: number, checked: boolean) => void
+    }
+
+    vm.toggleSelectAll(true)
+    vm.skuFilter = 'SKU-2'
+    await flushPromises()
+    vm.toggleRow(2, false)
+    await flushPromises()
+
+    expect(vm.selectedIds).toEqual([1, 3])
+    expect(vm.selectedCount).toBe(2)
+
+    vm.skuFilter = ''
+    await flushPromises()
+    expect(vm.selectedIds).toEqual([1, 3])
+  })
+
+  it('resets selection when suggestion changes', async () => {
+    const { default: View } = await import('../ProcurementListView.vue')
+    const wrapper = shallowMount(View, {
+      props: {
+        suggestion: makeSuggestion({ id: 1, procurement_item_count: 2 }),
+        items: [makeItem(1), makeItem(2)],
+      },
+      global: { stubs: STUBS },
+    })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      selectedIds: number[]
+      toggleSelectAll: (checked: boolean) => void
+    }
+
+    vm.toggleSelectAll(true)
+    await flushPromises()
+    expect(vm.selectedIds).toEqual([1, 2])
+
+    await wrapper.setProps({
+      suggestion: makeSuggestion({ id: 2, procurement_item_count: 1 }),
+      items: [makeItem(5)],
+    })
+    await flushPromises()
+
+    expect(vm.selectedIds).toEqual([])
+  })
+
+  it('filters out rows without purchase quantity and sorts by sku', async () => {
     const { default: View } = await import('../ProcurementListView.vue')
     const wrapper = shallowMount(View, {
       props: {
         suggestion: makeSuggestion(),
         items: [
-          makeItem(1, { purchase_qty: 0, purchase_date: '2026-04-21' }),
-          makeItem(2, { purchase_qty: 5, purchase_date: '2026-04-25' }),
-          makeItem(3, { purchase_qty: 6, purchase_date: '2026-04-22' }),
+          makeItem(1, { purchase_qty: 0, commodity_sku: 'SKU-003' }),
+          makeItem(2, { purchase_qty: 5, commodity_sku: 'SKU-002' }),
+          makeItem(3, { purchase_qty: 6, commodity_sku: 'SKU-001' }),
         ],
       },
       global: { stubs: STUBS },

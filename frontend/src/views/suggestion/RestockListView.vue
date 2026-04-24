@@ -13,11 +13,11 @@
         <el-button
           v-if="editable"
           type="primary"
-          :disabled="selectedIds.length === 0"
+          :disabled="selectedCount === 0"
           :loading="exporting"
           @click="handleExport"
         >
-          导出补货单 Excel
+          {{ exportButtonLabel }}
         </el-button>
       </div>
     </div>
@@ -26,9 +26,23 @@
       v-loading="loading"
       :data="pagedItems"
       empty-text="本期无补货需求"
-      @selection-change="onSelectionChange"
     >
-      <el-table-column v-if="editable" type="selection" width="48" />
+      <el-table-column v-if="editable" width="56" align="center">
+        <template #header>
+          <el-checkbox
+            :model-value="isAllSelected"
+            :indeterminate="isIndeterminate"
+            :disabled="allSelectableIds.length === 0"
+            @change="(checked: string | number | boolean) => toggleSelectAll(Boolean(checked))"
+          />
+        </template>
+        <template #default="{ row }">
+          <el-checkbox
+            :model-value="isRowSelected(row.id)"
+            @change="(checked: string | number | boolean) => toggleRow(row.id, Boolean(checked))"
+          />
+        </template>
+      </el-table-column>
       <el-table-column type="expand" width="48">
         <template #default="{ row }">
           <table class="breakdown-table">
@@ -36,7 +50,6 @@
               <tr>
                 <th class="breakdown-col-country">国家</th>
                 <th class="breakdown-col-qty">补货量</th>
-                <th class="breakdown-col-date">补货日期</th>
                 <th class="breakdown-col-warehouses">仓库分配</th>
               </tr>
             </thead>
@@ -52,9 +65,6 @@
                 <td class="breakdown-col-qty">
                   <span class="breakdown-qty-value">{{ country.qty }}</span>
                 </td>
-                <td class="breakdown-col-date">
-                  <span class="breakdown-date-value">{{ country.restockDate || '—' }}</span>
-                </td>
                 <td class="breakdown-col-warehouses">
                   <template v-if="country.warehouses.length > 0">
                     <el-tag
@@ -67,7 +77,7 @@
                     </el-tag>
                   </template>
                   <el-tag v-else type="warning" effect="plain" size="small">
-                    ⚠ 未拆仓（{{ country.qty }} 件待分配）
+                    未拆仓（{{ country.qty }} 件待分配）
                   </el-tag>
                 </td>
               </tr>
@@ -82,9 +92,6 @@
       </el-table-column>
       <el-table-column label="补货量" width="120" align="right">
         <template #default="{ row }">{{ restockTotal(row) }}</template>
-      </el-table-column>
-      <el-table-column label="最晚补货日期" width="160">
-        <template #default="{ row }">{{ restockDateSummary(row) }}</template>
       </el-table-column>
       <el-table-column label="国家分布" min-width="220">
         <template #default="{ row }">
@@ -127,13 +134,13 @@ import TablePaginationBar from '@/components/TablePaginationBar.vue'
 import { getActionErrorMessage } from '@/utils/apiError'
 import { getCountryLabel } from '@/utils/countries'
 import { triggerBlobDownload } from '@/utils/download'
+import { useCrossPageSelection } from '@/views/suggestion/useCrossPageSelection'
 import { ElMessage } from 'element-plus'
 import { computed, onMounted, ref, watch } from 'vue'
 
 interface CountryRow {
   country: string
   qty: number
-  restockDate: string | null
   warehouses: { id: string; qty: number }[]
 }
 
@@ -150,7 +157,6 @@ const emit = defineEmits<{
 const skuFilter = ref('')
 const page = ref(1)
 const pageSize = ref(20)
-const selectedIds = ref<number[]>([])
 const exporting = ref(false)
 const warehouseMap = ref<Record<string, string>>({})
 
@@ -167,18 +173,13 @@ onMounted(async () => {
   try {
     const warehouses = await listWarehouses()
     const map: Record<string, string> = {}
-    for (const w of warehouses as Warehouse[]) {
-      map[w.id] = w.name
+    for (const warehouse of warehouses as Warehouse[]) {
+      map[warehouse.id] = warehouse.name
     }
     warehouseMap.value = map
-  } catch {
-    // 静默失败：仓库名加载不了时退化为仅显示 id
-  }
+  } catch {}
 })
 
-// 补货视图当前无单元格编辑 UI（与 ProcurementListView 对齐保留该开关），
-// editable 目前只用于决定是否显示导出按钮和多选列。后续若需补货也支持
-// PATCH（如修改 country_breakdown），再用 editable 守护 inline-edit 组件。
 const editable = computed(() => props.suggestion?.status === 'draft')
 
 function restockTotal(item: SuggestionItem): number {
@@ -191,17 +192,10 @@ function countryRows(item: SuggestionItem): CountryRow[] {
     .map(([country, qty]) => ({
       country,
       qty: Number(qty),
-      restockDate: item.restock_dates?.[country] || null,
       warehouses: Object.entries(item.warehouse_breakdown?.[country] || {})
-        .filter(([, whQty]) => Number(whQty) > 0)
-        .map(([id, whQty]) => ({ id, qty: Number(whQty) })),
+        .filter(([, warehouseQty]) => Number(warehouseQty) > 0)
+        .map(([id, warehouseQty]) => ({ id, qty: Number(warehouseQty) })),
     }))
-}
-
-function restockDateSummary(item: SuggestionItem): string {
-  const dates = Object.values(item.restock_dates || {}).filter((value): value is string => Boolean(value))
-  if (dates.length === 0) return '—'
-  return dates.sort()[0]
 }
 
 const restockItems = computed(() =>
@@ -209,6 +203,8 @@ const restockItems = computed(() =>
     .filter((item) => restockTotal(item) > 0)
     .sort((left, right) => left.commodity_sku.localeCompare(right.commodity_sku)),
 )
+
+const allSelectableIds = computed(() => restockItems.value.map((item) => item.id))
 
 const filteredItems = computed(() => {
   const keyword = skuFilter.value.trim().toLowerCase()
@@ -221,14 +217,27 @@ const pagedItems = computed(() => {
   return filteredItems.value.slice(start, start + pageSize.value)
 })
 
-function onSelectionChange(rows: SuggestionItem[]): void {
-  selectedIds.value = rows.map((row) => row.id)
-}
+const {
+  selectedIds,
+  selectedCount,
+  isAllSelected,
+  isIndeterminate,
+  toggleSelectAll,
+  toggleRow,
+  isRowSelected,
+} = useCrossPageSelection({
+  allSelectableIds,
+  resetKey: () => props.suggestion?.id,
+})
+
+const exportButtonLabel = computed(() => `导出补货单 Excel (${selectedCount.value}项)`)
 
 async function handleExport(): Promise<void> {
   if (!props.suggestion || selectedIds.value.length === 0) return
+
   exporting.value = true
   let snapshotId: number | null = null
+
   try {
     const snapshot = await createRestockSnapshot(props.suggestion.id, selectedIds.value)
     snapshotId = snapshot.id
@@ -316,10 +325,6 @@ async function handleExport(): Promise<void> {
   text-align: right !important;
 }
 
-.breakdown-col-date {
-  width: 140px;
-}
-
 .breakdown-col-warehouses {
   min-width: 320px;
 }
@@ -333,10 +338,6 @@ async function handleExport(): Promise<void> {
   font-family: $font-family-mono;
   font-weight: 600;
   color: $color-brand-primary;
-}
-
-.breakdown-date-value {
-  font-family: $font-family-mono;
 }
 
 .breakdown-warehouse-chip {

@@ -37,7 +37,6 @@ def test_snapshot_item_fields():
         "warehouse_breakdown",
         "restock_dates",
         "purchase_qty",
-        "purchase_date",
         "urgent",
         "velocity_snapshot",
         "sale_days_snapshot",

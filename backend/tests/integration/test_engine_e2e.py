@@ -1,5 +1,5 @@
 """端到端引擎集成测试。"""
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -32,7 +32,11 @@ class TestEngineE2E:
             await factories.seed_minimum_dataset(db, today)
 
         ctx = _TestContext()
-        suggestion_id = await run_engine(ctx, triggered_by="test")
+        suggestion_id = await run_engine(
+            ctx,
+            triggered_by="test",
+            demand_date=today - timedelta(days=50),
+        )
 
         # 返回非 None 的 suggestion_id
         assert suggestion_id is not None, "run_engine 应返回 suggestion_id，但返回了 None"
@@ -112,7 +116,7 @@ class TestEngineE2E:
             await db.commit()
 
         ctx = _TestContext()
-        result = await run_engine(ctx, triggered_by="test")
+        result = await run_engine(ctx, triggered_by="test", demand_date=date.today())
 
         await db_engine.dispose()
 
@@ -131,12 +135,20 @@ class TestEngineE2E:
             await factories.seed_minimum_dataset(db, today)
 
         ctx1 = _TestContext()
-        first_id = await run_engine(ctx1, triggered_by="test-first")
+        first_id = await run_engine(
+            ctx1,
+            triggered_by="test-first",
+            demand_date=today - timedelta(days=50),
+        )
 
         assert first_id is not None, "第一次 run_engine 应返回 suggestion_id"
 
         ctx2 = _TestContext()
-        second_id = await run_engine(ctx2, triggered_by="test-second")
+        second_id = await run_engine(
+            ctx2,
+            triggered_by="test-second",
+            demand_date=today - timedelta(days=50),
+        )
 
         assert second_id is not None, "第二次 run_engine 应返回 suggestion_id"
         assert second_id != first_id, "第二次应产生新建议单（不同 id）"

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import date
 from pathlib import Path
 
 import pytest
@@ -45,7 +44,6 @@ async def seed_suggestion(db_session):
             commodity_sku=f"SKU-SNAPTEST-{i}",
             total_qty=100 + i,
             purchase_qty=20 + i,
-            purchase_date=date(2026, 4, 20 + i),
             country_breakdown={"US": 50 + i, "GB": 50},
             warehouse_breakdown={"US": {"WH-1": 50 + i}, "GB": {"WH-5": 50}},
             restock_dates={"US": "2026-04-21", "GB": "2026-05-01"},
@@ -288,6 +286,7 @@ async def test_snapshot_detail(client, seed_suggestion, ensure_global_config, mo
     assert body["snapshot_type"] == "procurement"
     assert len(body["items"]) == 2
     assert body["items"][0]["purchase_qty"] is not None
+    assert "purchase_date" not in body["items"][0]
     assert body["items"][0]["restock_dates"]["US"] == "2026-04-21"
 
 

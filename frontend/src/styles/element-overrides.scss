@@ -783,6 +783,47 @@ body {
   box-shadow: none;
 }
 
+.segmented-radio-group {
+  display: inline-flex;
+  align-items: center;
+  width: auto;
+  min-height: 40px;
+  overflow: hidden;
+  border: 1px solid $color-border-default;
+  border-radius: $radius-md;
+  background: $color-bg-card;
+  box-shadow: $shadow-sm;
+
+  .el-radio-button {
+    display: inline-flex;
+  }
+
+  .el-radio-button__inner {
+    min-width: 76px;
+    height: 36px;
+    border: 0;
+    border-radius: 0;
+    background: $color-bg-card;
+    box-shadow: none;
+    color: $color-text-secondary;
+  }
+
+  .el-radio-button:not(.is-active) .el-radio-button__inner:hover {
+    background: $color-bg-subtle;
+    color: $color-text-primary;
+  }
+
+  .el-radio-button.is-active .el-radio-button__original-radio:not(:disabled) + .el-radio-button__inner {
+    background: $color-brand-primary;
+    box-shadow: none;
+    color: $color-brand-primary-fg;
+  }
+
+  .el-radio-button + .el-radio-button .el-radio-button__inner {
+    border-left: 1px solid $color-border-default;
+  }
+}
+
 // ==================== Progress ====================
 .el-progress-bar__outer {
   background: $color-bg-subtle;

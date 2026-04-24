@@ -11,6 +11,7 @@ from app.core.permissions import RESTOCK_OPERATE, SYNC_OPERATE, SYNC_VIEW
 from app.models.global_config import GlobalConfig
 from app.models.task_run import TaskRun
 from app.schemas.sync import (
+    EngineRunIn,
     OrderDetailRefetchIn,
     OrderDetailRefetchOut,
     SchedulerStatusOut,
@@ -201,6 +202,7 @@ async def set_scheduler_status(
 
 @router.post("/engine/run")
 async def run_engine_now(
+    payload: EngineRunIn,
     db: AsyncSession = Depends(db_session),
     user: UserContext = Depends(get_current_user),
     _: None = Depends(require_permission(RESTOCK_OPERATE)),
@@ -209,6 +211,6 @@ async def run_engine_now(
         db,
         job_name="calc_engine",
         trigger_source="manual",
-        payload={"triggered_by": "manual"},
+        payload={"triggered_by": "manual", "demand_date": payload.demand_date.isoformat()},
     )
     return {"task_id": task_id, "existing": existing}

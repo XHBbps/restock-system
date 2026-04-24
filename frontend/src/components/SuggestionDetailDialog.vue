@@ -3,9 +3,15 @@
     :model-value="modelValue"
     :title="dialogTitle"
     width="80%"
+    :top="isEmptyState ? '' : '0'"
+    :align-center="isEmptyState"
+    :class="[
+      'suggestion-detail-dialog',
+      { 'suggestion-detail-dialog--empty': isEmptyState },
+    ]"
     :close-on-click-modal="false"
     :show-close="false"
-    @update:model-value="(v: boolean) => emit('update:modelValue', v)"
+    @update:model-value="(value: boolean) => emit('update:modelValue', value)"
     @closed="reset"
   >
     <template #header="{ titleId, titleClass }">
@@ -35,155 +41,155 @@
       </div>
     </template>
 
-    <div v-loading="loadingList" class="detail-dialog-body">
-      <!-- 左侧：版本切换 -->
-      <aside class="version-side">
-        <div class="version-side__title">版本列表</div>
-        <div class="version-side__list">
-          <button
-            v-for="snap in snapshots"
-            :key="snap.id"
-            type="button"
-            class="version-item"
-            :class="{ 'version-item--active': currentSnapshotId === snap.id }"
-            @click="selectSnapshot(snap.id)"
-          >
-            <div class="version-item__head">
-              <span class="version-item__ver">V{{ snap.version }}</span>
-              <span class="version-item__count">{{ snap.item_count }} 条</span>
+    <div v-loading="loadingList" class="detail-dialog-shell">
+      <div class="detail-dialog-body">
+        <aside class="version-side">
+          <div class="version-side__title">版本列表</div>
+          <div class="version-side__list">
+            <button
+              v-for="snapshot in snapshots"
+              :key="snapshot.id"
+              type="button"
+              class="version-item"
+              :class="{ 'version-item--active': currentSnapshotId === snapshot.id }"
+              @click="selectSnapshot(snapshot.id)"
+            >
+              <div class="version-item__head">
+                <span class="version-item__ver">V{{ snapshot.version }}</span>
+                <span class="version-item__count">{{ snapshot.item_count }} 条</span>
+              </div>
+              <div class="version-item__time">{{ formatDateTime(snapshot.exported_at) }}</div>
+            </button>
+            <div v-if="snapshots.length === 0 && !loadingList" class="version-side__empty">
+              暂无快照版本
             </div>
-            <div class="version-item__time">{{ formatDateTime(snap.exported_at) }}</div>
-          </button>
-          <div v-if="snapshots.length === 0 && !loadingList" class="version-side__empty">
-            暂无快照版本
           </div>
-        </div>
-      </aside>
+        </aside>
 
-      <!-- 右侧：主内容 -->
-      <section class="detail-main">
-        <div v-if="!currentSnapshot" class="detail-main__empty">
-          选择左侧版本查看详情
-        </div>
+        <section class="detail-main">
+          <div v-if="!currentSnapshot" class="detail-main__empty">
+            选择左侧版本查看详情
+          </div>
 
-        <template v-else>
-          <!-- 元数据 -->
-          <dl class="detail-meta">
-            <div class="detail-meta__row">
-              <dt>版本</dt>
-              <dd class="version-pill">V{{ currentSnapshot.version }}</dd>
-              <dt>导出时间</dt>
-              <dd>{{ formatDateTime(currentSnapshot.exported_at) }}</dd>
-              <dt>导出人</dt>
-              <dd>{{ currentSnapshot.exported_by_name || '-' }}</dd>
-              <dt>条目数</dt>
-              <dd>{{ currentSnapshot.item_count }}</dd>
-            </div>
-          </dl>
+          <template v-else>
+            <dl class="detail-meta">
+              <div class="detail-meta__row">
+                <dt>版本</dt>
+                <dd class="version-pill">V{{ currentSnapshot.version }}</dd>
+                <dt>导出时间</dt>
+                <dd>{{ formatDateTime(currentSnapshot.exported_at) }}</dd>
+                <dt>导出人</dt>
+                <dd>{{ currentSnapshot.exported_by_name || '-' }}</dd>
+                <dt>需求截止日期</dt>
+                <dd>{{ currentDemandDate || '-' }}</dd>
+                <dt>条目数</dt>
+                <dd>{{ currentSnapshot.item_count }}</dd>
+              </div>
+            </dl>
 
-          <!-- 明细表格（分采购/补货） -->
-          <el-table
-            v-if="type === 'procurement'"
-            v-loading="loadingDetail"
-            :data="currentSnapshot.items"
-            empty-text="该版本无条目"
-            class="detail-table"
-            max-height="500"
-          >
-            <el-table-column label="商品信息" min-width="280">
-              <template #default="{ row }">
-                <SkuCard :sku="row.commodity_sku" :name="row.commodity_name" :image="row.main_image_url" />
-              </template>
-            </el-table-column>
-            <el-table-column label="采购量" prop="purchase_qty" width="110" align="right" />
-            <el-table-column label="采购日期" width="180">
-              <template #default="{ row }">
-                <PurchaseDateCell :date="row.purchase_date" />
-              </template>
-            </el-table-column>
-          </el-table>
+            <div class="detail-table-scroll">
+              <el-table
+                v-if="type === 'procurement'"
+                v-loading="loadingDetail"
+                :data="pagedItems"
+                empty-text="该版本无条目"
+                class="detail-table detail-table--procurement"
+                height="100%"
+              >
+                <el-table-column label="商品信息" min-width="280">
+                  <template #default="{ row }">
+                    <SkuCard :sku="row.commodity_sku" :name="row.commodity_name" :image="row.main_image_url" />
+                  </template>
+                </el-table-column>
+                <el-table-column label="采购量" prop="purchase_qty" width="110" align="right" />
+              </el-table>
 
-          <el-table
-            v-else
-            v-loading="loadingDetail"
-            :data="currentSnapshot.items"
-            empty-text="该版本无条目"
-            class="detail-table"
-            max-height="500"
-          >
-            <el-table-column type="expand" width="48">
-              <template #default="{ row }">
-                <table class="breakdown-table">
-                  <thead>
-                    <tr>
-                      <th class="breakdown-col-country">国家</th>
-                      <th class="breakdown-col-qty">补货量</th>
-                      <th class="breakdown-col-date">补货日期</th>
-                      <th class="breakdown-col-warehouses">仓库分配</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr
-                      v-for="country in itemCountryRows(row)"
-                      :key="country.country"
-                      class="breakdown-row"
-                    >
-                      <td class="breakdown-col-country">
-                        <span class="breakdown-country-label">{{ getCountryLabel(country.country) }}</span>
-                      </td>
-                      <td class="breakdown-col-qty">
-                        <span class="breakdown-qty-value">{{ country.qty }}</span>
-                      </td>
-                      <td class="breakdown-col-date">
-                        <span class="breakdown-date-value">{{ country.restockDate || '—' }}</span>
-                      </td>
-                      <td class="breakdown-col-warehouses">
-                        <template v-if="country.warehouses.length > 0">
-                          <el-tag
-                            v-for="w in country.warehouses"
-                            :key="w.id"
-                            size="small"
-                            class="breakdown-warehouse-chip"
+              <el-table
+                v-else
+                v-loading="loadingDetail"
+                :data="pagedItems"
+                empty-text="该版本无条目"
+                class="detail-table detail-table--restock"
+                height="100%"
+              >
+                <el-table-column type="expand" width="48">
+                  <template #default="{ row }">
+                    <div class="breakdown-table-scroll">
+                      <table class="breakdown-table">
+                        <thead>
+                          <tr>
+                            <th class="breakdown-col-country">国家</th>
+                            <th class="breakdown-col-qty">补货量</th>
+                            <th class="breakdown-col-warehouses">仓库分配</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr
+                            v-for="country in itemCountryRows(row)"
+                            :key="country.country"
+                            class="breakdown-row"
                           >
-                            {{ warehouseLabel(w.id) }} · {{ w.qty }}
-                          </el-tag>
-                        </template>
-                        <el-tag v-else type="warning" effect="plain" size="small">
-                          ⚠ 未拆仓（{{ country.qty }} 件待分配）
-                        </el-tag>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </template>
-            </el-table-column>
-            <el-table-column label="商品信息" min-width="280">
-              <template #default="{ row }">
-                <SkuCard :sku="row.commodity_sku" :name="row.commodity_name" :image="row.main_image_url" />
-              </template>
-            </el-table-column>
-            <el-table-column label="补货量" prop="total_qty" width="110" align="right" />
-            <el-table-column label="最晚补货日期" width="160">
-              <template #default="{ row }">
-                {{ restockDateSummary(row) }}
-              </template>
-            </el-table-column>
-            <el-table-column label="国家分布" min-width="220">
-              <template #default="{ row }">
-                <div class="country-chips">
-                  <el-tag
-                    v-for="country in itemCountryRows(row)"
-                    :key="country.country"
-                    size="small"
-                  >
-                    {{ country.country }}: {{ country.qty }}
-                  </el-tag>
-                </div>
-              </template>
-            </el-table-column>
-          </el-table>
-        </template>
-      </section>
+                            <td class="breakdown-col-country">
+                              <span class="breakdown-country-label">{{ getCountryLabel(country.country) }}</span>
+                            </td>
+                            <td class="breakdown-col-qty">
+                              <span class="breakdown-qty-value">{{ country.qty }}</span>
+                            </td>
+                            <td class="breakdown-col-warehouses">
+                              <template v-if="country.warehouses.length > 0">
+                                <el-tag
+                                  v-for="warehouse in country.warehouses"
+                                  :key="warehouse.id"
+                                  size="small"
+                                  class="breakdown-warehouse-chip"
+                                >
+                                  {{ warehouseLabel(warehouse.id) }} · {{ warehouse.qty }}
+                                </el-tag>
+                              </template>
+                              <el-tag v-else type="warning" effect="plain" size="small">
+                                ⚠ 未拆仓（{{ country.qty }} 件待分配）
+                              </el-tag>
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </template>
+                </el-table-column>
+                <el-table-column label="商品信息" min-width="280">
+                  <template #default="{ row }">
+                    <SkuCard :sku="row.commodity_sku" :name="row.commodity_name" :image="row.main_image_url" />
+                  </template>
+                </el-table-column>
+                <el-table-column label="补货量" prop="total_qty" width="110" align="right" />
+                <el-table-column label="国家分布" min-width="220">
+                  <template #default="{ row }">
+                    <div class="country-chips">
+                      <el-tag
+                        v-for="country in itemCountryRows(row)"
+                        :key="country.country"
+                        size="small"
+                      >
+                        {{ country.country }}: {{ country.qty }}
+                      </el-tag>
+                    </div>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </div>
+
+            <TablePaginationBar
+              v-if="currentSnapshotTotal > 0"
+              v-model:current-page="currentPage"
+              v-model:page-size="pageSize"
+              :total="currentSnapshotTotal"
+              :page-sizes="pageSizeOptions"
+              class="detail-pagination"
+              @size-change="handlePageSizeChange"
+            />
+          </template>
+        </section>
+      </div>
     </div>
   </el-dialog>
 </template>
@@ -199,12 +205,12 @@ import {
   type SnapshotOut,
   type SnapshotType,
 } from '@/api/snapshot'
-import PurchaseDateCell from '@/components/PurchaseDateCell.vue'
 import SkuCard from '@/components/SkuCard.vue'
+import TablePaginationBar from '@/components/TablePaginationBar.vue'
 import { getActionErrorMessage } from '@/utils/apiError'
 import { getCountryLabel } from '@/utils/countries'
 import { triggerBlobDownload } from '@/utils/download'
-import { formatDateTime } from '@/utils/format'
+import { clampPage, formatDateTime } from '@/utils/format'
 import { ElMessage } from 'element-plus'
 import { X } from 'lucide-vue-next'
 import { computed, ref, watch } from 'vue'
@@ -226,11 +232,30 @@ const loadingList = ref(false)
 const loadingDetail = ref(false)
 const downloading = ref(false)
 const warehouseMap = ref<Record<string, string>>({})
+const currentPage = ref(1)
+const pageSize = ref(10)
+const pageSizeOptions = [10, 20, 50, 100]
 
 const dialogTitle = computed(() => {
   if (props.suggestionId === null) return '详情'
   const prefix = props.type === 'procurement' ? '采购建议单 CG-' : '补货建议单 BH-'
   return `${prefix}${props.suggestionId} 详情`
+})
+const isEmptyState = computed(
+  () => !loadingList.value && !loadingDetail.value && currentSnapshot.value === null,
+)
+
+const currentItems = computed(() => currentSnapshot.value?.items ?? [])
+const currentSnapshotTotal = computed(
+  () => currentSnapshot.value?.item_count ?? currentItems.value.length,
+)
+const currentDemandDate = computed(() => {
+  const value = currentSnapshot.value?.global_config_snapshot?.demand_date
+  return typeof value === 'string' && value ? value : ''
+})
+const pagedItems = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  return currentItems.value.slice(start, start + pageSize.value)
 })
 
 function warehouseLabel(warehouseId: string): string {
@@ -241,7 +266,6 @@ function warehouseLabel(warehouseId: string): string {
 interface CountryRow {
   country: string
   qty: number
-  restockDate: string | null
   warehouses: { id: string; qty: number }[]
 }
 
@@ -253,17 +277,10 @@ function itemCountryRows(item: SnapshotItemOut): CountryRow[] {
     .map(([country, qty]) => ({
       country,
       qty: Number(qty),
-      restockDate: item.restock_dates?.[country] || null,
       warehouses: Object.entries(warehouseBreakdown[country] || {})
-        .filter(([, wqty]) => Number(wqty) > 0)
-        .map(([id, wqty]) => ({ id, qty: Number(wqty) })),
+        .filter(([, warehouseQty]) => Number(warehouseQty) > 0)
+        .map(([id, warehouseQty]) => ({ id, qty: Number(warehouseQty) })),
     }))
-}
-
-function restockDateSummary(item: SnapshotItemOut): string {
-  const dates = Object.values(item.restock_dates || {}).filter((value): value is string => Boolean(value))
-  if (dates.length === 0) return '—'
-  return dates.sort()[0]
 }
 
 async function loadWarehouses(): Promise<void> {
@@ -271,12 +288,12 @@ async function loadWarehouses(): Promise<void> {
   try {
     const rows = await listWarehouses()
     const map: Record<string, string> = {}
-    for (const w of rows as Warehouse[]) {
-      map[w.id] = w.name
+    for (const warehouse of rows as Warehouse[]) {
+      map[warehouse.id] = warehouse.name
     }
     warehouseMap.value = map
   } catch {
-    // 静默
+    // 静默失败即可
   }
 }
 
@@ -285,14 +302,13 @@ async function loadList(): Promise<void> {
   loadingList.value = true
   try {
     const rows = await listSnapshots(props.suggestionId, props.type)
-    // 按 version 降序（最新在上）
-    snapshots.value = [...rows].sort((a, b) => b.version - a.version)
+    snapshots.value = [...rows].sort((left, right) => right.version - left.version)
     if (snapshots.value.length > 0) {
       await selectSnapshot(snapshots.value[0].id)
-    } else {
-      currentSnapshot.value = null
-      currentSnapshotId.value = null
+      return
     }
+    currentSnapshot.value = null
+    currentSnapshotId.value = null
   } catch (error) {
     ElMessage.error(getActionErrorMessage(error, '加载版本列表失败'))
   } finally {
@@ -301,6 +317,7 @@ async function loadList(): Promise<void> {
 }
 
 async function selectSnapshot(snapshotId: number): Promise<void> {
+  resetCurrentPage()
   currentSnapshotId.value = snapshotId
   loadingDetail.value = true
   try {
@@ -326,10 +343,24 @@ async function download(): Promise<void> {
   }
 }
 
+function resetCurrentPage(): void {
+  currentPage.value = 1
+}
+
+function resetPaginationState(): void {
+  currentPage.value = 1
+  pageSize.value = 10
+}
+
+function handlePageSizeChange(): void {
+  currentPage.value = 1
+}
+
 function reset(): void {
   snapshots.value = []
   currentSnapshot.value = null
   currentSnapshotId.value = null
+  resetPaginationState()
 }
 
 function closeDialog(): void {
@@ -337,18 +368,46 @@ function closeDialog(): void {
 }
 
 watch(
-  () => [props.modelValue, props.suggestionId] as const,
-  ([open, id]) => {
-    if (open && id !== null) {
+  () => [props.modelValue, props.suggestionId, props.type] as const,
+  ([open, suggestionId]) => {
+    if (open && suggestionId !== null) {
+      resetCurrentPage()
       void loadWarehouses()
       void loadList()
     }
   },
   { immediate: true },
 )
+
+watch(
+  () => [currentSnapshotTotal.value, pageSize.value] as const,
+  ([total, nextPageSize]) => {
+    currentPage.value = clampPage(currentPage.value, total, nextPageSize)
+  },
+)
 </script>
 
 <style scoped lang="scss">
+:global(.suggestion-detail-dialog) {
+  display: flex;
+  flex-direction: column;
+  width: min(1280px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
+  margin: 16px auto !important;
+}
+
+:global(.suggestion-detail-dialog.suggestion-detail-dialog--empty) {
+  margin: auto !important;
+}
+
+:global(.suggestion-detail-dialog .el-dialog__body) {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .detail-dialog-header {
   display: flex;
   align-items: center;
@@ -364,7 +423,7 @@ watch(
   &__actions {
     display: flex;
     align-items: center;
-    gap: $space-3;    // 下载按钮和 × 间隔
+    gap: $space-3;
     flex-shrink: 0;
   }
 }
@@ -392,33 +451,47 @@ watch(
   }
 }
 
-.detail-dialog-body {
-  display: grid;
-  grid-template-columns: 220px 1fr;
-  gap: $space-4;
-  min-height: 500px;
+.detail-dialog-shell {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
 }
 
-// ========== 版本列表（左侧） ==========
+.detail-dialog-body {
+  display: grid;
+  flex: 1;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: $space-4;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+}
+
 .version-side {
   display: flex;
   flex-direction: column;
   gap: $space-2;
-  border-right: 1px solid $color-border-subtle;
+  min-height: 0;
   padding-right: $space-4;
+  border-right: 1px solid $color-border-subtle;
+  overflow: hidden;
 
   &__title {
+    padding: 0 $space-2;
     font-size: $font-size-sm;
     font-weight: $font-weight-semibold;
     color: $color-text-secondary;
-    padding: 0 $space-2;
   }
 
   &__list {
     display: flex;
+    flex: 1;
     flex-direction: column;
     gap: $space-1;
-    max-height: 560px;   // 固定高度，多版本时独立滚动
+    min-height: 0;
+    overflow-x: hidden;
     overflow-y: auto;
     padding-right: $space-1;
   }
@@ -438,9 +511,9 @@ watch(
   flex-direction: column;
   gap: 4px;
   padding: $space-2 $space-3;
+  border: 1px solid transparent;
   border-radius: $radius-md;
   transition: $transition-fast;
-  border: 1px solid transparent;
 
   &:hover {
     background: $color-bg-subtle;
@@ -455,6 +528,7 @@ watch(
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: $space-2;
   }
 
   &__ver {
@@ -463,43 +537,48 @@ watch(
     color: $color-brand-primary;
   }
 
-  &__count {
+  &__count,
+  &__time {
     font-size: $font-size-xs;
     color: $color-text-secondary;
   }
 
   &__time {
-    font-size: $font-size-xs;
-    color: $color-text-secondary;
     font-family: $font-family-mono;
   }
 }
 
-// ========== 主内容（右侧） ==========
 .detail-main {
   display: flex;
   flex-direction: column;
   gap: $space-4;
+  min-width: 0;
   min-height: 0;
+  overflow: hidden;
 
   &__empty {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    justify-content: center;
     padding: $space-10 0;
-    text-align: center;
     color: $color-text-secondary;
+    text-align: center;
   }
 }
 
 .detail-meta {
+  margin: 0;
   padding: $space-3 $space-4;
   background: $color-bg-subtle;
   border-radius: $radius-md;
-  margin: 0;
+  flex-shrink: 0;
 
   &__row {
     display: grid;
-    grid-template-columns: auto 1fr auto 1fr;
-    row-gap: $space-2;
+    grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr);
     column-gap: $space-3;
+    row-gap: $space-2;
     align-items: center;
 
     dt {
@@ -511,6 +590,7 @@ watch(
       margin: 0;
       font-size: $font-size-sm;
       color: $color-text-primary;
+      word-break: break-word;
     }
   }
 }
@@ -521,15 +601,43 @@ watch(
   color: $color-brand-primary !important;
 }
 
+.detail-table-scroll {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
 .detail-table {
   flex: 1;
+  min-width: 100%;
   min-height: 0;
 }
 
-// 补货视图展开行样式（复用 RestockListView 设计）
+.detail-pagination {
+  flex-shrink: 0;
+}
+
+:deep(.detail-table .el-table__inner-wrapper) {
+  min-height: 100%;
+}
+
+:deep(.detail-table .el-scrollbar__wrap),
+:deep(.detail-table .el-table__body-wrapper) {
+  overflow: auto;
+}
+
+.breakdown-table-scroll {
+  overflow-x: auto;
+  padding: $space-3 $space-4;
+}
+
 .breakdown-table {
-  width: 100%;
-  margin: $space-3 $space-4;
+  width: max-content;
+  min-width: 100%;
+  margin: 0;
   border-collapse: separate;
   border-spacing: 0;
   background: $color-bg-subtle;
@@ -566,10 +674,6 @@ watch(
   text-align: right !important;
 }
 
-.breakdown-col-date {
-  width: 140px;
-}
-
 .breakdown-col-warehouses {
   min-width: 320px;
 }
@@ -585,10 +689,6 @@ watch(
   color: $color-brand-primary;
 }
 
-.breakdown-date-value {
-  font-family: $font-family-mono;
-}
-
 .breakdown-warehouse-chip {
   margin: 2px 4px 2px 0;
 }
@@ -597,5 +697,53 @@ watch(
   display: flex;
   flex-wrap: wrap;
   gap: $space-2;
+}
+
+@media (max-width: 1200px) {
+  .detail-dialog-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .version-side {
+    padding-right: 0;
+    padding-bottom: $space-3;
+    border-right: 0;
+    border-bottom: 1px solid $color-border-subtle;
+  }
+
+  .version-side__list {
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-right: 0;
+    padding-bottom: $space-1;
+  }
+
+  .version-item {
+    flex: 0 0 180px;
+    min-width: 180px;
+  }
+}
+
+@media (max-width: 768px) {
+  :global(.suggestion-detail-dialog) {
+    width: calc(100vw - 16px);
+    max-width: calc(100vw - 16px);
+    max-height: calc(100vh - 16px);
+    margin: 8px auto !important;
+  }
+
+  .detail-meta__row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .breakdown-col-country {
+    width: 140px;
+  }
+
+  .breakdown-col-warehouses {
+    min-width: 260px;
+  }
 }
 </style>

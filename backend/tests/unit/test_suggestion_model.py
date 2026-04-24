@@ -16,7 +16,6 @@ def test_suggestion_has_new_archive_fields():
 def test_suggestion_item_export_fields():
     cols = {c.name for c in SuggestionItem.__table__.columns}
     assert "purchase_qty" in cols
-    assert "purchase_date" in cols
     assert "restock_dates" in cols
     assert "procurement_export_status" in cols
     assert "procurement_exported_snapshot_id" in cols

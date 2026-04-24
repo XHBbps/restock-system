@@ -28,6 +28,22 @@ export interface TaskRun {
   created_at: string
 }
 
+export interface TaskListResult {
+  items: TaskRun[]
+  total: number
+}
+
+export interface TaskListParams {
+  job_name?: string
+  status?: TaskStatus
+  limit?: number
+}
+
+export async function listTasks(params: TaskListParams = {}): Promise<TaskListResult> {
+  const { data } = await client.get<TaskListResult>('/api/tasks', { params })
+  return data
+}
+
 export async function getTask(taskId: number): Promise<TaskRun> {
   const { data } = await client.get<TaskRun>(`/api/tasks/${taskId}`)
   return data

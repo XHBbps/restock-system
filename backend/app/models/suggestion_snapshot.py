@@ -1,13 +1,12 @@
 """建议单导出快照 + 快照条目。Immutable，不可删除。"""
 
-from datetime import date, datetime
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
-    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -116,7 +115,6 @@ class SuggestionSnapshotItem(Base):
     )
     # 采购类型快照冻结的值；补货类型快照可为 NULL。
     purchase_qty: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    purchase_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     urgent: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
     velocity_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)

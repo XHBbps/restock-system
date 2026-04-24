@@ -1,13 +1,12 @@
 """建议单主表 + 条目表（导出模式）。"""
 
-from datetime import date, datetime
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
-    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -130,7 +129,6 @@ class SuggestionItem(Base):
 
     # 采购字段
     purchase_qty: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    purchase_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     # 补货导出状态
     restock_export_status: Mapped[str] = mapped_column(

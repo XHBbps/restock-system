@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -40,7 +40,6 @@ class SnapshotItemOut(BaseModel):
     warehouse_breakdown: dict[str, Any]
     restock_dates: dict[str, str | None] = Field(default_factory=dict)
     purchase_qty: int | None = None
-    purchase_date: date | None = None
     urgent: bool
     velocity_snapshot: dict[str, Any] | None = None
     sale_days_snapshot: dict[str, Any] | None = None

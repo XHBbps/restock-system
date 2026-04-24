@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import datetime
 from io import BytesIO
 
 import pytest
@@ -28,6 +28,7 @@ def procurement_context() -> SnapshotExportContext:
             "safety_stock_days": 15,
             "restock_regions": ["US", "GB"],
             "eu_countries": ["DE", "FR"],
+            "demand_date": "2026-04-30",
         },
         items=[
             {
@@ -36,7 +37,6 @@ def procurement_context() -> SnapshotExportContext:
                 "main_image_url": "https://img/a.jpg",
                 "total_qty": 150,
                 "purchase_qty": 80,
-                "purchase_date": date(2026, 4, 17),
                 "urgent": True,
                 "country_breakdown": {"US": 100, "GB": 50},
                 "warehouse_breakdown": {"US": {"WH-1": 60, "WH-2": 40}, "GB": {"WH-5": 50}},
@@ -65,6 +65,7 @@ def restock_context() -> SnapshotExportContext:
             "safety_stock_days": 15,
             "restock_regions": ["US", "GB"],
             "eu_countries": ["DE", "FR"],
+            "demand_date": "2026-04-30",
         },
         items=[
             {
@@ -92,9 +93,22 @@ def test_procurement_sheet_rows(procurement_context):
     wb = build_procurement_workbook(procurement_context)
     ws = wb[wb.sheetnames[1]]
     assert ws.max_row == 2
+    headers = [ws.cell(row=1, column=index).value for index in range(1, ws.max_column + 1)]
+    assert "采购日期" not in headers
+    assert "逾期备注" not in headers
     assert ws.cell(row=2, column=1).value == "SKU-A"
     assert ws.cell(row=2, column=4).value == 80
-    assert ws.cell(row=2, column=6).value == "今日到期"
+    assert ws.cell(row=2, column=5).value == 2.3
+
+
+def test_meta_sheet_contains_demand_deadline(procurement_context):
+    wb = build_procurement_workbook(procurement_context)
+    meta_ws = wb[wb.sheetnames[0]]
+    values = {
+        meta_ws.cell(row=row, column=1).value: meta_ws.cell(row=row, column=2).value
+        for row in range(1, meta_ws.max_row + 1)
+    }
+    assert values["需求截止日期"] == "2026-04-30"
 
 
 def test_restock_workbook_has_four_sheets(restock_context):

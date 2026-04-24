@@ -99,7 +99,7 @@
             <el-switch v-model="form.scheduler_enabled" />
           </el-form-item>
           <el-form-item label="店铺同步模式">
-            <el-radio-group v-model="form.shop_sync_mode">
+            <el-radio-group v-model="form.shop_sync_mode" class="segmented-radio-group">
               <el-radio-button value="all">全量</el-radio-button>
               <el-radio-button value="specific">指定店铺</el-radio-button>
             </el-radio-group>

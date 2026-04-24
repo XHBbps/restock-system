@@ -83,7 +83,6 @@ class _FakeItem:
         self.allocation_snapshot: dict[str, Any] | None = {"US": {"allocation_mode": "matched"}}
         self.sale_days_snapshot: dict[str, float] | None = {"US": 25.0}
         self.purchase_qty = 0
-        self.purchase_date = None
         self.restock_dates: dict[str, str | None] = {}
         self.urgent = False
 

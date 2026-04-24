@@ -27,7 +27,6 @@ export interface SnapshotItemOut {
   warehouse_breakdown: Record<string, unknown>
   restock_dates: Record<string, string | null>
   purchase_qty: number | null
-  purchase_date: string | null
   urgent: boolean
   velocity_snapshot: Record<string, unknown> | null
   sale_days_snapshot: Record<string, unknown> | null

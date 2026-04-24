@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-23（补货建议新增“最晚补货日期”，并继续沿用 `buffer_days` / `lead_time_days` 新口径：`buffer_days` 参与采购日期，`lead_time_days` 同时参与采购日期与补货日期。）
+> 最近更新：2026-04-24（需求截止日期过滤后无补货国家命中的 SKU，只要 `purchase_qty > 0` 仍保留为采购建议；补货清单继续仅展示实际补货量。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -52,7 +52,7 @@
 - **订单详情同步与详情获取**：`sync_order_detail` 当前按 2 QPS / 2 并发保守抓取；订单页提供右侧独立“详情获取”组件，仅提供天数选择与触发按钮；手动触发会优先复用活跃的 `refetch_order_detail`、`sync_order_detail` 或 `sync_all` 任务，避免并发重复抓取，且不再对手动详情获取施加单次数量上限；任务执行中会按“已完成 X / 失败 Y / 总数 N”持续回写精确进度
 
 ### 2.3 补货计算引擎
-- **采购/补货拆分**：引擎同时产出 SKU 级 purchase_qty / purchase_date 与国家/仓库级 country_breakdown / warehouse_breakdown，并分别统计 procurement_item_count、restock_item_count；成功生成后自动关闭生成开关，等待导出与人工开新周期。
+- **采购/补货拆分**：引擎同时产出 SKU 级 `purchase_qty` 与国家/仓库级 `country_breakdown` / `warehouse_breakdown` / `restock_dates`，并分别统计 `procurement_item_count`、`restock_item_count`；成功生成后自动关闭生成开关，等待导出与人工开新周期。
 
 - **6 步流水线**（`backend/app/engine/runner.py`）：
   1. `step1_velocity` — 加权日均销量（7日×0.5 + 14日×0.3 + 30日×0.2）
@@ -60,10 +60,11 @@
   3. `step3_country_qty` — 各国补货量
   4. `step4_total` — 总采购量（Σcountry_qty − 本地库存 + ceil(Σvelocity × safety_stock_days)，clamp 到 0；`buffer_days` 不参与采购量）
   5. `step5_warehouse_split` — 按邮编规则分配到具体仓库
-  6. `step6_timing` — 紧急标志与采购日期（任一有效国家 `sale_days <= lead_time_days` 即为紧急；`purchase_date = today + int(min_sale_days) − buffer_days − lead_time_days`）
+  6. `step6_timing` — 紧急标志与补货日期（任一正补货国家 `sale_days <= lead_time_days` 即为紧急；`restock_date[sku][country] = today + int(sale_days[sku][country]) − lead_time_days`）
 - **补货区域过滤**：全局参数 `restock_regions` 支持按国家多选；为空数组时表示全部国家参与计算，配置后仅这些国家的订单会参与 `step1_velocity` 销量统计和 `step5_warehouse_split` 的国家订单分仓
 - **并发保护**：`pg_advisory_xact_lock(7429001)` 事务级锁，阻止并发引擎覆盖彼此
-- **快照追溯**：`velocity_snapshot`、`sale_days_snapshot`、`global_config_snapshot` 存入 JSONB 字段；其中 `global_config_snapshot` 会记录 `restock_regions`
+- **需求截止日期过滤**：`POST /api/engine/run` 必填 `demand_date` 且不能早于北京时间今天；runner 仍按 `today=now_beijing().date()` 计算销量、库存、分仓与完整 SKU 口径采购量，再在持久化前仅保留 `restock_dates[country] <= demand_date` 的国家，过期未处理补货国家也会纳入截止范围；`restock_dates[country]` 为空时不纳入补货范围，命中后收缩补货字段并重算 `total_qty` / `urgent`；若无补货国家命中但 `purchase_qty > 0`，仍保留为采购-only 条目并清空补货拆分字段；最终无条目时不归档旧 draft、不关闭生成开关、不生成空建议单
+- **快照追溯**：`velocity_snapshot`、`sale_days_snapshot`、`global_config_snapshot` 存入 JSONB 字段；其中 `global_config_snapshot` 会记录 `restock_regions` 与本次 `demand_date`
 
 ### 2.4 补货建议管理
 - **采购/补货独立导出**：建议单分为采购 Tab 与补货 Tab，采购快照只要求 purchase_qty > 0，补货快照只要求国家补货量大于 0；两类快照按 snapshot_type 独立递增版本、独立更新条目导出状态。
@@ -73,10 +74,10 @@
 - **编辑校验**：建议详情支持编辑 `total_qty` / `country_breakdown` / `warehouse_breakdown`；国家补货量不要求与总采购量一致，已配置仓库时仓内分量之和必须等于国家补货量；`urgent` 会随国家补货量变更按对应 SKU 的提前期重新判定
 - **历史记录删除**：历史记录页新增建议单删除入口，删除准入统一为 `snapshot_count === 0`（尚未生成任何导出快照的建议单才可物理删除，保留快照的建议单保留历史追溯不允许删除）
 - **触发方式中文化**：历史记录页“触发方式”由原始值改为中文展示，当前口径统一为“手动触发 / 自动触发”
-- **Excel 导出（替代推送）**：业务人员在建议详情勾选 `export_status='pending'` 的条目，点击“导出 Excel”走一步式 `POST /api/suggestions/{id}/snapshots` + `GET /api/snapshots/{id}/download` blob 下载；服务端生成不可变 `suggestion_snapshot` + `suggestion_snapshot_item` JSONB 快照并同步落盘 Excel 文件，后续可反复下载；首次导出后 `global_config.suggestion_generation_enabled` 自动翻 OFF，业务人员在全局配置页翻回 ON 时会二次确认并归档全部 `draft` 建议单以开启下一周期
+- **Excel 导出（替代推送）**：业务人员在建议详情勾选 `export_status='pending'` 的条目，点击“导出 Excel”走一步式 `POST /api/suggestions/{id}/snapshots` + `GET /api/snapshots/{id}/download` blob 下载；服务端生成不可变 `suggestion_snapshot` + `suggestion_snapshot_item` JSONB 快照并同步落盘 Excel 文件，后续可反复下载；元信息页记录“需求截止日期”，采购/补货明细表不增加需求截止日期列；首次导出后 `global_config.suggestion_generation_enabled` 自动翻 OFF，业务人员在全局配置页翻回 ON 时会二次确认并归档全部 `draft` 建议单以开启下一周期
 
 ### 2.5 前端 Dashboard 体系
-- **嵌套路由与 Tab 视图**：当前建议、建议详情、历史记录均拆为 procurement / restock 子路由，SuggestionTabBar 统一切换；采购页默认按采购日期排序并使用 PurchaseDateCell 标注今日/逾期，补货页支持国家与仓库下钻。
+- **嵌套路由与 Tab 视图**：当前建议、建议详情、历史记录均拆为 procurement / restock 子路由，`SuggestionTabBar` 统一切换；采购页默认按 `commodity_sku` 稳定排序，仅展示商品信息、采购量与导出状态，补货页支持国家与仓库下钻。
 
 - **统一页面容器**：所有列表页使用 `PageSectionCard`（`#title` + `#actions` slot）
 - **共享工具模块**：
@@ -97,6 +98,46 @@
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
 
+### 3.63 安全库存采购-only 项保留到采购建议（2026-04-24）
+- **过滤口径**：`backend/app/engine/runner.py` 的需求截止日期过滤在无补货国家命中时，不再直接丢弃 SKU；只要过滤前完整 SKU 口径的 `purchase_qty > 0`，仍保留为采购-only 条目。
+- **补货字段收口**：采购-only 条目持久化时写入 `country_breakdown={}`、`warehouse_breakdown={}`、`allocation_snapshot={}`、`restock_dates={}`、`total_qty=0`、`urgent=false`；补货清单与补货 Excel 仍只包含实际补货量大于 0 的条目。
+- **计数与导出**：`procurement_item_count` 继续按 `purchase_qty > 0` 统计，`restock_item_count` 继续按 `total_qty > 0` 统计；采购快照可导出这类安全库存采购项，补货快照不包含它们。
+- **测试**：更新 `backend/tests/unit/test_engine_runner.py`，覆盖采购-only 保留、无采购量继续丢弃、补货项与安全库存采购-only 项混合生成，以及采购/补货 item count 独立统计。
+
+### 3.62 前端隐藏补货日期展示（2026-04-24）
+- **页面展示收口**：`frontend/src/views/suggestion/RestockListView.vue` 与 `frontend/src/components/SuggestionDetailDialog.vue` 移除 SKU 表格“最晚补货日期”列和展开行国家级“补货日期”列，当前前端仅展示商品、补货量、国家分布与仓库分配。
+- **数据与导出保留**：API 类型中的 `restock_dates`、后端持久化、快照冻结和 `backend/app/services/excel_export.py` 补货 Excel “补货日期”列保持不变，用于需求截止过滤、历史追溯与 Excel 交付。
+
+### 3.61 需求截止日期过滤口径（2026-04-24）
+- **截止范围**：`backend/app/engine/runner.py` 的持久化前过滤由 `restock_dates[country] == demand_date` 调整为 `restock_dates[country] <= demand_date`，选择某一需求截止日期时会包含当天及之前已到期但尚未处理的补货国家。
+- **空日期处理**：`restock_dates[country]` 为空的国家继续不纳入补货截止范围，因为无法判断是否已在截止日前到期；无补货命中但 `purchase_qty > 0` 时会保留为采购-only 条目，否则返回 `no_suggestion_needed`，不归档旧 draft、不关闭生成开关、不生成空建议单。
+- **展示与导出**：`frontend/src/views/SuggestionListView.vue`、`frontend/src/components/SuggestionDetailDialog.vue` 与 `backend/app/services/excel_export.py` 的用户可见文案统一改为“需求截止日期”；API 字段名继续保持 `demand_date`。
+
+### 3.60 需求日期驱动采补建议生成（2026-04-24）
+- **发起入口校验**：`frontend/src/views/SuggestionListView.vue` 删除手动“刷新”按钮，改为默认空的“需求截止日期”日期选择器；点击生成时前端校验空值与早于北京时间今天，合法时调用 `runEngine({ demand_date })`。
+- **任务复用与结果摘要**：前端新增 `frontend/src/api/task.ts:listTasks()`，页面加载与切回时分别查询 `calc_engine` 的 `pending` / `running` 任务并复用 `TaskProgress`；后端扩展 `JobContext.progress(result_summary=...)` 与 worker 进度写回，生成成功或无需求均写结构化 JSON。
+- **后端入队契约**：`POST /api/engine/run` 请求体改为必填 `{ "demand_date": "YYYY-MM-DD" }`，缺失、格式错误或早于北京时间今天均由 Pydantic 返回 422；入队 payload 写入 `demand_date`，仍使用 `dedupe_key="calc_engine"` 防并发生成。
+- **持久化前过滤**：`backend/app/engine/runner.py` 先计算完整中间结果，再按 `demand_date` 保留到期国家；采购量沿用过滤前 SKU 口径，纯安全库存触发但无补货命中的 SKU 会作为采购-only 条目保存。
+- **展示与导出**：当前建议页顶部、历史详情元信息与 Excel 元信息页均展示需求截止日期；历史列表、采购明细表、补货明细表不新增需求截止日期列，不改导出文件名。
+
+### 3.59 移除采购日期与采购页紧急筛选（2026-04-24）
+- **后端链路收缩**：`backend/alembic/versions/20260424_0100_drop_purchase_date_from_suggestions.py` 删除 `suggestion_item`、`suggestion_snapshot_item` 上的 `purchase_date`；`backend/app/engine/step6_timing.py` 仅保留 `urgent` 与 `restock_dates` 计算，`backend/app/engine/runner.py`、`backend/app/api/suggestion.py`、`backend/app/api/snapshot.py` 与相关 DTO 不再写入、存储或返回采购日期。
+- **采购导出精简**：`backend/app/services/excel_export.py` 的采购工作簿移除“采购日期”“逾期备注”两列，采购导出仅保留 SKU、商品名、图片 URL、采购量、各国动销合计、本地库存可用+占用、安全库存天数。
+- **前端采购侧收口**：`frontend/src/views/suggestion/ProcurementListView.vue` 移除“仅显示紧急（≤30天）”开关、`purchase_date` 列与相关排序/筛选逻辑；`frontend/src/components/SuggestionDetailDialog.vue` 的采购历史详情同步移除采购日期列；`frontend/src/components/PurchaseDateCell.vue` 及其单测已删除。
+- **验证**：后端定向测试 `pytest -p no:cacheprovider backend/tests/unit/test_engine_step6.py backend/tests/unit/test_engine_runner.py backend/tests/unit/test_excel_export_service.py backend/tests/unit/test_suggestion_patch.py backend/tests/unit/test_suggestion_model.py backend/tests/unit/test_suggestion_snapshot_model.py backend/tests/unit/test_suggestion_snapshot_schemas.py backend/tests/integration/test_snapshot_api.py` 通过（`51 passed, 13 skipped`，跳过因 `TEST_DATABASE_URL` 未配置）；前端 `npm run test -- src/views/suggestion/__tests__/ProcurementListView.test.ts src/components/__tests__/SuggestionDetailDialog.test.ts`、`npx vue-tsc --noEmit`、`npm run build` 通过。
+
+### 3.58 删除整单后自动尝试开启生成开关（2026-04-24）
+- `frontend/src/views/SuggestionListView.vue` 的“删除整单”改为前端串行两步：先调用 `DELETE /api/suggestions/{id}` 删除当前 draft 建议单，再调用 `PATCH /api/config/generation-toggle` 尝试把全局“采购建议生成开关”设为开启。
+- 删除成功且开关开启成功时，页面提示“删除成功，已自动开启生成开关”，并同步刷新当前建议单与开关状态；不再跳转到全局参数页。
+- 若删单成功但开关开启失败（如缺少 `restock:new_cycle` 权限或 `can_enable=false`），前端保留删除结果，提示用户“删除成功，但开启生成开关失败，请前往全局参数手动开启”，并刷新当前页状态。
+- 更新 `frontend/src/views/__tests__/SuggestionListView.test.ts`，覆盖“删除成功后自动开启”“删除成功但开启失败”“删除失败时不触发开启”三条交互分支。
+
+### 3.57 补货发起页支持跨页全选导出（2026-04-24）
+- `frontend/src/views/suggestion/ProcurementListView.vue` 与 `frontend/src/views/suggestion/RestockListView.vue` 改为前端自管勾选状态：表头全选覆盖当前 Tab 下全部可导出条目，不再受当前分页限制；搜索仅用于定位并取消个别条目，翻页与筛选后已选状态持续回显。
+- 新增 `frontend/src/views/suggestion/useCrossPageSelection.ts` 复用组合式逻辑，统一处理 `selectedIds`、全选/半选状态、按行勾选，以及 `suggestion.id` 切换后的选择重置和可导出 ID 集合变化后的自动清理。
+- 采购/补货导出按钮文案改为显示当前总选中数，例如“导出采购单 Excel（N项）”“导出补货单 Excel（N项）”；导出时继续复用现有快照接口，仅把提交的 `item_ids` 改为跨页累计后的全局选择集合。
+- 前端测试新增覆盖跨页全选、搜索后取消单条、翻页回显、切换建议单重置选择，以及导出接口收到全局选中 ID 集合的断言。
+
 ### 3.56 分仓候选仓收口为“仅规则仓参与”（2026-04-24）
 - **Step5 口径调整**：`backend/app/engine/step5_warehouse_split.py` 的国家候选仓不再来自该国家全部海外仓，而是只来自“该国家下已配置邮编规则”的仓库集合。
 - **兜底逻辑**：有订单未命中规则或该国无订单时，只在规则仓集合内均分；若该国家一个规则仓都没有，则该国家 `warehouse_breakdown` 为空，不再回退到该国家全部海外仓。
@@ -107,7 +148,7 @@
 - **计算口径**：`backend/app/engine/step6_timing.py` 新增 `compute_restock_dates()`，公式为 `restock_date[sku][country] = today + int(sale_days[sku][country]) − lead_time_days(sku)`；仅对 `country_breakdown[country] > 0` 的国家输出，缺少 `sale_days` 时保留 `null`，且不受 `buffer_days` 影响。
 - **持久化与编辑**：`backend/app/engine/runner.py` 在生成建议单时写入 `restock_dates`；`backend/app/api/suggestion.py` 在 PATCH 修改 `country_breakdown` 后会同步重算 `total_qty`、`urgent` 与 `restock_dates`，前端保持只读展示，不提供手工编辑。
 - **快照与导出**：`backend/app/api/snapshot.py` 在补货快照中冻结 `restock_dates`；`backend/app/services/excel_export.py` 的补货工作簿在 `SKU×国家`、`SKU×国家×仓库` 两个 Sheet 新增“补货日期”列。
-- **前端展示与验证**：`frontend/src/views/suggestion/RestockListView.vue` 与 `frontend/src/components/SuggestionDetailDialog.vue` 新增“最晚补货日期”列和展开行国家级“补货日期”列；已通过宿主机后端定向单测 `54 passed`、集成测试 `test_snapshot_api.py` `13 passed`，以及前端 `npx vue-tsc --noEmit`、补货日期相关 Vitest。
+- **前端展示策略**：当前前端不再展示“最晚补货日期”列或展开行国家级“补货日期”列；`restock_dates` 继续通过后端、快照与 Excel 导出保留，前端仅保留类型字段以兼容接口。
 
 ### 3.54 buffer_days / lead_time_days 计算口径调整（2026-04-23）
 - **引擎公式**：`backend/app/engine/step4_total.py` 的采购量改为 `purchase_qty = max(0, Σcountry_qty − (local.available + local.reserved) + ceil(Σvelocity × safety_stock_days))`；`buffer_days` 保留兼容参数但不再参与采购量。

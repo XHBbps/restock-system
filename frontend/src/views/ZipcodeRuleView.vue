@@ -162,7 +162,7 @@
         </el-form-item>
 
         <el-form-item label="值类型">
-          <el-radio-group v-model="form.value_type" class="form-field">
+          <el-radio-group v-model="form.value_type" class="segmented-radio-group">
             <el-radio-button value="number">数字</el-radio-button>
             <el-radio-button value="string">字符串</el-radio-button>
           </el-radio-group>
@@ -1015,52 +1015,6 @@ watch(
   :deep(.el-select.is-disabled .el-select__selected-item) {
     color: $color-text-disabled !important;
     cursor: not-allowed;
-  }
-
-  :deep(.el-radio-group) {
-    display: inline-flex;
-    align-items: center;
-    width: auto;
-    min-height: 40px;
-    overflow: hidden;
-    border: 1px solid $color-border-default;
-    border-radius: $radius-md;
-    background: $color-bg-card;
-    box-shadow: $shadow-sm;
-  }
-
-  :deep(.el-radio-button) {
-    display: inline-flex;
-  }
-
-  :deep(.el-radio-button__inner) {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 76px;
-    height: 36px;
-    border: 0;
-    border-radius: 0;
-    background: $color-bg-card;
-    box-shadow: none;
-    color: $color-text-secondary;
-    font-weight: $font-weight-medium;
-    transition: $transition-fast;
-  }
-
-  :deep(.el-radio-button:not(.is-active) .el-radio-button__inner:hover) {
-    background: $color-bg-subtle;
-    color: $color-text-primary;
-  }
-
-  :deep(.el-radio-button.is-active .el-radio-button__inner) {
-    background: $color-brand-primary;
-    box-shadow: none;
-    color: $color-brand-primary-fg;
-  }
-
-  :deep(.el-radio-button + .el-radio-button .el-radio-button__inner) {
-    border-left: 1px solid $color-border-default;
   }
 
   :deep(.form-item--compare-value),

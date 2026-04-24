@@ -16,7 +16,11 @@ from app.core.exceptions import ConflictError, NotFound, ValidationFailed
 from app.core.permissions import HISTORY_DELETE, RESTOCK_OPERATE, RESTOCK_VIEW
 from app.core.query import escape_like
 from app.core.timezone import BEIJING, now_beijing
-from app.engine.step6_timing import compute_restock_dates, has_urgent_sale_days, positive_qty_countries
+from app.engine.step6_timing import (
+    compute_restock_dates,
+    has_urgent_sale_days,
+    positive_qty_countries,
+)
 from app.models.product_listing import ProductListing
 from app.models.sku import SkuConfig
 from app.models.suggestion import Suggestion, SuggestionItem
@@ -40,7 +44,6 @@ class SuggestionItemUpdates(TypedDict, total=False):
 
     total_qty: int
     purchase_qty: int
-    purchase_date: date_type | None
     country_breakdown: dict[str, int]
     warehouse_breakdown: dict[str, dict[str, int]]
     allocation_snapshot: None
@@ -270,8 +273,6 @@ async def patch_item(
         updates["total_qty"] = patch.total_qty
     if patch.purchase_qty is not None:
         updates["purchase_qty"] = patch.purchase_qty
-    if "purchase_date" in patch.model_fields_set:
-        updates["purchase_date"] = patch.purchase_date
     if patch.country_breakdown is not None:
         updates["country_breakdown"] = patch.country_breakdown
         updates["total_qty"] = sum(patch.country_breakdown.values())

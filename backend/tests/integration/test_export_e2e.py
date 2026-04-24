@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -48,7 +48,9 @@ async def test_export_closed_loop(
     from app.engine.runner import run_engine
 
     monkeypatch.setattr(job_module, "async_session_factory", engine_session_factory)
-    await job_module.calc_engine_job(_Ctx())  # type: ignore[arg-type]
+    ctx = _Ctx()
+    ctx.payload["demand_date"] = (today - timedelta(days=50)).isoformat()
+    await job_module.calc_engine_job(ctx)  # type: ignore[arg-type]
 
     async with engine_session_factory() as db:
         gc = (await db.execute(select(GlobalConfig).where(GlobalConfig.id == 1))).scalar_one()
@@ -60,7 +62,11 @@ async def test_export_closed_loop(
         suggestion_id = suggestion.id
     assert gc.suggestion_generation_enabled is False
 
-    second_sid = await run_engine(_Ctx(), triggered_by="test")  # type: ignore[arg-type]
+    second_sid = await run_engine(
+        _Ctx(),
+        triggered_by="test",
+        demand_date=today - timedelta(days=50),
+    )  # type: ignore[arg-type]
     assert second_sid is None
 
     async with engine_session_factory() as db:

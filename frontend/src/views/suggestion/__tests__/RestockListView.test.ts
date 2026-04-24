@@ -1,9 +1,39 @@
 // @vitest-environment jsdom
 
 import { flushPromises, shallowMount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import type { SuggestionDetail, SuggestionItem } from '@/api/suggestion'
+
+const mockCreateRestockSnapshot = vi.fn()
+const mockDownloadSnapshotBlob = vi.fn()
+const mockTriggerBlobDownload = vi.fn()
+const mockListWarehouses = vi.fn()
+
+vi.mock('@/api/config', async () => {
+  const actual = await vi.importActual<typeof import('@/api/config')>('@/api/config')
+  return {
+    ...actual,
+    listWarehouses: (...args: unknown[]) => mockListWarehouses(...args),
+  }
+})
+
+vi.mock('@/api/snapshot', () => ({
+  createRestockSnapshot: (...args: unknown[]) => mockCreateRestockSnapshot(...args),
+  downloadSnapshotBlob: (...args: unknown[]) => mockDownloadSnapshotBlob(...args),
+}))
+
+vi.mock('@/utils/download', () => ({
+  triggerBlobDownload: (...args: unknown[]) => mockTriggerBlobDownload(...args),
+}))
+
+vi.mock('element-plus', async () => {
+  const actual = await vi.importActual('element-plus')
+  return {
+    ...actual,
+    ElMessage: { success: vi.fn(), error: vi.fn() },
+  }
+})
 
 function makeItem(id: number, overrides: Partial<SuggestionItem> = {}): SuggestionItem {
   return {
@@ -20,7 +50,6 @@ function makeItem(id: number, overrides: Partial<SuggestionItem> = {}): Suggesti
     sale_days_snapshot: null,
     urgent: false,
     purchase_qty: 10,
-    purchase_date: null,
     procurement_export_status: 'pending',
     procurement_exported_snapshot_id: null,
     procurement_exported_at: null,
@@ -58,6 +87,7 @@ const STUBS = {
   ElEmpty: true,
   ElInput: true,
   ElButton: true,
+  ElCheckbox: true,
   ElTable: { template: '<div><slot /></div>' },
   ElTableColumn: true,
   ElTag: { template: '<span><slot /></span>' },
@@ -65,7 +95,126 @@ const STUBS = {
 }
 
 describe('RestockListView', () => {
+  it('selects all restock rows across pages and exports the global selection', async () => {
+    mockListWarehouses.mockResolvedValue([])
+    mockCreateRestockSnapshot.mockResolvedValue({ id: 99 })
+    mockDownloadSnapshotBlob.mockResolvedValue({
+      blob: new Blob(['ok']),
+      filename: 'restock.xlsx',
+    })
+
+    const { default: View } = await import('../RestockListView.vue')
+    const wrapper = shallowMount(View, {
+      props: {
+        suggestion: makeSuggestion({ restock_item_count: 3 }),
+        items: [
+          makeItem(1, { country_breakdown: { US: 10 } }),
+          makeItem(2, { country_breakdown: { US: 8 } }),
+          makeItem(3, { country_breakdown: { US: 6 } }),
+        ],
+      },
+      global: { stubs: STUBS },
+    })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      page: number
+      pageSize: number
+      pagedItems: SuggestionItem[]
+      selectedIds: number[]
+      selectedCount: number
+      exportButtonLabel: string
+      toggleSelectAll: (checked: boolean) => void
+      handleExport: () => Promise<void>
+    }
+
+    vm.pageSize = 2
+    await flushPromises()
+    expect(vm.pagedItems.map((item) => item.id)).toEqual([1, 2])
+
+    vm.toggleSelectAll(true)
+    await flushPromises()
+    expect(vm.selectedIds).toEqual([1, 2, 3])
+    expect(vm.selectedCount).toBe(3)
+    expect(vm.exportButtonLabel).toBe('导出补货单 Excel (3项)')
+
+    vm.page = 2
+    await flushPromises()
+    expect(vm.pagedItems.map((item) => item.id)).toEqual([3])
+
+    await vm.handleExport()
+    expect(mockCreateRestockSnapshot).toHaveBeenCalledWith(1, [1, 2, 3])
+  })
+
+  it('keeps selection after filtering and lets a single row opt out', async () => {
+    mockListWarehouses.mockResolvedValue([])
+
+    const { default: View } = await import('../RestockListView.vue')
+    const wrapper = shallowMount(View, {
+      props: {
+        suggestion: makeSuggestion({ restock_item_count: 3 }),
+        items: [makeItem(1), makeItem(2), makeItem(3)],
+      },
+      global: { stubs: STUBS },
+    })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      skuFilter: string
+      selectedIds: number[]
+      selectedCount: number
+      toggleSelectAll: (checked: boolean) => void
+      toggleRow: (id: number, checked: boolean) => void
+    }
+
+    vm.toggleSelectAll(true)
+    vm.skuFilter = 'SKU-3'
+    await flushPromises()
+    vm.toggleRow(3, false)
+    await flushPromises()
+
+    expect(vm.selectedIds).toEqual([1, 2])
+    expect(vm.selectedCount).toBe(2)
+
+    vm.skuFilter = ''
+    await flushPromises()
+    expect(vm.selectedIds).toEqual([1, 2])
+  })
+
+  it('resets selection when suggestion changes', async () => {
+    mockListWarehouses.mockResolvedValue([])
+
+    const { default: View } = await import('../RestockListView.vue')
+    const wrapper = shallowMount(View, {
+      props: {
+        suggestion: makeSuggestion({ id: 1, restock_item_count: 2 }),
+        items: [makeItem(1), makeItem(2)],
+      },
+      global: { stubs: STUBS },
+    })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      selectedIds: number[]
+      toggleSelectAll: (checked: boolean) => void
+    }
+
+    vm.toggleSelectAll(true)
+    await flushPromises()
+    expect(vm.selectedIds).toEqual([1, 2])
+
+    await wrapper.setProps({
+      suggestion: makeSuggestion({ id: 2, restock_item_count: 1 }),
+      items: [makeItem(7)],
+    })
+    await flushPromises()
+
+    expect(vm.selectedIds).toEqual([])
+  })
+
   it('renders only rows with positive country breakdown total', async () => {
+    mockListWarehouses.mockResolvedValue([])
+
     const { default: View } = await import('../RestockListView.vue')
     const wrapper = shallowMount(View, {
       props: {
@@ -84,6 +233,8 @@ describe('RestockListView', () => {
   })
 
   it('shows empty state when there is no restock demand', async () => {
+    mockListWarehouses.mockResolvedValue([])
+
     const { default: View } = await import('../RestockListView.vue')
     const wrapper = shallowMount(View, {
       props: { suggestion: makeSuggestion({ restock_item_count: 0 }), items: [] },
@@ -93,7 +244,9 @@ describe('RestockListView', () => {
     expect(wrapper.findComponent({ name: 'ElEmpty' }).exists()).toBe(true)
   })
 
-  it('exposes country-level restock dates and SKU summary date', async () => {
+  it('exposes country-level restock quantities and warehouse allocations', async () => {
+    mockListWarehouses.mockResolvedValue([])
+
     const { default: View } = await import('../RestockListView.vue')
     const wrapper = shallowMount(View, {
       props: {
@@ -111,15 +264,17 @@ describe('RestockListView', () => {
     await flushPromises()
 
     const vm = wrapper.vm as unknown as {
-      countryRows: (item: SuggestionItem) => { country: string; restockDate: string | null }[]
-      restockDateSummary: (item: SuggestionItem) => string
+      countryRows: (item: SuggestionItem) => {
+        country: string
+        qty: number
+        warehouses: { id: string; qty: number }[]
+      }[]
       filteredItems: SuggestionItem[]
     }
     const item = vm.filteredItems[0]
-    expect(vm.countryRows(item).map((row) => [row.country, row.restockDate])).toEqual([
-      ['US', '2026-05-10'],
-      ['GB', '2026-05-01'],
+    expect(vm.countryRows(item).map((row) => [row.country, row.qty, row.warehouses])).toEqual([
+      ['US', 10, [{ id: 'WH-1', qty: 10 }]],
+      ['GB', 5, [{ id: 'WH-2', qty: 5 }]],
     ])
-    expect(vm.restockDateSummary(item)).toBe('2026-05-01')
   })
 })

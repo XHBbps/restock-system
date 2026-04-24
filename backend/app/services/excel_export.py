@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import datetime
 from typing import Any
 
 from openpyxl import Workbook  # type: ignore[import-untyped]
@@ -67,6 +67,7 @@ def _build_meta_sheet(wb: Workbook, ctx: SnapshotExportContext) -> None:
         ("导出时间", ctx.exported_at.strftime("%Y-%m-%d %H:%M:%S")),
         ("导出人", ctx.exported_by_name or "系统"),
         ("备注", ctx.note or ""),
+        ("需求截止日期", ctx.global_config.get("demand_date", "")),
         ("buffer_days", ctx.global_config.get("buffer_days", "")),
         ("target_days", ctx.global_config.get("target_days", "")),
         ("lead_time_days", ctx.global_config.get("lead_time_days", "")),
@@ -77,17 +78,6 @@ def _build_meta_sheet(wb: Workbook, ctx: SnapshotExportContext) -> None:
     for key, value in rows:
         ws.append([key, value])
     _autosize(ws)
-
-
-def _purchase_date_note(purchase_date: date | None, exported_at: datetime) -> str:
-    if purchase_date is None:
-        return ""
-    delta = (purchase_date - exported_at.date()).days
-    if delta < 0:
-        return f"逾期 {abs(delta)} 天"
-    if delta == 0:
-        return "今日到期"
-    return ""
 
 
 def build_procurement_workbook(ctx: SnapshotExportContext) -> Workbook:
@@ -104,8 +94,6 @@ def build_procurement_workbook(ctx: SnapshotExportContext) -> Workbook:
             "商品名",
             "图片 URL",
             "采购量",
-            "采购日期",
-            "逾期备注",
             "各国动销合计",
             "本地库存可用+占用",
             "安全库存天数",
@@ -114,15 +102,12 @@ def build_procurement_workbook(ctx: SnapshotExportContext) -> Workbook:
     for item in ctx.items:
         velocity_sum = sum((item.get("velocity_snapshot") or {}).values())
         local_stock = item.get("local_stock") or {}
-        purchase_date = item.get("purchase_date")
         ws.append(
             [
                 item["commodity_sku"],
                 item.get("commodity_name") or "",
                 item.get("main_image_url") or "",
                 item.get("purchase_qty") or 0,
-                purchase_date.isoformat() if purchase_date else "",
-                _purchase_date_note(purchase_date, ctx.exported_at),
                 velocity_sum,
                 int(local_stock.get("available", 0)) + int(local_stock.get("reserved", 0)),
                 ctx.global_config.get("safety_stock_days", ""),

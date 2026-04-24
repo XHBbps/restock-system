@@ -31,11 +31,13 @@ class JobContext:
         current_step: str | None = None,
         step_detail: str | None = None,
         total_steps: int | None = None,
+        result_summary: str | None = None,
     ) -> None:
         await self._set_progress(
             current_step=current_step,
             step_detail=step_detail,
             total_steps=total_steps,
+            result_summary=result_summary,
         )
 
 

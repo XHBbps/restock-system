@@ -1,4 +1,4 @@
-"""Step 6: urgency and purchase-date calculation."""
+"""Step 6: urgency and restock-date calculation."""
 
 from __future__ import annotations
 
@@ -15,7 +15,6 @@ logger = get_logger(__name__)
 @dataclass
 class UrgencyResult:
     urgent: bool
-    purchase_date: date | None = None
     restock_dates: dict[str, str | None] | None = None
 
 
@@ -49,30 +48,6 @@ def has_urgent_sale_days(
     return False
 
 
-def compute_purchase_date(
-    sale_days_by_country: Mapping[str, float | int | None],
-    *,
-    purchase_qty: int,
-    lead_time_days: int,
-    buffer_days: int = 0,
-    today: date,
-) -> date | None:
-    if purchase_qty <= 0:
-        return None
-    valid: list[float] = []
-    for raw in sale_days_by_country.values():
-        if raw is None:
-            continue
-        try:
-            valid.append(float(raw))
-        except (TypeError, ValueError):
-            continue
-    if not valid:
-        return None
-    min_sale_days = min(valid)
-    return today + timedelta(days=int(min_sale_days) - buffer_days - lead_time_days)
-
-
 def compute_restock_dates(
     sale_days_by_country: Mapping[str, float | int | None],
     *,
@@ -102,8 +77,6 @@ def compute_urgency_for_sku(
     sale_days_for_sku: Mapping[str, float | int | None],
     country_qty_for_sku: Mapping[str, int],
     lead_time_days: int,
-    buffer_days: int = 0,
-    purchase_qty: int = 0,
     today: date | None = None,
 ) -> UrgencyResult:
     effective_today = today or date.today()
@@ -112,13 +85,6 @@ def compute_urgency_for_sku(
             sale_days_for_sku,
             lead_time_days=lead_time_days,
             countries=positive_qty_countries(country_qty_for_sku),
-        ),
-        purchase_date=compute_purchase_date(
-            sale_days_for_sku,
-            purchase_qty=purchase_qty,
-            lead_time_days=lead_time_days,
-            buffer_days=buffer_days,
-            today=effective_today,
         ),
         restock_dates=compute_restock_dates(
             sale_days_for_sku,
@@ -132,27 +98,22 @@ def compute_urgency_for_sku(
 def step6_timing(
     *,
     sale_days_snapshot: dict[str, dict[str, float | None]],
-    purchase_qty: dict[str, int],
     lead_time_by_sku: dict[str, int],
-    buffer_days_by_sku: dict[str, int] | None = None,
     country_qty: dict[str, dict[str, int]] | None = None,
     today: date | None = None,
 ) -> dict[str, dict[str, Any]]:
     effective_today = today or date.today()
     result: dict[str, dict[str, Any]] = {}
-    all_skus = set(sale_days_snapshot) | set(purchase_qty) | set(lead_time_by_sku)
+    all_skus = set(sale_days_snapshot) | set(lead_time_by_sku) | set(country_qty or {})
     for sku in all_skus:
         urgency = compute_urgency_for_sku(
             sale_days_for_sku=sale_days_snapshot.get(sku, {}),
             country_qty_for_sku=(country_qty or {}).get(sku, {}),
             lead_time_days=lead_time_by_sku.get(sku, 50),
-            buffer_days=(buffer_days_by_sku or {}).get(sku, 0),
-            purchase_qty=purchase_qty.get(sku, 0),
             today=effective_today,
         )
         result[sku] = {
             "urgent": urgency.urgent,
-            "purchase_date": urgency.purchase_date,
             "restock_dates": urgency.restock_dates or {},
         }
     return result

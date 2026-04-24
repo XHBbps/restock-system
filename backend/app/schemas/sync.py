@@ -1,4 +1,8 @@
-from pydantic import BaseModel, Field
+from datetime import date
+
+from pydantic import BaseModel, Field, field_validator
+
+from app.core.timezone import now_beijing
 
 
 class SchedulerJobOut(BaseModel):
@@ -30,3 +34,14 @@ class OrderDetailRefetchOut(BaseModel):
     queued_count: int
     active_job_name: str | None = None
     active_trigger_source: str | None = None
+
+
+class EngineRunIn(BaseModel):
+    demand_date: date
+
+    @field_validator("demand_date")
+    @classmethod
+    def demand_date_must_not_be_past(cls, value: date) -> date:
+        if value < now_beijing().date():
+            raise ValueError("需求截止日期不能早于今天")
+        return value

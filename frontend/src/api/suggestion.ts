@@ -47,7 +47,6 @@ export interface SuggestionItem {
   sale_days_snapshot: Record<string, number> | null
   urgent: boolean
   purchase_qty: number
-  purchase_date: string | null
   procurement_export_status: 'pending' | 'exported'
   procurement_exported_snapshot_id: number | null
   procurement_exported_at: string | null
@@ -63,7 +62,6 @@ export interface SuggestionDetail extends Suggestion {
 export interface SuggestionItemPatch {
   total_qty?: number
   purchase_qty?: number
-  purchase_date?: string | null
   country_breakdown?: Record<string, number>
   warehouse_breakdown?: Record<string, Record<string, number>>
 }
