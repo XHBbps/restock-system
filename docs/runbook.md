@@ -48,6 +48,8 @@ docker compose -f deploy/docker-compose.yml exec db psql -U postgres -d replenis
 | `GET /healthz` | 进程存活探针 | 进程崩溃或未启动 |
 | `GET /readyz` | 按角色检查依赖状态 | 依赖不可用（见下） |
 
+生产 Caddy 默认只允许内网或本机访问 `/healthz`、`/readyz`；公网访问返回 `404` 是安全策略，不代表服务异常。发布脚本的 `deploy/scripts/smoke_check.sh` 默认使用 `--resolve APP_DOMAIN:443:127.0.0.1` 从服务器本机检查，既验证 Caddy 路由，又避免公开健康端点。
+
 ### 2.1 `/readyz` 检查内容
 
 根据当前进程的 `PROCESS_ENABLE_*` 配置，检查以下组件：

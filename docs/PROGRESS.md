@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-22（审计 fix Stage 3 全量收口：5 Critical + 28 Important + 18 Minor 闭环 / mypy blanket override 全清空 109 files strict / retention 三连 + dashboard stale 自动失效 / 历史页去重 + display_status_code / 部署安全加固。详见 `docs/superpowers/reviews/2026-04-22-audit-fixes-progress-v2.md`）
+> 最近更新：2026-04-25（生产冒烟检查改为本机解析 `APP_DOMAIN`，避免公网健康端点 404 安全策略导致发布误回滚；同步 `SMOKE_BASE_URL` / `SMOKE_RESOLVE_LOCAL` 文档。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -96,6 +96,10 @@
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.54 生产冒烟检查本机解析（2026-04-25）
+- **部署脚本**：`deploy/scripts/smoke_check.sh` 默认继续检查 `APP_BASE_URL` 的 `/healthz` 与 `/readyz`，但通过 `curl --resolve APP_DOMAIN:443:127.0.0.1` 从服务器本机命中 Caddy，避免健康端点对公网返回 404 时误判发布失败并触发回滚。
+- **配置文档**：新增可选 `SMOKE_BASE_URL` 与 `SMOKE_RESOLVE_LOCAL` 说明；生产仍保持 `/healthz`、`/readyz` 不对公网公开。
 
 ### 3.53 采购/补货分拆与 EU 合并（2026-04-21）
 - **数据模型**：迁移 `20260420_0900` 将采购与补货字段拆分：`global_config` 新增 `safety_stock_days` / `eu_countries`，`suggestion` 新增 `procurement_item_count` / `restock_item_count`，`suggestion_item` 新增 `purchase_qty` / `purchase_date` 与 `procurement_*`、`restock_*` 两组导出状态，`suggestion_snapshot` 新增 `snapshot_type`，同步源表补齐 `original_*` 字段用于保留 EU 合并前原国家。
@@ -599,4 +603,3 @@
 - [部署指南](deployment.md) — 发布流程和环境变量
 - [运维手册](runbook.md) — 故障排查和监控
 - [新成员入门](onboarding.md) — 本地开发和工作流
-
