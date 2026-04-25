@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-25（以需求截止日期版本为基底，合入 Caddy Google Fonts CSP、Deploy 短 SHA 解析、生产 Alembic revision 兼容、CI pip-audit 临时忽略、部署脚本可执行位修复与 tag 强制 fetch。）
+> 最近更新：2026-04-25（以需求截止日期版本为基底，合入 Caddy Google Fonts CSP、Deploy 短 SHA 解析、生产 Alembic revision 兼容、CI pip-audit 临时忽略、部署脚本可执行位修复、tag 强制 fetch 与生产冒烟检查本机解析。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -108,6 +108,10 @@
 ### 3.69 部署脚本可执行位修复（2026-04-25）
 - **部署权限**：恢复分支同步将 `deploy/scripts/*.sh` 标记为 `100755`，避免 SSH 部署时直接调用 `validate_env.sh`、`rollback.sh` 等脚本出现 `Permission denied`。
 - **tag 更新**：`Deploy` workflow 的 fetch 改为显式强制拉取 `+refs/heads/*` 与 `+refs/tags/*`，不再使用隐式 `--tags`，允许服务器本地 tag 跟随 GitHub 强制更新，避免重新移动 `v-demand-date-20260425` 后报 `would clobber existing tag`。
+
+### 3.70 生产冒烟检查本机解析修复（2026-04-25）
+- **冒烟检查**：`deploy/scripts/smoke_check.sh` 支持 `SMOKE_BASE_URL` 与 `SMOKE_RESOLVE_LOCAL`，生产默认通过 `curl --resolve APP_DOMAIN:443:127.0.0.1` 从服务器本机访问 Caddy 的 `/healthz`、`/readyz`，避免公网健康端点被 Caddy 404 保护时误触发回滚。
+- **文档同步**：`deploy/.env.example`、`docs/deployment.md`、`docs/runbook.md` 与 `docs/onboarding.md` 已说明生产公网访问 `/healthz`、`/readyz` 返回 404 属于预期安全策略。
 
 ### 3.67 Alembic 生产 revision 兼容修复（2026-04-25）
 - **迁移拓扑**：保留需求截止日期分支真实迁移 `20260423_1100_add_restock_dates` 与 `20260424_0100_drop_purchase_date_from_suggestions`，并新增 `20260425_1420` 兼容 marker。

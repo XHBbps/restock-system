@@ -308,6 +308,13 @@ bash scripts/check.sh
 |---|---|---|
 | `VITE_API_PROXY_TARGET` | 后端地址 | `http://localhost:8000` |
 
+### 6.3 部署冒烟检查（`deploy/.env`）
+
+| 变量 | 说明 | 默认 |
+|---|---|---|
+| `SMOKE_BASE_URL` | 覆盖 `deploy/scripts/smoke_check.sh` 的检查入口 | `APP_BASE_URL` |
+| `SMOKE_RESOLVE_LOCAL` | 生产发布时是否将 `APP_DOMAIN` 解析到 `127.0.0.1` 后检查 | `true` |
+
 ---
 
 ## 7. 开发约定

@@ -196,6 +196,8 @@ Scheduler 保持单例避免重复触发，Worker 可水平扩展。
 |---|---|---|
 | `APP_DOMAIN` | 对外域名（Caddy 用） | `restock.example.com` |
 | `APP_BASE_URL` | 应用基础 URL | `https://restock.example.com` |
+| `SMOKE_BASE_URL` | 冒烟检查基础 URL（可选） | 默认使用 `APP_BASE_URL` |
+| `SMOKE_RESOLVE_LOCAL` | 冒烟检查是否把 `APP_DOMAIN` 解析到 `127.0.0.1`（可选） | `true` |
 | `APP_DOCS_ENABLED` | 是否开放 `/docs`（生产建议 `false`） | `false` |
 | `GHCR_OWNER` | GHCR 命名空间所有者，必须小写 | `xhbbps` |
 | `DB_PASSWORD` | PostgreSQL 密码（强密码） | — |
@@ -226,6 +228,8 @@ Scheduler 保持单例避免重复触发，Worker 可水平扩展。
 |---|---|---|---|---|---|
 | `APP_DOMAIN` | — | `deploy/.env` | — | `deploy/Caddyfile`、`deploy/scripts/validate_env.sh` | 仅生产使用；决定 Caddy 域名和 TLS 证书 |
 | `APP_BASE_URL` | `deploy/.env.dev` | `deploy/.env` | 可选 `backend/.env` | `deploy/docker-compose*.yml`、`deploy/scripts/smoke_check.sh` | 本地通常为 `http://localhost:8088`，生产为 `https://<domain>` |
+| `SMOKE_BASE_URL` | 可选 `deploy/.env.dev` | 可选 `deploy/.env` | — | `deploy/scripts/smoke_check.sh` | 覆盖冒烟检查 URL；默认使用 `APP_BASE_URL` |
+| `SMOKE_RESOLVE_LOCAL` | 可选 `deploy/.env.dev` | 可选 `deploy/.env` | — | `deploy/scripts/smoke_check.sh` | 默认 `true`，让生产冒烟检查从服务器本机访问 Caddy，避免公网健康端点被 404 保护误判 |
 | `APP_DOCS_ENABLED` | `deploy/.env.dev` | `deploy/.env` | `backend/.env` | `deploy/docker-compose*.yml`、`backend/app/config.py` | 控制 `/docs` 是否开放；生产默认建议关闭 |
 | `GHCR_OWNER` | — | `deploy/.env` | — | `deploy/docker-compose.yml`、`deploy/scripts/validate_env.sh` | 生产镜像命名空间；必须使用全小写 GitHub 用户名/组织名 |
 | `DB_PASSWORD` | `deploy/.env.dev` | `deploy/.env` | — | `deploy/docker-compose*.yml` | Compose 内部 PostgreSQL 密码；修改前需确认数据卷兼容性 |
@@ -308,7 +312,7 @@ bash deploy/scripts/deploy.sh
 3. **拉取镜像** — `docker compose pull backend worker scheduler frontend`（`IMAGE_TAG` 默认取当前 git commit 的 `sha-<commit>`）
 4. **执行迁移** — `docker compose run --rm backend alembic upgrade head`
 5. **滚动更新服务** — `docker compose up -d db backend worker scheduler frontend caddy`
-6. **冒烟检查** — `deploy/scripts/smoke_check.sh` 访问 `/healthz` 和 `/readyz`
+6. **冒烟检查** — `deploy/scripts/smoke_check.sh` 访问 `/healthz` 和 `/readyz`；生产默认通过 `--resolve` 将 `APP_DOMAIN` 指向 `127.0.0.1`，验证 Caddy + 后端路由但不公开健康端点
 7. **失败自动回滚** — 任何步骤失败触发 `deploy/scripts/rollback.sh`，仅恢复上一版应用；若迁移已执行，数据库必须通过最近一次备份手动恢复
 
 **经验**：凡是移除旧数据库字段兼容层的发布，必须坚持“先执行 `alembic upgrade head`，再启动 backend / worker / scheduler”，否则运行时会直接暴露 schema 漂移问题。
@@ -348,12 +352,14 @@ docker compose -f deploy/docker-compose.yml ps
 ### 5.2 健康检查
 
 ```bash
-curl https://your-domain.com/healthz
+curl --resolve your-domain.com:443:127.0.0.1 https://your-domain.com/healthz
 # 预期: {"status":"ok"}
 
-curl https://your-domain.com/readyz
+curl --resolve your-domain.com:443:127.0.0.1 https://your-domain.com/readyz
 # 预期: {"status":"ok","checks":{"database":"ok","worker":"running","reaper":"running","scheduler":"running"}}
 ```
+
+生产 Caddy 会对公网隐藏 `/healthz` 和 `/readyz`；直接从外网访问这些端点返回 `404` 属于预期行为。
 
 **注意**：`/readyz` 会根据当前进程角色返回不同的 checks 字段。例如 `backend` 服务只检查 database，`worker` 服务检查 database + worker + reaper。
 
