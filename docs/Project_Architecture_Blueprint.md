@@ -332,7 +332,7 @@ src/
 **基于 shadcn/ui Zinc 主题**，在 `src/styles/tokens.scss` 中定义：
 - **颜色**：50+ 设计令牌，主色 `#18181b`（zinc-900）
 - **间距**：4px 网格（`$space-1` 至 `$space-16`）
-- **字体**：系统 UI 字体栈 + 系统等宽字体栈（不依赖外部字体 CDN）
+- **字体**：当前需求截止日期版本仍引用 Google Fonts；生产 `deploy/Caddyfile` 临时放行 `fonts.googleapis.com` / `fonts.gstatic.com`，长期建议改为自托管或系统字体栈
 - **圆角**：4 / 6 / 8 / 12 / pill
 - **阴影**：card / popup 两级
 
