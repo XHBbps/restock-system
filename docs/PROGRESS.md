@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-25（Deploy workflow 修复短 SHA 输入导致 `actions/checkout` 抓取 `76aa13e*` 失败的问题；check-ci 会先解析分支 / tag / 短 SHA 到完整 commit 后再校验 CI。）
+> 最近更新：2026-04-25（补齐生产曾执行的 `20260423_1100` / `20260424_0100` Alembic revision 拓扑，并新增 `20260425_1420` 兼容迁移补回当前 master 仍需要的 `purchase_date` 字段。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -100,6 +100,10 @@
 ### 3.57 Deploy workflow 短 SHA 解析修复（2026-04-25）
 - **check-ci 修复**：`Deploy` workflow 不再直接把手动输入的短 SHA 传给 `actions/checkout`；先 checkout 默认分支并 fetch 全量分支 / tag，再把分支名、tag、完整或短 commit SHA 解析成完整 commit。
 - **CI 校验口径**：`checks.listForRef` 改为使用解析后的完整 SHA，避免短 SHA 被误当作分支 / tag 通配 ref 导致 checkout 在 `76aa13e*` 这类输入上失败。
+
+### 3.58 Alembic 生产 revision 兼容修复（2026-04-25）
+- **迁移拓扑**：补齐 `20260423_1100` 与 `20260424_0100` 两个兼容 marker，解决生产库 `alembic_version=20260424_0100` 时当前 master 提示 `Can't locate revision identified by '20260424_0100'` 的问题。
+- **schema 兼容**：新增 `20260425_1420` 幂等补回 `suggestion_item.purchase_date` 与 `suggestion_snapshot_item.purchase_date`，匹配当前 master 的模型、API 与 Excel 导出口径。
 
 ### 3.56 Caddy CSP 临时放行 Google Fonts（2026-04-25）
 - **CSP 调整**：`deploy/Caddyfile` 的 `style-src` 放行 `https://fonts.googleapis.com`，`font-src` 放行 `https://fonts.gstatic.com`，用于兼容当前生产临时镜像 `local-20260424-2130` 中仍存在的 Google Fonts 外链。
