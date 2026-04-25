@@ -36,7 +36,6 @@ restock_system/
 ├── frontend/             # Vue 3 + Vite 前端
 ├── deploy/               # Docker Compose / Caddy 部署配置
 ├── docs/                 # 项目文档（短期目标与当前事实所在位置）
-├── specs/                # 需求规格与任务拆解
 ├── scripts/              # 统一检查脚本（check.ps1 / check.sh）
 ├── .claude/skills/       # Speckit skills（本仓库内置）
 ├── .specify/             # Spec 工作流目录
@@ -77,9 +76,6 @@ restock_system/
 | `docs/runbook.md` | 故障排查与运维 | 中（新增排障场景时） |
 | `docs/onboarding.md` | 新成员入门、本地开发 | 低（流程变化时） |
 | `docs/saihu_api/` | 赛狐 API 参考资料（外部） | 低 |
-| `specs/*` | 需求规格与实现任务 | 按 feature 新增 |
-| `docs/superpowers/specs/` | 使用 superpowers skill 产生的设计 spec | 按 feature 新增 |
-| `docs/superpowers/plans/` | 使用 superpowers skill 产生的实施计划 | 按 feature 新增 |
 
 ---
 
@@ -89,8 +85,7 @@ restock_system/
 2. **`docs/PROGRESS.md`** — 当前事实进度和近期变更
 3. **`docs/Project_Architecture_Blueprint.md`** — 若涉及架构层改动
 4. **`docs/onboarding.md`** — 若需要本地启动或改目录结构
-5. **对应 `specs/*` / `docs/superpowers/specs/*`** — 若做具体 feature
-6. **`docs/saihu_api/*`** — 若涉及赛狐接口联调
+5. **`docs/saihu_api/*`** — 若涉及赛狐接口联调
 
 ---
 
@@ -231,8 +226,7 @@ AGENTS.md                                (长期稳定)
     ├──▶ docs/Project_Architecture_Blueprint.md  (架构真理源)
     ├──▶ docs/deployment.md               (部署流程)
     ├──▶ docs/runbook.md                  (运维故障排查)
-    ├──▶ docs/onboarding.md               (新成员入门)
-    └──▶ docs/superpowers/specs|plans/    (feature 级 spec 和 plan)
+    └──▶ docs/onboarding.md               (新成员入门)
 ```
 
 **优先级**：
@@ -243,14 +237,14 @@ AGENTS.md                                (长期稳定)
 
 ---
 
-## 10. 常用 Superpowers Skills 工作流
+## 10. 复杂变更工作流
 
 涉及架构级变更、新功能、复杂重构时，按以下工作流进行：
 
-1. **`superpowers:brainstorming`** — 讨论设计、提出方案、产出 spec 到 `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`
+1. 先讨论设计，形成范围、取舍和验收口径
 2. **用户审阅 spec 并确认**
-3. **`superpowers:writing-plans`** — 产出实施计划到 `docs/superpowers/plans/YYYY-MM-DD-<topic>.md`
-4. **`superpowers:subagent-driven-development`** 或 **`superpowers:executing-plans`** — 执行计划
+3. 产出实施计划（如需落盘，使用当前任务明确指定的位置）
+4. 按计划执行，保持每步可验证
 5. **每步通过校验后才算验收**
 6. **按第 9 节触发映射表同步文档**
 

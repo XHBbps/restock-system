@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-24（需求截止日期过滤后无补货国家命中的 SKU，只要 `purchase_qty > 0` 仍保留为采购建议；补货清单继续仅展示实际补货量。）
+> 最近更新：2026-04-25（清理历史设计产物与旧赛狐写入残留配置，项目文档入口统一收敛到当前 `docs/` 事实文档。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -9,7 +9,7 @@
 
 | 维度 | 状态 |
 |---|---|
-| 主链路 | 打通 — 赛狐同步 → 补货计算 → 建议编辑 → Excel 导出 + Snapshot 版本化（Plan A 已替换推送赛狐） |
+| 主链路 | 打通 — 赛狐同步 → 补货计算 → 建议编辑 → Excel 导出 + Snapshot 版本化（Plan A 已替换旧赛狐写入链路） |
 | 工程化 | 运行时配置校验、健康检查、部署脚本、CI 骨架、测试覆盖已就绪 |
 | 前端 | 已统一到 `PageSectionCard`；订单、历史、商品、库存、出库记录等高增长页面已切换为后端分页模式，设计系统对齐 shadcn Zinc |
 | 后端 | 三服务进程分离（backend / worker / scheduler），TaskRun 队列稳定运行 |
@@ -69,12 +69,12 @@
 ### 2.4 补货建议管理
 - **采购/补货独立导出**：建议单分为采购 Tab 与补货 Tab，采购快照只要求 purchase_qty > 0，补货快照只要求国家补货量大于 0；两类快照按 snapshot_type 独立递增版本、独立更新条目导出状态。
 
-- **建议单**：`draft / archived / error` 状态流转（Plan A 后端重构后推送相关状态 `partial` / `pushed` 已随 §3.49 一并移除）
+- **建议单**：`draft / archived / error` 状态流转（Plan A 后端重构后旧链路状态 `partial` / `pushed` 已随 §3.49 一并移除）
 - **跨页选择**：补货发起页的 `selectedIds` 数组跨分页保持，支持全选筛选后的所有条目
 - **编辑校验**：建议详情支持编辑 `total_qty` / `country_breakdown` / `warehouse_breakdown`；国家补货量不要求与总采购量一致，已配置仓库时仓内分量之和必须等于国家补货量；`urgent` 会随国家补货量变更按对应 SKU 的提前期重新判定
 - **历史记录删除**：历史记录页新增建议单删除入口，删除准入统一为 `snapshot_count === 0`（尚未生成任何导出快照的建议单才可物理删除，保留快照的建议单保留历史追溯不允许删除）
 - **触发方式中文化**：历史记录页“触发方式”由原始值改为中文展示，当前口径统一为“手动触发 / 自动触发”
-- **Excel 导出（替代推送）**：业务人员在建议详情勾选 `export_status='pending'` 的条目，点击“导出 Excel”走一步式 `POST /api/suggestions/{id}/snapshots` + `GET /api/snapshots/{id}/download` blob 下载；服务端生成不可变 `suggestion_snapshot` + `suggestion_snapshot_item` JSONB 快照并同步落盘 Excel 文件，后续可反复下载；元信息页记录“需求截止日期”，采购/补货明细表不增加需求截止日期列；首次导出后 `global_config.suggestion_generation_enabled` 自动翻 OFF，业务人员在全局配置页翻回 ON 时会二次确认并归档全部 `draft` 建议单以开启下一周期
+- **Excel 导出**：业务人员在建议详情勾选 `export_status='pending'` 的条目，点击“导出 Excel”走一步式 `POST /api/suggestions/{id}/snapshots` + `GET /api/snapshots/{id}/download` blob 下载；服务端生成不可变 `suggestion_snapshot` + `suggestion_snapshot_item` JSONB 快照并同步落盘 Excel 文件，后续可反复下载；元信息页记录“需求截止日期”，采购/补货明细表不增加需求截止日期列；首次导出后 `global_config.suggestion_generation_enabled` 自动翻 OFF，业务人员在全局配置页翻回 ON 时会二次确认并归档全部 `draft` 建议单以开启下一周期
 
 ### 2.5 前端 Dashboard 体系
 - **嵌套路由与 Tab 视图**：当前建议、建议详情、历史记录均拆为 procurement / restock 子路由，`SuggestionTabBar` 统一切换；采购页默认按 `commodity_sku` 稳定排序，仅展示商品信息、采购量与导出状态，补货页支持国家与仓库下钻。
@@ -97,6 +97,11 @@
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.64 历史产物与旧配置清理（2026-04-25）
+- 删除历史设计材料目录，并同步移除 AGENTS、onboarding、架构蓝图、README 与报告中的旧入口引用。
+- 删除旧赛狐写入模块残留目录与各类本地构建 / 测试缓存产物；`deploy/data/`、`backend/.venv/`、`cloudflared-windows-amd64.exe`、`Ai_project.lnk` 保留不动。
+- 运行时配置移除旧写入重试与批量大小配置项，`backend/.env.example`、`docs/deployment.md` 与配置校验单测同步收敛。
 
 ### 3.63 安全库存采购-only 项保留到采购建议（2026-04-24）
 - **过滤口径**：`backend/app/engine/runner.py` 的需求截止日期过滤在无补货国家命中时，不再直接丢弃 SKU；只要过滤前完整 SKU 口径的 `purchase_qty > 0`，仍保留为采购-only 条目。
@@ -197,26 +202,26 @@
   - `SuggestionListView.vue` / `SuggestionDetailView.vue` 的状态 tag 同步切换到派生函数。
   - 测试：`status.test.ts` 新增派生函数断言；`HistoryView.test.ts` 状态下拉断言切换到新 value 枚举。
 
-### 3.50 Plan A 前端收尾：导出按钮 + 历史快照区 + 生成开关 + 推送死代码清理（2026-04-19）
-- 前端：新增快照 API 客户端与 blob 下载工具；建议单详情页加导出按钮（一步式 POST+GET blob）与历史快照区；全局配置页加生成开关卡片（即时保存 + 翻 ON 二次确认）；列表页加开关只读 tag；全量清理赛狐推送时代死代码（~110 行 UI + 8 死字段 + `utils/status.ts` map + 4 个测试文件的推送相关 case）；`Suggestion.status` TS 枚举收敛为 `'draft' | 'archived' | 'error'`；`HistoryView.canDelete` 改用 `snapshot_count === 0`。
+### 3.50 Plan A 前端收尾：导出按钮 + 历史快照区 + 生成开关 + 旧链路死代码清理（2026-04-19）
+- 前端：新增快照 API 客户端与 blob 下载工具；建议单详情页加导出按钮（一步式 POST+GET blob）与历史快照区；全局配置页加生成开关卡片（即时保存 + 翻 ON 二次确认）；列表页加开关只读 tag；全量清理旧赛狐写入时代死代码（~110 行 UI + 8 死字段 + `utils/status.ts` map + 4 个测试文件的旧链路 case）；`Suggestion.status` TS 枚举收敛为 `'draft' | 'archived' | 'error'`；`HistoryView.canDelete` 改用 `snapshot_count === 0`。
 - 后端：alembic 迁移 `20260419_0000_grant_export_and_config_view_to_business_role` 给“业务人员”角色补齐 `restock:export` + `config:view`（幂等 `ON CONFLICT DO NOTHING`）。
-- 新增/更新文件：`frontend/src/api/snapshot.ts`、`frontend/src/utils/download.ts` 新增；`frontend/src/api/suggestion.ts`、`frontend/src/api/config.ts`、`frontend/src/utils/status.ts`、`frontend/src/views/SuggestionDetailView.vue`、`frontend/src/views/SuggestionListView.vue`、`frontend/src/views/HistoryView.vue`、`frontend/src/views/GlobalConfigView.vue` 同步收敛为导出视角，并清理推送字段 / pushItems / selection 列等相关 UI 与测试分支。
+- 新增/更新文件：`frontend/src/api/snapshot.ts`、`frontend/src/utils/download.ts` 新增；`frontend/src/api/suggestion.ts`、`frontend/src/api/config.ts`、`frontend/src/utils/status.ts`、`frontend/src/views/SuggestionDetailView.vue`、`frontend/src/views/SuggestionListView.vue`、`frontend/src/views/HistoryView.vue`、`frontend/src/views/GlobalConfigView.vue` 同步收敛为导出视角，并清理旧字段、批量动作列等相关 UI 与测试分支。
 
-### 3.49 Plan A 后端导出重构：推送赛狐 → Excel 导出 + Snapshot 版本化（2026-04-19）
-- 数据模型：`backend/alembic/versions/20260418_0900_redesign_to_export_model.py` 新增 `suggestion_snapshot` / `suggestion_snapshot_item` / `excel_export_log` 三张表，清空 `suggestion` / `suggestion_item` 的推送字段，追加 `export_status` / `exported_snapshot_id` / `exported_at` / `archived_trigger` / `archived_by` 等导出 & 归档审计字段；`suggestion.status` 枚举收缩为 `draft / archived / error`；`global_config` 新增 `suggestion_generation_enabled` 与 `generation_toggle_updated_by / generation_toggle_updated_at`；非生产数据采用一次性迁移。
-- ORM + DTO 同步：`backend/app/models/{suggestion,suggestion_snapshot,excel_export_log,global_config}.py`、`backend/app/schemas/{suggestion,suggestion_snapshot,config}.py` 去除全部 push 字段并新增 snapshot 相关 DTO。
+### 3.49 Plan A 后端导出重构：旧赛狐写入链路 → Excel 导出 + Snapshot 版本化（2026-04-19）
+- 数据模型：`backend/alembic/versions/20260418_0900_redesign_to_export_model.py` 新增 `suggestion_snapshot` / `suggestion_snapshot_item` / `excel_export_log` 三张表，清空 `suggestion` / `suggestion_item` 的旧链路字段，追加 `export_status` / `exported_snapshot_id` / `exported_at` / `archived_trigger` / `archived_by` 等导出 & 归档审计字段；`suggestion.status` 枚举收缩为 `draft / archived / error`；`global_config` 新增 `suggestion_generation_enabled` 与 `generation_toggle_updated_by / generation_toggle_updated_at`；非生产数据采用一次性迁移。
+- ORM + DTO 同步：`backend/app/models/{suggestion,suggestion_snapshot,excel_export_log,global_config}.py`、`backend/app/schemas/{suggestion,suggestion_snapshot,config}.py` 去除全部旧链路字段并新增 snapshot 相关 DTO。
 - Excel 生成：新增 `backend/app/services/excel_export.py`，基于 openpyxl 生成四 Sheet 工作簿（汇总 / 明细 / 国家 / 仓库分仓）；文件落到 `deploy/data/exports/{yyyy}/{mm}/` 容器卷，文件名由 `build_filename(suggestion_id, version, exported_at_compact)` 统一；`openpyxl>=3.1.2` 加入 `backend/pyproject.toml` 生产依赖。
 - 新增快照 API（`backend/app/api/snapshot.py`）：`POST /api/suggestions/{id}/snapshots` 创建并冻结 snapshot、生成 Excel 并将 `suggestion_generation_enabled` 翻为 OFF；`GET /api/suggestions/{id}/snapshots`、`GET /api/snapshots/{id}`、`GET /api/snapshots/{id}/download` 支持列表 / 详情 / 下载计数 + `excel_export_log` 审计；时间戳统一走 `now_beijing()`。
 - 生成开关 API（`backend/app/api/config.py`）：新增 `GET/PATCH /api/config/generation-toggle`；翻 ON 时连带归档全部 `status='draft'` 建议单并打上 `archived_trigger='admin_toggle'` + `archived_by` / `archived_at`。
-- 建议单 & 引擎清理：`backend/app/api/suggestion.py` 删除 `POST /api/suggestions/{id}/push`，`GET /api/suggestions` 注入 `snapshot_count`，删除接口校验快照归属；`backend/app/engine/runner.py` 在生成开关关闭时直接返回 `None`，`_archive_active` 现由 `run_engine` 在写入新 draft 前主动调用，移除 `commodity_id` 自动补齐；`backend/app/tasks/access.py` 及任务注册清理 `push_saihu`。
+- 建议单 & 引擎清理：`backend/app/api/suggestion.py` 删除旧赛狐写入端点，`GET /api/suggestions` 注入 `snapshot_count`，删除接口校验快照归属；`backend/app/engine/runner.py` 在生成开关关闭时直接返回 `None`，`_archive_active` 现由 `run_engine` 在写入新 draft 前主动调用，移除 `commodity_id` 自动补齐；`backend/app/tasks/access.py` 及任务注册清理旧赛狐写入作业。
 - 权限：`backend/app/core/permissions.py` 新增 `restock:export` / `restock:new_cycle`，`superadmin` 自动继承。
-- 代码删除：`backend/app/pushback/purchase.py`、`backend/app/saihu/endpoints/purchase_create.py`、`backend/app/core/commodity_id.py` 及对应 `push_saihu` / `test_pushback_*` / `test_commodity_id.py` 等旧单测。
+- 代码删除：旧赛狐写入作业、`backend/app/saihu/endpoints/purchase_create.py`、`backend/app/core/commodity_id.py` 及对应旧单测。
 - 集成测试抱真实 PostgreSQL：`backend/tests/integration/conftest.py` 采用 `NullPool` 避免跨 event loop 连接复用，client fixture 预置 role+sys_user 并以 `unittest.mock.patch` 短路 `/readyz` 的数据库 / 后台探测；`backend/tests/integration/factories.py` 新增 `seed_test_user`；`backend/pyproject.toml` 将 `asyncio_default_fixture_loop_scope` 改为 `function`；新增 `backend/tests/integration/test_export_e2e.py`、`test_generation_toggle_api.py` 等，`test_config_api.py` 同步新字段。24 项集成测试在 `replenish_test` 库全绿（`TEST_DATABASE_URL=postgresql+asyncpg://postgres@localhost:5433/replenish_test`）。
 
 ### 3.44 鉴权/RBAC 收口与快照刷新边界修复（2026-04-16）
 - `backend/app/api/config.py`、`backend/app/api/data.py`、`backend/app/api/suggestion.py` 不再使用弱化版 `get_current_session()`；改为基于 `get_current_user()` / `require_permission()` 的后端权限校验，分别对 `config:*`、`data_base:*`、`data_biz:*`、`sync:view`、`restock:*`、`history:delete` 生效
-- `backend/app/api/task.py` 改为按 `job_name` 做作业级权限隔离：同步类任务映射到 `sync:view` / `sync:operate`，`calc_engine` 与 `push_saihu` 映射到 `restock:operate`，`refresh_dashboard_snapshot` 映射到 `home:refresh`；通用创建接口不再接受 `push_saihu`
-- `backend/app/api/suggestion.py` 推送去重键改为 `push_saihu#<suggestion_id>#<sorted_item_ids>`，并对 `item_ids` 做排序去重，避免不同推送子集误复用同一活跃任务
+- `backend/app/api/task.py` 改为按 `job_name` 做作业级权限隔离：同步类任务映射到 `sync:view` / `sync:operate`，`calc_engine` 映射到 `restock:operate`，`refresh_dashboard_snapshot` 映射到 `home:refresh`；通用创建接口不再接受旧赛狐写入作业
+- `backend/app/api/suggestion.py` 旧赛狐写入任务的去重键曾按建议单和条目集合排序，避免不同子集误复用同一活跃任务
 - `backend/app/api/metrics.py` 将 `GET /api/metrics/dashboard` 收敛为纯读取接口；无快照或旧快照时返回 `snapshot_status="missing"`，不再自动入队刷新；`GET /api/metrics/prometheus` 新增 `monitor:view` 校验
 - `deploy/Caddyfile` 为 `/api/metrics/prometheus` 增加独立内网 matcher，公网请求直接返回 404，作为应用层权限之外的第二道防线
 - **测试**：新增 `backend/tests/unit/test_task_api.py`，并更新 `backend/tests/unit/test_metrics_snapshot_api.py`、`backend/tests/unit/test_suggestion_patch.py`、`backend/tests/integration/conftest.py`、`frontend/src/views/__tests__/WorkspaceView.test.ts`
@@ -232,7 +237,7 @@
 - `deploy/Caddyfile` 的生产 CSP 将 `img-src` 放行到 `https://m.media-amazon.com`，与赛狐同步的 Amazon 商品主图来源保持一致，避免订单/商品页缩略图被浏览器策略拦截
 - `frontend/src/config/appPages.ts` 新增统一页面定义，`frontend/src/router/index.ts` 与 `frontend/src/config/navigation.ts` 改为共同消费同一份路由/菜单元数据，减少页面 path / title / permission 双份维护
 - `frontend/src/utils/storage.ts` 新增安全读取工具；`frontend/src/stores/auth.ts`、`frontend/src/stores/sidebar.ts` 在 localStorage JSON 损坏或结构异常时自动清理脏数据并回退默认值，避免 SPA 启动阶段因 `JSON.parse` 直接崩溃
-- `backend/app/tasks/access.py` 收敛 TaskRun 作业白名单与查看/操作权限映射，`backend/app/api/task.py` 改为复用统一注册表；保留 `push_saihu` 仅允许通过专用业务入口触发的约束
+- `backend/app/tasks/access.py` 收敛 TaskRun 作业白名单与查看/操作权限映射，`backend/app/api/task.py` 改为复用统一注册表；旧赛狐写入作业仅允许通过专用业务入口触发
 - `backend/app/core/rate_limit.py` 为进程内限流补充周期性全局过期清理、`max_tracked_clients` 容量上限和最旧客户端驱逐逻辑，降低不同 IP 扫描导致的内存持续膨胀风险
 - **测试**：新增 `backend/tests/unit/test_rate_limit_middleware.py`、`frontend/src/stores/__tests__/sidebar.test.ts`，并扩展 `frontend/src/stores/__tests__/auth.test.ts`
 

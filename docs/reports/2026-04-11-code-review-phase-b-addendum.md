@@ -1,6 +1,6 @@
 # Code Review Phase B Addendum（2026-04-11）
 
-> **关联工作**：本报告是 `docs/superpowers/plans/2026-04-11-code-review-fixes.md` Phase B 的产出
+> **关联工作**：本报告是 2026-04-11 代码评审修复 Phase B 的历史产出
 > **目的**：补跑首轮 review 中被 CodeRabbit rate limit 拦截的 3 个目录切片
 > **工具**：CodeRabbit CLI 0.4.1（通过 WSL 调用，--plain -t uncommitted 模式）
 

@@ -29,4 +29,4 @@ npm run build        # 生产构建
 
 ## 设计风格
 
-参考 spec.md 的 "Frontend Design Direction" 章节。设计 tokens 定义在 `src/styles/tokens.scss`。
+参考项目文档入口 `../docs/onboarding.md` 与 `../docs/Project_Architecture_Blueprint.md`。设计 tokens 定义在 `src/styles/tokens.scss`。

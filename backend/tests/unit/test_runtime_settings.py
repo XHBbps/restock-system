@@ -96,20 +96,6 @@ def test_process_role_flags_can_be_overridden(monkeypatch) -> None:
     get_settings.cache_clear()
 
 
-def test_push_auto_retry_times_must_be_positive(monkeypatch) -> None:
-    monkeypatch.setenv(
-        "DATABASE_URL",
-        "postgresql+asyncpg://postgres:postgres@localhost:5432/replenish",
-    )
-    monkeypatch.setenv("PUSH_AUTO_RETRY_TIMES", "0")
-    get_settings.cache_clear()
-
-    with pytest.raises(ValueError, match="PUSH_AUTO_RETRY_TIMES must be >= 1"):
-        get_settings()
-
-    get_settings.cache_clear()
-
-
 def test_retention_stuck_generating_hours_rejects_negative(monkeypatch) -> None:
     """负值会让 cutoff 跑到未来，静默把所有 generating snapshot 标 failed。"""
     monkeypatch.setenv(

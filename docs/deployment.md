@@ -235,7 +235,7 @@ Scheduler 保持单例避免重复触发，Worker 可水平扩展。
 | `LOGIN_PASSWORD` | `deploy/.env.dev` | `deploy/.env` | `backend/.env` | `deploy/docker-compose*.yml`、`backend/app/config.py` | 首次登录使用的明文密码；启动后会写入 hash |
 | `JWT_SECRET` | `deploy/.env.dev` | `deploy/.env` | `backend/.env` | `deploy/docker-compose*.yml`、`backend/app/config.py` | JWT 签名密钥 |
 | `PIP_INDEX_URL` / `PIP_TRUSTED_HOST` | 可选写入 `deploy/.env.dev` | — | — | `deploy/docker-compose.dev.yml`、`backend/Dockerfile` | 仅影响本地 dev 镜像构建时的 pip 源；默认官方 PyPI，需要换镜像时再覆盖 |
-| `WORKER_POLL_INTERVAL_SECONDS` 等任务参数 | 可选写入 `deploy/.env.dev` | 可选写入 `deploy/.env` | `backend/.env` | `backend/app/config.py`、worker/scheduler 进程 | 队列轮询、租约、心跳、重试等运行参数 |
+| `WORKER_POLL_INTERVAL_SECONDS` 等任务参数 | 可选写入 `deploy/.env.dev` | 可选写入 `deploy/.env` | `backend/.env` | `backend/app/config.py`、worker/scheduler 进程 | 队列轮询、租约、心跳等运行参数 |
 | `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` | 可选写入 `deploy/.env.dev` | 可选写入 `deploy/.env` | `backend/.env` | `deploy/docker-compose*.yml`、`backend/app/config.py` | worker / scheduler 常按较小池配置运行 |
 | `VITE_API_PROXY_TARGET` | `frontend/.env` | — | `frontend/.env` | `frontend/vite.config.ts` | 本地前端开发代理目标，默认 `http://localhost:8000` |
 
@@ -286,7 +286,6 @@ Scheduler 保持单例避免重复触发，Worker 可水平扩展。
 | `REAPER_INTERVAL_SECONDS` | Reaper 扫描间隔 | `60` |
 | `DB_POOL_SIZE` | 每个服务的数据库连接池大小 | `10` |
 | `DB_MAX_OVERFLOW` | 连接池可溢出上限 | `5` |
-| `PUSH_AUTO_RETRY_TIMES` | 赛狐同步单条记录失败后的自动重试次数（env 名沿用历史，Plan A 后实际用于同步重试而非推送） | `3` |
 | `SAIHU_RATE_LIMIT_QPS` | 默认单接口 QPS | `1` |
 
 ---

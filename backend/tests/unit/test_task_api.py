@@ -72,10 +72,10 @@ def _task_row(job_name: str, status: str = "pending") -> SimpleNamespace:
 
 
 @pytest.mark.asyncio
-async def test_create_task_rejects_generic_push_saihu_enqueue() -> None:
-    with pytest.raises(ConflictError, match="push_saihu"):
+async def test_create_task_rejects_unknown_job_enqueue() -> None:
+    with pytest.raises(ConflictError, match="legacy_saihu_write"):
         await create_task(
-            EnqueueRequest(job_name="push_saihu"),
+            EnqueueRequest(job_name="legacy_saihu_write"),
             db=_FakeDb([]),  # type: ignore[arg-type]
             permissions=frozenset({RESTOCK_OPERATE}),
         )

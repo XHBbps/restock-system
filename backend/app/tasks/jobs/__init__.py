@@ -1,7 +1,7 @@
 """Job 注册表:job_name -> 异步执行函数。
 
 Worker 通过 `JOB_REGISTRY[task.job_name]` 找到要执行的函数。
-Phase 2 仅注册 placeholder;Phase 3+ 由各 sync/engine/pushback 模块注册。
+Phase 2 仅注册 placeholder;Phase 3+ 由各 sync/engine 模块注册。
 """
 
 from collections.abc import Awaitable, Callable

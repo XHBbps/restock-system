@@ -54,9 +54,6 @@ class Settings(BaseSettings):
     worker_heartbeat_seconds: int = 30
     reaper_interval_seconds: int = 60
 
-    push_auto_retry_times: int = 3
-    push_max_items_per_batch: int = 50
-
     default_buffer_days: int = 30
     default_target_days: int = 60
     default_lead_time_days: int = 50
@@ -94,8 +91,6 @@ def validate_settings(settings: Settings) -> Settings:
 
     if settings.worker_heartbeat_seconds * 2 >= settings.worker_lease_minutes * 60:
         errors.append("WORKER_HEARTBEAT_SECONDS must be less than WORKER_LEASE_MINUTES*60/2")
-    if settings.push_auto_retry_times < 1:
-        errors.append("PUSH_AUTO_RETRY_TIMES must be >= 1")
     if settings.retention_stuck_generating_hours < 0:
         errors.append("RETENTION_STUCK_GENERATING_HOURS must be >= 0 (0 disables)")
     if len(settings.jwt_secret.encode("utf-8")) < 32:

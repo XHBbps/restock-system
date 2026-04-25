@@ -65,12 +65,6 @@ class UnprocessableError(BusinessError):
     status_code = 422
 
 
-class PushBlockedError(BusinessError):
-    """建议条目带有 push_blocker,不可推送。"""
-
-    status_code = 400
-
-
 # ==================== Saihu API Errors ====================
 
 

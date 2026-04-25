@@ -57,8 +57,7 @@
 │  │ │ engine/   │ sync/      │ services/   │ tasks/           │ │ │
 │  │ │ 6 步计算  │ 赛狐数据同步│ Excel 导出  │ 队列+调度+worker │ │ │
 │  │ └───────────┴────────────┴─────────────┴──────────────────┘ │ │
-│  │ （已移除 pushback/、saihu/endpoints/purchase_create.py、   │ │
-│  │   core/commodity_id.py；见 §3.6 导出快照子系统）            │ │
+│  │ （已移除旧赛狐写入模块；见 §3.6 导出快照子系统）            │ │
 │  └──────────────────────┬────────────────────────────────────────┘ │
 │                         │                                           │
 │  ┌──────────────────────▼────────────────────────────────────────┐ │
@@ -212,7 +211,7 @@ CREATE INDEX ix_task_run_lease
 
 **进度追踪**：`TaskRun.current_step / step_detail / total_steps / result_summary` 由 worker 在执行中写入，前端 `TaskProgress` 组件轮询 `/api/tasks/{id}`。`calc_engine` 在生成成功或无需求时写结构化 JSON 摘要（`generated`、`suggestion_id`、`demand_date`、可选 `reason`）；`sync_order_detail` / `refetch_order_detail` 直接按目标订单数回写精确进度；店铺、仓库、商品、库存、订单、出库等分页同步任务则复用赛狐分页响应里的 `totalPage` 输出“第 P / N 页”进度，不额外发起预扫描请求。自 2026-04-20 起，worker 的 heartbeat、进度更新和 success/failed 终态回写都带 `status='running' + worker_id` 条件；若租约已被 reaper 回收，则抛 `TaskLeaseLostError` 并停止继续覆盖状态。
 **信息总览快照任务**：`refresh_dashboard_snapshot` 也是标准 TaskRun 任务，复用现有去重、轮询和失败回写机制；它在后台调用 `build_dashboard_payload()` 生成 `dashboard_snapshot` 单例缓存，页面刷新时优先消费该缓存而不是重复现算。
-**任务权限注册表**：`app/tasks/access.py` 统一维护 TaskRun 作业清单，以及查看/操作权限映射；通用 `POST /api/tasks` 只允许创建显式白名单里的任务。`push_saihu` 作业与推送链路已随 §3.6 的导出快照子系统一同删除。
+**任务权限注册表**：`app/tasks/access.py` 统一维护 TaskRun 作业清单，以及查看/操作权限映射；通用 `POST /api/tasks` 只允许创建显式白名单里的任务。旧赛狐写入作业已随 §3.6 的导出快照子系统一同删除。
 
 ### 3.4 赛狐集成层（app/saihu）
 
@@ -266,7 +265,7 @@ _ENDPOINT_RATE_OVERRIDES = {
 
 ### 3.6 导出快照子系统（app/services + app/api/snapshot.py）
 
-**定位**：取代原“推送采购单到赛狐”链路，改为“建议单 → 用户勾选采购/补货条目 → 生成不可变 Snapshot + Excel 文件 → 用户下载”的工作流。采购与补货从 API、快照版本、条目导出状态和 Excel 格式上完全拆分。
+**定位**：取代旧赛狐写入链路，改为“建议单 → 用户勾选采购/补货条目 → 生成不可变 Snapshot + Excel 文件 → 用户下载”的工作流。采购与补货从 API、快照版本、条目导出状态和 Excel 格式上完全拆分。
 
 **核心表**：
 
@@ -453,7 +452,7 @@ async function reload() {
 
 | 视图 | 职责 |
 |---|---|
-| `SuggestionListView` | 顶部 `PageSectionCard.actions` 展示生成开关只读状态 tag 与当前建议 `需求截止日期`；发起区使用默认空的需求截止日期选择器，提交前校验空值与早于北京时间今天；`loadToggle()` + `loadActiveEngineTask()` 在 `onMounted` / `onActivated` 双钩子刷新开关与活跃 `calc_engine` 任务，活跃任务存在时复用 `TaskProgress` 并禁用日期选择器与生成按钮。已移除推送时代的选择列、推送按钮、`pushTaskId` 轮询、`selectedIds` / `handleSelection` / `handleSelectAll` / `syncTableSelection` / `handlePush` / `PUSH_STATUS_SORT_ORDER` / `filterPushStatus` 等死代码。 |
+| `SuggestionListView` | 顶部 `PageSectionCard.actions` 展示生成开关只读状态 tag 与当前建议 `需求截止日期`；发起区使用默认空的需求截止日期选择器，提交前校验空值与早于北京时间今天；`loadToggle()` + `loadActiveEngineTask()` 在 `onMounted` / `onActivated` 双钩子刷新开关与活跃 `calc_engine` 任务，活跃任务存在时复用 `TaskProgress` 并禁用日期选择器与生成按钮。列表页已收敛为生成与导出视角，不再保留旧赛狐写入时代的选择列、批量动作和状态筛选死代码。 |
 | `SuggestionDetailView` | 勾选 `export_status='pending'` 的条目 → “导出 Excel”按钮走一步式 `POST /api/suggestions/{id}/snapshots` + `GET /api/snapshots/{id}/download` blob 流程（失败时仍在 `finally` 中 `await load()` 刷新快照历史，并区分”导出成功但下载失败”的独立错误文案）；右侧新增”历史快照区”`PageSectionCard`（6 列，按 `version` 降序，可重复下载）；导出前会先探测生成开关，探测失败时按 fail-close 禁用按钮；`SkuCard` 停止传入 `:blocker`（组件 prop 仍保留但所有调用点不再传值）；条目 `isEditable` 改为 `export_status !== 'exported'`（对应 snapshot 条目不可变的约束，见 §9.5 Don'ts）。 |
 | `GlobalConfigView` | 新增”生成开关卡片”：`el-switch` 即时保存，翻 ON 时弹 `ElMessageBox` 二次确认”将归档全部 draft”，`PATCH` 失败时回滚开关状态并提示；无 `config:edit` 时控件只读并提示”无权限操作此开关”。 |
 | `HistoryView` | 参见 §4.5 — 状态筛选 3 项，快照数 + 导出状态列，`canDelete` 基于 `snapshot_count === 0`。 |
@@ -714,15 +713,15 @@ PROCESS_ENABLE_SCHEDULER=true
   - `SuggestionDetailView`（详情页 header 复杂，保留原始 `el-card`）
   - `GlobalConfigView` 已迁移
 
-### ADR-6：去重基于已推送建议而非赛狐在途
+### ADR-6：旧赛狐写入去重决策（已废弃）
 
-- **Status**: Superseded by Plan A 2026-04-19（见 §3.6 / PROGRESS.md §3.49）。推送链路已整体删除，本 ADR 的原始决策不再有效，仅保留做审计追溯。
-- **Replacement decision**：`load_in_transit` 改回直接读取赛狐同步下来的在途出库记录（`in_transit_record` + `in_transit_item`，按 `is_in_transit=true` 过滤），不再做跨批次"已推送未归档"去重。业务人员通过 Excel 导出 + 线下落单的工作流替代了即时去重诉求；如果需要防止重复下单，现在依靠"首次导出后翻 OFF 生成开关 → 新周期由业务人员显式翻 ON 并归档旧 draft"这一闸门，而不是引擎层的数量冲销。
-- **原始决策（已失效）**：`load_in_transit` 从 `suggestion_item` 汇总已推送条目，而非查赛狐在途
+- **Status**: Superseded by Plan A 2026-04-19（见 §3.6 / PROGRESS.md §3.49）。旧赛狐写入链路已整体删除，本 ADR 的原始决策不再有效，仅保留做审计追溯。
+- **Replacement decision**：`load_in_transit` 改回直接读取赛狐同步下来的在途出库记录（`in_transit_record` + `in_transit_item`，按 `is_in_transit=true` 过滤），不再做跨批次旧建议数量冲销。业务人员通过 Excel 导出 + 线下落单的工作流替代了即时去重诉求；如果需要防止重复下单，现在依靠“首次导出后翻 OFF 生成开关 → 新周期由业务人员显式翻 ON 并归档旧 draft”这一闸门，而不是引擎层的数量冲销。
+- **原始决策（已失效）**：`load_in_transit` 从旧建议条目汇总数量，而非查赛狐在途
 - **原始驱动（已失效）**：
   - 赛狐在途数据有同步延迟（需要下次 sync 才写入本地）
-  - 已推送建议单立即可查，0 延迟去重
-- **原始约束（已失效）**：只考虑近 90 天的已推送建议（避免累积过多历史数据）
+  - 旧建议单立即可查，0 延迟去重
+- **原始约束（已失效）**：只考虑近 90 天的旧建议（避免累积过多历史数据）
 
 ---
 
@@ -753,7 +752,7 @@ PROCESS_ENABLE_SCHEDULER=true
 
 **不推荐**。当前 6 步流水线已经覆盖所有计算需求，新增 step 会破坏既有快照字段的语义。更推荐的做法：
 - **修改现有 step**：在已有 step 内增加逻辑
-- **新增独立 job**：例如"补货提醒推送"作为独立 task，读取 `suggestion_item` 后发送通知
+- **新增独立 job**：例如“补货提醒”作为独立 task，读取 `suggestion_item` 后发送通知
 
 ### 9.4 新增一个赛狐 API 端点
 
@@ -866,17 +865,16 @@ npm run build
 ### 12.1 一致性维护
 
 - **CLAUDE.md**（项目根）：记录技术栈和最近变更，AI 助手和新成员优先阅读
-- **docs/superpowers/specs/**：保留每个重要设计的 spec 文档
-- **docs/superpowers/plans/**：保留每次实施计划
+- **docs/**：保留当前事实文档、架构蓝图、部署指南、运维手册和入门说明
 - **本文档**：架构层级的真理源（Source of Truth）
 
 ### 12.2 架构变更流程
 
-1. 先用 `superpowers:brainstorming` skill 讨论设计
-2. 写 spec 到 `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`
+1. 先讨论设计，明确范围、取舍和验收口径
+2. 如需落盘设计材料，使用当前任务明确指定的位置
 3. 用户审阅通过
-4. 用 `superpowers:writing-plans` 生成可执行计划
-5. 用 `superpowers:subagent-driven-development` 执行
+4. 生成可执行计划
+5. 按计划执行
 6. 每步通过校验后才算验收
 7. 更新本架构蓝图（如涉及架构变更）
 
@@ -926,6 +924,7 @@ VITE_API_PROXY_TARGET=http://localhost:8000
 
 | 日期 | 变更 | 相关 PROGRESS 章节 |
 |---|---|---|
+| 2026-04-25 | 清理历史设计产物与旧赛狐写入残留配置，文档入口收敛到当前 `docs/` 事实文档 | §3.64 |
 | 2026-04-24 | 安全库存采购-only 项保留到采购建议：无补货国家命中但 `purchase_qty > 0` 时保留 SKU，补货字段清空且采购/补货计数继续独立 | §3.63 |
 | 2026-04-24 | 前端当前补货页与历史详情弹窗不再展示补货日期；`restock_dates` 仍保留在后端、快照与补货 Excel 导出中 | §3.62 |
 | 2026-04-24 | 需求日期口径改为需求截止日期：runner 按 `restock_dates[country] <= demand_date` 保留补货国家，过期未处理国家纳入截止范围，前端与 Excel 元信息同步改为“需求截止日期” | §3.61 |
@@ -934,7 +933,7 @@ VITE_API_PROXY_TARGET=http://localhost:8000
 | 2026-04-22 | Audit Stage 3 P0 闪电修：engine step4 clamp `purchase_qty >= 0` + DB CheckConstraint；`docs_enabled()` production 硬关忽略 env；CI 加 postgres service 让 integration tests 真跑；`.gitignore` 补 `*.exe` / `*.lnk` 防误 commit | PROGRESS.md 最近更新 |
 | 2026-04-21 | 采购/补货分拆 + 安全库存 + EU 合并 + 嵌套 Tab 视图 | §3.53 |
 | 2026-04-20 | Full audit 收口修复（并发保护 / 查询口径 / fail-close 探测 / dev 重建稳定性） | §3.52 |
-| 2026-04-19 | Plan A 后端 + 前端：推送赛狐 → Excel 导出 + Snapshot 版本化 | §3.49 / §3.50 / §3.51 |
+| 2026-04-19 | Plan A 后端 + 前端：旧赛狐写入链路 → Excel 导出 + Snapshot 版本化 | §3.49 / §3.50 / §3.51 |
 | 2026-04-17 及之前 | 权限系统 / 审计改造 / 数据同步基础 | §3.44 及之前 |
 
 本表只列架构级变更；小改动以 `PROGRESS.md` 各节为准。

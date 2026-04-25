@@ -3,7 +3,7 @@
 > **评审范围**：`backend/app/engine/` 全部 9 个文件
 > **评审基准**：`AGENTS.md §6.5` 后端约定 + `docs/Project_Architecture_Blueprint.md` 引擎章节
 > **评审方式**：离线人工读码，**不依赖赛狐 API 联通**（白名单不通的限制下唯一可行路径）
-> **关联工作**：本评审是 `docs/superpowers/plans/2026-04-11-code-review-fixes.md` Phase C 的产出
+> **关联工作**：本评审是 2026-04-11 代码评审修复 Phase C 的历史产出
 > **评审人**：Claude Code（Opus 4.6）
 
 ---

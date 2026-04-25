@@ -6,7 +6,7 @@
 
 ## 1. 项目概览
 
-**Restock System** 是一套跨境电商海外仓补货管理系统，从赛狐（Sellfox）同步业务数据，通过规则引擎计算各国采购/补货建议，最终以 Excel 导出 + 不可变快照版本化交付给业务人员（Plan A 后已取代原推送赛狐链路）。
+**Restock System** 是一套跨境电商海外仓补货管理系统，从赛狐（Sellfox）同步业务数据，通过规则引擎计算各国采购/补货建议，最终以 Excel 导出 + 不可变快照版本化交付给业务人员（Plan A 后已取代旧赛狐写入链路）。
 
 ### 快速阅读路径
 
@@ -36,7 +36,6 @@ restock_system/
 │   │   ├── api/      # REST 端点
 │   │   ├── engine/   # 补货计算引擎（6 步流水线）
 │   │   ├── sync/     # 赛狐数据同步
-│   │   ├── pushback/ # 采购单回写
 │   │   ├── saihu/    # 赛狐 HTTP 客户端
 │   │   ├── models/   # SQLAlchemy ORM
 │   │   ├── schemas/  # Pydantic DTO
@@ -57,7 +56,6 @@ restock_system/
 │       └── config/   # 导航配置
 ├── deploy/           # Docker Compose + 部署脚本
 ├── docs/             # 文档（本文件所在位置）
-├── specs/            # 需求和契约
 ├── scripts/          # 统一检查脚本（check.ps1 / check.sh）
 └── .github/          # CI/CD workflows
 ```
@@ -143,7 +141,7 @@ npm run dev
 3. 进入"商品"页 → 点击"从商品同步初始化"创建 sku_config
 4. 进入"补货发起"页 → 点击"生成补货建议"
 5. 等待引擎完成（TaskProgress 会自动轮询）
-6. 查看生成的建议单，选择条目推送
+6. 查看并编辑生成的建议单，按需导出采购 / 补货 Excel 快照
 
 ### 4.5 方式 B：本地全栈容器验证
 
@@ -342,11 +340,11 @@ Conventional Commits：
 
 架构级变更 / 新功能：
 
-1. 用 `superpowers:brainstorming` skill 讨论设计
-2. 产出 spec 到 `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`
+1. 先讨论设计，明确范围、取舍和验收口径
+2. 如需落盘设计材料，使用当前任务明确指定的位置
 3. 用户审阅通过
-4. 用 `superpowers:writing-plans` 生成实施计划到 `docs/superpowers/plans/`
-5. 用 `superpowers:subagent-driven-development` 执行
+4. 生成实施计划
+5. 按计划执行
 6. 每步通过校验后才算验收
 7. 若涉及架构变化，同步更新 `Project_Architecture_Blueprint.md`
 
