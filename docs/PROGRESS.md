@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-25（以需求截止日期版本为基底，合入 Caddy Google Fonts CSP 白名单与 Deploy 短 SHA 解析修复。）
+> 最近更新：2026-04-25（以需求截止日期版本为基底，合入 Caddy Google Fonts CSP、Deploy 短 SHA 解析与生产 Alembic revision 兼容修复。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -101,6 +101,10 @@
 ### 3.66 Deploy workflow 短 SHA 解析修复（2026-04-25）
 - **check-ci 修复**：`Deploy` workflow 不再直接把手动输入的短 SHA 传给 `actions/checkout`；先 checkout 默认分支并 fetch 全量分支 / tag，再把分支名、tag、完整或短 commit SHA 解析成完整 commit。
 - **CI 校验口径**：`checks.listForRef` 改为使用解析后的完整 SHA，避免短 SHA 被误当作分支 / tag 通配 ref 导致 checkout 失败。
+
+### 3.67 Alembic 生产 revision 兼容修复（2026-04-25）
+- **迁移拓扑**：补齐 `20260423_1100` 与 `20260424_0100` 两个兼容 marker，解决生产库 `alembic_version=20260424_0100` 时提示 `Can't locate revision identified by '20260424_0100'` 的问题。
+- **schema 兼容**：新增 `20260425_1420` 幂等补回 `suggestion_item.purchase_date` 与 `suggestion_snapshot_item.purchase_date`，兼容曾执行旧本地镜像迁移的生产库。
 
 ### 3.65 Caddy CSP 临时放行 Google Fonts（2026-04-25）
 - **CSP 调整**：`deploy/Caddyfile` 的 `style-src` 放行 `https://fonts.googleapis.com`，`font-src` 放行 `https://fonts.gstatic.com`，用于兼容当前生产镜像中仍存在的 Google Fonts 外链。

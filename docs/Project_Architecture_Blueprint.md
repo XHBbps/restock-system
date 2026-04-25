@@ -577,6 +577,7 @@ UPDATE global_config SET suggestion_generation_enabled=true, generation_toggle_u
 - 位置：`backend/alembic/versions/`
 - 命名：`YYYYMMDD_HHMM_description.py`
 - 执行：`alembic upgrade head`（容器启动时由 deploy 脚本自动执行）
+- 兼容约束：`20260423_1100`、`20260424_0100` 是生产曾短暂执行过的兼容 marker；当前 head `20260425_1420` 会补回 master 仍需要的 `purchase_date` 字段，避免生产库停在旧 revision 时无法升级。
 
 ---
 
