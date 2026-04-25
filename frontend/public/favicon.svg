@@ -2,5 +2,5 @@
   <!-- Background: large radius matching reference icon style -->
   <rect width="32" height="32" rx="8" fill="#09090b"/>
   <!-- Letter R -->
-  <text x="16" y="22.5" text-anchor="middle" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" font-weight="700" fill="#ffffff">R</text>
+  <text x="16" y="22.5" text-anchor="middle" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" font-weight="700" fill="#ffffff">R</text>
 </svg>

@@ -4,8 +4,6 @@
 // HSL values converted to hex for SCSS/Element Plus usage
 // =====================================================================
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
-
 // ---------- shadcn/ui 原始 HSL 调色板（Zinc theme） ----------
 // --background:          0 0% 100%       #ffffff
 // --foreground:          240 10% 3.9%    #09090b
@@ -116,17 +114,31 @@ $space-12: 48px;
 $space-16: 64px;
 
 // ==================== Typography ====================
-// ★ Inter via Google Fonts, 加系统 fallback
+// 系统字体栈，避免生产环境发起外部字体请求。
 $font-family-sans:
-  'Inter',
+  system-ui,
   -apple-system,
   BlinkMacSystemFont,
   'Segoe UI',
   'PingFang SC',
   'Hiragino Sans GB',
   'Microsoft YaHei',
+  'Noto Sans CJK SC',
+  'Source Han Sans SC',
+  'Helvetica Neue',
+  Arial,
   sans-serif;
-$font-family-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', 'Cascadia Code', Consolas, monospace;
+$font-family-mono:
+  ui-monospace,
+  'SFMono-Regular',
+  'SF Mono',
+  'Cascadia Code',
+  'Cascadia Mono',
+  Consolas,
+  'Liberation Mono',
+  Menlo,
+  Monaco,
+  monospace;
 
 // shadcn 字号 (对应 tailwind text-xs/sm/base/lg/xl/2xl/3xl)
 $font-size-xs: 12px;                  // text-xs
