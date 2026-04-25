@@ -177,7 +177,9 @@ onMounted(async () => {
       map[warehouse.id] = warehouse.name
     }
     warehouseMap.value = map
-  } catch {}
+  } catch {
+    warehouseMap.value = {}
+  }
 })
 
 const editable = computed(() => props.suggestion?.status === 'draft')

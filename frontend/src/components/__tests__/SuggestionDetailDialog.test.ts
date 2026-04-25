@@ -33,17 +33,17 @@ const ElDialogStub = defineComponent({
 
 const ElTableStub = defineComponent({
   name: 'ElTableStub',
+  provide() {
+    return {
+      tableRow: Array.isArray(this.data) && this.data.length > 0 ? this.data[0] : {},
+    }
+  },
   inheritAttrs: false,
   props: {
     data: {
       type: Array,
       default: () => [],
     },
-  },
-  provide() {
-    return {
-      tableRow: Array.isArray(this.data) && this.data.length > 0 ? this.data[0] : {},
-    }
   },
   template: `
     <div
@@ -165,7 +165,9 @@ function makeSnapshotItem(index = 1, overrides: Partial<SnapshotItemOut> = {}): 
 }
 
 function toSnapshotRow(snapshot: SnapshotDetailOut): SnapshotOut {
-  const { items: _items, global_config_snapshot: _config, ...row } = snapshot
+  const row = { ...snapshot }
+  delete (row as Partial<SnapshotDetailOut>).items
+  delete (row as Partial<SnapshotDetailOut>).global_config_snapshot
   return row
 }
 
