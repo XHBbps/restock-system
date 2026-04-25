@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-25（以需求截止日期版本为基底，合入 Caddy Google Fonts CSP、Deploy 短 SHA 解析与生产 Alembic revision 兼容修复。）
+> 最近更新：2026-04-25（以需求截止日期版本为基底，合入 Caddy Google Fonts CSP、Deploy 短 SHA 解析、生产 Alembic revision 兼容与 CI pip-audit 修复。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -101,6 +101,9 @@
 ### 3.66 Deploy workflow 短 SHA 解析修复（2026-04-25）
 - **check-ci 修复**：`Deploy` workflow 不再直接把手动输入的短 SHA 传给 `actions/checkout`；先 checkout 默认分支并 fetch 全量分支 / tag，再把分支名、tag、完整或短 commit SHA 解析成完整 commit。
 - **CI 校验口径**：`checks.listForRef` 改为使用解析后的完整 SHA，避免短 SHA 被误当作分支 / tag 通配 ref 导致 checkout 失败。
+
+### 3.68 CI pip-audit 工具链修复（2026-04-25）
+- **后端 CI**：`.github/workflows/ci.yml` 将 pip 升级命令固定为 `pip>=26.0.2`，避免 `pip-audit` 扫描到 runner 中 `pip 26.0.1` 的 `CVE-2026-3219` 后阻断后端 job。
 
 ### 3.67 Alembic 生产 revision 兼容修复（2026-04-25）
 - **迁移拓扑**：保留需求截止日期分支真实迁移 `20260423_1100_add_restock_dates` 与 `20260424_0100_drop_purchase_date_from_suggestions`，并新增 `20260425_1420` 兼容 marker。
