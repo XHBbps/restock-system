@@ -107,7 +107,7 @@
 
 ### 3.69 部署脚本可执行位修复（2026-04-25）
 - **部署权限**：恢复分支同步将 `deploy/scripts/*.sh` 标记为 `100755`，避免 SSH 部署时直接调用 `validate_env.sh`、`rollback.sh` 等脚本出现 `Permission denied`。
-- **tag 更新**：`Deploy` workflow 的 SSH 阶段改为 `git fetch --force --prune --tags origin '+refs/heads/*:refs/remotes/origin/*' '+refs/tags/*:refs/tags/*'`，允许服务器本地 tag 跟随 GitHub 强制更新，避免重新移动 `v-demand-date-20260425` 后报 `would clobber existing tag`。
+- **tag 更新**：`Deploy` workflow 的 fetch 改为显式强制拉取 `+refs/heads/*` 与 `+refs/tags/*`，不再使用隐式 `--tags`，允许服务器本地 tag 跟随 GitHub 强制更新，避免重新移动 `v-demand-date-20260425` 后报 `would clobber existing tag`。
 
 ### 3.67 Alembic 生产 revision 兼容修复（2026-04-25）
 - **迁移拓扑**：保留需求截止日期分支真实迁移 `20260423_1100_add_restock_dates` 与 `20260424_0100_drop_purchase_date_from_suggestions`，并新增 `20260425_1420` 兼容 marker。
