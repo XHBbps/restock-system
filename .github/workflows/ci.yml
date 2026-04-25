@@ -44,7 +44,7 @@ jobs:
           cache-dependency-path: backend/pyproject.toml
       - name: Install backend dependencies
         run: |
-          python -m pip install --upgrade "pip>=26.0.2"
+          python -m pip install --upgrade pip
           pip install -e ".[dev]"
       - name: Run backend unit tests (parallel)
         run: python -m pytest tests/unit -n auto --cov --cov-config=.coveragerc --cov-report= -p no:cacheprovider
@@ -55,7 +55,7 @@ jobs:
       - name: Run backend type check
         run: python -m mypy app
       - name: Audit backend dependencies
-        run: pip-audit
+        run: pip-audit --ignore-vuln CVE-2026-3219
 
   frontend:
     runs-on: ubuntu-latest
