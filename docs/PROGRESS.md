@@ -103,8 +103,8 @@
 - **CI 校验口径**：`checks.listForRef` 改为使用解析后的完整 SHA，避免短 SHA 被误当作分支 / tag 通配 ref 导致 checkout 失败。
 
 ### 3.67 Alembic 生产 revision 兼容修复（2026-04-25）
-- **迁移拓扑**：补齐 `20260423_1100` 与 `20260424_0100` 两个兼容 marker，解决生产库 `alembic_version=20260424_0100` 时提示 `Can't locate revision identified by '20260424_0100'` 的问题。
-- **schema 兼容**：新增 `20260425_1420` 幂等补回 `suggestion_item.purchase_date` 与 `suggestion_snapshot_item.purchase_date`，兼容曾执行旧本地镜像迁移的生产库。
+- **迁移拓扑**：保留需求截止日期分支真实迁移 `20260423_1100_add_restock_dates` 与 `20260424_0100_drop_purchase_date_from_suggestions`，并新增 `20260425_1420` 兼容 marker。
+- **生产兼容**：`20260425_1420` 不修改 schema，仅用于兼容已经推进到该 revision 的生产库，避免回到需求截止日期分支时提示 `Can't locate revision identified by '20260425_1420'`。
 
 ### 3.65 Caddy CSP 临时放行 Google Fonts（2026-04-25）
 - **CSP 调整**：`deploy/Caddyfile` 的 `style-src` 放行 `https://fonts.googleapis.com`，`font-src` 放行 `https://fonts.gstatic.com`，用于兼容当前生产镜像中仍存在的 Google Fonts 外链。
