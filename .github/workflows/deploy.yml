@@ -96,7 +96,9 @@ jobs:
             set -euo pipefail
             REF="${{ github.event.inputs.ref || github.ref_name }}"
             cd "${{ secrets.DEPLOY_PATH }}"
-            git fetch --all --tags
+            git fetch --force --prune --tags origin \
+              '+refs/heads/*:refs/remotes/origin/*' \
+              '+refs/tags/*:refs/tags/*'
             if [[ "$REF" == refs/heads/* ]]; then
               BRANCH="${REF#refs/heads/}"
               git checkout "$BRANCH"
