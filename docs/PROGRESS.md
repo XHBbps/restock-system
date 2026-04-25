@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-25（生产临时使用 `local-20260424-2130` 镜像，Caddy CSP 放行 `fonts.googleapis.com` / `fonts.gstatic.com` 以兼容该镜像内置的 Google Fonts 外链。）
+> 最近更新：2026-04-25（Deploy workflow 修复短 SHA 输入导致 `actions/checkout` 抓取 `76aa13e*` 失败的问题；check-ci 会先解析分支 / tag / 短 SHA 到完整 commit 后再校验 CI。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -96,6 +96,10 @@
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.57 Deploy workflow 短 SHA 解析修复（2026-04-25）
+- **check-ci 修复**：`Deploy` workflow 不再直接把手动输入的短 SHA 传给 `actions/checkout`；先 checkout 默认分支并 fetch 全量分支 / tag，再把分支名、tag、完整或短 commit SHA 解析成完整 commit。
+- **CI 校验口径**：`checks.listForRef` 改为使用解析后的完整 SHA，避免短 SHA 被误当作分支 / tag 通配 ref 导致 checkout 在 `76aa13e*` 这类输入上失败。
 
 ### 3.56 Caddy CSP 临时放行 Google Fonts（2026-04-25）
 - **CSP 调整**：`deploy/Caddyfile` 的 `style-src` 放行 `https://fonts.googleapis.com`，`font-src` 放行 `https://fonts.gstatic.com`，用于兼容当前生产临时镜像 `local-20260424-2130` 中仍存在的 Google Fonts 外链。
