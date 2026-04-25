@@ -55,7 +55,7 @@ jobs:
       - name: Run backend type check
         run: python -m mypy app
       - name: Audit backend dependencies
-        run: pip-audit
+        run: pip-audit -r requirements.lock
 
   frontend:
     runs-on: ubuntu-latest
