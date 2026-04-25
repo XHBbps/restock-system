@@ -82,9 +82,17 @@ export async function listSuggestions(params: {
   return data
 }
 
-export async function getCurrentSuggestion(): Promise<SuggestionDetail> {
-  const { data } = await client.get<SuggestionDetail>('/api/suggestions/current')
-  return data
+export async function getCurrentSuggestion(): Promise<SuggestionDetail | null> {
+  const result = await listSuggestions({
+    status: 'draft',
+    page: 1,
+    page_size: 1,
+    sort_by: 'created_at',
+    sort_order: 'desc',
+  })
+  const current = result.items[0]
+  if (!current) return null
+  return getSuggestion(current.id)
 }
 
 export async function getSuggestion(id: number): Promise<SuggestionDetail> {

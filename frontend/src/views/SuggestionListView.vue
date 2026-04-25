@@ -146,12 +146,7 @@ async function loadCurrent(): Promise<void> {
   try {
     suggestion.value = await getCurrentSuggestion()
   } catch (err: unknown) {
-    const e = err as { response?: { status?: number } }
-    if (e.response?.status === 404) {
-      suggestion.value = null
-    } else {
-      ElMessage.error(getActionErrorMessage(err, '加载当前建议失败'))
-    }
+    ElMessage.error(getActionErrorMessage(err, '加载当前建议失败'))
   } finally {
     loading.value = false
   }
