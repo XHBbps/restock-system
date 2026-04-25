@@ -6,7 +6,7 @@ on:
       ref:
         description: "Git ref to deploy"
         required: true
-        default: "main"
+        default: "master"
   push:
     tags:
       - 'v*'
@@ -24,12 +24,41 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.inputs.ref || github.ref_name }}
+          fetch-depth: 0
+      - name: Resolve deploy ref
+        id: resolve-ref
+        shell: bash
+        run: |
+          set -euo pipefail
+          INPUT_REF="${{ github.event.inputs.ref || github.ref_name }}"
+          git fetch --force --prune --tags origin \
+            '+refs/heads/*:refs/remotes/origin/*' \
+            '+refs/tags/*:refs/tags/*'
+
+          CANDIDATE="$INPUT_REF"
+          if [[ "$INPUT_REF" == refs/heads/* ]]; then
+            CANDIDATE="origin/${INPUT_REF#refs/heads/}"
+          elif [[ "$INPUT_REF" == refs/tags/* ]]; then
+            CANDIDATE="$INPUT_REF"
+          elif git show-ref --verify --quiet "refs/remotes/origin/$INPUT_REF"; then
+            CANDIDATE="origin/$INPUT_REF"
+          elif git show-ref --verify --quiet "refs/tags/$INPUT_REF"; then
+            CANDIDATE="refs/tags/$INPUT_REF"
+          fi
+
+          RESOLVED_SHA="$(git rev-parse --verify "${CANDIDATE}^{commit}")"
+          echo "ref=$INPUT_REF" >> "$GITHUB_OUTPUT"
+          echo "sha=$RESOLVED_SHA" >> "$GITHUB_OUTPUT"
+          echo "Resolved $INPUT_REF to $RESOLVED_SHA"
       - name: Verify CI passed for this ref
         uses: actions/github-script@v9
+        env:
+          DEPLOY_REF: ${{ steps.resolve-ref.outputs.ref }}
+          RESOLVED_SHA: ${{ steps.resolve-ref.outputs.sha }}
         with:
           script: |
-            const ref = '${{ github.event.inputs.ref || github.sha }}';
+            const ref = process.env.RESOLVED_SHA;
+            const inputRef = process.env.DEPLOY_REF;
             const checkRuns = await github.paginate(github.rest.checks.listForRef, {
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -42,12 +71,12 @@ jobs:
             const ciFrontend = checkRuns.find(c => c.name === 'frontend');
 
             if (!ciBackend || ciBackend.conclusion !== 'success') {
-              core.setFailed(`Backend CI has not passed for ref ${ref}`);
+              core.setFailed(`Backend CI has not passed for ref ${inputRef} (${ref})`);
             }
             if (!ciFrontend || ciFrontend.conclusion !== 'success') {
-              core.setFailed(`Frontend CI has not passed for ref ${ref}`);
+              core.setFailed(`Frontend CI has not passed for ref ${inputRef} (${ref})`);
             }
-            core.info('CI checks passed');
+            core.info(`CI checks passed for ${inputRef} (${ref})`);
 
   deploy:
     needs: check-ci

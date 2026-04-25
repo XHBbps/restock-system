@@ -183,7 +183,7 @@ Scheduler 保持单例避免重复触发，Worker 可水平扩展。
 补充约定：
 
 - `CI` workflow 会在 `main`、`master` 和 `v*` tag 上发布 GHCR 镜像，镜像标签统一为 `sha-<commit>`，并自动将 owner 归一化为小写
-- `Deploy` workflow 支持传入分支名、tag 名或 commit SHA；部署机会先切到对应 ref，再导出同名 `IMAGE_TAG=sha-<commit>` 给 Compose 使用
+- `Deploy` workflow 支持传入分支名、tag 名、完整 commit SHA 或短 commit SHA；`check-ci` 会先解析为完整 SHA 再校验 CI，部署机会切到对应 ref 后导出 `IMAGE_TAG=sha-<commit>` 给 Compose 使用
 - `latest` 仅作为主分支便捷标签，生产发布以 `sha-<commit>` 为准，避免分支名与镜像 tag 脱节
 
 ---
@@ -315,7 +315,7 @@ bash deploy/scripts/deploy.sh
 
 如果是通过 GitHub Actions 触发发布，推荐流程如下：
 
-1. 选择已经通过 CI 的 `main` / `master` / `v*` tag / commit SHA
+1. 选择已经通过 CI 的 `main` / `master` / `v*` tag / 完整或短 commit SHA
 2. 确认对应 GHCR 中已存在 `sha-<commit>` 镜像
 3. 执行 `Deploy` workflow，由 workflow 自动切 ref、设置 `IMAGE_TAG` 并调用 `deploy/scripts/deploy.sh`
 
