@@ -405,15 +405,16 @@ docker compose -f deploy/docker-compose.yml restart backend
         查看 deploy/Caddyfile
 ```
 
-### 3.9 发布后商品缩略图空白
+### 3.9 发布后静态资源被 CSP 拦截
 
-**症状**：页面能打开，但商品卡片或订单详情里的商品缩略图不显示；浏览器控制台出现 CSP / `img-src` 拦截。
+**症状**：页面能打开，但商品卡片、订单详情缩略图或字体样式异常；浏览器控制台出现 CSP / `img-src` / `style-src` / `font-src` 拦截。
 
 **排查**：
 
 1. **确认图片来源域名**
    - 当前赛狐同步的 Amazon 商品主图默认来自 `https://m.media-amazon.com`
    - 若接入了新的图片来源域名，需要同步更新 `deploy/Caddyfile` 的 `Content-Security-Policy`
+   - 当前生产临时镜像若仍引用 Google Fonts，`style-src` 需包含 `https://fonts.googleapis.com`，`font-src` 需包含 `https://fonts.gstatic.com`
 
 2. **检查生产 Caddy 配置**
    ```bash
@@ -427,7 +428,7 @@ docker compose -f deploy/docker-compose.yml restart backend
 
 4. **浏览器复查**
    - 强制刷新页面（`Ctrl+F5`）
-   - 打开开发者工具 → Network / Console，确认不再出现 `Refused to load the image` 之类的 CSP 报错
+   - 打开开发者工具 → Network / Console，确认不再出现 `Refused to load the image`、`Loading the stylesheet ... violates Content Security Policy` 之类的 CSP 报错
 
 ### 3.10 补货引擎卡住或异常
 

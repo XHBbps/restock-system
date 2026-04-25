@@ -266,6 +266,7 @@ Scheduler 保持单例避免重复触发，Worker 可水平扩展。
 |---|---|---|---|
 | Caddy → Backend 转发真实来源 IP | `deploy/Caddyfile`、`deploy/Caddyfile.dev` | 设置 `X-Real-IP`、`X-Forwarded-For`、`X-Forwarded-Proto` | 让后端日志、限流、登录审计拿到来源地址 |
 | 健康检查访问限制 | `deploy/Caddyfile` | 仅允许 `127.0.0.1`、`10.0.0.0/8`、`172.16.0.0/12`、`192.168.0.0/16` 访问 `/healthz`、`/readyz` | 限制生产健康端点暴露范围 |
+| 生产 CSP 字体白名单 | `deploy/Caddyfile` | `style-src` 放行 `https://fonts.googleapis.com`，`font-src` 放行 `https://fonts.gstatic.com` | 兼容仍引用 Google Fonts 的生产临时镜像；安全性弱于完全自托管字体 |
 | 后端信任代理网段 | `backend/app/api/auth.py`、`backend/app/core/rate_limit.py` | 信任 `127.0.0.1/32`、`10.0.0.0/8`、`172.16.0.0/12`、`192.168.0.0/16` | 只有来自这些代理源时才信任转发 IP |
 
 ### 变更落点速查
@@ -278,6 +279,7 @@ Scheduler 保持单例避免重复触发，Worker 可水平扩展。
 | 本地容器入口端口 `8088` / `5433` | `deploy/docker-compose.dev.yml`，必要时同步 `deploy/Caddyfile.dev` | 端口改动后文档与检查脚本也应同步 |
 | 生产入口端口 `80/443` | `deploy/docker-compose.yml` | 变更后需确认防火墙与证书流程 |
 | 本地前端代理目标 | `frontend/.env` 或 `frontend/.env.example`、`frontend/vite.config.ts` | 仅影响 `npm run dev` |
+| 生产 CSP 外部资源白名单 | `deploy/Caddyfile`，必要时同步 `docs/runbook.md` | 放行外部字体、图片、脚本等资源必须明确域名与风险 |
 | 生产域名路由 / 健康检查限制 | `deploy/Caddyfile` | 与 `APP_DOMAIN`、trusted proxy 配置一起看 |
 
 ### 可选进阶配置
