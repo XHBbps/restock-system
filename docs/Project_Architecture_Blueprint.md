@@ -332,7 +332,7 @@ src/
 **基于 shadcn/ui Zinc 主题**，在 `src/styles/tokens.scss` 中定义：
 - **颜色**：50+ 设计令牌，主色 `#18181b`（zinc-900）
 - **间距**：4px 网格（`$space-1` 至 `$space-16`）
-- **字体**：Inter + JetBrains Mono
+- **字体**：系统 sans-serif + monospace 字体栈（不依赖外部字体 CDN，兼容生产 CSP）
 - **圆角**：4 / 6 / 8 / 12 / pill
 - **阴影**：card / popup 两级
 
@@ -934,4 +934,3 @@ VITE_API_PROXY_TARGET=http://localhost:8000
 ---
 
 **本架构蓝图应随架构演进同步更新。** 若发现文档与代码实际行为不符，以代码为准并回填文档。
-
