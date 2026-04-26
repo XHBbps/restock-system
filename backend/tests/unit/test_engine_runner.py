@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from app.core.timezone import now_beijing
 from app.engine.context import LocalStock
 from app.engine.runner import (
     ENGINE_RUN_ADVISORY_LOCK_KEY,
@@ -100,6 +101,10 @@ def _make_config(**overrides: Any) -> SimpleNamespace:
     return SimpleNamespace(**defaults)
 
 
+def _today() -> date:
+    return now_beijing().date()
+
+
 def test_config_snapshot_keys() -> None:
     snapshot = _config_snapshot(_make_config())  # type: ignore[arg-type]
 
@@ -120,7 +125,7 @@ async def test_run_engine_no_enabled_skus_returns_none() -> None:
     ctx = _FakeContext()
 
     with patch("app.engine.runner.async_session_factory", _FakeSessionFactory(db)):
-        result = await run_engine(ctx, demand_date=date.today())  # type: ignore[arg-type]
+        result = await run_engine(ctx, demand_date=_today())  # type: ignore[arg-type]
 
     assert result is None
     assert any(call.get("current_step") == "完成" for call in ctx.progress_calls)
@@ -153,14 +158,14 @@ async def test_run_engine_writes_purchase_fields_and_item_counts() -> None:
         patch("app.engine.runner.load_all_sku_country_orders", AsyncMock(return_value={})),
         patch("app.engine.runner._persist_suggestion", fake_persist),
     ):
-        demand_date = date.today()
+        demand_date = _today()
         result = await run_engine(_FakeContext(), demand_date=demand_date)  # type: ignore[arg-type]
 
     assert result == 123
     item = captured["items"][0]
     assert item["total_qty"] == 100
     assert item["purchase_qty"] == 145
-    assert item["restock_dates"] == {"US": (date.today() - timedelta(days=20)).isoformat()}
+    assert item["restock_dates"] == {"US": (_today() - timedelta(days=20)).isoformat()}
 
 
 @pytest.mark.asyncio
@@ -199,7 +204,7 @@ async def test_run_engine_velocity_unaffected_by_restock_regions() -> None:
         patch("app.engine.runner.load_all_sku_country_orders", AsyncMock(return_value={})),
         patch("app.engine.runner._persist_suggestion", fake_persist),
     ):
-        demand_date = date.today()
+        demand_date = _today()
         result = await run_engine(_FakeContext(), demand_date=demand_date)  # type: ignore[arg-type]
 
     # step1 必须以全量 velocity 被调用（不传 allowed_countries）
@@ -217,7 +222,7 @@ async def test_run_engine_velocity_unaffected_by_restock_regions() -> None:
     # purchase_qty = 180 - 0 + (3+2)*15 = 255
     # 关键：Σvelocity 含 JP 的 2/天，否则会少算 2*15=30，结果变 225
     assert item["purchase_qty"] == 255, "purchase_qty 应覆盖所有国家动销；若仅算白名单则为 225"
-    assert item["restock_dates"] == {"US": (date.today() - timedelta(days=20)).isoformat()}
+    assert item["restock_dates"] == {"US": (_today() - timedelta(days=20)).isoformat()}
 
 
 @pytest.mark.asyncio
@@ -237,7 +242,7 @@ async def test_run_engine_returns_none_when_all_items_empty() -> None:
         patch("app.engine.runner.load_all_sku_country_orders", AsyncMock(return_value={})),
         patch("app.engine.runner._persist_suggestion", persist),
     ):
-        result = await run_engine(_FakeContext(), demand_date=date.today())  # type: ignore[arg-type]
+        result = await run_engine(_FakeContext(), demand_date=_today())  # type: ignore[arg-type]
 
     assert result is None
     persist.assert_not_awaited()
@@ -270,7 +275,7 @@ async def test_run_engine_keeps_safety_stock_purchase_only_item() -> None:
         patch("app.engine.runner.load_all_sku_country_orders", AsyncMock(return_value={})),
         patch("app.engine.runner._persist_suggestion", fake_persist),
     ):
-        result = await run_engine(_FakeContext(), demand_date=date.today())  # type: ignore[arg-type]
+        result = await run_engine(_FakeContext(), demand_date=_today())  # type: ignore[arg-type]
 
     assert result == 123
     assert len(captured["items"]) == 1
@@ -337,7 +342,7 @@ async def test_run_engine_keeps_restock_and_purchase_only_items_together() -> No
         patch("app.engine.runner.load_all_sku_country_orders", AsyncMock(return_value={})),
         patch("app.engine.runner._persist_suggestion", fake_persist),
     ):
-        demand_date = date.today()
+        demand_date = _today()
         result = await run_engine(_FakeContext(), demand_date=demand_date)  # type: ignore[arg-type]
 
     assert result == 123
@@ -380,7 +385,7 @@ async def test_run_engine_uses_restock_date_as_effective_target_days() -> None:
     ):
         await run_engine(
             _FakeContext(),
-            demand_date=date.today() + timedelta(days=30),
+            demand_date=_today() + timedelta(days=30),
         )  # type: ignore[arg-type]
 
     assert compute_country_qty_mock.call_args.args[2] == 90
@@ -422,13 +427,13 @@ async def test_run_engine_keeps_countries_after_restock_date() -> None:
     ):
         result = await run_engine(
             _FakeContext(),
-            demand_date=date.today(),
+            demand_date=_today(),
         )  # type: ignore[arg-type]
 
     assert result == 123
     item = captured["items"][0]
     assert item["country_breakdown"] == {"US": 60, "GB": 120}
-    assert item["restock_dates"]["GB"] == (date.today() + timedelta(days=50)).isoformat()
+    assert item["restock_dates"]["GB"] == (_today() + timedelta(days=50)).isoformat()
     assert item["total_qty"] == 180
     assert item["purchase_qty"] == 225
 
