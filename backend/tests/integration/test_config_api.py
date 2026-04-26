@@ -107,6 +107,7 @@ async def test_patch_global_config_backfills_order_country_to_eu(
         country_code="DE",
         marketplace_id="DE",
     )
+    order_pk = order.id
     await db_session.commit()
 
     resp = await client.patch("/api/config/global", json={"eu_countries": ["DE", "FR"]})
@@ -114,7 +115,7 @@ async def test_patch_global_config_backfills_order_country_to_eu(
     assert resp.status_code == 200
     db_session.expire_all()
     updated = (
-        await db_session.execute(select(OrderHeader).where(OrderHeader.id == order.id))
+        await db_session.execute(select(OrderHeader).where(OrderHeader.id == order_pk))
     ).scalar_one()
     assert updated.country_code == "EU"
     assert updated.marketplace_id == "EU"
@@ -133,6 +134,7 @@ async def test_patch_global_config_restores_order_country_when_removed_from_eu(
         marketplace_id="EU",
         original_country_code="DE",
     )
+    order_pk = order.id
     await db_session.commit()
 
     resp = await client.patch("/api/config/global", json={"eu_countries": ["FR"]})
@@ -140,7 +142,7 @@ async def test_patch_global_config_restores_order_country_when_removed_from_eu(
     assert resp.status_code == 200
     db_session.expire_all()
     updated = (
-        await db_session.execute(select(OrderHeader).where(OrderHeader.id == order.id))
+        await db_session.execute(select(OrderHeader).where(OrderHeader.id == order_pk))
     ).scalar_one()
     assert updated.country_code == "DE"
     assert updated.marketplace_id == "DE"
@@ -158,6 +160,7 @@ async def test_patch_global_config_skips_order_backfill_when_eu_countries_unchan
         country_code="DE",
         marketplace_id="DE",
     )
+    order_pk = order.id
     await _seed_dashboard_snapshot(db_session, stale=False)
 
     resp = await client.patch("/api/config/global", json={"eu_countries": ["DE"]})
@@ -165,7 +168,7 @@ async def test_patch_global_config_skips_order_backfill_when_eu_countries_unchan
     assert resp.status_code == 200
     db_session.expire_all()
     unchanged = (
-        await db_session.execute(select(OrderHeader).where(OrderHeader.id == order.id))
+        await db_session.execute(select(OrderHeader).where(OrderHeader.id == order_pk))
     ).scalar_one()
     snap = await db_session.get(DashboardSnapshot, 1)
     assert unchanged.country_code == "DE"
