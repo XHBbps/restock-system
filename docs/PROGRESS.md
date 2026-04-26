@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-26（EU 国家配置保存会回填历史订单国家码；信息总览风险分布、覆盖国家与急需补货 SKU 改为按当前补货区域口径展示。）
+> 最近更新：2026-04-27（生产主分支切换为当前线上补货日期发布线；Deploy workflow 的分支部署改为对齐 `origin/<branch>`，避免服务器旧本地分支阻塞。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -103,6 +103,11 @@
 - **快照刷新**：`eu_countries` 变化仍会将 `dashboard_snapshot.stale=True`，沿用现有信息总览自动刷新任务机制；`eu_countries` 值未变化时不执行历史订单回填，也不额外置 stale。
 - **风险分布口径**：`backend/app/api/metrics.py` 的 `country_risk_distribution`、`urgent_count` / `warning_count` / `safe_count`、`risk_country_count` 和 `top_urgent_skus` 统一按 `restock_regions` 过滤后的国家展示；`restock_regions=[]` 仍表示全部国家参与，配置为 `["EU"]` 时风险图和覆盖国家只显示 `EU`。
 - **保留统计**：`restock_sku_count` / `no_restock_sku_count` 继续使用当前补货引擎数量口径，不改变 API 返回字段结构和前端页面结构。
+
+### 3.73 生产主分支切换与部署分支对齐（2026-04-27）
+- **主分支口径**：生产线从 `recover-demand-date-base` 切换为新的 `master`，旧 `master` 保留为 `master_former` 备查。
+- **部署兼容**：`.github/workflows/deploy.yml` 在分支部署时使用 `git checkout -B <branch> origin/<branch>`，确保服务器本地旧分支不会因非快进历史阻塞后续 `master` 部署。
+- **发布口径**：当前线上 revision 为 `182beabc6110c4f983faef5489e6bb617c449a6e`，后续生产部署可直接选择 `master` 或发布 tag。
 
 ### 3.71 补货日期参与数量计算（2026-04-26）
 - **引擎口径**：`backend/app/engine/runner.py` 不再调用旧的持久化前日期过滤逻辑；`demand_date` 只作为补货目标日期参与数量计算，公式为 `国家补货量=max(ceil((target_days + demand_days) × 国家日均销量 - 国家库存覆盖量), 0)`，其中 `demand_days=max(demand_date - today, 0)`。

@@ -183,7 +183,7 @@ Scheduler 保持单例避免重复触发，Worker 可水平扩展。
 补充约定：
 
 - `CI` workflow 会在 `main`、`master` 和 `v*` tag 上发布 GHCR 镜像，镜像标签统一为 `sha-<commit>`，并自动将 owner 归一化为小写
-- `Deploy` workflow 支持传入分支名、tag 名、完整 commit SHA 或短 commit SHA；`check-ci` 会先解析为完整 SHA 再校验 CI，部署机会切到对应 ref 后导出 `IMAGE_TAG=sha-<commit>` 给 Compose 使用
+- `Deploy` workflow 支持传入分支名、tag 名、完整 commit SHA 或短 commit SHA；`check-ci` 会先解析为完整 SHA 再校验 CI，部署机会切到对应 ref 后导出 `IMAGE_TAG=sha-<commit>` 给 Compose 使用。分支部署会强制把服务器本地同名分支重置为 `origin/<branch>`，避免远端主分支切换后被服务器旧本地分支的非快进历史阻塞
 - `latest` 仅作为主分支便捷标签，生产发布以 `sha-<commit>` 为准，避免分支名与镜像 tag 脱节
 
 ---

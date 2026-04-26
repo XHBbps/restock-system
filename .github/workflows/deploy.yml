@@ -101,13 +101,11 @@ jobs:
               '+refs/tags/*:refs/tags/*'
             if [[ "$REF" == refs/heads/* ]]; then
               BRANCH="${REF#refs/heads/}"
-              git checkout "$BRANCH"
-              git pull --ff-only origin "$BRANCH"
+              git checkout -B "$BRANCH" "origin/$BRANCH"
             elif [[ "$REF" == refs/tags/* ]]; then
               git checkout --detach "$REF"
             elif git show-ref --verify --quiet "refs/remotes/origin/$REF"; then
-              git checkout "$REF"
-              git pull --ff-only origin "$REF"
+              git checkout -B "$REF" "origin/$REF"
             elif git show-ref --verify --quiet "refs/tags/$REF"; then
               git checkout --detach "refs/tags/$REF"
             else
