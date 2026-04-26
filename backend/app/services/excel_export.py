@@ -67,7 +67,7 @@ def _build_meta_sheet(wb: Workbook, ctx: SnapshotExportContext) -> None:
         ("导出时间", ctx.exported_at.strftime("%Y-%m-%d %H:%M:%S")),
         ("导出人", ctx.exported_by_name or "系统"),
         ("备注", ctx.note or ""),
-        ("需求截止日期", ctx.global_config.get("demand_date", "")),
+        ("补货日期", ctx.global_config.get("demand_date", "")),
         ("buffer_days", ctx.global_config.get("buffer_days", "")),
         ("target_days", ctx.global_config.get("target_days", "")),
         ("lead_time_days", ctx.global_config.get("lead_time_days", "")),
@@ -140,7 +140,12 @@ def build_restock_workbook(ctx: SnapshotExportContext) -> Workbook:
     for item in ctx.items:
         for country, qty in (item.get("country_breakdown") or {}).items():
             country_ws.append(
-                [item["commodity_sku"], country, qty, (item.get("restock_dates") or {}).get(country) or ""]
+                [
+                    item["commodity_sku"],
+                    country,
+                    qty,
+                    (item.get("restock_dates") or {}).get(country) or "",
+                ]
             )
     _autosize(country_ws)
 

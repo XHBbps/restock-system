@@ -39,6 +39,7 @@ async def run_engine(
     triggered_by: str = "scheduler",
 ) -> int | None:
     today = now_beijing().date()
+    demand_days = max((demand_date - today).days, 0)
 
     async with async_session_factory() as db:
         await db.execute(
@@ -60,7 +61,9 @@ async def run_engine(
         if config.buffer_days < 0:
             raise ValueError(f"GlobalConfig.buffer_days must be >= 0, got {config.buffer_days}")
         if config.lead_time_days < 0:
-            raise ValueError(f"GlobalConfig.lead_time_days must be >= 0, got {config.lead_time_days}")
+            raise ValueError(
+                f"GlobalConfig.lead_time_days must be >= 0, got {config.lead_time_days}"
+            )
         if config.safety_stock_days < 0:
             raise ValueError(
                 f"GlobalConfig.safety_stock_days must be >= 0, got {config.safety_stock_days}"
@@ -70,6 +73,7 @@ async def run_engine(
                 "GlobalConfig.target_days must be >= GlobalConfig.lead_time_days, "
                 f"got target_days={config.target_days}, lead_time_days={config.lead_time_days}"
             )
+        effective_target_days = config.target_days + demand_days
 
         enabled_skus = (
             await db.execute(
@@ -95,7 +99,7 @@ async def run_engine(
         sale_days, inventory = await run_step2(db, velocity, sku_list)
 
         await ctx.progress(current_step="Step 3: 计算各国补货量")
-        country_qty_all = compute_country_qty(velocity, inventory, config.target_days)
+        country_qty_all = compute_country_qty(velocity, inventory, effective_target_days)
         if allowed_countries is not None:
             country_qty = {
                 sku: {c: q for c, q in cq.items() if c in allowed_countries}
@@ -179,13 +183,6 @@ async def run_engine(
                 }
             )
 
-        items_to_insert = _filter_items_for_demand_date(
-            items_to_insert,
-            demand_date=demand_date,
-            sku_lead_time=sku_lead_time,
-            default_lead_time_days=config.lead_time_days,
-        )
-
         if not items_to_insert:
             await ctx.progress(current_step="完成", step_detail="no_suggestion_needed")
             return None
@@ -217,77 +214,6 @@ def _config_snapshot(config: GlobalConfig, *, demand_date: date | None = None) -
     if demand_date is not None:
         snapshot["demand_date"] = demand_date.isoformat()
     return snapshot
-
-
-def _filter_items_for_demand_date(
-    items: list[dict[str, Any]],
-    *,
-    demand_date: date,
-    sku_lead_time: dict[str, int | None],
-    default_lead_time_days: int,
-) -> list[dict[str, Any]]:
-    demand_date_text = demand_date.isoformat()
-    filtered: list[dict[str, Any]] = []
-    for item in items:
-        restock_dates = item.get("restock_dates") or {}
-        matched_countries = {
-            country
-            for country, restock_date in restock_dates.items()
-            if isinstance(restock_date, str) and restock_date <= demand_date_text
-        }
-
-        country_breakdown = {
-            country: int(qty or 0)
-            for country, qty in (item.get("country_breakdown") or {}).items()
-            if country in matched_countries and int(qty or 0) > 0
-        }
-        if not country_breakdown:
-            if int(item.get("purchase_qty", 0) or 0) <= 0:
-                continue
-
-            next_item = dict(item)
-            next_item["country_breakdown"] = {}
-            next_item["warehouse_breakdown"] = {}
-            next_item["allocation_snapshot"] = {}
-            next_item["restock_dates"] = {}
-            next_item["total_qty"] = 0
-            next_item["urgent"] = False
-            filtered.append(next_item)
-            continue
-
-        warehouse_breakdown = {
-            country: breakdown
-            for country, breakdown in (item.get("warehouse_breakdown") or {}).items()
-            if country in country_breakdown
-        }
-        allocation_snapshot = {
-            country: allocation
-            for country, allocation in (item.get("allocation_snapshot") or {}).items()
-            if country in country_breakdown
-        }
-        restock_dates_filtered = {
-            country: restock_dates.get(country)
-            for country in country_breakdown
-            if country in restock_dates
-        }
-        commodity_sku = str(item.get("commodity_sku"))
-        lead_time_days = sku_lead_time.get(commodity_sku) or default_lead_time_days
-        timing = compute_urgency_for_sku(
-            sale_days_for_sku=item.get("sale_days_snapshot") or {},
-            country_qty_for_sku=country_breakdown,
-            lead_time_days=lead_time_days,
-            today=now_beijing().date(),
-        )
-
-        next_item = dict(item)
-        next_item["country_breakdown"] = country_breakdown
-        next_item["warehouse_breakdown"] = warehouse_breakdown
-        next_item["allocation_snapshot"] = allocation_snapshot
-        next_item["restock_dates"] = restock_dates_filtered
-        next_item["total_qty"] = sum(country_breakdown.values())
-        next_item["urgent"] = timing.urgent
-        filtered.append(next_item)
-    return filtered
 
 
 async def _persist_suggestion(

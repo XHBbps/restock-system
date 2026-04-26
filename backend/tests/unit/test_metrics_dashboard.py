@@ -1,3 +1,4 @@
+from datetime import date, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -57,6 +58,7 @@ async def test_dashboard_returns_empty_risk_distribution_without_active_suggesti
             _ScalarOneOrNoneResult(
                 SimpleNamespace(target_days=60, lead_time_days=50, restock_regions=[])
             ),
+            _ScalarOneOrNoneResult(None),
             _RowsResult([]),
             _RowsResult(
                 [
@@ -64,7 +66,6 @@ async def test_dashboard_returns_empty_risk_distribution_without_active_suggesti
                     ("SKU-2", "Beta", "https://img.example/beta.png"),
                 ]
             ),
-            _ScalarOneOrNoneResult(None),
         ]
     )
 
@@ -130,6 +131,51 @@ async def test_dashboard_returns_empty_risk_distribution_without_active_suggesti
             "sale_days": 35.0,
         },
     ]
+
+
+@pytest.mark.asyncio
+async def test_dashboard_restock_sku_count_uses_draft_demand_date() -> None:
+    db = _FakeDb(
+        [
+            _ScalarsResult(["SKU-1"]),
+            _ScalarOneOrNoneResult(
+                SimpleNamespace(target_days=60, lead_time_days=50, restock_regions=[])
+            ),
+            _ScalarOneOrNoneResult(
+                SimpleNamespace(
+                    id=9,
+                    status="draft",
+                    global_config_snapshot={
+                        "demand_date": (date.today() + timedelta(days=30)).isoformat()
+                    },
+                )
+            ),
+            _RowsResult([]),
+            _ScalarsResult([]),
+            _ScalarOneResult(0),
+        ]
+    )
+
+    async def _fake_run_step1(*_args, **_kwargs):
+        return {"SKU-1": {"US": 1.0}}
+
+    async def _fake_run_step2(*_args, **_kwargs):
+        return (
+            {"SKU-1": {"US": 100.0}},
+            {"SKU-1": {"US": SimpleNamespace(total=70)}},
+        )
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(metrics_module, "run_step1", _fake_run_step1)
+    monkeypatch.setattr(metrics_module, "run_step2", _fake_run_step2)
+
+    try:
+        result = await build_dashboard_payload(db=db)  # type: ignore[arg-type]
+    finally:
+        monkeypatch.undo()
+
+    assert result.restock_sku_count == 1
+    assert result.no_restock_sku_count == 0
 
 
 @pytest.mark.asyncio
@@ -205,6 +251,7 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
             _ScalarOneOrNoneResult(
                 SimpleNamespace(target_days=60, lead_time_days=20, restock_regions=[])
             ),
+            _ScalarOneOrNoneResult(SimpleNamespace(id=9, status="draft")),
             _RowsResult([]),
             _RowsResult(
                 [
@@ -213,7 +260,6 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
                     ("SKU-7", "Delta", "https://img.example/delta.png"),
                 ]
             ),
-            _ScalarOneOrNoneResult(SimpleNamespace(id=9, status="draft")),
             _ScalarsResult(items),
             _ScalarOneResult(2),
         ]

@@ -43,5 +43,5 @@ class EngineRunIn(BaseModel):
     @classmethod
     def demand_date_must_not_be_past(cls, value: date) -> date:
         if value < now_beijing().date():
-            raise ValueError("需求截止日期不能早于今天")
+            raise ValueError("补货日期不能早于今天")
         return value

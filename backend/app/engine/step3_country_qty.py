@@ -1,7 +1,7 @@
 """Step 3:各国建议补货量。
 
 公式(FR-031):
-    raw[国] = TARGET_DAYS x velocity[国] - (available + reserved + in_transit)
+    raw[国] = effective_target_days x velocity[国] - (available + reserved + in_transit)
     country_qty[国] = max(raw, 0)
 """
 

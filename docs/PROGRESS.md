@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-25（以需求截止日期版本为基底，合入 Caddy Google Fonts CSP、Deploy 短 SHA 解析、生产 Alembic revision 兼容、CI pip-audit 临时忽略、部署脚本可执行位修复、tag 强制 fetch 与生产冒烟检查本机解析。）
+> 最近更新：2026-04-26（补货日期参与补货量与采购量计算：`demand_date` 不再过滤补货国家，而是扩展 Step 3 的有效目标库存天数。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -57,14 +57,14 @@
 - **6 步流水线**（`backend/app/engine/runner.py`）：
   1. `step1_velocity` — 加权日均销量（7日×0.5 + 14日×0.3 + 30日×0.2）
   2. `step2_sale_days` — 可售天数 + 库存聚合（含在途）
-  3. `step3_country_qty` — 各国补货量
-  4. `step4_total` — 总采购量（Σcountry_qty − 本地库存 + ceil(Σvelocity × safety_stock_days)，clamp 到 0；`buffer_days` 不参与采购量）
+  3. `step3_country_qty` — 各国补货量（`target_days + (demand_date - today)` 作为有效目标库存天数）
+  4. `step4_total` — 总采购量（基于新的 Σcountry_qty − 本地库存 + ceil(Σvelocity × safety_stock_days)，clamp 到 0；`buffer_days` 不参与采购量）
   5. `step5_warehouse_split` — 按邮编规则分配到具体仓库
   6. `step6_timing` — 紧急标志与补货日期（任一正补货国家 `sale_days <= lead_time_days` 即为紧急；`restock_date[sku][country] = today + int(sale_days[sku][country]) − lead_time_days`）
 - **补货区域过滤**：全局参数 `restock_regions` 支持按国家多选；为空数组时表示全部国家参与计算，配置后仅这些国家的订单会参与 `step1_velocity` 销量统计和 `step5_warehouse_split` 的国家订单分仓
 - **并发保护**：`pg_advisory_xact_lock(7429001)` 事务级锁，阻止并发引擎覆盖彼此
-- **需求截止日期过滤**：`POST /api/engine/run` 必填 `demand_date` 且不能早于北京时间今天；runner 仍按 `today=now_beijing().date()` 计算销量、库存、分仓与完整 SKU 口径采购量，再在持久化前仅保留 `restock_dates[country] <= demand_date` 的国家，过期未处理补货国家也会纳入截止范围；`restock_dates[country]` 为空时不纳入补货范围，命中后收缩补货字段并重算 `total_qty` / `urgent`；若无补货国家命中但 `purchase_qty > 0`，仍保留为采购-only 条目并清空补货拆分字段；最终无条目时不归档旧 draft、不关闭生成开关、不生成空建议单
-- **快照追溯**：`velocity_snapshot`、`sale_days_snapshot`、`global_config_snapshot` 存入 JSONB 字段；其中 `global_config_snapshot` 会记录 `restock_regions` 与本次 `demand_date`
+- **补货日期参与数量计算**：`POST /api/engine/run` 必填 `demand_date` 且不能早于北京时间今天；runner 按 `today=now_beijing().date()` 计算 `demand_days=max(demand_date - today, 0)`，再用 `target_days + demand_days` 作为 Step 3 有效目标库存天数；`restock_regions` 仍只决定哪些国家参与补货，`restock_dates` 继续保存用于追溯、导出和紧急程度判断，不再按日期过滤国家
+- **快照追溯**：`velocity_snapshot`、`sale_days_snapshot`、`global_config_snapshot` 存入 JSONB 字段；其中 `global_config_snapshot` 会记录 `restock_regions` 与本次补货日期 `demand_date`
 
 ### 2.4 补货建议管理
 - **采购/补货独立导出**：建议单分为采购 Tab 与补货 Tab，采购快照只要求 purchase_qty > 0，补货快照只要求国家补货量大于 0；两类快照按 snapshot_type 独立递增版本、独立更新条目导出状态。
@@ -74,7 +74,7 @@
 - **编辑校验**：建议详情支持编辑 `total_qty` / `country_breakdown` / `warehouse_breakdown`；国家补货量不要求与总采购量一致，已配置仓库时仓内分量之和必须等于国家补货量；`urgent` 会随国家补货量变更按对应 SKU 的提前期重新判定
 - **历史记录删除**：历史记录页新增建议单删除入口，删除准入统一为 `snapshot_count === 0`（尚未生成任何导出快照的建议单才可物理删除，保留快照的建议单保留历史追溯不允许删除）
 - **触发方式中文化**：历史记录页“触发方式”由原始值改为中文展示，当前口径统一为“手动触发 / 自动触发”
-- **Excel 导出**：业务人员在建议详情勾选 `export_status='pending'` 的条目，点击“导出 Excel”走一步式 `POST /api/suggestions/{id}/snapshots` + `GET /api/snapshots/{id}/download` blob 下载；服务端生成不可变 `suggestion_snapshot` + `suggestion_snapshot_item` JSONB 快照并同步落盘 Excel 文件，后续可反复下载；元信息页记录“需求截止日期”，采购/补货明细表不增加需求截止日期列；首次导出后 `global_config.suggestion_generation_enabled` 自动翻 OFF，业务人员在全局配置页翻回 ON 时会二次确认并归档全部 `draft` 建议单以开启下一周期
+- **Excel 导出**：业务人员在建议详情勾选 `export_status='pending'` 的条目，点击“导出 Excel”走一步式 `POST /api/suggestions/{id}/snapshots` + `GET /api/snapshots/{id}/download` blob 下载；服务端生成不可变 `suggestion_snapshot` + `suggestion_snapshot_item` JSONB 快照并同步落盘 Excel 文件，后续可反复下载；元信息页记录“补货日期”，采购/补货明细表不增加补货日期列；首次导出后 `global_config.suggestion_generation_enabled` 自动翻 OFF，业务人员在全局配置页翻回 ON 时会二次确认并归档全部 `draft` 建议单以开启下一周期
 
 ### 2.5 前端 Dashboard 体系
 - **嵌套路由与 Tab 视图**：当前建议、建议详情、历史记录均拆为 procurement / restock 子路由，`SuggestionTabBar` 统一切换；采购页默认按 `commodity_sku` 稳定排序，仅展示商品信息、采购量与导出状态，补货页支持国家与仓库下钻。
@@ -98,6 +98,13 @@
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
 
+### 3.71 补货日期参与数量计算（2026-04-26）
+- **引擎口径**：`backend/app/engine/runner.py` 不再调用旧的持久化前日期过滤逻辑；`demand_date` 只作为补货目标日期参与数量计算，公式为 `国家补货量=max(ceil((target_days + demand_days) × 国家日均销量 - 国家库存覆盖量), 0)`，其中 `demand_days=max(demand_date - today, 0)`。
+- **采购联动**：Step 4 继续使用 `compute_total()`，但输入的 `country_qty` 已是补货日期扩展后的国家补货量，因此采购量会随更远补货日期同步增加；公式保持 `max(Σcountry_qty - 国内仓库存 + ceil(Σvelocity × safety_stock_days), 0)`。
+- **保留字段**：API 字段名继续为 `demand_date`，`restock_dates` 继续计算并保存，用于追溯、Excel 明细和紧急程度判断，不再决定国家是否进入本次补货。
+- **信息总览**：`backend/app/api/metrics.py` 的“需补货SKU / 无需补货SKU”统计读取当前最新 `draft` 建议单的 `global_config_snapshot.demand_date` 计算同一口径；无当前建议单时按 `demand_days=0` 统计。
+- **展示与导出**：`frontend/src/views/SuggestionListView.vue`、`frontend/src/components/SuggestionDetailDialog.vue` 与 `backend/app/services/excel_export.py` 的用户可见文案统一为“补货日期”，接口契约不变。
+
 ### 3.66 Deploy workflow 短 SHA 解析修复（2026-04-25）
 - **check-ci 修复**：`Deploy` workflow 不再直接把手动输入的短 SHA 传给 `actions/checkout`；先 checkout 默认分支并 fetch 全量分支 / tag，再把分支名、tag、完整或短 commit SHA 解析成完整 commit。
 - **CI 校验口径**：`checks.listForRef` 改为使用解析后的完整 SHA，避免短 SHA 被误当作分支 / tag 通配 ref 导致 checkout 失败。
@@ -114,8 +121,8 @@
 - **文档同步**：`deploy/.env.example`、`docs/deployment.md`、`docs/runbook.md` 与 `docs/onboarding.md` 已说明生产公网访问 `/healthz`、`/readyz` 返回 404 属于预期安全策略。
 
 ### 3.67 Alembic 生产 revision 兼容修复（2026-04-25）
-- **迁移拓扑**：保留需求截止日期分支真实迁移 `20260423_1100_add_restock_dates` 与 `20260424_0100_drop_purchase_date_from_suggestions`，并新增 `20260425_1420` 兼容 marker。
-- **生产兼容**：`20260425_1420` 不修改 schema，仅用于兼容已经推进到该 revision 的生产库，避免回到需求截止日期分支时提示 `Can't locate revision identified by '20260425_1420'`。
+- **迁移拓扑**：保留补货日期相关真实迁移 `20260423_1100_add_restock_dates` 与 `20260424_0100_drop_purchase_date_from_suggestions`，并新增 `20260425_1420` 兼容 marker。
+- **生产兼容**：`20260425_1420` 不修改 schema，仅用于兼容已经推进到该 revision 的生产库，避免回到该迁移链路时提示 `Can't locate revision identified by '20260425_1420'`。
 
 ### 3.65 Caddy CSP 临时放行 Google Fonts（2026-04-25）
 - **CSP 调整**：`deploy/Caddyfile` 的 `style-src` 放行 `https://fonts.googleapis.com`，`font-src` 放行 `https://fonts.gstatic.com`，用于兼容当前生产镜像中仍存在的 Google Fonts 外链。
@@ -127,26 +134,26 @@
 - 运行时配置移除旧写入重试与批量大小配置项，`backend/.env.example`、`docs/deployment.md` 与配置校验单测同步收敛。
 
 ### 3.63 安全库存采购-only 项保留到采购建议（2026-04-24）
-- **过滤口径**：`backend/app/engine/runner.py` 的需求截止日期过滤在无补货国家命中时，不再直接丢弃 SKU；只要过滤前完整 SKU 口径的 `purchase_qty > 0`，仍保留为采购-only 条目。
+- **过滤口径**：旧 `demand_date` 日期筛选在无补货国家命中时，不再直接丢弃 SKU；只要过滤前完整 SKU 口径的 `purchase_qty > 0`，仍保留为采购-only 条目。（该口径已由 §3.71 取消，`demand_date` 现作为补货日期参与数量计算。）
 - **补货字段收口**：采购-only 条目持久化时写入 `country_breakdown={}`、`warehouse_breakdown={}`、`allocation_snapshot={}`、`restock_dates={}`、`total_qty=0`、`urgent=false`；补货清单与补货 Excel 仍只包含实际补货量大于 0 的条目。
 - **计数与导出**：`procurement_item_count` 继续按 `purchase_qty > 0` 统计，`restock_item_count` 继续按 `total_qty > 0` 统计；采购快照可导出这类安全库存采购项，补货快照不包含它们。
 - **测试**：更新 `backend/tests/unit/test_engine_runner.py`，覆盖采购-only 保留、无采购量继续丢弃、补货项与安全库存采购-only 项混合生成，以及采购/补货 item count 独立统计。
 
 ### 3.62 前端隐藏补货日期展示（2026-04-24）
 - **页面展示收口**：`frontend/src/views/suggestion/RestockListView.vue` 与 `frontend/src/components/SuggestionDetailDialog.vue` 移除 SKU 表格“最晚补货日期”列和展开行国家级“补货日期”列，当前前端仅展示商品、补货量、国家分布与仓库分配。
-- **数据与导出保留**：API 类型中的 `restock_dates`、后端持久化、快照冻结和 `backend/app/services/excel_export.py` 补货 Excel “补货日期”列保持不变，用于需求截止过滤、历史追溯与 Excel 交付。
+- **数据与导出保留**：API 类型中的 `restock_dates`、后端持久化、快照冻结和 `backend/app/services/excel_export.py` 补货 Excel “补货日期”列保持不变，用于历史追溯、紧急程度判断与 Excel 交付。
 
-### 3.61 需求截止日期过滤口径（2026-04-24）
-- **截止范围**：`backend/app/engine/runner.py` 的持久化前过滤由 `restock_dates[country] == demand_date` 调整为 `restock_dates[country] <= demand_date`，选择某一需求截止日期时会包含当天及之前已到期但尚未处理的补货国家。
-- **空日期处理**：`restock_dates[country]` 为空的国家继续不纳入补货截止范围，因为无法判断是否已在截止日前到期；无补货命中但 `purchase_qty > 0` 时会保留为采购-only 条目，否则返回 `no_suggestion_needed`，不归档旧 draft、不关闭生成开关、不生成空建议单。
-- **展示与导出**：`frontend/src/views/SuggestionListView.vue`、`frontend/src/components/SuggestionDetailDialog.vue` 与 `backend/app/services/excel_export.py` 的用户可见文案统一改为“需求截止日期”；API 字段名继续保持 `demand_date`。
+### 3.61 旧 `demand_date` 日期筛选口径（2026-04-24，已由 §3.71 取代）
+- **旧范围**：`backend/app/engine/runner.py` 当时的持久化前日期筛选由 `restock_dates[country] == demand_date` 调整为 `restock_dates[country] <= demand_date`，选择某一日期时会包含当天及之前已到期但尚未处理的补货国家。
+- **空日期处理**：当时 `restock_dates[country]` 为空的国家不纳入日期筛选范围，因为无法判断是否已到期；无补货命中但 `purchase_qty > 0` 时会保留为采购-only 条目，否则返回 `no_suggestion_needed`，不归档旧 draft、不关闭生成开关、不生成空建议单。
+- **展示与导出**：当时 `frontend/src/views/SuggestionListView.vue`、`frontend/src/components/SuggestionDetailDialog.vue` 与 `backend/app/services/excel_export.py` 的用户可见文案随该口径调整；API 字段名继续保持 `demand_date`。（当前文案见 §3.71。）
 
-### 3.60 需求日期驱动采补建议生成（2026-04-24）
-- **发起入口校验**：`frontend/src/views/SuggestionListView.vue` 删除手动“刷新”按钮，改为默认空的“需求截止日期”日期选择器；点击生成时前端校验空值与早于北京时间今天，合法时调用 `runEngine({ demand_date })`。
+### 3.60 `demand_date` 驱动采补建议生成（2026-04-24）
+- **发起入口校验**：`frontend/src/views/SuggestionListView.vue` 删除手动“刷新”按钮，改为默认空的“补货日期”日期选择器；点击生成时前端校验空值与早于北京时间今天，合法时调用 `runEngine({ demand_date })`。
 - **任务复用与结果摘要**：前端新增 `frontend/src/api/task.ts:listTasks()`，页面加载与切回时分别查询 `calc_engine` 的 `pending` / `running` 任务并复用 `TaskProgress`；后端扩展 `JobContext.progress(result_summary=...)` 与 worker 进度写回，生成成功或无需求均写结构化 JSON。
 - **后端入队契约**：`POST /api/engine/run` 请求体改为必填 `{ "demand_date": "YYYY-MM-DD" }`，缺失、格式错误或早于北京时间今天均由 Pydantic 返回 422；入队 payload 写入 `demand_date`，仍使用 `dedupe_key="calc_engine"` 防并发生成。
-- **持久化前过滤**：`backend/app/engine/runner.py` 先计算完整中间结果，再按 `demand_date` 保留到期国家；采购量沿用过滤前 SKU 口径，纯安全库存触发但无补货命中的 SKU 会作为采购-only 条目保存。
-- **展示与导出**：当前建议页顶部、历史详情元信息与 Excel 元信息页均展示需求截止日期；历史列表、采购明细表、补货明细表不新增需求截止日期列，不改导出文件名。
+- **旧持久化前筛选**：当时 `backend/app/engine/runner.py` 先计算完整中间结果，再按 `demand_date` 保留到期国家；该口径已由 §3.71 取消，当前 `demand_date` 作为补货日期参与数量计算。
+- **展示与导出**：当前建议页顶部、历史详情元信息与 Excel 元信息页均展示补货日期；历史列表、采购明细表、补货明细表不新增补货日期列，不改导出文件名。
 
 ### 3.59 移除采购日期与采购页紧急筛选（2026-04-24）
 - **后端链路收缩**：`backend/alembic/versions/20260424_0100_drop_purchase_date_from_suggestions.py` 删除 `suggestion_item`、`suggestion_snapshot_item` 上的 `purchase_date`；`backend/app/engine/step6_timing.py` 仅保留 `urgent` 与 `restock_dates` 计算，`backend/app/engine/runner.py`、`backend/app/api/suggestion.py`、`backend/app/api/snapshot.py` 与相关 DTO 不再写入、存储或返回采购日期。

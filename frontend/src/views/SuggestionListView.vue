@@ -6,7 +6,7 @@
           {{ statusMeta.label }} · 采购 {{ suggestion.procurement_item_count }} · 补货 {{ suggestion.restock_item_count }}
         </el-tag>
         <el-tag v-if="currentDemandDate" type="warning" size="small">
-          需求截止日期：{{ currentDemandDate }}
+          补货日期：{{ currentDemandDate }}
         </el-tag>
         <el-tag
           v-if="toggle"
@@ -20,7 +20,7 @@
           v-model="demandDate"
           type="date"
           value-format="YYYY-MM-DD"
-          placeholder="需求截止日期"
+          placeholder="补货日期"
           :clearable="true"
           :disabled="isEngineBusy"
           class="demand-date-picker"
@@ -202,11 +202,11 @@ async function loadCurrent(): Promise<void> {
 async function triggerEngine(): Promise<void> {
   const selectedDemandDate = demandDate.value
   if (!selectedDemandDate) {
-    ElMessage.warning('请选择需求截止日期')
+    ElMessage.warning('请选择补货日期')
     return
   }
   if (selectedDemandDate < getBeijingTodayText()) {
-    ElMessage.warning('需求截止日期不能早于今天')
+    ElMessage.warning('补货日期不能早于今天')
     return
   }
 

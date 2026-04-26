@@ -101,14 +101,14 @@ def test_procurement_sheet_rows(procurement_context):
     assert ws.cell(row=2, column=5).value == 2.3
 
 
-def test_meta_sheet_contains_demand_deadline(procurement_context):
+def test_meta_sheet_contains_restock_date(procurement_context):
     wb = build_procurement_workbook(procurement_context)
     meta_ws = wb[wb.sheetnames[0]]
     values = {
         meta_ws.cell(row=row, column=1).value: meta_ws.cell(row=row, column=2).value
         for row in range(1, meta_ws.max_row + 1)
     }
-    assert values["需求截止日期"] == "2026-04-30"
+    assert values["补货日期"] == "2026-04-30"
 
 
 def test_restock_workbook_has_four_sheets(restock_context):

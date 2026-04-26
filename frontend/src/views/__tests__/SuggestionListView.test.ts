@@ -158,7 +158,7 @@ describe('SuggestionListView', () => {
     await generateButton!.trigger('click')
     await flushPromises()
 
-    expect(mockMessageWarning).toHaveBeenCalledWith('请选择需求截止日期')
+    expect(mockMessageWarning).toHaveBeenCalledWith('请选择补货日期')
     expect(mockRunEngine).not.toHaveBeenCalled()
   })
 
@@ -184,7 +184,7 @@ describe('SuggestionListView', () => {
     await generateButton!.trigger('click')
     await flushPromises()
 
-    expect(mockMessageWarning).toHaveBeenCalledWith('需求截止日期不能早于今天')
+    expect(mockMessageWarning).toHaveBeenCalledWith('补货日期不能早于今天')
     expect(mockRunEngine).not.toHaveBeenCalled()
   })
 

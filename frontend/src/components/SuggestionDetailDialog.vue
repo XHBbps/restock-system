@@ -80,7 +80,7 @@
                 <dd>{{ formatDateTime(currentSnapshot.exported_at) }}</dd>
                 <dt>导出人</dt>
                 <dd>{{ currentSnapshot.exported_by_name || '-' }}</dd>
-                <dt>需求截止日期</dt>
+                <dt>补货日期</dt>
                 <dd>{{ currentDemandDate || '-' }}</dd>
                 <dt>条目数</dt>
                 <dd>{{ currentSnapshot.item_count }}</dd>

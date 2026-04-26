@@ -3,7 +3,7 @@
 返回 task_run 各状态计数 + 最近 24h 同步成功率,用于人工巡检。
 """
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends
@@ -208,11 +208,7 @@ async def _build_top_urgent_skus(
 
 
 def _has_restock_summary_keys(payload: dict[str, Any] | None) -> bool:
-    return bool(
-        payload
-        and "restock_sku_count" in payload
-        and "no_restock_sku_count" in payload
-    )
+    return bool(payload and "restock_sku_count" in payload and "no_restock_sku_count" in payload)
 
 
 def _empty_dashboard_payload(
@@ -266,7 +262,9 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
                 .where(SkuConfig.enabled.is_(True))
                 .order_by(SkuConfig.commodity_sku)
             )
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
     )
     enabled_sku_count = len(enabled_skus)
 
@@ -277,15 +275,38 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
     lead_time_days = config.lead_time_days if config else 50
     allowed_countries = resolve_allowed_restock_regions(config.restock_regions if config else [])
 
+    suggestion = (
+        await db.execute(
+            select(Suggestion)
+            .where(Suggestion.status == "draft")
+            .order_by(Suggestion.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    demand_days = 0
+    if suggestion:
+        raw_demand_date = (getattr(suggestion, "global_config_snapshot", None) or {}).get(
+            "demand_date"
+        )
+        if isinstance(raw_demand_date, str) and raw_demand_date:
+            try:
+                demand_days = max(
+                    (date.fromisoformat(raw_demand_date) - now_beijing().date()).days,
+                    0,
+                )
+            except ValueError:
+                demand_days = 0
+    effective_target_days = target_days + demand_days
+
     # velocity 口径与 runner 一致：不受 restock_regions 过滤，
     # 保证采购量公式里的 Σvelocity 覆盖全部销售国家（含白名单外）。
-    velocity = (
-        await run_step1(db, enabled_skus, now_beijing().date())
-        if enabled_skus
-        else {}
+    velocity = await run_step1(db, enabled_skus, now_beijing().date()) if enabled_skus else {}
+    all_sale_days, inventory = (
+        await run_step2(db, velocity, enabled_skus) if enabled_skus else ({}, {})
     )
-    all_sale_days, inventory = await run_step2(db, velocity, enabled_skus) if enabled_skus else ({}, {})
-    live_country_qty_all = compute_country_qty(velocity, inventory, target_days) if enabled_skus else {}
+    live_country_qty_all = (
+        compute_country_qty(velocity, inventory, effective_target_days) if enabled_skus else {}
+    )
     # country_qty 只保留白名单国家（和 runner 行为一致）。
     if allowed_countries is not None:
         live_country_qty = {
@@ -331,15 +352,6 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
         else []
     )
 
-    suggestion = (
-        await db.execute(
-            select(Suggestion)
-            .where(Suggestion.status == "draft")
-            .order_by(Suggestion.created_at.desc())
-            .limit(1)
-        )
-    ).scalar_one_or_none()
-
     if not suggestion:
         return DashboardOverviewPayload(
             enabled_sku_count=enabled_sku_count,
@@ -381,9 +393,9 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
     )
     suggestion_snapshot_count = (
         await db.execute(
-            select(func.count()).select_from(SuggestionSnapshot).where(
-                SuggestionSnapshot.suggestion_id == suggestion.id
-            )
+            select(func.count())
+            .select_from(SuggestionSnapshot)
+            .where(SuggestionSnapshot.suggestion_id == suggestion.id)
         )
     ).scalar_one()
     country_restock_totals: dict[str, int] = {}
@@ -495,7 +507,9 @@ async def get_dashboard_overview(
         try:
             payload = DashboardOverviewPayload.model_validate(snapshot.payload)
         except ValidationError:
-            payload = _empty_dashboard_payload(enabled_sku_count=0, lead_time_days=50, target_days=60)
+            payload = _empty_dashboard_payload(
+                enabled_sku_count=0, lead_time_days=50, target_days=60
+            )
             return DashboardOverview(
                 **payload.model_dump(),
                 snapshot_status="refreshing" if active_task else "missing",

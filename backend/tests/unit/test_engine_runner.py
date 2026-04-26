@@ -11,7 +11,6 @@ from app.engine.context import LocalStock
 from app.engine.runner import (
     ENGINE_RUN_ADVISORY_LOCK_KEY,
     _config_snapshot,
-    _filter_items_for_demand_date,
     _persist_suggestion,
     run_engine,
 )
@@ -145,13 +144,16 @@ async def test_run_engine_writes_purchase_fields_and_item_counts() -> None:
             AsyncMock(return_value=({"SKU-001": {"US": 30.0}}, {"SKU-001": {}})),
         ),
         patch("app.engine.runner.compute_country_qty", return_value={"SKU-001": {"US": 100}}),
-        patch("app.engine.runner.load_local_inventory", AsyncMock(return_value={"SKU-001": LocalStock(available=0, reserved=0)})),
+        patch(
+            "app.engine.runner.load_local_inventory",
+            AsyncMock(return_value={"SKU-001": LocalStock(available=0, reserved=0)}),
+        ),
         patch("app.engine.runner.load_country_warehouses", AsyncMock(return_value={})),
         patch("app.engine.runner.load_zipcode_rules", AsyncMock(return_value=[])),
         patch("app.engine.runner.load_all_sku_country_orders", AsyncMock(return_value={})),
         patch("app.engine.runner._persist_suggestion", fake_persist),
     ):
-        demand_date = date.today() - timedelta(days=20)
+        demand_date = date.today()
         result = await run_engine(_FakeContext(), demand_date=demand_date)  # type: ignore[arg-type]
 
     assert result == 123
@@ -188,21 +190,24 @@ async def test_run_engine_velocity_unaffected_by_restock_regions() -> None:
             AsyncMock(return_value=({"SKU-001": {"US": 30.0, "JP": 30.0}}, {"SKU-001": {}})),
         ),
         # 不 mock compute_country_qty，让真实 step3 基于 velocity 算出两国 qty
-        patch("app.engine.runner.load_local_inventory", AsyncMock(return_value={"SKU-001": LocalStock(available=0, reserved=0)})),
+        patch(
+            "app.engine.runner.load_local_inventory",
+            AsyncMock(return_value={"SKU-001": LocalStock(available=0, reserved=0)}),
+        ),
         patch("app.engine.runner.load_country_warehouses", AsyncMock(return_value={})),
         patch("app.engine.runner.load_zipcode_rules", AsyncMock(return_value=[])),
         patch("app.engine.runner.load_all_sku_country_orders", AsyncMock(return_value={})),
         patch("app.engine.runner._persist_suggestion", fake_persist),
     ):
-        demand_date = date.today() - timedelta(days=20)
+        demand_date = date.today()
         result = await run_engine(_FakeContext(), demand_date=demand_date)  # type: ignore[arg-type]
 
     # step1 必须以全量 velocity 被调用（不传 allowed_countries）
     step1_mock.assert_awaited_once()
     call_kwargs = step1_mock.await_args.kwargs
-    assert call_kwargs.get("allowed_countries") is None, (
-        f"run_step1 不应接收 allowed_countries 过滤 velocity，实际传了: {call_kwargs}"
-    )
+    assert (
+        call_kwargs.get("allowed_countries") is None
+    ), f"run_step1 不应接收 allowed_countries 过滤 velocity，实际传了: {call_kwargs}"
 
     assert result == 123
     item = captured["items"][0]
@@ -211,9 +216,7 @@ async def test_run_engine_velocity_unaffected_by_restock_regions() -> None:
     assert item["total_qty"] == 180
     # purchase_qty = 180 - 0 + (3+2)*15 = 255
     # 关键：Σvelocity 含 JP 的 2/天，否则会少算 2*15=30，结果变 225
-    assert item["purchase_qty"] == 255, (
-        "purchase_qty 应覆盖所有国家动销；若仅算白名单则为 225"
-    )
+    assert item["purchase_qty"] == 255, "purchase_qty 应覆盖所有国家动销；若仅算白名单则为 225"
     assert item["restock_dates"] == {"US": (date.today() - timedelta(days=20)).isoformat()}
 
 
@@ -334,7 +337,7 @@ async def test_run_engine_keeps_restock_and_purchase_only_items_together() -> No
         patch("app.engine.runner.load_all_sku_country_orders", AsyncMock(return_value={})),
         patch("app.engine.runner._persist_suggestion", fake_persist),
     ):
-        demand_date = date.today() - timedelta(days=20)
+        demand_date = date.today()
         result = await run_engine(_FakeContext(), demand_date=demand_date)  # type: ignore[arg-type]
 
     assert result == 123
@@ -350,187 +353,84 @@ def test_engine_run_advisory_lock_key_is_stable() -> None:
     assert ENGINE_RUN_ADVISORY_LOCK_KEY == 7429001
 
 
-def test_filter_items_for_demand_date_keeps_countries_due_by_deadline() -> None:
-    item = {
-        "commodity_sku": "SKU-001",
-        "total_qty": 18,
-        "country_breakdown": {"US": 10, "GB": 5, "JP": 3},
-        "warehouse_breakdown": {
-            "US": {"WH-US": 10},
-            "GB": {"WH-GB": 5},
-            "JP": {"WH-JP": 3},
-        },
-        "allocation_snapshot": {
-            "US": {"mode": "matched"},
-            "GB": {"mode": "matched"},
-            "JP": {"mode": "matched"},
-        },
-        "velocity_snapshot": {"US": 1.0, "GB": 2.0, "JP": 3.0},
-        "sale_days_snapshot": {"US": 8, "GB": 40, "JP": 5},
-        "urgent": False,
-        "purchase_qty": 20,
-        "restock_dates": {"US": "2026-04-29", "GB": "2026-04-30", "JP": "2026-05-01"},
-    }
+@pytest.mark.asyncio
+async def test_run_engine_uses_restock_date_as_effective_target_days() -> None:
+    config = _make_config(target_days=60)
+    db = _FakeDb([None, _ScalarResult(config), _ScalarResult([("SKU-001", 50)])])
 
-    result = _filter_items_for_demand_date(
-        [item],
-        demand_date=date(2026, 4, 30),
-        sku_lead_time={"SKU-001": 10},
-        default_lead_time_days=50,
-    )
+    with (
+        patch("app.engine.runner.async_session_factory", _FakeSessionFactory(db)),
+        patch("app.engine.runner.run_step1", AsyncMock(return_value={"SKU-001": {"US": 3.0}})),
+        patch(
+            "app.engine.runner.run_step2",
+            AsyncMock(return_value=({"SKU-001": {"US": 30.0}}, {"SKU-001": {}})),
+        ),
+        patch(
+            "app.engine.runner.compute_country_qty",
+            return_value={"SKU-001": {"US": 100}},
+        ) as compute_country_qty_mock,
+        patch(
+            "app.engine.runner.load_local_inventory",
+            AsyncMock(return_value={"SKU-001": LocalStock(available=0, reserved=0)}),
+        ),
+        patch("app.engine.runner.load_country_warehouses", AsyncMock(return_value={})),
+        patch("app.engine.runner.load_zipcode_rules", AsyncMock(return_value=[])),
+        patch("app.engine.runner.load_all_sku_country_orders", AsyncMock(return_value={})),
+        patch("app.engine.runner._persist_suggestion", AsyncMock(return_value=123)),
+    ):
+        await run_engine(
+            _FakeContext(),
+            demand_date=date.today() + timedelta(days=30),
+        )  # type: ignore[arg-type]
 
-    assert len(result) == 1
-    filtered = result[0]
-    assert filtered["country_breakdown"] == {"US": 10, "GB": 5}
-    assert filtered["warehouse_breakdown"] == {"US": {"WH-US": 10}, "GB": {"WH-GB": 5}}
-    assert filtered["allocation_snapshot"] == {
-        "US": {"mode": "matched"},
-        "GB": {"mode": "matched"},
-    }
-    assert filtered["restock_dates"] == {"US": "2026-04-29", "GB": "2026-04-30"}
-    assert filtered["total_qty"] == 15
-    assert filtered["urgent"] is True
-    assert filtered["purchase_qty"] == 20
-    assert filtered["velocity_snapshot"] == item["velocity_snapshot"]
-    assert filtered["sale_days_snapshot"] == item["sale_days_snapshot"]
+    assert compute_country_qty_mock.call_args.args[2] == 90
 
 
-def test_filter_items_for_demand_date_keeps_overdue_countries() -> None:
-    today = date.today()
-    overdue_date = today - timedelta(days=1)
-    demand_date = today + timedelta(days=6)
-    item = {
-        "commodity_sku": "SKU-001",
-        "total_qty": 10,
-        "country_breakdown": {"US": 10},
-        "warehouse_breakdown": {"US": {"WH-US": 10}},
-        "allocation_snapshot": {"US": {"mode": "matched"}},
-        "velocity_snapshot": {"US": 1.0},
-        "sale_days_snapshot": {"US": 8},
-        "urgent": False,
-        "purchase_qty": 20,
-        "restock_dates": {"US": overdue_date.isoformat()},
-    }
+@pytest.mark.asyncio
+async def test_run_engine_keeps_countries_after_restock_date() -> None:
+    config = _make_config()
+    db = _FakeDb([None, _ScalarResult(config), _ScalarResult([("SKU-001", 50)])])
+    captured: dict[str, Any] = {}
 
-    result = _filter_items_for_demand_date(
-        [item],
-        demand_date=demand_date,
-        sku_lead_time={"SKU-001": 10},
-        default_lead_time_days=50,
-    )
+    async def fake_persist(_db: Any, **kwargs: Any) -> int:
+        captured.update(kwargs)
+        return 123
 
-    assert len(result) == 1
-    assert result[0]["restock_dates"] == {"US": overdue_date.isoformat()}
-    assert result[0]["purchase_qty"] == 20
+    with (
+        patch("app.engine.runner.async_session_factory", _FakeSessionFactory(db)),
+        patch(
+            "app.engine.runner.run_step1",
+            AsyncMock(return_value={"SKU-001": {"US": 1.0, "GB": 2.0}}),
+        ),
+        patch(
+            "app.engine.runner.run_step2",
+            AsyncMock(
+                return_value=(
+                    {"SKU-001": {"US": 10.0, "GB": 100.0}},
+                    {"SKU-001": {}},
+                )
+            ),
+        ),
+        patch(
+            "app.engine.runner.load_local_inventory",
+            AsyncMock(return_value={"SKU-001": LocalStock(available=0, reserved=0)}),
+        ),
+        patch("app.engine.runner.load_country_warehouses", AsyncMock(return_value={})),
+        patch("app.engine.runner.load_zipcode_rules", AsyncMock(return_value=[])),
+        patch("app.engine.runner.load_all_sku_country_orders", AsyncMock(return_value={})),
+        patch("app.engine.runner._persist_suggestion", fake_persist),
+    ):
+        result = await run_engine(
+            _FakeContext(),
+            demand_date=date.today(),
+        )  # type: ignore[arg-type]
 
-
-def test_filter_items_for_demand_date_keeps_purchase_only_after_deadline_or_unknown() -> None:
-    item = {
-        "commodity_sku": "SKU-001",
-        "total_qty": 15,
-        "country_breakdown": {"US": 10, "GB": 5},
-        "warehouse_breakdown": {"US": {"WH-US": 10}, "GB": {"WH-GB": 5}},
-        "allocation_snapshot": {"US": {"mode": "matched"}, "GB": {"mode": "matched"}},
-        "velocity_snapshot": {"US": 1.0, "GB": 2.0},
-        "sale_days_snapshot": {"US": 8, "GB": 40},
-        "urgent": False,
-        "purchase_qty": 20,
-        "restock_dates": {"US": "2026-05-01", "GB": None},
-    }
-
-    assert _filter_items_for_demand_date(
-        [item],
-        demand_date=date(2026, 4, 30),
-        sku_lead_time={"SKU-001": 10},
-        default_lead_time_days=50,
-    ) == [
-        {
-            "commodity_sku": "SKU-001",
-            "total_qty": 0,
-            "country_breakdown": {},
-            "warehouse_breakdown": {},
-            "allocation_snapshot": {},
-            "velocity_snapshot": {"US": 1.0, "GB": 2.0},
-            "sale_days_snapshot": {"US": 8, "GB": 40},
-            "urgent": False,
-            "purchase_qty": 20,
-            "restock_dates": {},
-        }
-    ]
-
-
-def test_filter_items_for_demand_date_drops_non_purchase_after_deadline_or_unknown() -> None:
-    item = {
-        "commodity_sku": "SKU-001",
-        "total_qty": 15,
-        "country_breakdown": {"US": 10, "GB": 5},
-        "warehouse_breakdown": {"US": {"WH-US": 10}, "GB": {"WH-GB": 5}},
-        "allocation_snapshot": {"US": {"mode": "matched"}, "GB": {"mode": "matched"}},
-        "velocity_snapshot": {"US": 1.0, "GB": 2.0},
-        "sale_days_snapshot": {"US": 8, "GB": 40},
-        "urgent": False,
-        "purchase_qty": 0,
-        "restock_dates": {"US": "2026-05-01", "GB": None},
-    }
-
-    assert (
-        _filter_items_for_demand_date(
-            [item],
-            demand_date=date(2026, 4, 30),
-            sku_lead_time={"SKU-001": 10},
-            default_lead_time_days=50,
-        )
-        == []
-    )
-
-
-def test_filter_items_for_demand_date_keeps_purchase_only_sku() -> None:
-    item = {
-        "commodity_sku": "SKU-001",
-        "total_qty": 0,
-        "country_breakdown": {},
-        "warehouse_breakdown": {},
-        "allocation_snapshot": {},
-        "velocity_snapshot": {"US": 1.0},
-        "sale_days_snapshot": {"US": 8},
-        "urgent": False,
-        "purchase_qty": 20,
-        "restock_dates": {},
-    }
-
-    result = _filter_items_for_demand_date(
-        [item],
-        demand_date=date(2026, 4, 30),
-        sku_lead_time={"SKU-001": 10},
-        default_lead_time_days=50,
-    )
-
-    assert result == [item]
-
-
-def test_filter_items_for_demand_date_drops_zero_purchase_only_sku() -> None:
-    item = {
-        "commodity_sku": "SKU-001",
-        "total_qty": 0,
-        "country_breakdown": {},
-        "warehouse_breakdown": {},
-        "allocation_snapshot": {},
-        "velocity_snapshot": {"US": 1.0},
-        "sale_days_snapshot": {"US": 8},
-        "urgent": False,
-        "purchase_qty": 0,
-        "restock_dates": {},
-    }
-
-    assert (
-        _filter_items_for_demand_date(
-            [item],
-            demand_date=date(2026, 4, 30),
-            sku_lead_time={"SKU-001": 10},
-            default_lead_time_days=50,
-        )
-        == []
-    )
+    assert result == 123
+    item = captured["items"][0]
+    assert item["country_breakdown"] == {"US": 60, "GB": 120}
+    assert item["restock_dates"]["GB"] == (date.today() + timedelta(days=50)).isoformat()
+    assert item["total_qty"] == 180
+    assert item["purchase_qty"] == 225
 
 
 @pytest.mark.asyncio
