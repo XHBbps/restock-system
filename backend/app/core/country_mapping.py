@@ -89,4 +89,4 @@ async def backfill_order_eu_country_mapping(
             original_country_code=mapped_original_country,
         )
     )
-    return int(result.rowcount or 0)
+    return int(result.rowcount or 0)  # type: ignore[attr-defined]
