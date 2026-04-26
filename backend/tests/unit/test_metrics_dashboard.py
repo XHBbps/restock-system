@@ -134,6 +134,68 @@ async def test_dashboard_returns_empty_risk_distribution_without_active_suggesti
 
 
 @pytest.mark.asyncio
+async def test_dashboard_risk_distribution_uses_restock_regions_filter() -> None:
+    db = _FakeDb(
+        [
+            _ScalarsResult(["SKU-1", "SKU-2"]),
+            _ScalarOneOrNoneResult(
+                SimpleNamespace(target_days=60, lead_time_days=50, restock_regions=["EU"])
+            ),
+            _ScalarOneOrNoneResult(None),
+            _RowsResult([]),
+            _RowsResult([("SKU-1", "Alpha", None)]),
+        ]
+    )
+
+    async def _fake_run_step1(*_args, **_kwargs):
+        return {
+            "SKU-1": {"EU": 1.0, "DE": 1.0, "US": 1.0},
+            "SKU-2": {"EU": 1.0, "DE": 1.0, "US": 1.0},
+        }
+
+    async def _fake_run_step2(*_args, **_kwargs):
+        return (
+            {
+                "SKU-1": {"EU": 10.0, "DE": 10.0, "US": 10.0},
+                "SKU-2": {"EU": 55.0, "DE": 10.0, "US": 10.0},
+            },
+            {},
+        )
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(metrics_module, "run_step1", _fake_run_step1)
+    monkeypatch.setattr(metrics_module, "run_step2", _fake_run_step2)
+
+    try:
+        result = await build_dashboard_payload(db=db)  # type: ignore[arg-type]
+    finally:
+        monkeypatch.undo()
+
+    assert result.risk_country_count == 1
+    assert result.urgent_count == 1
+    assert result.warning_count == 1
+    assert result.safe_count == 0
+    assert [item.model_dump() for item in result.country_risk_distribution] == [
+        {
+            "country": "EU",
+            "urgent_count": 1,
+            "warning_count": 1,
+            "safe_count": 0,
+            "total_count": 2,
+        }
+    ]
+    assert [item.model_dump() for item in result.top_urgent_skus] == [
+        {
+            "commodity_sku": "SKU-1",
+            "commodity_name": "Alpha",
+            "main_image": None,
+            "country": "EU",
+            "sale_days": 10.0,
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_dashboard_restock_sku_count_uses_draft_demand_date() -> None:
     db = _FakeDb(
         [

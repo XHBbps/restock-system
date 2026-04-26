@@ -19,9 +19,13 @@ for row in batch:
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
+from sqlalchemy import case, func, or_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.global_config import GlobalConfig
+from app.models.order import OrderHeader
 
 
 async def load_eu_countries(db: AsyncSession) -> set[str]:
@@ -53,3 +57,36 @@ def apply_eu_mapping(country: str | None, eu_countries: set[str]) -> str | None:
     if country in eu_countries:
         return "EU"
     return country
+
+
+async def backfill_order_eu_country_mapping(
+    db: AsyncSession,
+    eu_countries: Iterable[str],
+) -> int:
+    """按当前 EU 配置重新归一化本地历史订单国家码。
+
+    源国家优先取 `original_country_code`，缺失时取当前 `country_code`。源国家属于
+    `eu_countries` 时写为 `EU` 并保留原国家；否则恢复源国家并清空原国家字段。
+    """
+    normalized_eu_countries = {str(code).strip().upper() for code in eu_countries if code}
+    source_country = func.coalesce(OrderHeader.original_country_code, OrderHeader.country_code)
+    is_eu_country = source_country.in_(sorted(normalized_eu_countries))
+    mapped_country = case((is_eu_country, "EU"), else_=source_country)
+    mapped_original_country = case((is_eu_country, source_country), else_=None)
+
+    result = await db.execute(
+        update(OrderHeader)
+        .where(
+            or_(
+                OrderHeader.country_code.is_distinct_from(mapped_country),
+                OrderHeader.marketplace_id.is_distinct_from(mapped_country),
+                OrderHeader.original_country_code.is_distinct_from(mapped_original_country),
+            )
+        )
+        .values(
+            country_code=mapped_country,
+            marketplace_id=mapped_country,
+            original_country_code=mapped_original_country,
+        )
+    )
+    return int(result.rowcount or 0)

@@ -1,10 +1,18 @@
 """Integration tests for config APIs."""
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.dashboard_snapshot import DashboardSnapshot
+from app.models.order import OrderHeader
 from tests.integration.factories import seed_global_config
+
+BEIJING = ZoneInfo("Asia/Shanghai")
 
 
 @pytest.mark.asyncio
@@ -60,6 +68,111 @@ async def test_patch_global_config_updates_safety_stock_and_eu_countries(
     body = resp.json()
     assert body["safety_stock_days"] == 30
     assert body["eu_countries"] == ["DE", "FR"]
+
+
+async def _seed_order_header(
+    db_session: AsyncSession,
+    *,
+    order_id: str,
+    country_code: str,
+    marketplace_id: str | None = None,
+    original_country_code: str | None = None,
+) -> OrderHeader:
+    now = datetime.now(BEIJING)
+    row = OrderHeader(
+        shop_id="SHOP-001",
+        amazon_order_id=order_id,
+        marketplace_id=marketplace_id or country_code,
+        country_code=country_code,
+        original_country_code=original_country_code,
+        order_status="Shipped",
+        fulfillment_channel="AFN",
+        purchase_date=now,
+        last_update_date=now,
+        last_sync_at=now,
+    )
+    db_session.add(row)
+    await db_session.flush()
+    return row
+
+
+@pytest.mark.asyncio
+async def test_patch_global_config_backfills_order_country_to_eu(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    await seed_global_config(db_session, eu_countries=[])
+    order = await _seed_order_header(
+        db_session,
+        order_id="111-0000001-0000001",
+        country_code="DE",
+        marketplace_id="DE",
+    )
+    await db_session.commit()
+
+    resp = await client.patch("/api/config/global", json={"eu_countries": ["DE", "FR"]})
+
+    assert resp.status_code == 200
+    db_session.expire_all()
+    updated = (
+        await db_session.execute(select(OrderHeader).where(OrderHeader.id == order.id))
+    ).scalar_one()
+    assert updated.country_code == "EU"
+    assert updated.marketplace_id == "EU"
+    assert updated.original_country_code == "DE"
+
+
+@pytest.mark.asyncio
+async def test_patch_global_config_restores_order_country_when_removed_from_eu(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    await seed_global_config(db_session, eu_countries=["DE", "FR"])
+    order = await _seed_order_header(
+        db_session,
+        order_id="111-0000002-0000002",
+        country_code="EU",
+        marketplace_id="EU",
+        original_country_code="DE",
+    )
+    await db_session.commit()
+
+    resp = await client.patch("/api/config/global", json={"eu_countries": ["FR"]})
+
+    assert resp.status_code == 200
+    db_session.expire_all()
+    updated = (
+        await db_session.execute(select(OrderHeader).where(OrderHeader.id == order.id))
+    ).scalar_one()
+    assert updated.country_code == "DE"
+    assert updated.marketplace_id == "DE"
+    assert updated.original_country_code is None
+
+
+@pytest.mark.asyncio
+async def test_patch_global_config_skips_order_backfill_when_eu_countries_unchanged(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    await seed_global_config(db_session, eu_countries=["DE"])
+    order = await _seed_order_header(
+        db_session,
+        order_id="111-0000003-0000003",
+        country_code="DE",
+        marketplace_id="DE",
+    )
+    await _seed_dashboard_snapshot(db_session, stale=False)
+
+    resp = await client.patch("/api/config/global", json={"eu_countries": ["DE"]})
+
+    assert resp.status_code == 200
+    db_session.expire_all()
+    unchanged = (
+        await db_session.execute(select(OrderHeader).where(OrderHeader.id == order.id))
+    ).scalar_one()
+    snap = await db_session.get(DashboardSnapshot, 1)
+    assert unchanged.country_code == "DE"
+    assert unchanged.marketplace_id == "DE"
+    assert unchanged.original_country_code is None
+    assert snap is not None
+    assert snap.stale is False
 
 
 @pytest.mark.asyncio

@@ -113,7 +113,7 @@
 | 5 | `step5_warehouse_split.py` | country_qty + 订单邮编 + 邮编规则 + 国家规则仓映射 | `warehouse_breakdown[country][wh_id]` | 按邮编规则分配到具体仓库；仅“该国家已配置邮编规则”的仓参与分仓与均分兜底；若无规则仓则该国家不分仓；若配置 `restock_regions`，仅消费这些国家的订单明细作为分仓依据；同优先级 tied 均分 |
 | 6 | `step6_timing.py` | sale_days + lead_time + country_qty | `urgent` + `restock_dates` | `urgent` 仍按任一正补货国家 `sale_days <= lead_time_days`；`restock_date[sku][country] = today + int(sale_days[sku][country]) − lead_time_days`，仅对正补货国家输出，缺少 sale_days 时记为 `null` |
 
-**运行上下文**：`EngineContext` 包含 `target_days`、`buffer_days`、`lead_time_days`、`safety_stock_days`、`restock_regions`、`eu_countries` 和本次请求的补货日期 `demand_date`。runner 会计算 `demand_days=max(demand_date - today, 0)` 并传给 Step 3 形成有效目标库存天数；`buffer_days` 作为全局配置快照保留，但当前仅用于追溯，不参与 `purchase_qty` 或 `restock_dates` 计算；`global_config.eu_countries` 由同步层消费，`global_config_snapshot` 会冻结这些全局参数与 `demand_date` 以便追溯。
+**运行上下文**：`EngineContext` 包含 `target_days`、`buffer_days`、`lead_time_days`、`safety_stock_days`、`restock_regions`、`eu_countries` 和本次请求的补货日期 `demand_date`。runner 会计算 `demand_days=max(demand_date - today, 0)` 并传给 Step 3 形成有效目标库存天数；`buffer_days` 作为全局配置快照保留，但当前仅用于追溯，不参与 `purchase_qty` 或 `restock_dates` 计算；`global_config.eu_countries` 由同步层消费，保存该配置且实际变化时会同步回填历史订单国家码，`global_config_snapshot` 会冻结这些全局参数与 `demand_date` 以便追溯。
 
 **持久化**：一次完整计算在事务内执行，受 `pg_advisory_xact_lock(7429001)` 保护；runner 不再按 `restock_dates[country] <= demand_date` 过滤补货国家，补货国家是否进入本次建议只由 Step 3 的正补货量与 `restock_regions` 白名单决定。若 `purchase_qty <= 0` 且国家补货合计为 0，则跳过该 SKU；若仅安全库存触发采购但无国家补货量，仍保留为采购-only 条目，并保持 `country_breakdown` / `warehouse_breakdown` / `allocation_snapshot` / `restock_dates` 为空、`total_qty=0`、`urgent=false`；若无条目则返回 `None`，不归档旧 `draft`、不关闭生成开关、不生成空建议单；成功生成非空建议单后才归档旧 `draft`，写入 `suggestion` / `suggestion_item`，统计 `procurement_item_count`、`restock_item_count`，并由 `calc_engine_job` 将 `global_config.suggestion_generation_enabled` 自动翻 OFF。
 
@@ -143,6 +143,8 @@ async def sync_inventory_job(ctx: JobContext) -> None:
 **批量 UPSERT**：使用 `pg_insert(...).on_conflict_do_update(...)` 模式，避免先 SELECT 后 INSERT/UPDATE 的竞态。
 
 **状态追踪**：每个 job 在 `sync_state` 表中维护最后运行时间、状态、错误信息。
+
+**EU 国家归一化**：同步层写入订单、商品、库存、出库在途数据时，会按 `global_config.eu_countries` 将成员国映射为字面值 `EU`，并在对应 `original_*` 字段保留原国家码。全局配置接口保存 `eu_countries` 且实际变化时，会在同一事务内调用 `backfill_order_eu_country_mapping()` 回填本地历史 `order_header`：源国家优先取 `original_country_code`，否则取当前 `country_code`；源国家属于当前 EU 集合时写 `country_code=marketplace_id='EU'` 且 `original_country_code=源国家`，否则恢复为源国家并清空 `original_country_code`。该回填只改本地库，不调用赛狐 API。
 
 **出库记录同步**：`sync_out_records` 会把赛狐“其他出库”记录同步到 `in_transit_record` / `in_transit_item`，除在途状态观测所需字段外，还保留 `warehouseId`、`updateTime`、`type/typeName`、`commodityId`、`perPurchase`，用于数据页直接展示“出库”主表和明细表字段。`target_country` 改为从备注文本提取国家名（如 `20260410美国-赢捷-加州-散货-在途中` → `US`）；提取失败时保持空值，不再回退到 `targetFbaWarehouseId -> warehouse.country`。每次执行该同步任务后，还会顺带扫描历史 `target_country` 为空的旧记录并按同一备注规则回填，不覆盖已有值。
 
@@ -443,9 +445,9 @@ async function reload() {
 - `ApiMonitorView`、`PerformanceMonitorView`、`sync/FailedApiCallTable` 只消费该工具，不在页面内各自维护映射表，避免图表、表格、tooltip 口径漂移
 
 **信息总览页口径**：
-- `WorkspaceView` 首行卡片展示补货概览：`restock_sku_count` 为按当前补货引擎口径计算后 `total_qty > 0` 的启用 SKU 数，`no_restock_sku_count` 为其余启用 SKU 数，`risk_country_count` 表示当前快照中进入风险分层的国家数
-- 左图使用分组柱状图展示各国缺货风险分布，统计对象是实时计算后写入 `dashboard_snapshot.payload.country_risk_distribution` 的 SKU+国家数量，而不是当前建议单快照
-- “急需补货SKU”列表同样使用快照中的国家级 `sale_days`，一行只表示一个 SKU 在一个国家上的风险，不再按 SKU 聚合
+- `WorkspaceView` 首行卡片展示补货概览：`restock_sku_count` 为按当前补货引擎口径计算后 `total_qty > 0` 的启用 SKU 数，`no_restock_sku_count` 为其余启用 SKU 数，`risk_country_count` 表示当前快照中按 `restock_regions` 过滤后进入风险分层的国家数
+- 左图使用分组柱状图展示各国缺货风险分布，统计对象是实时计算后写入 `dashboard_snapshot.payload.country_risk_distribution` 的 SKU+国家数量，而不是当前建议单快照；若 `restock_regions=[]` 则展示全部国家，若配置为 `["EU"]` 则只展示 `EU`
+- “急需补货SKU”列表同样使用快照中的国家级 `sale_days`，并与风险分布使用同一 `restock_regions` 过滤口径；一行只表示一个 SKU 在一个国家上的风险，不再按 SKU 聚合
 - 右图继续使用饼图，数据仍为 `country_restock_distribution`，即当前建议单全部条目的 `country_breakdown` 汇总，用于展示实际建议补货量的国家分布
 
 **建议单与全局配置视图职责**：

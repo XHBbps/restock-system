@@ -104,6 +104,7 @@ def _build_country_risk_distribution(
     *,
     lead_time_days: int,
     target_days: int,
+    allowed_countries: set[str] | None = None,
 ) -> tuple[list[CountryRiskDistribution], int, int, int]:
     country_risk_counts: dict[str, dict[str, int]] = {}
     urgent_count = 0
@@ -112,6 +113,8 @@ def _build_country_risk_distribution(
 
     for country_map in sale_days_by_sku.values():
         for country, days_val in country_map.items():
+            if allowed_countries is not None and country not in allowed_countries:
+                continue
             if not isinstance(days_val, (int, float)) or days_val < 0:
                 continue
             counts = country_risk_counts.setdefault(
@@ -337,6 +340,7 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
             all_sale_days,
             lead_time_days=lead_time_days,
             target_days=target_days,
+            allowed_countries=allowed_countries,
         )
         if enabled_skus
         else ([], 0, 0, 0)

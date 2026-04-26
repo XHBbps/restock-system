@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-26（补货日期参与补货量与采购量计算：`demand_date` 不再过滤补货国家，而是扩展 Step 3 的有效目标库存天数。）
+> 最近更新：2026-04-26（EU 国家配置保存会回填历史订单国家码；信息总览风险分布、覆盖国家与急需补货 SKU 改为按当前补货区域口径展示。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -97,6 +97,12 @@
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.72 信息总览 EU 口径修正（2026-04-26）
+- **EU 配置回填**：`PATCH /api/config/global` 保存 `eu_countries` 且实际变化时，会按当前 EU 配置重新归一化本地 `order_header.country_code`、`marketplace_id` 与 `original_country_code`；源国家优先取 `original_country_code`，否则取当前 `country_code`，不调用赛狐 API。
+- **快照刷新**：`eu_countries` 变化仍会将 `dashboard_snapshot.stale=True`，沿用现有信息总览自动刷新任务机制；`eu_countries` 值未变化时不执行历史订单回填，也不额外置 stale。
+- **风险分布口径**：`backend/app/api/metrics.py` 的 `country_risk_distribution`、`urgent_count` / `warning_count` / `safe_count`、`risk_country_count` 和 `top_urgent_skus` 统一按 `restock_regions` 过滤后的国家展示；`restock_regions=[]` 仍表示全部国家参与，配置为 `["EU"]` 时风险图和覆盖国家只显示 `EU`。
+- **保留统计**：`restock_sku_count` / `no_restock_sku_count` 继续使用当前补货引擎数量口径，不改变 API 返回字段结构和前端页面结构。
 
 ### 3.71 补货日期参与数量计算（2026-04-26）
 - **引擎口径**：`backend/app/engine/runner.py` 不再调用旧的持久化前日期过滤逻辑；`demand_date` 只作为补货目标日期参与数量计算，公式为 `国家补货量=max(ceil((target_days + demand_days) × 国家日均销量 - 国家库存覆盖量), 0)`，其中 `demand_days=max(demand_date - today, 0)`。
