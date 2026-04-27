@@ -4,7 +4,7 @@ import csv
 from io import BytesIO, StringIO
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Path, Query, UploadFile
+from fastapi import APIRouter, Depends, Path, Query, Request
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook, load_workbook  # type: ignore[import-untyped]
 from sqlalchemy import delete, distinct, func, or_, select, update
@@ -610,9 +610,8 @@ def _parse_enabled(value: Any) -> bool:
     raise ValueError("启用列必须为 是/否、true/false 或 1/0")
 
 
-async def _read_mapping_import_rows(file: UploadFile) -> list[dict[str, Any]]:
-    content = await file.read()
-    filename = (file.filename or "").lower()
+def _read_mapping_import_rows(filename: str, content: bytes) -> list[dict[str, Any]]:
+    filename = filename.lower()
     if filename.endswith(".csv"):
         text = content.decode("utf-8-sig")
         reader = csv.DictReader(StringIO(text))
@@ -696,11 +695,15 @@ def _normalize_import_rows(raw_rows: list[dict[str, Any]]) -> dict[str, SkuMappi
 
 @router.post("/sku-mapping-rules/import", response_model=SkuMappingImportOut)
 async def import_sku_mapping_rules(
-    file: UploadFile = File(...),
+    request: Request,
     db: AsyncSession = Depends(db_session),
     _: None = Depends(require_permission(CONFIG_EDIT)),
 ) -> SkuMappingImportOut:
-    raw_rows = await _read_mapping_import_rows(file)
+    filename = request.headers.get("x-filename", "")
+    content = await request.body()
+    if not content:
+        raise ValidationFailed("导入文件没有有效数据")
+    raw_rows = _read_mapping_import_rows(filename, content)
     rules = _normalize_import_rows(raw_rows)
     if not rules:
         raise ValidationFailed("导入文件没有有效数据")

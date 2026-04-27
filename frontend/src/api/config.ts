@@ -127,10 +127,11 @@ export async function importSkuMappingRules(file: File): Promise<{
   updated: number
   total_components: number
 }> {
-  const formData = new FormData()
-  formData.append('file', file)
-  const { data } = await client.post('/api/config/sku-mapping-rules/import', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
+  const { data } = await client.post('/api/config/sku-mapping-rules/import', file, {
+    headers: {
+      'Content-Type': file.type || 'application/octet-stream',
+      'X-Filename': encodeURIComponent(file.name),
+    },
   })
   return data
 }
