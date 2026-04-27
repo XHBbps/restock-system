@@ -104,15 +104,15 @@ jobs:
             fi
             if [[ "$REF" == refs/heads/* ]]; then
               BRANCH="${REF#refs/heads/}"
-              git checkout -B "$BRANCH" "origin/$BRANCH"
+              git checkout -f -B "$BRANCH" "origin/$BRANCH"
             elif [[ "$REF" == refs/tags/* ]]; then
-              git checkout --detach "$REF"
+              git checkout -f --detach "$REF"
             elif git show-ref --verify --quiet "refs/remotes/origin/$REF"; then
-              git checkout -B "$REF" "origin/$REF"
+              git checkout -f -B "$REF" "origin/$REF"
             elif git show-ref --verify --quiet "refs/tags/$REF"; then
-              git checkout --detach "refs/tags/$REF"
+              git checkout -f --detach "refs/tags/$REF"
             else
-              git checkout --detach "$REF"
+              git checkout -f --detach "$REF"
             fi
             export IMAGE_TAG="sha-$(git rev-parse HEAD)"
             bash deploy/scripts/deploy.sh
