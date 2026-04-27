@@ -463,14 +463,14 @@ async def _validate_mapping_unique(
         raise ConflictError(f"商品SKU {commodity_sku} 已存在映射规则")
 
     component_skus = [component.inventory_sku for component in components]
-    component_rows = (
-        await db.execute(
-            select(SkuMappingComponent.inventory_sku, SkuMappingRule.commodity_sku)
-            .join(SkuMappingRule, SkuMappingRule.id == SkuMappingComponent.rule_id)
-            .where(SkuMappingComponent.inventory_sku.in_(component_skus))
-            .where(SkuMappingComponent.rule_id != current_rule_id if current_rule_id else True)
-        )
-    ).all()
+    component_stmt = (
+        select(SkuMappingComponent.inventory_sku, SkuMappingRule.commodity_sku)
+        .join(SkuMappingRule, SkuMappingRule.id == SkuMappingComponent.rule_id)
+        .where(SkuMappingComponent.inventory_sku.in_(component_skus))
+    )
+    if current_rule_id is not None:
+        component_stmt = component_stmt.where(SkuMappingComponent.rule_id != current_rule_id)
+    component_rows = (await db.execute(component_stmt)).all()
     if component_rows:
         inventory_sku, owner_sku = component_rows[0]
         raise ConflictError(f"库存SKU {inventory_sku} 已归属商品SKU {owner_sku}")
@@ -645,10 +645,13 @@ def _normalize_import_rows(raw_rows: list[dict[str, Any]]) -> dict[str, SkuMappi
         commodity_sku = str(raw.get("商品SKU") or "").strip()
         inventory_sku = str(raw.get("库存SKU") or "").strip()
         quantity_raw = raw.get("组件数量")
-        try:
-            quantity = int(quantity_raw)
-        except (TypeError, ValueError):
+        if quantity_raw is None:
             quantity = 0
+        else:
+            try:
+                quantity = int(quantity_raw)
+            except (TypeError, ValueError):
+                quantity = 0
         try:
             enabled = _parse_enabled(raw.get("启用"))
         except ValueError as exc:
