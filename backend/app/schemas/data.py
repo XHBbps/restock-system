@@ -99,6 +99,7 @@ class DataInventoryItem(SaihuLikeModel):
     commodity_sku: str
     commodity_name: str | None = None
     main_image: str | None = None
+    is_package: bool
     warehouse_id: str
     warehouse_name: str
     warehouse_type: int

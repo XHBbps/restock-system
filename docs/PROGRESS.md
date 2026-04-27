@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-27（生产主分支切换为当前线上补货日期发布线；Deploy workflow 的分支部署改为对齐 `origin/<branch>`，避免服务器旧本地分支阻塞。）
+> 最近更新：2026-04-27（库存明细新增“包裹”标识与三态筛选；生产主分支切换为当前线上补货日期发布线，Deploy workflow 的分支部署改为对齐 `origin/<branch>`。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -98,6 +98,11 @@
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
 
+### 3.74 库存明细包裹标识与筛选（2026-04-27）
+- **判定口径**：库存 SKU 若在 `product_listing.commodity_sku` 中不存在，则 `backend/app/api/data.py` 返回 `is_package=true`；存在则返回 `false`。该口径不新增数据库字段，不依赖商品名或图片是否为空。
+- **接口过滤**：`GET /api/data/inventory` 与 `GET /api/data/inventory/warehouse-groups` 新增可选查询参数 `is_package=true|false`；缺省时保持全部库存。筛选通过 `EXISTS / NOT EXISTS` 下推到 SQL，分页总数、仓库分组 `sku_count`、可用库存合计和占用库存合计均按筛选后结果计算。
+- **前端展示**：`frontend/src/views/data/DataInventoryView.vue` 的筛选区新增“包裹”下拉（全部 / 包裹 / 非包裹），展开明细表新增“包裹”列，`●` 表示包裹，`○` 表示非包裹。
+- **测试**：更新 `backend/tests/unit/test_data_inventory_groups_api.py` 与 `frontend/src/views/__tests__/DataInventoryView.test.ts`，覆盖包裹字段、筛选参数和回到第一页行为。
 ### 3.72 信息总览 EU 口径修正（2026-04-26）
 - **EU 配置回填**：`PATCH /api/config/global` 保存 `eu_countries` 且实际变化时，会按当前 EU 配置重新归一化本地 `order_header.country_code`、`marketplace_id` 与 `original_country_code`；源国家优先取 `original_country_code`，否则取当前 `country_code`，不调用赛狐 API。
 - **快照刷新**：`eu_countries` 变化仍会将 `dashboard_snapshot.stale=True`，沿用现有信息总览自动刷新任务机制；`eu_countries` 值未变化时不执行历史订单回填，也不额外置 stale。

@@ -9,8 +9,25 @@
         @keyup.enter="reloadFirstPage"
         @clear="reloadFirstPage"
       />
-      <el-select v-model="filters.country" placeholder="国家" clearable filterable style="width: 140px" @change="reloadFirstPage">
+      <el-select
+        v-model="filters.country"
+        placeholder="国家"
+        clearable
+        filterable
+        style="width: 140px"
+        @change="reloadFirstPage"
+      >
         <el-option v-for="c in COUNTRY_OPTIONS" :key="c.code" :label="c.code" :value="c.code" />
+      </el-select>
+      <el-select
+        v-model="filters.is_package"
+        placeholder="包裹"
+        style="width: 120px"
+        @change="reloadFirstPage"
+      >
+        <el-option label="全部" value="" />
+        <el-option label="包裹" :value="true" />
+        <el-option label="非包裹" :value="false" />
       </el-select>
       <el-switch v-model="filters.only_nonzero" active-text="仅非零" @change="reloadFirstPage" />
     </template>
@@ -22,13 +39,24 @@
             <el-table :data="row.items" size="small" :show-header="true">
               <el-table-column label="SKU" min-width="200">
                 <template #default="{ row: item }">
-                  <SkuCard :sku="item.commoditySku" :name="item.commodityName" :image="item.mainImage" />
+                  <SkuCard
+                    :sku="item.commoditySku"
+                    :name="item.commodityName"
+                    :image="item.mainImage"
+                  />
                 </template>
               </el-table-column>
               <el-table-column label="国家" width="80" align="center">
                 <template #default="{ row: item }">
                   <el-tag v-if="item.country" size="small">{{ item.country }}</el-tag>
                   <span v-else class="muted">-</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="包裹" width="80" align="center">
+                <template #default="{ row: item }">
+                  <span class="package-marker" :title="item.isPackage ? '包裹' : '非包裹'">
+                    {{ item.isPackage ? '●' : '○' }}
+                  </span>
                 </template>
               </el-table-column>
               <el-table-column label="可用库存" prop="stockAvailable" width="120" align="right" />
@@ -78,13 +106,13 @@
 
 <script setup lang="ts">
 import { listInventoryWarehouseGroups, type DataInventoryWarehouseGroup } from '@/api/data'
-import { COUNTRY_OPTIONS } from '@/utils/countries'
-import { formatUpdateTime } from '@/utils/format'
-import { warehouseTypeLabel } from '@/utils/warehouse'
 import PageSectionCard from '@/components/PageSectionCard.vue'
 import SkuCard from '@/components/SkuCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
 import { getActionErrorMessage } from '@/utils/apiError'
+import { COUNTRY_OPTIONS } from '@/utils/countries'
+import { formatUpdateTime } from '@/utils/format'
+import { warehouseTypeLabel } from '@/utils/warehouse'
 import { ElMessage } from 'element-plus'
 import { onMounted, reactive, ref } from 'vue'
 
@@ -97,6 +125,7 @@ const filters = reactive({
   sku: '',
   country: '',
   only_nonzero: true,
+  is_package: '' as '' | boolean
 })
 
 async function reload(resetPage = false): Promise<void> {
@@ -109,8 +138,9 @@ async function reload(resetPage = false): Promise<void> {
       sku: filters.sku || undefined,
       country: filters.country || undefined,
       only_nonzero: filters.only_nonzero,
+      is_package: typeof filters.is_package === 'boolean' ? filters.is_package : undefined,
       page: page.value,
-      page_size: pageSize.value,
+      page_size: pageSize.value
     })
     warehouseGroups.value = resp.items
     total.value = resp.total

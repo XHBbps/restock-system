@@ -389,7 +389,7 @@ async function reload() {
 - `DataOrdersView.vue`：订单列表按页返回，并仅对当前页补查 `item_count` / `has_detail`
 - `HistoryView.vue`：建议单历史页直接消费 `GET /api/suggestions` 的 `items/total/page/page_size`；状态列使用 `getSuggestionDisplayStatusMeta(status, snapshot_count)` 派生 4 档显示标签（`未提交 / 已导出 / 已归档 / 异常`），状态下拉对应后端 `display_status=pending|exported|archived|error`，由后端统一按 `snapshot_count` 派生过滤，避免前端只过滤当前页造成 `items` 与 `total` 错位；`canDelete(row)` 规则为 `row.snapshot_count === 0`。派生逻辑定义在 `frontend/src/utils/status.ts::deriveSuggestionDisplayStatus`，`SuggestionListView` 与 `SuggestionDetailView` 的状态 tag 共用该函数，避免多处硬编码映射。
 - `DataProductsView.vue`：商品页通过 `listSkuOverview()` 下推 SKU、启用状态和分页参数
-- `DataInventoryView.vue`：库存页通过 `GET /api/data/inventory/warehouse-groups` 做仓库分组分页，保持仓库展开明细交互
+- `DataInventoryView.vue`：库存页通过 `GET /api/data/inventory/warehouse-groups` 做仓库分组分页，保持仓库展开明细交互；库存明细的 `is_package` 由 `product_listing.commodity_sku` 是否存在实时派生，支持全部 / 包裹 / 非包裹筛选
 - `DataOutRecordsView.vue`：出库记录页将 SKU、仓库单号、国家、类型、在途状态、排序和分页下推到后端
 
 **订单页排序示例**：
@@ -927,6 +927,7 @@ VITE_API_PROXY_TARGET=http://localhost:8000
 
 | 日期 | 变更 | 相关 PROGRESS 章节 |
 |---|---|---|
+| 2026-04-27 | 库存明细新增包裹标识与筛选：`is_package` 由 `product_listing.commodity_sku` 是否存在实时派生，仓库分组统计随筛选口径重算 | §3.74 |
 | 2026-04-26 | 补货日期参与数量计算：`demand_date` 扩展 Step 3 有效目标库存天数，`restock_dates` 不再过滤补货国家，前端与 Excel 元信息统一展示“补货日期” | §3.71 |
 | 2026-04-25 | 清理历史设计产物与旧赛狐写入残留配置，文档入口收敛到当前 `docs/` 事实文档 | §3.64 |
 | 2026-04-24 | 安全库存采购-only 项保留到采购建议：无补货国家命中但 `purchase_qty > 0` 时保留 SKU，补货字段清空且采购/补货计数继续独立 | §3.63 |

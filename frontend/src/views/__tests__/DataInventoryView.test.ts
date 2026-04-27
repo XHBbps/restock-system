@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mockListInventoryWarehouseGroups = vi.fn()
 
 vi.mock('@/api/data', () => ({
-  listInventoryWarehouseGroups: (...args: unknown[]) => mockListInventoryWarehouseGroups(...args),
+  listInventoryWarehouseGroups: (...args: unknown[]) => mockListInventoryWarehouseGroups(...args)
 }))
 
 vi.mock('element-plus', async () => {
@@ -17,7 +17,7 @@ vi.mock('element-plus', async () => {
 const STUBS = {
   PageSectionCard: {
     props: ['title'],
-    template: '<div><h1>{{ title }}</h1><slot name="actions" /><slot /></div>',
+    template: '<div><h1>{{ title }}</h1><slot name="actions" /><slot /></div>'
   },
   TablePaginationBar: {
     props: ['currentPage', 'pageSize', 'total'],
@@ -27,7 +27,7 @@ const STUBS = {
         <button class="page-2" @click="$emit('update:currentPage', 2); $emit('current-change', 2)">page</button>
         <button class="size-50" @click="$emit('update:pageSize', 50); $emit('size-change', 50)">size</button>
       </div>
-    `,
+    `
   },
   SkuCard: true,
   ElInput: {
@@ -40,26 +40,41 @@ const STUBS = {
         @input="$emit('update:modelValue', $event.target.value)"
         @keyup.enter="$emit('keyup.enter')"
       />
-    `,
+    `
   },
   ElSelect: {
     props: ['modelValue', 'placeholder'],
     emits: ['update:modelValue', 'change'],
     template: `
       <div :data-placeholder="placeholder">
-        <button class="country-us" @click="$emit('update:modelValue', 'US'); $emit('change', 'US')">US</button>
+        <button
+          v-if="placeholder === '国家'"
+          class="country-us"
+          @click="$emit('update:modelValue', 'US'); $emit('change', 'US')"
+        >US</button>
+        <button
+          v-if="placeholder === '包裹'"
+          class="package-true"
+          @click="$emit('update:modelValue', true); $emit('change', true)"
+        >package</button>
+        <button
+          v-if="placeholder === '包裹'"
+          class="package-false"
+          @click="$emit('update:modelValue', false); $emit('change', false)"
+        >non-package</button>
       </div>
-    `,
+    `
   },
   ElSwitch: {
     props: ['modelValue'],
     emits: ['update:modelValue', 'change'],
-    template: '<button class="only-nonzero" @click="$emit(\'update:modelValue\', false); $emit(\'change\', false)">switch</button>',
+    template:
+      '<button class="only-nonzero" @click="$emit(\'update:modelValue\', false); $emit(\'change\', false)">switch</button>'
   },
   ElOption: true,
   ElTable: { template: '<div><slot /></div>' },
   ElTableColumn: { template: '<div><slot :row="{}" /></div>' },
-  ElTag: { template: '<span><slot /></span>' },
+  ElTag: { template: '<span><slot /></span>' }
 }
 
 function buildResponse(total = 23) {
@@ -83,14 +98,15 @@ function buildResponse(total = 23) {
             country: 'US',
             stockAvailable: 10,
             stockOccupy: 2,
-            updatedAt: '2026-04-17T10:00:00',
-          },
-        ],
-      },
+            isPackage: false,
+            updatedAt: '2026-04-17T10:00:00'
+          }
+        ]
+      }
     ],
     total,
     page: 1,
-    pageSize: 20,
+    pageSize: 20
   }
 }
 
@@ -110,8 +126,9 @@ describe('DataInventoryView', () => {
       sku: undefined,
       country: undefined,
       only_nonzero: true,
+      is_package: undefined,
       page: 1,
-      page_size: 20,
+      page_size: 20
     })
   })
 
@@ -123,10 +140,35 @@ describe('DataInventoryView', () => {
 
     await wrapper.find('.page-2').trigger('click')
     await flushPromises()
-    expect(mockListInventoryWarehouseGroups).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2 }))
+    expect(mockListInventoryWarehouseGroups).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 2 })
+    )
 
     await wrapper.find('.country-us').trigger('click')
     await flushPromises()
-    expect(mockListInventoryWarehouseGroups).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, country: 'US' }))
+    expect(mockListInventoryWarehouseGroups).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 1, country: 'US' })
+    )
+  })
+
+  it('passes package filter and resets to first page', async () => {
+    const { default: View } = await import('../data/DataInventoryView.vue')
+    const wrapper = shallowMount(View, { global: { stubs: STUBS, directives: { loading: {} } } })
+    await flushPromises()
+    mockListInventoryWarehouseGroups.mockClear()
+
+    await wrapper.find('.page-2').trigger('click')
+    await flushPromises()
+    await wrapper.find('.package-true').trigger('click')
+    await flushPromises()
+    expect(mockListInventoryWarehouseGroups).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 1, is_package: true })
+    )
+
+    await wrapper.find('.package-false').trigger('click')
+    await flushPromises()
+    expect(mockListInventoryWarehouseGroups).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 1, is_package: false })
+    )
   })
 })

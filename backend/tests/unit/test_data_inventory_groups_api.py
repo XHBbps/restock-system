@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.api.data import list_inventory_warehouse_groups, list_out_record_types
+from app.api.data import list_inventory, list_inventory_warehouse_groups, list_out_record_types
 
 
 class _ScalarResult:
@@ -68,6 +68,7 @@ async def test_list_inventory_warehouse_groups_returns_grouped_page() -> None:
         country="US",
         sku="SKU",
         only_nonzero=True,
+        is_package=None,
         page=2,
         page_size=10,
         db=db,
@@ -81,6 +82,7 @@ async def test_list_inventory_warehouse_groups_returns_grouped_page() -> None:
     assert result.items[0].sku_count == 1
     assert result.items[0].total_available == 10
     assert result.items[0].items[0].commodity_name == "Product"
+    assert result.items[0].items[0].is_package is False
 
 
 @pytest.mark.asyncio
@@ -91,6 +93,7 @@ async def test_list_inventory_warehouse_groups_skips_item_queries_when_empty() -
         country=None,
         sku=None,
         only_nonzero=True,
+        is_package=None,
         page=1,
         page_size=20,
         db=db,
@@ -100,6 +103,72 @@ async def test_list_inventory_warehouse_groups_skips_item_queries_when_empty() -
     assert result.items == []
     assert result.total == 0
     assert len(db.statements) == 2
+
+
+@pytest.mark.asyncio
+async def test_list_inventory_marks_unmatched_sku_as_package() -> None:
+    db = _FakeSession(
+        [
+            _ScalarResult(1),
+            _AllResult([(_inventory_row(sku="PKG-1"), "Warehouse", 1)]),
+            _AllResult([]),
+        ]
+    )
+
+    result = await list_inventory(
+        country=None,
+        warehouse_id=None,
+        sku=None,
+        only_nonzero=True,
+        is_package=True,
+        page=1,
+        page_size=20,
+        sort_by=None,
+        sort_order="asc",
+        db=db,
+        _=None,
+    )
+
+    assert result.items[0].commodity_sku == "PKG-1"
+    assert result.items[0].is_package is True
+    assert "EXISTS" in str(db.statements[0])
+    assert "NOT" in str(db.statements[0])
+
+
+@pytest.mark.asyncio
+async def test_list_inventory_warehouse_groups_applies_non_package_filter() -> None:
+    group_row = SimpleNamespace(
+        warehouse_id="WH-1",
+        warehouse_name="Warehouse",
+        warehouse_type=1,
+        sku_count=1,
+        total_available=10,
+        total_occupy=2,
+    )
+    db = _FakeSession(
+        [
+            _ScalarResult(1),
+            _AllResult([group_row]),
+            _AllResult([(_inventory_row(sku="SKU-1"), "Warehouse", 1)]),
+            _AllResult([("SKU-1", "Product", None)]),
+        ]
+    )
+
+    result = await list_inventory_warehouse_groups(
+        country=None,
+        sku=None,
+        only_nonzero=True,
+        is_package=False,
+        page=1,
+        page_size=20,
+        db=db,
+        _=None,
+    )
+
+    assert result.items[0].items[0].is_package is False
+    assert "EXISTS" in str(db.statements[0])
+    assert "NOT" not in str(db.statements[0])
+    assert "EXISTS" in str(db.statements[2])
 
 
 @pytest.mark.asyncio

@@ -200,6 +200,7 @@ def _apply_inventory_filters(
     warehouse_id: str | None = None,
     sku: str | None,
     only_nonzero: bool,
+    is_package: bool | None = None,
 ) -> Any:
     if country:
         stmt = stmt.where(InventorySnapshotLatest.country == country.upper())
@@ -213,6 +214,13 @@ def _apply_inventory_filters(
         stmt = stmt.where(
             (InventorySnapshotLatest.available > 0) | (InventorySnapshotLatest.reserved > 0)
         )
+    if is_package is not None:
+        listing_exists = (
+            select(ProductListing.id)
+            .where(ProductListing.commodity_sku == InventorySnapshotLatest.commodity_sku)
+            .exists()
+        )
+        stmt = stmt.where(~listing_exists if is_package else listing_exists)
     return stmt
 
 
@@ -473,6 +481,7 @@ async def list_inventory(
     warehouse_id: str | None = Query(default=None),
     sku: str | None = Query(default=None),
     only_nonzero: bool = Query(default=True),
+    is_package: bool | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=5000),
     sort_by: str | None = Query(default=None),
@@ -491,6 +500,7 @@ async def list_inventory(
         warehouse_id=warehouse_id,
         sku=sku,
         only_nonzero=only_nonzero,
+        is_package=is_package,
     )
 
     base = _apply_inventory_sort(base, sort_by, sort_order)
@@ -502,6 +512,7 @@ async def list_inventory(
     # 批量加载 commodity_name / main_image
     sku_codes = list({r[0].commodity_sku for r in rows})
     name_map: dict[str, tuple[str | None, str | None]] = {}
+    matched_skus: set[str] = set()
     if sku_codes:
         pl_rows = (
             await db.execute(
@@ -513,7 +524,9 @@ async def list_inventory(
             )
         ).all()
         for sk, name, img in pl_rows:
-            name_map.setdefault(sk, (name, img))
+            if sk is not None:
+                matched_skus.add(sk)
+                name_map.setdefault(sk, (name, img))
 
     items: list[DataInventoryItem] = []
     for inv, wh_name, wh_type in rows:
@@ -524,6 +537,7 @@ async def list_inventory(
                     "commodity_sku": inv.commodity_sku,
                     "commodity_name": name,
                     "main_image": image,
+                    "is_package": inv.commodity_sku not in matched_skus,
                     "warehouse_id": inv.warehouse_id,
                     "warehouse_name": wh_name,
                     "warehouse_type": wh_type,
@@ -542,6 +556,7 @@ async def list_inventory_warehouse_groups(
     country: str | None = Query(default=None),
     sku: str | None = Query(default=None),
     only_nonzero: bool = Query(default=True),
+    is_package: bool | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=200),
     db: AsyncSession = Depends(db_session_readonly),
@@ -565,6 +580,7 @@ async def list_inventory_warehouse_groups(
         country=country,
         sku=sku,
         only_nonzero=only_nonzero,
+        is_package=is_package,
     )
 
     grouped_subquery = group_stmt.order_by(None).subquery()
@@ -597,11 +613,13 @@ async def list_inventory_warehouse_groups(
         country=country,
         sku=sku,
         only_nonzero=only_nonzero,
+        is_package=is_package,
     )
     item_rows = (await db.execute(item_stmt)).all()
 
     sku_codes = list({row[0].commodity_sku for row in item_rows})
     name_map: dict[str, tuple[str | None, str | None]] = {}
+    matched_skus: set[str] = set()
     if sku_codes:
         pl_rows = (
             await db.execute(
@@ -613,7 +631,9 @@ async def list_inventory_warehouse_groups(
             )
         ).all()
         for sk, name, img in pl_rows:
-            name_map.setdefault(sk, (name, img))
+            if sk is not None:
+                matched_skus.add(sk)
+                name_map.setdefault(sk, (name, img))
 
     items_by_warehouse: dict[str, list[DataInventoryItem]] = {warehouse_id: [] for warehouse_id in warehouse_ids}
     for inv, wh_name, wh_type in item_rows:
@@ -624,6 +644,7 @@ async def list_inventory_warehouse_groups(
                     "commodity_sku": inv.commodity_sku,
                     "commodity_name": name,
                     "main_image": image,
+                    "is_package": inv.commodity_sku not in matched_skus,
                     "warehouse_id": inv.warehouse_id,
                     "warehouse_name": wh_name,
                     "warehouse_type": wh_type,

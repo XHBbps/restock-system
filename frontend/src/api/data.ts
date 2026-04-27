@@ -1,6 +1,6 @@
 // 外部数据源 API 客户端（字段和赛狐接口一致，camelCase）
-import client from './client'
 import type { SortOrder } from '@/utils/tableSort'
+import client from './client'
 
 // ========== 订单 ==========
 export interface DataOrderSummary {
@@ -81,6 +81,7 @@ export interface DataInventoryItem {
   commoditySku: string
   commodityName: string | null
   mainImage: string | null
+  isPackage: boolean
   warehouseId: string
   warehouseName: string
   warehouseType: number
@@ -105,6 +106,7 @@ export async function listInventory(params: {
   warehouse_id?: string
   sku?: string
   only_nonzero?: boolean
+  is_package?: boolean
   page?: number
   page_size?: number
   sort_by?: string
@@ -118,6 +120,7 @@ export async function listInventoryWarehouseGroups(params: {
   country?: string
   sku?: string
   only_nonzero?: boolean
+  is_package?: boolean
   page?: number
   page_size?: number
 }): Promise<PageResult<DataInventoryWarehouseGroup>> {
