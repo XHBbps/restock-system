@@ -92,7 +92,7 @@ jobs:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
-          command_timeout: 30m
+          command_timeout: 90m
           script: |
             set -euo pipefail
             REF="${{ github.event.inputs.ref || github.ref_name }}"
