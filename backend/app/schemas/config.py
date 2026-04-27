@@ -85,6 +85,119 @@ class SkuConfigPatch(BaseModel):
     lead_time_days: int | None = Field(default=None, ge=0, le=365)
 
 
+# ==================== SKU Mapping Rules ====================
+class SkuMappingComponentIn(BaseModel):
+    inventory_sku: str = Field(..., min_length=1, max_length=100)
+    quantity: int = Field(..., ge=1, le=999999)
+
+    @field_validator("inventory_sku")
+    @classmethod
+    def normalize_inventory_sku(cls, value: str) -> str:
+        sku = value.strip()
+        if not sku:
+            raise ValueError("库存SKU不能为空")
+        return sku
+
+
+class SkuMappingComponentOut(SkuMappingComponentIn):
+    id: int
+
+    model_config = {"from_attributes": True}
+
+
+class SkuMappingRuleIn(BaseModel):
+    commodity_sku: str = Field(..., min_length=1, max_length=100)
+    enabled: bool = True
+    remark: str | None = Field(default=None, max_length=1000)
+    components: list[SkuMappingComponentIn] = Field(..., min_length=1)
+
+    @field_validator("commodity_sku")
+    @classmethod
+    def normalize_commodity_sku(cls, value: str) -> str:
+        sku = value.strip()
+        if not sku:
+            raise ValueError("商品SKU不能为空")
+        return sku
+
+    @field_validator("remark")
+    @classmethod
+    def normalize_remark(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        remark = value.strip()
+        return remark or None
+
+    @model_validator(mode="after")
+    def validate_components(self) -> "SkuMappingRuleIn":
+        seen: set[str] = set()
+        for component in self.components:
+            if component.inventory_sku in seen:
+                raise ValueError(f"库存SKU重复：{component.inventory_sku}")
+            seen.add(component.inventory_sku)
+        return self
+
+
+class SkuMappingRulePatch(BaseModel):
+    commodity_sku: str | None = Field(default=None, min_length=1, max_length=100)
+    enabled: bool | None = None
+    remark: str | None = Field(default=None, max_length=1000)
+    components: list[SkuMappingComponentIn] | None = Field(default=None, min_length=1)
+
+    @field_validator("commodity_sku")
+    @classmethod
+    def normalize_optional_commodity_sku(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        sku = value.strip()
+        if not sku:
+            raise ValueError("商品SKU不能为空")
+        return sku
+
+    @field_validator("remark")
+    @classmethod
+    def normalize_optional_remark(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        remark = value.strip()
+        return remark or None
+
+    @model_validator(mode="after")
+    def validate_components(self) -> "SkuMappingRulePatch":
+        if self.components is None:
+            return self
+        seen: set[str] = set()
+        for component in self.components:
+            if component.inventory_sku in seen:
+                raise ValueError(f"库存SKU重复：{component.inventory_sku}")
+            seen.add(component.inventory_sku)
+        return self
+
+
+class SkuMappingRuleOut(BaseModel):
+    id: int
+    commodity_sku: str
+    enabled: bool
+    remark: str | None = None
+    components: list[SkuMappingComponentOut]
+    formula_preview: str
+    component_count: int
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class SkuMappingRuleListOut(BaseModel):
+    items: list[SkuMappingRuleOut]
+    total: int
+
+
+class SkuMappingImportOut(BaseModel):
+    created: int
+    updated: int
+    total_components: int
+
+
 # ==================== Warehouse ====================
 class WarehouseOut(BaseModel):
     id: str

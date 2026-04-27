@@ -199,6 +199,37 @@ docker compose -f deploy/docker-compose.yml exec db psql -U postgres -d replenis
    - 03:30 `sync_warehouse`、02:00 `daily_archive`
    - 默认 08:00 `calc_engine`
 
+### 3.3.1 SKU 映射规则与计算结果异常
+
+**症状**：映射规则保存或导入失败，或补货建议中某个商品 SKU 的库存 / 补货量与预期不一致。
+
+**排查**：
+
+1. **规则唯一性**
+   ```sql
+   SELECT r.commodity_sku, c.inventory_sku, c.quantity, r.enabled
+   FROM sku_mapping_rule r
+   JOIN sku_mapping_component c ON c.rule_id = r.id
+   ORDER BY r.commodity_sku, c.inventory_sku;
+   ```
+   - `sku_mapping_rule.commodity_sku` 一商品只允许一条规则。
+   - `sku_mapping_component.inventory_sku` 全局唯一；如果提示“库存SKU已归属”，先编辑或删除原规则再改归属。
+
+2. **导入失败**
+   - 导入列名必须是 `商品SKU`、`库存SKU`、`组件数量`、`启用`、`备注`。
+   - 任一行 SKU 为空、数量不是正整数、同批次库存 SKU 重复、或库存 SKU 已归属其他规则时，整批不写入。
+   - 同一商品 SKU 多行表示多组件规则，但启用状态和备注必须一致。
+
+3. **计算口径**
+   - 规则停用时不参与计算。
+   - `A=2*B` 按同仓库 `floor(B/2)`；`A=1*B+2*C` 按同仓库 `min(floor(B/1), floor(C/2))`。
+   - 组件不能跨仓库组合；组件分散在不同仓库时可组装数量可能为 0。
+   - 组件在途必须有 `target_warehouse_id` 才参与映射组合；直接商品 SKU 的在途仍按原有国家聚合口径参与。
+
+4. **库存明细展示**
+   - 映射规则只影响补货计算，不改写同步落库数据。
+   - 库存明细页仍展示原始库存 SKU；未映射且不等于商品 SKU 的包裹 SKU 会保留为“未匹配”，不参与商品 SKU 补货计算。
+
 ### 3.4 Frontend 容器显示 unhealthy
 
 **症状**：`docker compose ps` 中 `frontend` 为 `unhealthy`，但日志显示 Nginx 已启动。

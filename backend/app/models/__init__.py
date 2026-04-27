@@ -18,6 +18,7 @@ from app.models.role import Role
 from app.models.role_permission import RolePermission
 from app.models.shop import Shop
 from app.models.sku import SkuConfig
+from app.models.sku_mapping import SkuMappingComponent, SkuMappingRule
 from app.models.suggestion import Suggestion, SuggestionItem
 from app.models.suggestion_snapshot import SuggestionSnapshot, SuggestionSnapshotItem
 from app.models.sync_state import SyncState
@@ -47,6 +48,8 @@ __all__ = [
     "RolePermission",
     "Shop",
     "SkuConfig",
+    "SkuMappingComponent",
+    "SkuMappingRule",
     "Suggestion",
     "SuggestionItem",
     "SuggestionSnapshot",

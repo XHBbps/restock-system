@@ -55,6 +55,86 @@ export async function initSkuConfigs(): Promise<{ created: number; total: number
   return data
 }
 
+// ========== SKU Mapping Rules ==========
+export interface SkuMappingComponent {
+  id: number
+  inventory_sku: string
+  quantity: number
+}
+
+export interface SkuMappingRule {
+  id: number
+  commodity_sku: string
+  enabled: boolean
+  remark: string | null
+  components: SkuMappingComponent[]
+  formula_preview: string
+  component_count: number
+  created_at: string
+  updated_at: string
+}
+
+export interface SkuMappingComponentInput {
+  inventory_sku: string
+  quantity: number
+}
+
+export interface SkuMappingRuleInput {
+  commodity_sku: string
+  enabled: boolean
+  remark?: string | null
+  components: SkuMappingComponentInput[]
+}
+
+export async function listSkuMappingRules(params: {
+  enabled?: boolean
+  keyword?: string
+  page?: number
+  page_size?: number
+}): Promise<{ items: SkuMappingRule[]; total: number }> {
+  const { data } = await client.get('/api/config/sku-mapping-rules', { params })
+  return data
+}
+
+export async function createSkuMappingRule(
+  rule: SkuMappingRuleInput,
+): Promise<SkuMappingRule> {
+  const { data } = await client.post<SkuMappingRule>('/api/config/sku-mapping-rules', rule)
+  return data
+}
+
+export async function updateSkuMappingRule(
+  id: number,
+  rule: Partial<SkuMappingRuleInput>,
+): Promise<SkuMappingRule> {
+  const { data } = await client.patch<SkuMappingRule>(`/api/config/sku-mapping-rules/${id}`, rule)
+  return data
+}
+
+export async function deleteSkuMappingRule(id: number): Promise<void> {
+  await client.delete(`/api/config/sku-mapping-rules/${id}`)
+}
+
+export async function exportSkuMappingRules(): Promise<Blob> {
+  const { data } = await client.get('/api/config/sku-mapping-rules/export', {
+    responseType: 'blob',
+  })
+  return data
+}
+
+export async function importSkuMappingRules(file: File): Promise<{
+  created: number
+  updated: number
+  total_components: number
+}> {
+  const formData = new FormData()
+  formData.append('file', file)
+  const { data } = await client.post('/api/config/sku-mapping-rules/import', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+  return data
+}
+
 // ========== Warehouse ==========
 export interface Warehouse {
   id: string

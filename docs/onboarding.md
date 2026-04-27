@@ -407,6 +407,16 @@ async function reload() {
 - 库存页如需保留“按仓库展开”交互，优先复用 `/api/data/inventory/warehouse-groups` 的仓库分组分页接口。
 - 店铺、仓库等低增长基础数据页可以保留轻量分页，但不要再为大数据页新增 `page_size=5000` 的前端本地筛选模式。
 
+基础配置页面：
+
+| 页面 | 路由 | 权限 | 说明 |
+|---|---|---|---|
+| 全局参数 | `/settings/global` | `config:view` / `config:edit` | 补货参数、EU 合并、生成开关 |
+| 邮编规则 | `/settings/zipcode` | `config:view` / `config:edit` | 国家 + 邮编前缀到仓库分配规则 |
+| 映射规则 | `/settings/sku-mapping-rules` | `config:view` / `config:edit` | 商品 SKU 与库存包裹 SKU 的组装规则 |
+
+映射规则导入模板固定为一行一个组件，列名必须为：`商品SKU`、`库存SKU`、`组件数量`、`启用`、`备注`。同一商品 SKU 的多行组成同一条规则；`启用` 支持 `是/否`、`true/false`、`1/0`；导入整批校验，任一行存在空 SKU、非法数量、重复库存 SKU 或库存 SKU 已归属其他规则时，本批次不写入。
+
 ### 7.5 后端开发约定
 
 - **API 层不写 SQL**，走 ORM 或业务函数

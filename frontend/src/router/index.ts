@@ -106,6 +106,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'config/global', redirect: '/settings/global' },
       { path: 'config/warehouse', redirect: '/settings/warehouse' },
       { path: 'config/zipcode', redirect: '/settings/zipcode' },
+      { path: 'config/sku-mapping-rules', redirect: '/settings/sku-mapping-rules' },
       { path: 'config/shop', redirect: '/settings/shop' },
       { path: 'troubleshooting/api-monitor', redirect: '/settings/api-monitor' },
       { path: 'troubleshooting/performance', redirect: '/settings/performance' },

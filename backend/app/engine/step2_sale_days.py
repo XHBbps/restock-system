@@ -14,6 +14,14 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.engine.context import InventoryMap, InventoryStock, SaleDaysMap, VelocityMap
+from app.engine.sku_mapping import (
+    component_skus_for_rules,
+    compute_mapped_stock_by_country,
+    load_active_mapping_rules,
+    load_in_transit_totals_by_warehouse,
+    load_inventory_totals_by_warehouse,
+    merge_warehouse_stock,
+)
 from app.models.in_transit import InTransitItem, InTransitRecord
 from app.models.inventory import InventorySnapshotLatest
 from app.models.warehouse import Warehouse
@@ -118,6 +126,26 @@ async def run_step2(
 ) -> tuple[SaleDaysMap, InventoryMap]:
     oversea = await load_oversea_inventory(db, commodity_skus)
     in_transit = await load_in_transit(db, commodity_skus)
+    rules = await load_active_mapping_rules(db, commodity_skus)
+    component_skus = component_skus_for_rules(rules)
+    if component_skus:
+        component_inventory = await load_inventory_totals_by_warehouse(
+            db,
+            component_skus,
+            exclude_warehouse_type=1,
+        )
+        component_transit = await load_in_transit_totals_by_warehouse(
+            db,
+            component_skus,
+            exclude_warehouse_type=1,
+        )
+        mapped = compute_mapped_stock_by_country(
+            rules,
+            merge_warehouse_stock(component_inventory, component_transit),
+        )
+        for key, quantity in mapped.items():
+            current = oversea.setdefault(key, {"available": 0, "reserved": 0})
+            current["available"] += quantity
     inventory = merge_inventory(oversea, in_transit)
     sale_days = compute_sale_days(velocity, inventory)
     return sale_days, inventory

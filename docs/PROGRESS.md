@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-27（同步日志 / 接口监控新增赛狐 `40019` 失败调用精确自动重试队列；库存明细将“包裹”展示口径改为“未匹配 / 已匹配”，并放大圆点标识；生产主分支切换为当前线上补货日期发布线，Deploy workflow 的分支部署改为对齐 `origin/<branch>`。）
+> 最近更新：2026-04-27（新增 SKU 映射规则配置页与 `/api/config/sku-mapping-rules` 配置接口，补货计算按同仓库组件组装口径把库存包裹 SKU 转换为商品 SKU 视角库存；同步日志 / 接口监控新增赛狐 `40019` 失败调用精确自动重试队列；库存明细将“包裹”展示口径改为“未匹配 / 已匹配”，并放大圆点标识；生产主分支切换为当前线上补货日期发布线，Deploy workflow 的分支部署改为对齐 `origin/<branch>`。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -98,6 +98,14 @@
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.76 SKU 映射规则与补货计算接入（2026-04-27）
+
+- **数据库表**：新增 `sku_mapping_rule` / `sku_mapping_component`，一条商品 SKU 只能有一条规则；`sku_mapping_component.inventory_sku` 全局唯一，避免同一库存包裹 SKU 被多个商品规则重复消费。
+- **配置接口**：新增 `GET/POST/PATCH/DELETE /api/config/sku-mapping-rules`，支持按商品 SKU / 库存 SKU 搜索、启用状态筛选、分页；新增 `/export` Excel 导出与 `/import` Excel/CSV 导入，导入列为“商品SKU、库存SKU、组件数量、启用、备注”，整批校验失败时不写入。
+- **前端页面**：新增 `frontend/src/views/SkuMappingRuleView.vue`，入口在“设置 > 基础配置 > 映射规则”，查看使用 `config:view`，新增、编辑、启停、删除、导入使用 `config:edit`。
+- **计算口径**：`backend/app/engine/sku_mapping.py` 提供同仓库组装计算；`step2_sale_days.py` 在海外库存 + 在途读取后叠加映射可组装数量，`step4_total.py` 在本地库存读取后叠加映射可组装数量。`A=2*B` 按 `floor(B/2)`，`A=1*B+2*C` 按同仓库 `min(floor(B/1), floor(C/2))`；组件分散在不同仓库不跨仓组合。
+- **边界口径**：同步落库数据不改写，库存明细页仍展示原始库存 SKU；停用规则保留但不参与计算；组件在途必须有目标仓库 ID 才参与映射组合，直接商品 SKU 在途仍沿用现有按国家聚合口径。
 
 ### 3.75 同步日志 40019 精确自动重试（2026-04-27）
 - **日志字段**：`api_call_log` 新增 `request_payload`、`retry_status`、`auto_retry_attempts`、`next_retry_at`、`resolved_at`、`last_retry_error`、`retry_source_log_id`。`SaihuClient.post()` 会保存原始请求 payload；最终仍为 `40019` 的可还原调用初始化为 `queued`，历史无 payload 的 `40019` 标记为 `unsupported`。

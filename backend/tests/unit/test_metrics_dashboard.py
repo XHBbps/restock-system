@@ -60,6 +60,7 @@ async def test_dashboard_returns_empty_risk_distribution_without_active_suggesti
             ),
             _ScalarOneOrNoneResult(None),
             _RowsResult([]),
+            _ScalarsResult([]),
             _RowsResult(
                 [
                     ("SKU-1", "Alpha", None),
@@ -143,6 +144,7 @@ async def test_dashboard_risk_distribution_uses_restock_regions_filter() -> None
             ),
             _ScalarOneOrNoneResult(None),
             _RowsResult([]),
+            _ScalarsResult([]),
             _RowsResult([("SKU-1", "Alpha", None)]),
         ]
     )
@@ -213,6 +215,7 @@ async def test_dashboard_restock_sku_count_uses_draft_demand_date() -> None:
                 )
             ),
             _RowsResult([]),
+            _ScalarsResult([]),
             _ScalarsResult([]),
             _ScalarOneResult(0),
         ]
@@ -315,6 +318,7 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
             ),
             _ScalarOneOrNoneResult(SimpleNamespace(id=9, status="draft")),
             _RowsResult([]),
+            _ScalarsResult([]),
             _RowsResult(
                 [
                     ("SKU-1", "Alpha", None),

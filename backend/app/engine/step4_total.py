@@ -9,6 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.engine.context import EngineContext, LocalStock
+from app.engine.sku_mapping import (
+    component_skus_for_rules,
+    compute_mapped_stock_total_by_sku,
+    load_active_mapping_rules,
+    load_inventory_totals_by_warehouse,
+)
 from app.models.inventory import InventorySnapshotLatest
 from app.models.warehouse import Warehouse
 
@@ -32,7 +38,24 @@ async def load_local_inventory(
     if commodity_skus is not None:
         stmt = stmt.where(InventorySnapshotLatest.commodity_sku.in_(commodity_skus))
     rows = (await db.execute(stmt)).all()
-    return {sku: LocalStock(available=int(a or 0), reserved=int(r or 0)) for sku, a, r in rows}
+    result = {sku: LocalStock(available=int(a or 0), reserved=int(r or 0)) for sku, a, r in rows}
+
+    rules = await load_active_mapping_rules(db, commodity_skus)
+    component_skus = component_skus_for_rules(rules)
+    if component_skus:
+        component_inventory = await load_inventory_totals_by_warehouse(
+            db,
+            component_skus,
+            warehouse_type=1,
+        )
+        mapped_totals = compute_mapped_stock_total_by_sku(rules, component_inventory)
+        for sku, quantity in mapped_totals.items():
+            current = result.get(sku)
+            if current is None:
+                result[sku] = LocalStock(available=quantity, reserved=0)
+            else:
+                result[sku] = LocalStock(available=current.available + quantity, reserved=current.reserved)
+    return result
 
 
 def compute_total(

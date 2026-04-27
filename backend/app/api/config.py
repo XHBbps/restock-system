@@ -1,11 +1,16 @@
 """配置管理 API(covers global / sku / warehouse / zipcode / shop)。"""
 
+import csv
+from io import BytesIO, StringIO
 from typing import Any
 
-from fastapi import APIRouter, Depends, Path, Query
-from sqlalchemy import delete, func, select, update
+from fastapi import APIRouter, Depends, File, Path, Query, UploadFile
+from fastapi.responses import StreamingResponse
+from openpyxl import Workbook, load_workbook  # type: ignore[import-untyped]
+from sqlalchemy import delete, distinct, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.api.deps import (
     UserContext,
@@ -32,6 +37,7 @@ from app.models.inventory import InventorySnapshotLatest
 from app.models.product_listing import ProductListing
 from app.models.shop import Shop
 from app.models.sku import SkuConfig
+from app.models.sku_mapping import SkuMappingComponent, SkuMappingRule
 from app.models.suggestion import Suggestion
 from app.models.suggestion_snapshot import SuggestionSnapshot
 from app.models.sys_user import SysUser
@@ -47,6 +53,12 @@ from app.schemas.config import (
     SkuConfigListOut,
     SkuConfigOut,
     SkuConfigPatch,
+    SkuMappingComponentIn,
+    SkuMappingImportOut,
+    SkuMappingRuleIn,
+    SkuMappingRuleListOut,
+    SkuMappingRuleOut,
+    SkuMappingRulePatch,
     WarehouseCountryPatch,
     WarehouseOut,
     ZipcodeRuleIn,
@@ -413,6 +425,396 @@ async def patch_sku_config(
         )
         await db.refresh(row)
     return SkuConfigOut.model_validate({**row.__dict__, "commodity_name": None, "main_image": None})
+
+
+# ============================================================
+# SKU Mapping Rules
+# ============================================================
+def _mapping_formula(rule: SkuMappingRule) -> str:
+    parts = [f"{component.quantity}*{component.inventory_sku}" for component in rule.components]
+    return f"{rule.commodity_sku}=" + "+".join(parts)
+
+
+def _mapping_rule_out(rule: SkuMappingRule) -> SkuMappingRuleOut:
+    return SkuMappingRuleOut(
+        id=rule.id,
+        commodity_sku=rule.commodity_sku,
+        enabled=rule.enabled,
+        remark=rule.remark,
+        components=rule.components,
+        formula_preview=_mapping_formula(rule),
+        component_count=len(rule.components),
+        created_at=rule.created_at,
+        updated_at=rule.updated_at,
+    )
+
+
+async def _validate_mapping_unique(
+    db: AsyncSession,
+    *,
+    commodity_sku: str,
+    components: list[SkuMappingComponentIn],
+    current_rule_id: int | None = None,
+) -> None:
+    existing_rule = (
+        await db.execute(select(SkuMappingRule).where(SkuMappingRule.commodity_sku == commodity_sku))
+    ).scalar_one_or_none()
+    if existing_rule is not None and existing_rule.id != current_rule_id:
+        raise ConflictError(f"商品SKU {commodity_sku} 已存在映射规则")
+
+    component_skus = [component.inventory_sku for component in components]
+    component_rows = (
+        await db.execute(
+            select(SkuMappingComponent.inventory_sku, SkuMappingRule.commodity_sku)
+            .join(SkuMappingRule, SkuMappingRule.id == SkuMappingComponent.rule_id)
+            .where(SkuMappingComponent.inventory_sku.in_(component_skus))
+            .where(SkuMappingComponent.rule_id != current_rule_id if current_rule_id else True)
+        )
+    ).all()
+    if component_rows:
+        inventory_sku, owner_sku = component_rows[0]
+        raise ConflictError(f"库存SKU {inventory_sku} 已归属商品SKU {owner_sku}")
+
+
+async def _replace_mapping_components(
+    db: AsyncSession,
+    rule: SkuMappingRule,
+    components: list[SkuMappingComponentIn],
+) -> None:
+    await db.execute(delete(SkuMappingComponent).where(SkuMappingComponent.rule_id == rule.id))
+    for component in components:
+        db.add(
+            SkuMappingComponent(
+                rule_id=rule.id,
+                inventory_sku=component.inventory_sku,
+                quantity=component.quantity,
+            )
+        )
+
+
+@router.get("/sku-mapping-rules", response_model=SkuMappingRuleListOut)
+async def list_sku_mapping_rules(
+    enabled: bool | None = Query(default=None),
+    keyword: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=200),
+    db: AsyncSession = Depends(db_session_readonly),
+    _: None = Depends(require_permission(CONFIG_VIEW)),
+) -> SkuMappingRuleListOut:
+    base = select(SkuMappingRule).options(selectinload(SkuMappingRule.components))
+    count_stmt = select(func.count(distinct(SkuMappingRule.id))).select_from(SkuMappingRule)
+    if enabled is not None:
+        base = base.where(SkuMappingRule.enabled.is_(enabled))
+        count_stmt = count_stmt.where(SkuMappingRule.enabled.is_(enabled))
+    if keyword:
+        like = f"%{escape_like(keyword)}%"
+        base = base.outerjoin(SkuMappingComponent).where(
+            or_(
+                SkuMappingRule.commodity_sku.ilike(like, escape="\\"),
+                SkuMappingComponent.inventory_sku.ilike(like, escape="\\"),
+            )
+        )
+        count_stmt = count_stmt.outerjoin(SkuMappingComponent).where(
+            or_(
+                SkuMappingRule.commodity_sku.ilike(like, escape="\\"),
+                SkuMappingComponent.inventory_sku.ilike(like, escape="\\"),
+            )
+        )
+
+    total = (await db.execute(count_stmt)).scalar_one()
+    rows = (
+        await db.execute(
+            base.order_by(SkuMappingRule.commodity_sku)
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+    ).scalars().unique().all()
+    return SkuMappingRuleListOut(items=[_mapping_rule_out(row) for row in rows], total=int(total or 0))
+
+
+@router.post("/sku-mapping-rules", response_model=SkuMappingRuleOut, status_code=201)
+async def create_sku_mapping_rule(
+    body: SkuMappingRuleIn,
+    db: AsyncSession = Depends(db_session),
+    _: None = Depends(require_permission(CONFIG_EDIT)),
+) -> SkuMappingRuleOut:
+    await _validate_mapping_unique(
+        db,
+        commodity_sku=body.commodity_sku,
+        components=body.components,
+    )
+    rule = SkuMappingRule(
+        commodity_sku=body.commodity_sku,
+        enabled=body.enabled,
+        remark=body.remark,
+    )
+    db.add(rule)
+    await db.flush()
+    await _replace_mapping_components(db, rule, body.components)
+    await db.commit()
+    rule = (
+        await db.execute(
+            select(SkuMappingRule)
+            .options(selectinload(SkuMappingRule.components))
+            .where(SkuMappingRule.id == rule.id)
+        )
+    ).scalar_one()
+    return _mapping_rule_out(rule)
+
+
+@router.get("/sku-mapping-rules/export")
+async def export_sku_mapping_rules(
+    db: AsyncSession = Depends(db_session_readonly),
+    _: None = Depends(require_permission(CONFIG_VIEW)),
+) -> StreamingResponse:
+    rows = (
+        await db.execute(
+            select(SkuMappingRule)
+            .options(selectinload(SkuMappingRule.components))
+            .order_by(SkuMappingRule.commodity_sku)
+        )
+    ).scalars().all()
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "映射规则"
+    sheet.append(["商品SKU", "库存SKU", "组件数量", "启用", "备注"])
+    for rule in rows:
+        for component in rule.components:
+            sheet.append(
+                [
+                    rule.commodity_sku,
+                    component.inventory_sku,
+                    component.quantity,
+                    "是" if rule.enabled else "否",
+                    rule.remark or "",
+                ]
+            )
+    stream = BytesIO()
+    workbook.save(stream)
+    stream.seek(0)
+    filename = f"sku_mapping_rules_{now_beijing().strftime('%Y%m%d%H%M%S')}.xlsx"
+    return StreamingResponse(
+        stream,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _parse_enabled(value: Any) -> bool:
+    text = str(value if value is not None else "").strip().lower()
+    if text in {"", "1", "true", "yes", "y", "是", "启用"}:
+        return True
+    if text in {"0", "false", "no", "n", "否", "停用"}:
+        return False
+    raise ValueError("启用列必须为 是/否、true/false 或 1/0")
+
+
+async def _read_mapping_import_rows(file: UploadFile) -> list[dict[str, Any]]:
+    content = await file.read()
+    filename = (file.filename or "").lower()
+    if filename.endswith(".csv"):
+        text = content.decode("utf-8-sig")
+        reader = csv.DictReader(StringIO(text))
+        return [dict(row) for row in reader]
+
+    workbook = load_workbook(BytesIO(content), read_only=True, data_only=True)
+    sheet = workbook.active
+    rows = list(sheet.iter_rows(values_only=True))
+    if not rows:
+        return []
+    headers = [str(cell or "").strip() for cell in rows[0]]
+    result: list[dict[str, Any]] = []
+    for row in rows[1:]:
+        result.append({headers[idx]: row[idx] if idx < len(row) else None for idx in range(len(headers))})
+    return result
+
+
+def _normalize_import_rows(raw_rows: list[dict[str, Any]]) -> dict[str, SkuMappingRuleIn]:
+    errors: list[dict[str, Any]] = []
+    grouped: dict[str, dict[str, Any]] = {}
+    seen_inventory: dict[str, int] = {}
+    required_headers = {"商品SKU", "库存SKU", "组件数量", "启用", "备注"}
+
+    for idx, raw in enumerate(raw_rows, start=2):
+        if not any(str(value or "").strip() for value in raw.values()):
+            continue
+        missing = required_headers - set(raw)
+        if missing:
+            errors.append({"row": idx, "message": f"缺少列：{', '.join(sorted(missing))}"})
+            continue
+        commodity_sku = str(raw.get("商品SKU") or "").strip()
+        inventory_sku = str(raw.get("库存SKU") or "").strip()
+        quantity_raw = raw.get("组件数量")
+        try:
+            quantity = int(quantity_raw)
+        except (TypeError, ValueError):
+            quantity = 0
+        try:
+            enabled = _parse_enabled(raw.get("启用"))
+        except ValueError as exc:
+            errors.append({"row": idx, "message": str(exc)})
+            continue
+        remark = str(raw.get("备注") or "").strip() or None
+
+        if not commodity_sku:
+            errors.append({"row": idx, "message": "商品SKU不能为空"})
+        if not inventory_sku:
+            errors.append({"row": idx, "message": "库存SKU不能为空"})
+        if quantity <= 0:
+            errors.append({"row": idx, "message": "组件数量必须为正整数"})
+        if inventory_sku:
+            previous_row = seen_inventory.get(inventory_sku)
+            if previous_row is not None:
+                errors.append({"row": idx, "message": f"库存SKU与第 {previous_row} 行重复：{inventory_sku}"})
+            seen_inventory[inventory_sku] = idx
+        if not commodity_sku or not inventory_sku or quantity <= 0:
+            continue
+
+        entry = grouped.setdefault(
+            commodity_sku,
+            {"enabled": enabled, "remark": remark, "components": []},
+        )
+        if entry["enabled"] != enabled:
+            errors.append({"row": idx, "message": f"同一商品SKU的启用状态不一致：{commodity_sku}"})
+        if entry["remark"] != remark:
+            errors.append({"row": idx, "message": f"同一商品SKU的备注不一致：{commodity_sku}"})
+        entry["components"].append({"inventory_sku": inventory_sku, "quantity": quantity})
+
+    if errors:
+        raise ValidationFailed("导入校验失败", detail={"errors": errors})
+    return {
+        commodity_sku: SkuMappingRuleIn(
+            commodity_sku=commodity_sku,
+            enabled=entry["enabled"],
+            remark=entry["remark"],
+            components=entry["components"],
+        )
+        for commodity_sku, entry in grouped.items()
+    }
+
+
+@router.post("/sku-mapping-rules/import", response_model=SkuMappingImportOut)
+async def import_sku_mapping_rules(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(db_session),
+    _: None = Depends(require_permission(CONFIG_EDIT)),
+) -> SkuMappingImportOut:
+    raw_rows = await _read_mapping_import_rows(file)
+    rules = _normalize_import_rows(raw_rows)
+    if not rules:
+        raise ValidationFailed("导入文件没有有效数据")
+
+    commodity_skus = set(rules)
+    component_skus = [component.inventory_sku for rule in rules.values() for component in rule.components]
+    conflicts = (
+        await db.execute(
+            select(SkuMappingComponent.inventory_sku, SkuMappingRule.commodity_sku)
+            .join(SkuMappingRule, SkuMappingRule.id == SkuMappingComponent.rule_id)
+            .where(SkuMappingComponent.inventory_sku.in_(component_skus))
+            .where(SkuMappingRule.commodity_sku.not_in(commodity_skus))
+        )
+    ).all()
+    if conflicts:
+        errors = [
+            {"row": None, "message": f"库存SKU {sku} 已归属商品SKU {owner}"}
+            for sku, owner in conflicts
+        ]
+        raise ValidationFailed("导入校验失败", detail={"errors": errors})
+
+    existing_rows = (
+        await db.execute(
+            select(SkuMappingRule)
+            .options(selectinload(SkuMappingRule.components))
+            .where(SkuMappingRule.commodity_sku.in_(commodity_skus))
+        )
+    ).scalars().all()
+    existing_map = {row.commodity_sku: row for row in existing_rows}
+    created = 0
+    updated = 0
+    for commodity_sku, body in rules.items():
+        rule = existing_map.get(commodity_sku)
+        if rule is None:
+            rule = SkuMappingRule(
+                commodity_sku=commodity_sku,
+                enabled=body.enabled,
+                remark=body.remark,
+            )
+            db.add(rule)
+            await db.flush()
+            created += 1
+        else:
+            rule.enabled = body.enabled
+            rule.remark = body.remark
+            updated += 1
+        await _replace_mapping_components(db, rule, body.components)
+    await db.commit()
+    return SkuMappingImportOut(
+        created=created,
+        updated=updated,
+        total_components=len(component_skus),
+    )
+
+
+@router.patch("/sku-mapping-rules/{rule_id}", response_model=SkuMappingRuleOut)
+async def patch_sku_mapping_rule(
+    patch: SkuMappingRulePatch,
+    rule_id: int = Path(..., ge=1),
+    db: AsyncSession = Depends(db_session),
+    _: None = Depends(require_permission(CONFIG_EDIT)),
+) -> SkuMappingRuleOut:
+    rule = (
+        await db.execute(
+            select(SkuMappingRule)
+            .options(selectinload(SkuMappingRule.components))
+            .where(SkuMappingRule.id == rule_id)
+        )
+    ).scalar_one_or_none()
+    if rule is None:
+        raise NotFound(f"映射规则 {rule_id} 不存在")
+
+    new_commodity_sku = patch.commodity_sku if patch.commodity_sku is not None else rule.commodity_sku
+    new_components = patch.components if patch.components is not None else [
+        SkuMappingComponentIn(inventory_sku=item.inventory_sku, quantity=item.quantity)
+        for item in rule.components
+    ]
+    await _validate_mapping_unique(
+        db,
+        commodity_sku=new_commodity_sku,
+        components=new_components,
+        current_rule_id=rule.id,
+    )
+
+    if patch.commodity_sku is not None:
+        rule.commodity_sku = patch.commodity_sku
+    if patch.enabled is not None:
+        rule.enabled = patch.enabled
+    if "remark" in patch.model_fields_set:
+        rule.remark = patch.remark
+    if patch.components is not None:
+        await _replace_mapping_components(db, rule, patch.components)
+    await db.commit()
+    rule = (
+        await db.execute(
+            select(SkuMappingRule)
+            .options(selectinload(SkuMappingRule.components))
+            .where(SkuMappingRule.id == rule_id)
+        )
+    ).scalar_one()
+    return _mapping_rule_out(rule)
+
+
+@router.delete("/sku-mapping-rules/{rule_id}", status_code=204)
+async def delete_sku_mapping_rule(
+    rule_id: int = Path(..., ge=1),
+    db: AsyncSession = Depends(db_session),
+    _: None = Depends(require_permission(CONFIG_EDIT)),
+) -> None:
+    result = await db.execute(delete(SkuMappingRule).where(SkuMappingRule.id == rule_id))
+    if result.rowcount == 0:  # type: ignore[attr-defined]
+        raise NotFound(f"映射规则 {rule_id} 不存在")
+    await db.commit()
+    return None
 
 
 # ============================================================
