@@ -1,0 +1,113 @@
+name: Export Inventory Excel Once
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CSV_FILE: restock_inventory_current_${{ github.run_id }}.csv
+  XLSX_FILE: 库存明细_包裹_${{ github.run_id }}.xlsx
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Export inventory CSV on production server
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          command_timeout: 20m
+          script: |
+            set -euo pipefail
+            cd "${{ secrets.DEPLOY_PATH }}"
+            OUT="/tmp/${{ env.CSV_FILE }}"
+            docker compose --env-file deploy/.env -f deploy/docker-compose.yml exec -T db \
+              psql -U postgres -d replenish -v ON_ERROR_STOP=1 \
+              -c "COPY (
+                SELECT
+                  i.commodity_sku AS \"sku\",
+                  CASE WHEN NOT EXISTS (
+                    SELECT 1 FROM product_listing p
+                    WHERE p.commodity_sku = i.commodity_sku
+                  ) THEN '●' ELSE '○' END AS \"包裹\",
+                  i.warehouse_id AS \"仓库编号\",
+                  COALESCE(w.name, '') AS \"仓库名\",
+                  i.available AS \"可用库存\",
+                  i.reserved AS \"占用库存\"
+                FROM inventory_snapshot_latest i
+                LEFT JOIN warehouse w ON w.id = i.warehouse_id
+                ORDER BY i.commodity_sku ASC, i.warehouse_id ASC
+              ) TO STDOUT WITH CSV HEADER" > "$OUT"
+            wc -l "$OUT"
+
+      - name: Download CSV from production server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          source: /tmp/${{ env.CSV_FILE }}
+          target: export-artifact
+          strip_components: 1
+
+      - name: Convert CSV to Excel
+        run: |
+          python -m pip install --upgrade openpyxl
+          python - <<'PY'
+          import csv
+          import os
+          from pathlib import Path
+          from openpyxl import Workbook
+          from openpyxl.styles import Font, PatternFill, Alignment
+          from openpyxl.utils import get_column_letter
+
+          csv_path = Path('export-artifact') / os.environ['CSV_FILE']
+          xlsx_path = Path(os.environ['XLSX_FILE'])
+
+          wb = Workbook()
+          ws = wb.active
+          ws.title = '库存明细'
+
+          with csv_path.open('r', encoding='utf-8-sig', newline='') as f:
+              reader = csv.reader(f)
+              for row in reader:
+                  ws.append(row)
+
+          header_fill = PatternFill('solid', fgColor='E5E7EB')
+          for cell in ws[1]:
+              cell.font = Font(bold=True)
+              cell.fill = header_fill
+              cell.alignment = Alignment(horizontal='center')
+
+          widths = [28, 10, 18, 32, 14, 14]
+          for index, width in enumerate(widths, start=1):
+              ws.column_dimensions[get_column_letter(index)].width = width
+          for row in ws.iter_rows(min_row=2, min_col=2, max_col=6):
+              row[0].alignment = Alignment(horizontal='center')
+              for cell in row[3:]:
+                  cell.alignment = Alignment(horizontal='right')
+          ws.freeze_panes = 'A2'
+          ws.auto_filter.ref = ws.dimensions
+          wb.save(xlsx_path)
+          print(f'created {xlsx_path} rows={ws.max_row - 1}')
+          PY
+
+      - name: Upload Excel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: inventory-current-excel
+          path: ${{ env.XLSX_FILE }}
+          if-no-files-found: error
+
+      - name: Cleanup production temp CSV
+        if: always()
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: rm -f /tmp/${{ env.CSV_FILE }}
