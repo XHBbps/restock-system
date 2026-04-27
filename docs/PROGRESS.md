@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-27（库存明细将“包裹”展示口径改为“未匹配 / 已匹配”，并放大圆点标识；生产主分支切换为当前线上补货日期发布线，Deploy workflow 的分支部署改为对齐 `origin/<branch>`。）
+> 最近更新：2026-04-27（同步日志 / 接口监控新增赛狐 `40019` 失败调用精确自动重试队列；库存明细将“包裹”展示口径改为“未匹配 / 已匹配”，并放大圆点标识；生产主分支切换为当前线上补货日期发布线，Deploy workflow 的分支部署改为对齐 `origin/<branch>`。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -44,6 +44,7 @@
 - **手动触发**：`POST /api/sync/shop` 及其他 sync 端点
 - **自动同步任务**（APScheduler 间隔触发）：
   - `sync_product_listing` / `sync_inventory` / `sync_out_records` / `sync_order_list` / `sync_order_detail`
+- **失败调用自动重试任务**：`retry_failed_api_calls` 每 5 分钟扫描 `api_call_log` 中可精确还原的赛狐 `40019` 失败调用（必须有 `request_payload`），按原始 `endpoint + request_payload` 从老到新重放；相关同步任务活跃时跳过，成功后将原失败日志标记为 `resolved` 并从失败列表隐藏，最多自动重试 5 次。
 - **定时任务**（cron，Asia/Shanghai）：
   - 03:30 `sync_warehouse`
   - 02:00 `daily_archive`
@@ -97,6 +98,13 @@
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.75 同步日志 40019 精确自动重试（2026-04-27）
+- **日志字段**：`api_call_log` 新增 `request_payload`、`retry_status`、`auto_retry_attempts`、`next_retry_at`、`resolved_at`、`last_retry_error`、`retry_source_log_id`。`SaihuClient.post()` 会保存原始请求 payload；最终仍为 `40019` 的可还原调用初始化为 `queued`，历史无 payload 的 `40019` 标记为 `unsupported`。
+- **后台任务**：新增 `retry_failed_api_calls` TaskRun job，由 APScheduler 每 5 分钟入队，使用 TaskRun dedupe 避免并发；任务只处理 `saihu_code=40019`、`retry_status='queued'`、`request_payload IS NOT NULL`、`auto_retry_attempts < 5`、`retry_source_log_id IS NULL` 的原始失败日志，并按 `called_at ASC, id ASC` 从老到新执行。
+- **冲突与限速**：重试前按 endpoint 检查相关 `pending/running` TaskRun；`sync_all` 视为所有 endpoint 忙碌，订单详情额外检查 `sync_order_detail` / `refetch_order_detail`。重放间隔按 QPS 保守计算：1 QPS 为 1.5 秒，2 QPS 为 0.75 秒。
+- **终态**：重试成功时原失败日志标记 `resolved` 并从失败列表隐藏；再次 `40019` 未满 5 次继续 `queued`，第 5 次标记 `permanent`；非 `40019` 失败或其他异常直接标记 `permanent`。
+- **前端与 API**：`GET /api/monitor/api-calls/recent` 返回重试状态、尝试次数和 `can_retry`；`only_failed=true` 默认排除 `resolved` 和自动重试子日志。`POST /api/monitor/api-calls/{id}/retry` 改为单条精确重试入口，仅允许可还原的 `40019` 日志入队。
 
 ### 3.74 库存明细未匹配标识与筛选（2026-04-27）
 - **判定口径**：库存 SKU 若在 `product_listing.commodity_sku` 中不存在，则 `backend/app/api/data.py` 返回 `is_package=true`；存在则返回 `false`。该口径不新增数据库字段，不依赖商品名或图片是否为空。

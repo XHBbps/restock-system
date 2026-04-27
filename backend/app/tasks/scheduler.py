@@ -102,6 +102,13 @@ def _register_jobs(scheduler: AsyncIOScheduler, *, sync_interval_minutes: int) -
         id="trigger_retention_purge",
         replace_existing=True,
     )
+    scheduler.add_job(
+        _enqueue_safely,
+        trigger=IntervalTrigger(minutes=5),
+        args=["retry_failed_api_calls"],
+        id="trigger_retry_failed_api_calls",
+        replace_existing=True,
+    )
 
 
 async def setup_scheduler(force_reload: bool = False) -> AsyncIOScheduler:

@@ -213,6 +213,7 @@ CREATE INDEX ix_task_run_lease
 
 **进度追踪**：`TaskRun.current_step / step_detail / total_steps / result_summary` 由 worker 在执行中写入，前端 `TaskProgress` 组件轮询 `/api/tasks/{id}`。`calc_engine` 在生成成功或无需求时写结构化 JSON 摘要（`generated`、`suggestion_id`、`demand_date`、可选 `reason`）；`sync_order_detail` / `refetch_order_detail` 直接按目标订单数回写精确进度；店铺、仓库、商品、库存、订单、出库等分页同步任务则复用赛狐分页响应里的 `totalPage` 输出“第 P / N 页”进度，不额外发起预扫描请求。自 2026-04-20 起，worker 的 heartbeat、进度更新和 success/failed 终态回写都带 `status='running' + worker_id` 条件；若租约已被 reaper 回收，则抛 `TaskLeaseLostError` 并停止继续覆盖状态。
 **信息总览快照任务**：`refresh_dashboard_snapshot` 也是标准 TaskRun 任务，复用现有去重、轮询和失败回写机制；它在后台调用 `build_dashboard_payload()` 生成 `dashboard_snapshot` 单例缓存，页面刷新时优先消费该缓存而不是重复现算。
+**失败调用重试任务**：`retry_failed_api_calls` 是标准 TaskRun job，由 APScheduler 每 5 分钟入队，使用默认 `dedupe_key=job_name` 避免并发；它只消费 `api_call_log` 中可精确还原的赛狐 `40019` 失败日志，重试前检查相关同步任务是否活跃，活跃则跳过等待下一轮。
 **任务权限注册表**：`app/tasks/access.py` 统一维护 TaskRun 作业清单，以及查看/操作权限映射；通用 `POST /api/tasks` 只允许创建显式白名单里的任务。旧赛狐写入作业已随 §3.6 的导出快照子系统一同删除。
 
 ### 3.4 赛狐集成层（app/saihu）
@@ -242,14 +243,17 @@ SaihuClient.post()  ← 统一重试 + 日志
 - 可重试：`SaihuRateLimited`（40019）、`SaihuNetworkError`
 - 不重试：`SaihuBizError`（业务错误码）
 - **特殊处理**：`SaihuAuthExpired`（40001）→ 在重试预算**之外**强制刷新 token 后再重试一次
+- **自动队列**：最终仍为 `40019` 且已保存 `request_payload` 的原始调用会进入 `retry_failed_api_calls` 队列；自动任务按 `endpoint + request_payload` 精确重放，子调用通过 `retry_source_log_id` 关联原失败日志，不再扩展为整类同步任务。
 
 **限流**：
 ```python
 _ENDPOINT_RATE_OVERRIDES = {
-    "/api/order/detailByOrderId.json": 3,  # 该接口放宽到 3 QPS
+    "/api/order/detailByOrderId.json": 2,  # 该接口按 2 QPS 保守放行
 }
 # 默认 1 QPS per endpoint
 ```
+
+`retry_failed_api_calls` 在客户端 limiter 之外再按更保守间隔重放：1 QPS endpoint 间隔 1.5 秒，2 QPS endpoint 间隔 0.75 秒。
 
 **Token 单飞**：并发 `get_token()` 调用共享同一个刷新 Future，避免同时发起多个刷新请求。
 
@@ -552,7 +556,7 @@ UPDATE global_config SET suggestion_generation_enabled=true, generation_toggle_u
 | `excel_export_log` | Excel 下载审计 | 记录 snapshot、操作者、IP、User-Agent、文件大小等 |
 | `task_run` | 后台任务队列 | `dedupe_key + active status` partial unique index |
 | `dashboard_snapshot` | 信息总览缓存快照 | 单例缓存 dashboard payload、刷新状态与错误信息 |
-| `api_call_log` | 赛狐 API 调用日志 | 按时间范围查询 |
+| `api_call_log` | 赛狐 API 调用日志与 40019 重试队列 | `request_payload` 保存原始请求；`retry_status` 区分 `queued/resolved/permanent/unsupported`；`retry_source_log_id` 关联自动重试子日志 |
 | `login_attempt` | 登录尝试与锁定状态 | `source_key` PK |
 
 #### `zipcode_rule`（邮编→仓库规则）
@@ -569,9 +573,10 @@ UPDATE global_config SET suggestion_generation_enabled=true, generation_toggle_u
 - `uq_task_run_active_dedupe`：仅对活跃任务去重，历史任务不占索引空间
 - `ix_task_run_pending_priority`：Worker 调度查询加速
 - `ix_task_run_lease`：Reaper 扫描过期任务加速
+- `ix_api_call_log_retry_queue`：加速 `retry_failed_api_calls` 扫描 `40019 + queued + request_payload` 的原始失败日志
 - `ix_suggestion_item_urgent`：仅索引紧急条目
 
-**JSONB 字段**：`country_breakdown`、`warehouse_breakdown`、`velocity_snapshot`、`sale_days_snapshot`、`global_config_snapshot`、`allocation_snapshot`、`payload`。其中 `global_config_snapshot` 会保留 `restock_regions` 等配置快照。当前仅整体读取，不查 JSONB 内部字段，无需 GIN 索引。
+**JSONB 字段**：`country_breakdown`、`warehouse_breakdown`、`velocity_snapshot`、`sale_days_snapshot`、`global_config_snapshot`、`allocation_snapshot`、`payload`、`request_payload`。其中 `global_config_snapshot` 会保留 `restock_regions` 等配置快照；`api_call_log.request_payload` 用于精确重放赛狐 `40019` 失败调用。当前仅整体读取，不查 JSONB 内部字段，无需 GIN 索引。
 
 ### 6.3 迁移管理
 
@@ -927,6 +932,7 @@ VITE_API_PROXY_TARGET=http://localhost:8000
 
 | 日期 | 变更 | 相关 PROGRESS 章节 |
 |---|---|---|
+| 2026-04-27 | 同步日志 / 接口监控新增赛狐 `40019` 精确自动重试队列：保存 `request_payload`，每 5 分钟按原始请求重放，成功标记 `resolved`，最多 5 次后 `permanent` | §3.75 |
 | 2026-04-27 | 库存明细新增未匹配标识与筛选：`is_package` 由 `product_listing.commodity_sku` 是否存在实时派生，前端展示为未匹配 / 已匹配，仓库分组统计随筛选口径重算 | §3.74 |
 | 2026-04-26 | 补货日期参与数量计算：`demand_date` 扩展 Step 3 有效目标库存天数，`restock_dates` 不再过滤补货国家，前端与 Excel 元信息统一展示“补货日期” | §3.71 |
 | 2026-04-25 | 清理历史设计产物与旧赛狐写入残留配置，文档入口收敛到当前 `docs/` 事实文档 | §3.64 |

@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Path, Query
 from pydantic import BaseModel
-from sqlalchemy import case, exists, func, select, text
+from sqlalchemy import case, exists, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
@@ -15,13 +15,19 @@ from app.api.deps import (
     get_current_user,
     require_permission,
 )
-from app.core.exceptions import NotFound
+from app.core.exceptions import NotFound, ValidationFailed
 from app.core.logging import get_logger
 from app.core.permissions import MONITOR_VIEW, SYNC_OPERATE
 from app.core.timezone import now_beijing
 from app.models.api_call_log import ApiCallLog
 from app.models.order import OrderDetailFetchLog, OrderHeader, OrderItem
 from app.models.product_listing import ProductListing
+from app.tasks.jobs.api_call_retry import (
+    JOB_NAME as RETRY_FAILED_API_CALLS_JOB_NAME,
+)
+from app.tasks.jobs.api_call_retry import (
+    MAX_AUTO_RETRY_ATTEMPTS,
+)
 from app.tasks.queue import enqueue_task
 
 router = APIRouter(prefix="/api/monitor", tags=["monitor"])
@@ -163,6 +169,14 @@ class RecentCallOut(BaseModel):
     saihu_code: int | None = None
     saihu_msg: str | None = None
     error_type: str | None = None
+    retry_status: str | None = None
+    auto_retry_attempts: int = 0
+    next_retry_at: datetime | None = None
+    resolved_at: datetime | None = None
+    last_retry_error: str | None = None
+    retry_source_log_id: int | None = None
+    has_request_payload: bool = False
+    can_retry: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -180,20 +194,44 @@ async def get_recent_calls(
     if endpoint:
         stmt = stmt.where(ApiCallLog.endpoint == endpoint)
     if only_failed:
-        stmt = stmt.where(ApiCallLog.saihu_code != 0)
+        stmt = (
+            stmt.where(ApiCallLog.saihu_code != 0)
+            .where(or_(ApiCallLog.retry_status.is_(None), ApiCallLog.retry_status != "resolved"))
+            .where(ApiCallLog.retry_source_log_id.is_(None))
+        )
     rows = (await db.execute(stmt)).scalars().all()
-    return [RecentCallOut.model_validate(r) for r in rows]
+    return [_recent_call_out(r) for r in rows]
 
 
-_ENDPOINT_TO_JOB = {
-    "/api/order/api/product/pageList.json": "sync_product_listing",
-    "/api/warehouseManage/warehouseList.json": "sync_warehouse",
-    "/api/warehouseManage/warehouseItemList.json": "sync_inventory",
-    "/api/warehouseInOut/outRecords.json": "sync_out_records",
-    "/api/order/pageList.json": "sync_order_list",
-    "/api/order/detailByOrderId.json": "sync_order_detail",
-    "/api/shop/pageList.json": "sync_shop",
-}
+def _recent_call_out(row: ApiCallLog) -> RecentCallOut:
+    return RecentCallOut(
+        id=row.id,
+        endpoint=row.endpoint,
+        called_at=row.called_at,
+        duration_ms=row.duration_ms,
+        http_status=row.http_status,
+        saihu_code=row.saihu_code,
+        saihu_msg=row.saihu_msg,
+        error_type=row.error_type,
+        retry_status=row.retry_status,
+        auto_retry_attempts=row.auto_retry_attempts,
+        next_retry_at=row.next_retry_at,
+        resolved_at=row.resolved_at,
+        last_retry_error=row.last_retry_error,
+        retry_source_log_id=row.retry_source_log_id,
+        has_request_payload=row.request_payload is not None,
+        can_retry=_can_retry(row),
+    )
+
+
+def _can_retry(row: ApiCallLog) -> bool:
+    return (
+        row.saihu_code == 40019
+        and row.request_payload is not None
+        and row.retry_source_log_id is None
+        and row.retry_status not in {"resolved", "permanent", "unsupported"}
+        and row.auto_retry_attempts < MAX_AUTO_RETRY_ATTEMPTS
+    )
 
 
 @router.post("/api-calls/{call_id}/retry")
@@ -208,8 +246,27 @@ async def retry_call(
     ).scalar_one_or_none()
     if row is None:
         raise NotFound(f"调用记录 {call_id} 不存在")
-    job_name = _ENDPOINT_TO_JOB.get(row.endpoint)
-    if not job_name:
-        return {"task_id": None, "message": f"不支持自动重试该接口: {row.endpoint}"}
-    task_id, existing = await enqueue_task(db, job_name=job_name, trigger_source="manual")
+    if row.retry_status == "resolved":
+        raise ValidationFailed("该失败调用已经解决，无需重试")
+    if row.retry_status == "permanent":
+        raise ValidationFailed("该失败调用已达到重试上限或失败类型不可恢复")
+    if row.retry_status == "unsupported" or row.request_payload is None:
+        raise ValidationFailed("该调用日志缺少原始请求参数，无法精确重试")
+    if row.saihu_code != 40019:
+        raise ValidationFailed("仅支持重试赛狐返回码 40019 的失败调用")
+    if row.retry_source_log_id is not None:
+        raise ValidationFailed("自动重试产生的子日志不能再次作为重试源")
+    if row.auto_retry_attempts >= MAX_AUTO_RETRY_ATTEMPTS:
+        raise ValidationFailed("该失败调用已达到最多 5 次重试上限")
+
+    row.retry_status = "queued"
+    row.next_retry_at = now_beijing()
+    await db.flush()
+    task_id, existing = await enqueue_task(
+        db,
+        job_name=RETRY_FAILED_API_CALLS_JOB_NAME,
+        trigger_source="manual",
+        payload={"call_ids": [call_id]},
+        priority=50,
+    )
     return {"task_id": task_id, "existing": existing}

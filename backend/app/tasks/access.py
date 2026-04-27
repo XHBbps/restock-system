@@ -14,6 +14,7 @@ TASK_VIEW_PERMISSIONS: dict[str, tuple[str, ...]] = {
     "sync_shop": (SYNC_VIEW, SYNC_OPERATE),
     "sync_all": (SYNC_VIEW, SYNC_OPERATE),
     "daily_archive": (SYNC_VIEW, SYNC_OPERATE),
+    "retry_failed_api_calls": (SYNC_VIEW, SYNC_OPERATE),
     "calc_engine": (RESTOCK_OPERATE,),
     "refresh_dashboard_snapshot": (HOME_REFRESH,),
 }
@@ -29,6 +30,7 @@ TASK_MANAGE_PERMISSIONS: dict[str, tuple[str, ...]] = {
     "sync_shop": (SYNC_OPERATE,),
     "sync_all": (SYNC_OPERATE,),
     "daily_archive": (SYNC_OPERATE,),
+    "retry_failed_api_calls": (SYNC_OPERATE,),
     "calc_engine": (RESTOCK_OPERATE,),
     "refresh_dashboard_snapshot": (HOME_REFRESH,),
 }

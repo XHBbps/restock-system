@@ -338,9 +338,27 @@ docker compose -f deploy/docker-compose.yml restart backend
 1. **前端接口监控页**：`/settings/api-monitor` 查看近 24 小时接口统计和失败 Top
 2. **典型错误码**：
    - `40001` — Token 过期：正常情况下客户端会自动刷新，持续失败说明 client_id/secret 配置错误
-   - `40019` — 限流：应该被重试吃掉，持续失败说明 QPS 配置超过赛狐实际上限
+   - `40019` — 限流：最终失败会进入 `retry_failed_api_calls` 自动队列（前提是 `request_payload` 已保存），成功后原失败日志标记为 `resolved` 并从失败列表隐藏
    - 网络错误（timeout / connection refused）— 检查服务器网络和赛狐域名解析
-3. **强制刷新 token**：重启 backend / worker 服务即可清空内存 token 缓存
+3. **查看自动重试状态**：
+   - `queued`：等待自动重试；scheduler 每 5 分钟入队，从老到新执行
+   - `resolved`：已通过精确重放成功解决，默认不再出现在失败列表
+   - `permanent`：非 `40019` 重试结果、其他异常，或第 5 次仍为 `40019`；需要人工排查赛狐限流、参数和业务状态
+   - `unsupported`：历史日志没有 `request_payload`，无法按原始请求精确重放
+4. **检查是否被活跃任务跳过**：
+   ```sql
+   SELECT id, job_name, status, created_at
+   FROM task_run
+   WHERE status IN ('pending', 'running')
+     AND job_name IN ('sync_all', 'sync_order_detail', 'refetch_order_detail',
+                      'sync_order_list', 'sync_inventory', 'sync_out_records',
+                      'sync_product_listing', 'sync_warehouse', 'sync_shop',
+                      'retry_failed_api_calls')
+   ORDER BY created_at DESC;
+   ```
+   自动重试会在相关同步任务活跃时跳过本轮；`sync_all` 视为所有赛狐 endpoint 忙碌，订单详情还会检查 `sync_order_detail` / `refetch_order_detail`。
+5. **QPS 间隔口径**：自动重放在客户端 limiter 之外再保守等待；默认 1 QPS endpoint 间隔 1.5 秒，订单详情 2 QPS endpoint 间隔 0.75 秒。
+6. **强制刷新 token**：重启 backend / worker 服务即可清空内存 token 缓存。
 
 ### 3.6 后端启动失败
 

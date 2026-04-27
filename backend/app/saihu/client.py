@@ -31,6 +31,7 @@ from app.core.exceptions import (
     SaihuRateLimited,
 )
 from app.core.logging import get_logger
+from app.core.timezone import now_beijing
 from app.db.session import async_session_factory
 from app.models.api_call_log import ApiCallLog
 from app.saihu.rate_limit import get_limiter
@@ -65,6 +66,8 @@ class SaihuClient:
         body: dict[str, Any] | None = None,
         *,
         retry_network_errors: bool = True,
+        retry_source_log_id: int | None = None,
+        queue_rate_limit_retry: bool = True,
     ) -> dict[str, Any]:
         """发起一次 POST 业务请求并返回 data 字段。
 
@@ -89,7 +92,11 @@ class SaihuClient:
             ):
                 with attempt:
                     return await self._do_request(
-                        endpoint_path, body, attempt.retry_state.attempt_number
+                        endpoint_path,
+                        body,
+                        attempt.retry_state.attempt_number,
+                        retry_source_log_id=retry_source_log_id,
+                        queue_rate_limit_retry=queue_rate_limit_retry,
                     )
             # AsyncRetrying 总会抛或返回,这里不可达
             raise SaihuAPIError("unreachable", endpoint=endpoint_path)
@@ -109,6 +116,9 @@ class SaihuClient:
         endpoint_path: str,
         body: dict[str, Any],
         attempt_no: int,
+        *,
+        retry_source_log_id: int | None = None,
+        queue_rate_limit_retry: bool = True,
     ) -> dict[str, Any]:
         settings = get_settings()
         token_mgr = get_token_manager()
@@ -162,6 +172,9 @@ class SaihuClient:
                     None,
                     error_type,
                     attempt_no,
+                    body,
+                    retry_source_log_id,
+                    queue_rate_limit_retry,
                 )
                 raise SaihuNetworkError(f"网络错误: {exc}", endpoint=endpoint_path) from exc
 
@@ -178,6 +191,9 @@ class SaihuClient:
                 None,
                 error_type,
                 attempt_no,
+                body,
+                retry_source_log_id,
+                queue_rate_limit_retry,
             )
             raise SaihuBizError(f"赛狐返回非 JSON: {exc}", endpoint=endpoint_path) from exc
 
@@ -196,6 +212,9 @@ class SaihuClient:
                 request_id,
                 error_type,
                 attempt_no,
+                body,
+                retry_source_log_id,
+                queue_rate_limit_retry,
             )
             await get_token_manager().force_refresh()
             raise SaihuAuthExpired(
@@ -213,6 +232,9 @@ class SaihuClient:
                 request_id,
                 error_type,
                 attempt_no,
+                body,
+                retry_source_log_id,
+                queue_rate_limit_retry,
             )
             raise SaihuRateLimited(
                 "被限流", endpoint=endpoint_path, code=saihu_code, request_id=request_id
@@ -229,6 +251,9 @@ class SaihuClient:
                 request_id,
                 error_type,
                 attempt_no,
+                body,
+                retry_source_log_id,
+                queue_rate_limit_retry,
             )
             raise SaihuBizError(
                 f"赛狐业务错误 code={saihu_code} msg={saihu_msg}",
@@ -238,7 +263,17 @@ class SaihuClient:
             )
 
         await self._log(
-            endpoint_path, started, http_status, saihu_code, saihu_msg, request_id, None, attempt_no
+            endpoint_path,
+            started,
+            http_status,
+            saihu_code,
+            saihu_msg,
+            request_id,
+            None,
+            attempt_no,
+            body,
+            retry_source_log_id,
+            queue_rate_limit_retry,
         )
         # resp.json() 静态类型是 Any，运行时为 dict（前面分支已保证非 None）
         assert isinstance(payload, dict)
@@ -254,8 +289,18 @@ class SaihuClient:
         request_id: str | None,
         error_type: str | None,
         attempt_no: int,
+        request_payload: dict[str, Any] | None,
+        retry_source_log_id: int | None,
+        queue_rate_limit_retry: bool,
     ) -> None:
         duration_ms = int((time.monotonic() - started) * 1000)
+        should_queue_retry = (
+            queue_rate_limit_retry
+            and retry_source_log_id is None
+            and saihu_code == 40019
+            and request_payload is not None
+            and attempt_no >= get_settings().saihu_max_retries
+        )
         try:
             async with async_session_factory() as db:
                 await db.execute(
@@ -269,6 +314,10 @@ class SaihuClient:
                         request_id=request_id,
                         error_type=error_type,
                         retry_count=attempt_no - 1,
+                        request_payload=request_payload,
+                        retry_status="queued" if should_queue_retry else None,
+                        next_retry_at=now_beijing() if should_queue_retry else None,
+                        retry_source_log_id=retry_source_log_id,
                     )
                 )
                 await db.commit()

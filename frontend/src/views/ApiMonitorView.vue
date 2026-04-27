@@ -98,9 +98,15 @@
           <el-table-column label="错误信息" min-width="260" show-overflow-tooltip>
             <template #default="{ row }">{{ row.saihu_msg || row.error_type || '-' }}</template>
           </el-table-column>
+          <el-table-column label="重试状态" width="130" align="center">
+            <template #default="{ row }">{{ retryStatusLabel(row.retry_status) }}</template>
+          </el-table-column>
+          <el-table-column label="重试次数" width="100" align="right">
+            <template #default="{ row }">{{ row.auto_retry_attempts ?? 0 }}/5</template>
+          </el-table-column>
           <el-table-column label="操作" width="100" align="center">
             <template #default="{ row }">
-              <el-button v-if="row.saihu_code !== 0 && auth.hasPermission('sync:operate')" link type="primary" @click="retry(row.id)">
+              <el-button v-if="row.can_retry && auth.hasPermission('sync:operate')" link type="primary" @click="retry(row.id)">
                 重试
               </el-button>
             </template>
@@ -316,6 +322,21 @@ function formatDuration(value?: number | null): string {
 
 function getEndpointDisplay(endpoint: string) {
   return formatMonitorEndpoint(endpoint)
+}
+
+function retryStatusLabel(status: string | null): string {
+  switch (status) {
+    case 'queued':
+      return '待重试'
+    case 'resolved':
+      return '已解决'
+    case 'permanent':
+      return '永久失败'
+    case 'unsupported':
+      return '不支持'
+    default:
+      return '-'
+  }
 }
 
 async function loadOverview(): Promise<void> {

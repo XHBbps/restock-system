@@ -23,11 +23,17 @@ _ENDPOINT_RATE_OVERRIDES: dict[str, int] = {
 }
 
 
+def get_endpoint_qps(endpoint: str) -> int:
+    """Return the configured Saihu QPS for an endpoint."""
+
+    return _ENDPOINT_RATE_OVERRIDES.get(endpoint, _DEFAULT_RATE)
+
+
 def get_limiter(endpoint: str) -> AsyncLimiter:
     """获取(懒创建)某接口的 limiter。"""
     limiter = _LIMITERS.get(endpoint)
     if limiter is None:
-        rate = _ENDPOINT_RATE_OVERRIDES.get(endpoint, _DEFAULT_RATE)
+        rate = get_endpoint_qps(endpoint)
         limiter = AsyncLimiter(rate, _DEFAULT_PERIOD)
         _LIMITERS[endpoint] = limiter
     return limiter

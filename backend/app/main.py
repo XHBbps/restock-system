@@ -37,6 +37,7 @@ from app.sync import out_records as _job_or  # noqa: F401
 from app.sync import product_listing as _job_pl  # noqa: F401
 from app.sync import shop as _job_shop  # noqa: F401
 from app.sync import warehouse as _job_wh  # noqa: F401
+from app.tasks.jobs import api_call_retry as _job_api_call_retry  # noqa: F401
 from app.tasks.jobs import daily_archive as _job_arch  # noqa: F401
 from app.tasks.jobs import dashboard_snapshot as _job_dashboard_snapshot  # noqa: F401
 from app.tasks.jobs import retention as _job_retention  # noqa: F401

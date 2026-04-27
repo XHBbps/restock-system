@@ -26,6 +26,14 @@ export interface RecentCall {
   saihu_code: number | null
   saihu_msg: string | null
   error_type: string | null
+  retry_status: string | null
+  auto_retry_attempts: number
+  next_retry_at: string | null
+  resolved_at: string | null
+  last_retry_error: string | null
+  retry_source_log_id: number | null
+  has_request_payload: boolean
+  can_retry: boolean
 }
 
 export async function getApiCallsOverview(hours = 24): Promise<ApiCallsOverview> {
