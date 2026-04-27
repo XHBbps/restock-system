@@ -53,15 +53,15 @@ const STUBS = {
           @click="$emit('update:modelValue', 'US'); $emit('change', 'US')"
         >US</button>
         <button
-          v-if="placeholder === '包裹'"
+          v-if="placeholder === '未匹配'"
           class="package-true"
           @click="$emit('update:modelValue', true); $emit('change', true)"
-        >package</button>
+        >未匹配</button>
         <button
-          v-if="placeholder === '包裹'"
+          v-if="placeholder === '未匹配'"
           class="package-false"
           @click="$emit('update:modelValue', false); $emit('change', false)"
-        >non-package</button>
+        >已匹配</button>
       </div>
     `
   },

@@ -21,13 +21,13 @@
       </el-select>
       <el-select
         v-model="filters.is_package"
-        placeholder="包裹"
+        placeholder="未匹配"
         style="width: 120px"
         @change="reloadFirstPage"
       >
         <el-option label="全部" value="" />
-        <el-option label="包裹" :value="true" />
-        <el-option label="非包裹" :value="false" />
+        <el-option label="未匹配" :value="true" />
+        <el-option label="已匹配" :value="false" />
       </el-select>
       <el-switch v-model="filters.only_nonzero" active-text="仅非零" @change="reloadFirstPage" />
     </template>
@@ -52,9 +52,9 @@
                   <span v-else class="muted">-</span>
                 </template>
               </el-table-column>
-              <el-table-column label="包裹" width="80" align="center">
+              <el-table-column label="未匹配" width="80" align="center">
                 <template #default="{ row: item }">
-                  <span class="package-marker" :title="item.isPackage ? '包裹' : '非包裹'">
+                  <span class="package-marker" :title="item.isPackage ? '未匹配' : '已匹配'">
                     {{ item.isPackage ? '●' : '○' }}
                   </span>
                 </template>
@@ -190,5 +190,11 @@ function handlePageSizeChange(value: number): void {
 .mono {
   font-family: $font-family-mono;
   font-size: $font-size-xs;
+}
+
+.package-marker {
+  display: inline-block;
+  font-size: 2em;
+  line-height: 1;
 }
 </style>
