@@ -433,7 +433,12 @@ onMounted(() => {
 
 .component-add-button.el-button {
   align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex: 0 0 auto;
+  box-sizing: border-box;
+  width: 420px;
   height: 32px;
   min-width: max-content;
   padding: 0 12px;
@@ -446,6 +451,11 @@ onMounted(() => {
   transition: $transition-fast;
 
   :deep(span) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    line-height: 1;
     white-space: nowrap;
   }
 
@@ -496,6 +506,11 @@ onMounted(() => {
   .component-row {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .component-add-button.el-button {
+    width: 100%;
+    min-width: 0;
   }
 }
 </style>
