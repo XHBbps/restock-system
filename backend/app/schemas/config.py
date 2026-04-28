@@ -5,6 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
+from app.core.countries import normalize_country_list_for_eu_members
 from app.core.restock_regions import normalize_restock_regions
 
 
@@ -51,7 +52,7 @@ class GlobalConfigPatch(BaseModel):
     def validate_eu_countries(cls, value: list[str] | None) -> list[str] | None:
         if value is None:
             return None
-        return normalize_restock_regions(value)
+        return normalize_country_list_for_eu_members(value)
 
     @model_validator(mode="after")
     def validate_target_vs_lead_time(self) -> "GlobalConfigPatch":
@@ -212,6 +213,19 @@ class WarehouseOut(BaseModel):
 
 class WarehouseCountryPatch(BaseModel):
     country: str | None = Field(default=None, min_length=2, max_length=2, description="ISO 二字码或 null 清除")
+
+
+class CountryOptionOut(BaseModel):
+    code: str
+    label: str
+    builtin: bool
+    observed: bool
+    can_be_eu_member: bool
+
+
+class CountryOptionsOut(BaseModel):
+    items: list[CountryOptionOut]
+    unknown_country_codes: list[str] = Field(default_factory=list)
 
 
 # ==================== Zipcode Rule ====================

@@ -108,7 +108,7 @@
 </template>
 
 <script setup lang="ts">
-import { patchWarehouseCountry, refreshWarehouses } from '@/api/config'
+import { getCountryOptions, patchWarehouseCountry, refreshWarehouses, type CountryOption } from '@/api/config'
 import { listDataWarehouses, type DataWarehouse } from '@/api/data'
 import PageSectionCard from '@/components/PageSectionCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
@@ -143,7 +143,14 @@ const filters = reactive({
   type: undefined as number | undefined,
 })
 
-const countryOptions = COUNTRY_OPTIONS
+const countryOptions = ref<CountryOption[]>(
+  COUNTRY_OPTIONS.map((option) => ({
+    ...option,
+    builtin: true,
+    observed: false,
+    can_be_eu_member: !['EU', 'ZZ'].includes(option.code),
+  })),
+)
 
 const TYPE_SORT_ORDER: Record<number, number> = { 0: 0, 1: 1, 3: 2, 2: 3, [-1]: 4 }
 
@@ -215,6 +222,15 @@ async function reload(): Promise<void> {
   }
 }
 
+async function loadCountryOptions(): Promise<void> {
+  try {
+    const resp = await getCountryOptions()
+    countryOptions.value = resp.items
+  } catch {
+    // 保留内置选项作为降级。
+  }
+}
+
 async function refresh(): Promise<void> {
   refreshing.value = true
   try {
@@ -254,7 +270,10 @@ function handleSortChange({ prop, order }: SortChangeEvent): void {
   page.value = 1
 }
 
-onMounted(reload)
+onMounted(() => {
+  void loadCountryOptions()
+  void reload()
+})
 </script>
 
 <style lang="scss" scoped>

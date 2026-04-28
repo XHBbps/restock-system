@@ -72,6 +72,7 @@ restock_system/
 | `CLAUDE.md` | 自动生成的技术栈摘要 | 低 |
 | `docs/Project_Architecture_Blueprint.md` | 完整架构蓝图：分层、组件、ADR、扩展指南 | 中（架构演进时） |
 | `docs/PROGRESS.md` | 已交付能力 + 近期重大变更 | 高（每次功能交付） |
+| `docs/server-operations.md` | 服务器交互与生产运维操作总入口 | 中（服务器、部署、密钥、备份流程变化时） |
 | `docs/deployment.md` | 部署流程与环境变量 | 中（部署配置变更时） |
 | `docs/runbook.md` | 故障排查与运维 | 中（新增排障场景时） |
 | `docs/onboarding.md` | 新成员入门、本地开发 | 低（流程变化时） |
@@ -85,7 +86,11 @@ restock_system/
 2. **`docs/PROGRESS.md`** — 当前事实进度和近期变更
 3. **`docs/Project_Architecture_Blueprint.md`** — 若涉及架构层改动
 4. **`docs/onboarding.md`** — 若需要本地启动或改目录结构
-5. **`docs/saihu_api/*`** — 若涉及赛狐接口联调
+5. **`docs/server-operations.md`** — 若涉及服务器、SSH、部署、密钥、备份恢复、生产排障
+6. **`docs/deployment.md` / `docs/runbook.md`** — 若需要部署细节或故障处理 SOP
+7. **`docs/saihu_api/*`** — 若涉及赛狐接口联调
+
+服务器连接信息、token、key、password 等敏感明文不写入可提交文档；本机交接索引使用被 Git 忽略的 `docs/server-operations.secrets.local`。
 
 ---
 
@@ -101,6 +106,13 @@ restock_system/
 - **方案类任务**：先给结论，再说明取舍
 - **多方案**：最多 3 个，并明确推荐项
 - **发现风险、口径冲突、文档失真**：直接指出
+
+### 6.2.1 执行连续性
+
+- **默认连续执行**：用户给出执行类任务后，Agent 应持续推进到可验证的最终结果，不在每个中间步骤反复请求确认。
+- **提权操作**：遇到需要提升权限、网络访问、推送、部署、运行受限命令等平台权限场景时，Agent 直接发起对应授权请求并说明用途；不额外用文字反复询问是否继续。
+- **仅在高风险时停下确认**：涉及破坏性操作（删除数据、强制覆盖、回滚生产、重写远端历史等）、需求口径明显冲突或缺少关键信息导致无法安全判断时，才暂停并向用户确认。
+- **直到最终输出**：授权通过后继续执行验证、文档同步、发布或收尾检查，最后一次性汇报结果、阻塞点和必要的后续动作。
 
 ### 6.3 代码原则
 

@@ -25,6 +25,10 @@ def test_busy_job_names_include_sync_all_and_order_detail_refetch() -> None:
         "sync_order_list",
         "sync_all",
     )
+    assert busy_job_names_for_endpoint("/api/multiplatform/order/list.json") == (
+        "sync_order_list",
+        "sync_all",
+    )
     assert busy_job_names_for_endpoint("/api/order/detailByOrderId.json") == (
         "sync_order_detail",
         "refetch_order_detail",

@@ -23,7 +23,7 @@
             @clear="reloadFirstPage"
           />
           <el-select v-model="filters.country" placeholder="国家" clearable filterable style="width: 140px" @change="reloadFirstPage">
-            <el-option v-for="c in COUNTRY_OPTIONS" :key="c.code" :label="c.code" :value="c.code" />
+            <el-option v-for="c in countryOptions" :key="c.code" :label="c.label" :value="c.code" />
           </el-select>
           <el-select v-model="filters.shop" placeholder="店铺" clearable filterable style="width: 160px" @change="reloadFirstPage">
             <el-option v-for="s in shopOptions" :key="s" :label="s" :value="s" />
@@ -53,6 +53,16 @@
           <span class="mono muted nowrap">{{ row.shopId }}</span>
         </template>
       </el-table-column>
+      <el-table-column label="来源" prop="source" width="92" sortable="custom">
+        <template #default="{ row }">
+          <el-tag size="small" :type="row.source === '亚马逊' ? 'success' : 'info'">{{ row.source }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="订单平台" prop="orderPlatform" min-width="112" sortable="custom" show-overflow-tooltip>
+        <template #default="{ row }">
+          <span class="nowrap">{{ row.orderPlatform }}</span>
+        </template>
+      </el-table-column>
       <el-table-column label="国家" prop="countryCode" width="72" align="center" sortable="custom">
         <template #default="{ row }">
           <el-tag size="small">{{ row.countryCode }}</el-tag>
@@ -74,7 +84,8 @@
       </el-table-column>
       <el-table-column label="详情状态" prop="hasDetail" width="120" align="center" sortable="custom">
         <template #default="{ row }">
-          <el-tag v-if="row.hasDetail" type="success" size="small">已拉取</el-tag>
+          <el-tag v-if="row.source !== '亚马逊'" type="info" size="small">不适用</el-tag>
+          <el-tag v-else-if="row.hasDetail" type="success" size="small">已拉取</el-tag>
           <el-tag v-else type="info" size="small">无详情</el-tag>
         </template>
       </el-table-column>
@@ -107,6 +118,8 @@
           <div class="section-title">基本信息</div>
           <div class="kv-grid">
             <div><span class="label">店铺 ID（shopId）</span><span class="mono">{{ detail.shopId }}</span></div>
+            <div><span class="label">来源（source）</span><span class="mono">{{ detail.source }}</span></div>
+            <div><span class="label">订单平台（orderPlatform）</span><span class="mono">{{ detail.orderPlatform }}</span></div>
             <div><span class="label">站点 ID（marketplaceId）</span><span class="mono">{{ detail.marketplaceId }}</span></div>
             <div><span class="label">国家代码（countryCode）</span><span class="mono">{{ detail.countryCode }}</span></div>
             <div><span class="label">订单状态（orderStatus）</span><span class="mono">{{ detail.orderStatus }}</span></div>
@@ -160,6 +173,7 @@
 
 <script setup lang="ts">
 import { getOrderDetail, listDataShops, listOrders, type DataOrderDetail, type DataOrderSummary } from '@/api/data'
+import { getCountryOptions, type CountryOption } from '@/api/config'
 import { COUNTRY_OPTIONS } from '@/utils/countries'
 import PageSectionCard from '@/components/PageSectionCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
@@ -178,6 +192,14 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = ref(50)
 const shopOptions = ref<string[]>([])
+const countryOptions = ref<CountryOption[]>(
+  COUNTRY_OPTIONS.map((option) => ({
+    ...option,
+    builtin: true,
+    observed: false,
+    can_be_eu_member: !['EU', 'ZZ'].includes(option.code),
+  })),
+)
 const loading = ref(false)
 const sortState = ref<SortState>({ prop: 'purchaseDate', order: 'desc' })
 const dateRange = ref<[string, string] | null>(null)
@@ -242,6 +264,15 @@ async function loadShopOptions(): Promise<void> {
   }
 }
 
+async function loadCountryOptions(): Promise<void> {
+  try {
+    const resp = await getCountryOptions()
+    countryOptions.value = resp.items
+  } catch {
+    // 保留内置选项作为降级。
+  }
+}
+
 function reloadFirstPage(): void {
   clearSkuReloadTimer()
   page.value = 1
@@ -262,7 +293,7 @@ async function openDetail(row: DataOrderSummary): Promise<void> {
   dialogVisible.value = true
   detail.value = null
   try {
-    const data = await getOrderDetail(row.shopId, row.amazonOrderId)
+    const data = await getOrderDetail(row.shopId, row.amazonOrderId, row.source)
     if (myReqId === detailReqId && dialogVisible.value) {
       detail.value = data
     }
@@ -296,6 +327,7 @@ function statusType(status: string): TagType {
       Unshipped: 'warning',
       Pending: 'info',
       Canceled: 'danger',
+      Unknown: 'info',
     } as Record<string, TagType>
   )[status] || 'info'
 }
@@ -306,6 +338,7 @@ const ORDER_STATUS_LABEL: Record<string, string> = {
   Unshipped: '未发货',
   Pending: '待处理',
   Canceled: '已取消',
+  Unknown: '未知',
 }
 
 function statusLabel(status: string): string {
@@ -342,6 +375,7 @@ function handlePageSizeChange(value: number): void {
 }
 
 onMounted(() => {
+  void loadCountryOptions()
   void loadShopOptions()
   void reload()
 })

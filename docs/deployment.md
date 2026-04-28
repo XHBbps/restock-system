@@ -178,12 +178,12 @@ Scheduler 保持单例避免重复触发，Worker 可水平扩展。
 | `DEPLOY_PATH` | ✅ | 服务器上仓库根目录绝对路径（如 `/opt/restock`） |
 | `DEPLOY_NOTIFY_WEBHOOK` | 可选 | 飞书 / Slack incoming webhook URL，部署成功或失败时发送通知 |
 
-配置完成后，在 GitHub Actions 页面手动触发 `Deploy` workflow 即可一键部署。
+配置完成后，在 GitHub Actions 页面手动触发 `Deploy` workflow 即可一键部署。刚 push 后也可以立即触发，workflow 会在 `check-ci` 阶段等待目标 commit 的 CI 与 GHCR 镜像发布完成后再 SSH 部署。
 
 补充约定：
 
 - `CI` workflow 会在 `main`、`master` 和 `v*` tag 上发布 GHCR 镜像，镜像标签统一为 `sha-<commit>`，并自动将 owner 归一化为小写
-- `Deploy` workflow 支持传入分支名、tag 名、完整 commit SHA 或短 commit SHA；`check-ci` 会先解析为完整 SHA 再校验 CI，部署机会切到对应 ref 后导出 `IMAGE_TAG=sha-<commit>` 给 Compose 使用。分支部署会强制把服务器本地同名分支重置为 `origin/<branch>`，避免远端主分支切换后被服务器旧本地分支的非快进历史阻塞
+- `Deploy` workflow 支持传入分支名、tag 名、完整 commit SHA 或短 commit SHA；`check-ci` 会先解析为完整 SHA，再等待 `backend`、`frontend`、`docker-build`、`publish` 四个 required checks 全部通过，确保 `sha-<commit>` 镜像已经发布到 GHCR。部署机会切到对应 ref 后导出 `IMAGE_TAG=sha-<commit>` 给 Compose 使用。分支部署会强制把服务器本地同名分支重置为 `origin/<branch>`，避免远端主分支切换后被服务器旧本地分支的非快进历史阻塞
 - `latest` 仅作为主分支便捷标签，生产发布以 `sha-<commit>` 为准，避免分支名与镜像 tag 脱节
 
 ---
@@ -319,9 +319,9 @@ bash deploy/scripts/deploy.sh
 
 如果是通过 GitHub Actions 触发发布，推荐流程如下：
 
-1. 选择已经通过 CI 的 `main` / `master` / `v*` tag / 完整或短 commit SHA
-2. 确认对应 GHCR 中已存在 `sha-<commit>` 镜像
-3. 执行 `Deploy` workflow，由 workflow 自动切 ref、设置 `IMAGE_TAG` 并调用 `deploy/scripts/deploy.sh`
+1. 选择 `main` / `master` / `v*` tag / 完整或短 commit SHA；刚 push 后可以立即触发，不需要手动等待 CI 页面完成
+2. 执行 `Deploy` workflow，由 `check-ci` 等待目标 commit 的 `backend`、`frontend`、`docker-build`、`publish` 全部通过，并确认 `sha-<commit>` 镜像已发布
+3. 门禁通过后，workflow 自动切 ref、设置 `IMAGE_TAG` 并调用 `deploy/scripts/deploy.sh`
 
 ### 4.2 手动命令（细粒度操作）
 

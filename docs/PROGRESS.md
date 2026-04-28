@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-27（新增 SKU 映射规则配置页与 `/api/config/sku-mapping-rules` 配置接口，补货计算按同仓库组件组装口径把库存包裹 SKU 转换为商品 SKU 视角库存；同步日志 / 接口监控新增赛狐 `40019` 失败调用精确自动重试队列；库存明细将“包裹”展示口径改为“未匹配 / 已匹配”，并放大圆点标识；生产主分支切换为当前线上补货日期发布线，Deploy workflow 的分支部署改为对齐 `origin/<branch>`。）
+> 最近更新：2026-04-28（国家选项改为“内置常见国家 + 数据库已观测国家”动态来源；多平台订单遇到新 2 位国家码按原码入库，非法国家才回落 `ZZ` 并记录结构化日志，EU 归类仍由管理员在全局参数中维护。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -37,6 +37,8 @@
 
 ### 2.2 同步与调度
 - **EU 合并同步口径**：订单、商品、出库、库存同步均按全局 eu_countries 将 EU 成员国合并到 EU，并在 original_* 字段保存原国家码；calc_engine 已移出 APScheduler 定时注册，仅保留手动生成入口。
+- **新国家发现口径**：多平台订单同步遇到有效 2 位国家码时直接落入 `order_header.country_code` 并参与计算；若该国家已配置到 `eu_countries`，则归并为 `EU` 并在 `original_country_code` 保留原码；空值或非法国家码才写为 `ZZ` 并记录结构化日志。
+- **订单列表同步来源**：`sync_order_list` 内部同时调用亚马逊订单接口 `/api/order/pageList.json` 与多平台订单接口 `/api/multiplatform/order/list.json`；亚马逊继续按 `updateDateTime` 增量窗口同步，多平台按近 30 天 `purchase` 滚动窗口同步，统一落入 `order_header` / `order_item` 并通过 `source` 区分。
 
 - **调度器开关**：`GET/POST /api/sync/scheduler`，开关状态持久化到 `global_config.scheduler_enabled`
 - **调度参数实时生效**：`sync_interval_minutes`、`calc_cron` 保存后立即 reload
@@ -50,7 +52,7 @@
   - 02:00 `daily_archive`
   - 默认 08:00 `calc_engine`（可配置，`global_config.suggestion_generation_enabled` 控制是否实际产出建议）
 - **信息总览快照刷新任务**：`refresh_dashboard_snapshot` 通过 TaskRun 入队执行；`GET /api/metrics/dashboard` 只读返回现有快照 / 活跃任务状态，手动“刷新快照”是默认触发入口
-- **订单详情同步与详情获取**：`sync_order_detail` 当前按 2 QPS / 2 并发保守抓取；订单页提供右侧独立“详情获取”组件，仅提供天数选择与触发按钮；手动触发会优先复用活跃的 `refetch_order_detail`、`sync_order_detail` 或 `sync_all` 任务，避免并发重复抓取，且不再对手动详情获取施加单次数量上限；任务执行中会按“已完成 X / 失败 Y / 总数 N”持续回写精确进度
+- **订单详情同步与详情获取**：`sync_order_detail` 当前按 2 QPS / 2 并发保守抓取，且仅处理 `source='亚马逊'` 的订单；订单页提供右侧独立“详情获取”组件，仅提供天数选择与触发按钮；手动触发会优先复用活跃的 `refetch_order_detail`、`sync_order_detail` 或 `sync_all` 任务，避免并发重复抓取，且不再对手动详情获取施加单次数量上限；任务执行中会按“已完成 X / 失败 Y / 总数 N”持续回写精确进度
 
 ### 2.3 补货计算引擎
 - **采购/补货拆分**：引擎同时产出 SKU 级 `purchase_qty` 与国家/仓库级 `country_breakdown` / `warehouse_breakdown` / `restock_dates`，并分别统计 `procurement_item_count`、`restock_item_count`；成功生成后自动关闭生成开关，等待导出与人工开新周期。
@@ -93,11 +95,37 @@
   - `BaseChart`（ECharts 封装）
 - **数据加载模式**：订单页、历史记录页、商品页、库存页、出库记录页使用“后端分页 + 后端筛选”；仓库、店铺等低增长基础页仍保留轻量分页
 - **筛选控件高度统一**：`PageSectionCard` 的 `section-actions` 强制所有控件 32px 高度
-- **订单状态中文映射**：`DataOrdersView.vue` 添加 `ORDER_STATUS_LABEL`（已发货 / 部分发货 / 未发货 / 待处理 / 已取消）
-- **全局参数页补货区域配置**：`GlobalConfigView.vue` 新增“补货区域”多选，选项复用 `COUNTRY_OPTIONS`，保存前变更检测与配置变更提示已纳入 `restock_regions`
+- **订单来源与状态展示**：`DataOrdersView.vue` 展示“来源”“订单平台”，订单状态中文映射覆盖已发货 / 部分发货 / 未发货 / 待处理 / 已取消 / 未知；多平台订单的详情状态显示为“不适用”
+- **全局参数页补货区域配置**：`GlobalConfigView.vue` 的“补货区域”多选已接入动态国家选项，保存前变更检测与配置变更提示已纳入 `restock_regions`
+- **动态国家选项**：`GET /api/config/country-options` 返回内置国家与订单、仓库、库存、出库在途中已观测国家的并集；订单、库存、出库、仓库、邮编规则、补货区域和 EU 成员国配置均改用该接口，接口不可用时前端降级使用内置选项。
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.79 动态国家选项与新国家入库口径（2026-04-28）
+
+- **配置接口**：新增 `GET /api/config/country-options`，返回内置常见国家与数据库已观测国家的并集，并标注 `builtin`、`observed`、`can_be_eu_member` 与 `unknown_country_codes`；观测来源包括 `order_header.country_code/original_country_code`、`warehouse.country`、`inventory_snapshot_latest.country/original_country`、`in_transit_record.target_country/original_target_country`。
+- **同步口径**：`backend/app/sync/order_list.py` 对多平台订单的 `marketplaceCode` / `extraInfo.warehouse_country` 执行 2 位字母国家码校验；新国家如 `RO` 首次出现时按 `RO` 入库，不再变成 `ZZ`；空值或非法值才回落 `ZZ` 并记录 `multiplatform_order_country_unrecognized` 结构化日志。
+- **EU 配置保护**：`backend/app/schemas/config.py` 对 `eu_countries` 继续归一化去重，但拒绝 `EU` 与 `ZZ`；管理员保存新 EU 成员后，沿用既有 `backfill_order_eu_country_mapping()` 回填历史订单。
+- **前端接入**：全局参数页、订单页、库存页、出库页、仓库页和邮编规则页均改用动态国家选项；全局参数页会提示“新发现国家”，未知名称国家显示原始代码，EU 成员国下拉不展示 `EU` / `ZZ`。
+- **测试**：补充 `backend/tests/integration/test_config_api.py`、`backend/tests/unit/test_config_schema.py`、`backend/tests/unit/test_sync_order_list_eu.py` 与 `frontend/src/views/__tests__/GlobalConfigView.test.ts`，覆盖动态选项、EU 成员校验、新国家入库和前端加载。
+
+### 3.78 订单页接入多平台订单接口（2026-04-28）
+
+- **数据库字段**：`order_header` 新增 `source`、`order_platform`，历史数据默认回填为“亚马逊”；唯一约束调整为 `shop_id + amazon_order_id + source`。`order_detail` 与 `order_detail_fetch_log` 新增 `source` 并纳入主键，避免同店铺同订单号不同来源互相覆盖详情状态。
+- **同步任务**：`sync_order_list` 保持原任务名和入口不变，内部先按 `updateDateTime` 增量同步亚马逊订单，再按近 30 天 `purchase` 滚动同步多平台订单；`sync_all`、定时同步和 `/api/sync/orders` 无新增步骤。
+- **字段归一**：亚马逊订单写 `source='亚马逊'`、`order_platform='亚马逊'`；多平台订单写 `source='多平台'`、`order_platform=platformName`，`orderNo` 继续落入内部 `amazon_order_id` 字段。多平台状态归一为 `Shipped / PartiallyShipped / Unshipped / Pending / Canceled / Unknown`，仅 `localSku` 非空的明细写入 `order_item`。
+- **补货计算**：多平台订单明细沿用现有 `order_item` 销量口径，归一状态为 `Shipped / PartiallyShipped` 且 SKU 有效时参与 `step1_velocity` 销量统计；`step5_warehouse_split` 的邮编分仓仍依赖订单详情，因此只消费带亚马逊详情的订单。
+- **详情拉取**：`sync_order_detail`、`refetch_order_detail` 与订单详情接口查询均带 `source` 口径；后台详情任务只筛选 `source='亚马逊'`，不会对多平台订单调用 `/api/order/detailByOrderId.json`。
+- **前端展示**：订单列表新增“来源”“订单平台”列，详情弹窗展示对应字段；多平台订单详情状态显示“不适用”，点击详情仍可查看本地订单头与明细。
+- **40019 重试**：`retry_failed_api_calls` 支持 `/api/multiplatform/order/list.json`，其忙碌任务映射为 `sync_order_list` / `sync_all`，避免与正在运行的订单同步并发重放。
+
+### 3.77 Deploy 等待 CI 与镜像发布完成（2026-04-28）
+
+- **门禁口径**：`.github/workflows/deploy.yml` 的 `check-ci` 继续先把手动输入的分支、tag、完整或短 commit SHA 解析为完整 `RESOLVED_SHA`，再用 `checks.listForRef` 查询目标 commit 的 check runs。
+- **等待范围**：Deploy 必须等待 `backend`、`frontend`、`docker-build`、`publish` 四个 required checks 全部 `success`；check 尚未出现或仍处于 `queued` / `in_progress` 时，每 15 秒继续轮询，最多等待 30 分钟。
+- **失败处理**：任一 required check 返回 `failure`、`cancelled`、`timed_out`、`action_required` 或其他非成功终态时，`check-ci` 立即失败并输出具体 job 名与结论；超时后输出仍未完成的 required checks。
+- **发布体验**：保留手动触发 `Deploy(ref=...)` 与 `v*` tag push 自动 Deploy 行为；刚 push 后可立即手动触发 Deploy，workflow 会在 SSH 部署前等待 CI 与 `sha-<commit>` GHCR 镜像发布完成。
 
 ### 3.76 SKU 映射规则与补货计算接入（2026-04-27）
 
@@ -394,7 +422,7 @@
 
 ---
 
-## 3. 近期重大变更（2026-04-10 ~ 2026-04-15）
+## 3. 近期重大变更（2026-04-10 ~ 2026-04-28）
 ### 3.37 急需补货SKU过滤缺失可售天数并统一 `<1天` 展示（2026-04-14）
 - `backend/app/engine/step6_timing.py` 将缺失或无效的 `sale_days` 从 urgent 判定中排除，仅对存在且可解析的国家级 `sale_days` 执行 `<= lead_time_days` 判断
 - `backend/app/api/metrics.py` 调整 dashboard 的 `top_urgent_skus` 过滤逻辑，缺失 `sale_days` 的国家不再进入“急需补货SKU”列表

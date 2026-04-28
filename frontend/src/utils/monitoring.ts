@@ -11,6 +11,7 @@ const SAIHU_ENDPOINT_LABELS: Record<string, string> = {
   '/api/warehouseManage/warehouseItemList.json': '库存同步',
   '/api/warehouseInOut/outRecords.json': '出库记录同步',
   '/api/order/pageList.json': '订单列表同步',
+  '/api/multiplatform/order/list.json': '多平台订单同步',
   '/api/order/detailByOrderId.json': '订单详情同步',
   '/api/shop/pageList.json': '店铺同步',
 }

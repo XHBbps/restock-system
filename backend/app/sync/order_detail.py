@@ -11,7 +11,13 @@ from app.core.exceptions import SaihuBizError
 from app.core.logging import get_logger
 from app.core.timezone import marketplace_to_country, now_beijing
 from app.db.session import async_session_factory
-from app.models.order import OrderDetail, OrderDetailFetchLog, OrderHeader, OrderItem
+from app.models.order import (
+    ORDER_SOURCE_AMAZON,
+    OrderDetail,
+    OrderDetailFetchLog,
+    OrderHeader,
+    OrderItem,
+)
 from app.models.product_listing import ProductListing
 from app.saihu.endpoints.order_detail import get_order_detail
 from app.sync.common import mark_sync_failed, mark_sync_running, mark_sync_success
@@ -159,9 +165,11 @@ async def _find_pending_orders(db: AsyncSession, limit: int) -> list[tuple[str, 
         .outerjoin(
             OrderDetailFetchLog,
             (OrderDetailFetchLog.shop_id == OrderHeader.shop_id)
-            & (OrderDetailFetchLog.amazon_order_id == OrderHeader.amazon_order_id),
+            & (OrderDetailFetchLog.amazon_order_id == OrderHeader.amazon_order_id)
+            & (OrderDetailFetchLog.source == OrderHeader.source),
         )
         .where(OrderDetailFetchLog.amazon_order_id.is_(None))
+        .where(OrderHeader.source == ORDER_SOURCE_AMAZON)
         .distinct()
         .order_by(OrderHeader.purchase_date.desc())
         .limit(limit)
@@ -195,9 +203,11 @@ async def find_refetch_targets(
         .outerjoin(
             OrderDetail,
             (OrderDetail.shop_id == OrderHeader.shop_id)
-            & (OrderDetail.amazon_order_id == OrderHeader.amazon_order_id),
+            & (OrderDetail.amazon_order_id == OrderHeader.amazon_order_id)
+            & (OrderDetail.source == OrderHeader.source),
         )
         .where(OrderDetail.amazon_order_id.is_(None))
+        .where(OrderHeader.source == ORDER_SOURCE_AMAZON)
         .where(OrderHeader.purchase_date >= cutoff)
         .distinct()
         .order_by(OrderHeader.purchase_date.desc())
@@ -213,7 +223,7 @@ async def find_refetch_targets(
 
 def serialize_refetch_targets(targets: list[tuple[str, str]]) -> list[dict[str, str]]:
     return [
-        {"shop_id": shop_id, "amazon_order_id": amazon_order_id}
+        {"shop_id": shop_id, "amazon_order_id": amazon_order_id, "source": ORDER_SOURCE_AMAZON}
         for shop_id, amazon_order_id in targets
     ]
 
@@ -269,6 +279,7 @@ async def _save_detail(
     detail_values = {
         "shop_id": shop_id,
         "amazon_order_id": amazon_order_id,
+        "source": ORDER_SOURCE_AMAZON,
         "postal_code": _postal_code_for_routing(detail),
         "country_code": _sanitize_detail_country(detail),
         "fetched_at": now_beijing(),
@@ -277,13 +288,18 @@ async def _save_detail(
     stmt = pg_insert(OrderDetail).values(**detail_values)
     stmt = stmt.on_conflict_do_update(
         constraint="pk_order_detail",
-        set_={k: v for k, v in detail_values.items() if k not in ("shop_id", "amazon_order_id")},
+        set_={
+            k: v
+            for k, v in detail_values.items()
+            if k not in ("shop_id", "amazon_order_id", "source")
+        },
     )
     await db.execute(stmt)
 
     log_values = {
         "shop_id": shop_id,
         "amazon_order_id": amazon_order_id,
+        "source": ORDER_SOURCE_AMAZON,
         "fetched_at": now_beijing(),
         "http_status": 200,
         "saihu_code": 0,
@@ -303,6 +319,7 @@ async def _log_fetch_failure(
     log_values = {
         "shop_id": shop_id,
         "amazon_order_id": amazon_order_id,
+        "source": ORDER_SOURCE_AMAZON,
         "fetched_at": now_beijing(),
         "http_status": None,
         "saihu_code": exc.code,

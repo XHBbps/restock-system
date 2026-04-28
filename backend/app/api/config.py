@@ -19,6 +19,13 @@ from app.api.deps import (
     get_current_user,
     require_permission,
 )
+from app.core.countries import (
+    BUILTIN_COUNTRY_NAMES,
+    BUILTIN_COUNTRY_ORDER,
+    NON_EU_MEMBER_CODES,
+    country_label,
+    normalize_observed_country_code,
+)
 from app.core.country_mapping import backfill_order_eu_country_mapping
 from app.core.exceptions import ConflictError, NotFound, UnprocessableError, ValidationFailed
 from app.core.permissions import (
@@ -33,7 +40,9 @@ from app.core.query import escape_like
 from app.core.timezone import now_beijing
 from app.models.dashboard_snapshot import DashboardSnapshot
 from app.models.global_config import GlobalConfig
+from app.models.in_transit import InTransitRecord
 from app.models.inventory import InventorySnapshotLatest
+from app.models.order import OrderHeader
 from app.models.product_listing import ProductListing
 from app.models.shop import Shop
 from app.models.sku import SkuConfig
@@ -44,6 +53,8 @@ from app.models.sys_user import SysUser
 from app.models.warehouse import Warehouse
 from app.models.zipcode_rule import ZipcodeRule
 from app.schemas.config import (
+    CountryOptionOut,
+    CountryOptionsOut,
     GenerationToggleOut,
     GenerationTogglePatch,
     GlobalConfigOut,
@@ -198,6 +209,62 @@ async def get_global(
 ) -> GlobalConfigOut:
     row = (await db.execute(select(GlobalConfig).where(GlobalConfig.id == 1))).scalar_one()
     return GlobalConfigOut.model_validate(row)
+
+
+async def _observed_country_codes(db: AsyncSession) -> set[str]:
+    columns = (
+        OrderHeader.country_code,
+        OrderHeader.original_country_code,
+        Warehouse.country,
+        InventorySnapshotLatest.country,
+        InventorySnapshotLatest.original_country,
+        InTransitRecord.target_country,
+        InTransitRecord.original_target_country,
+    )
+    observed: set[str] = set()
+    for column in columns:
+        rows = (
+            await db.execute(
+                select(distinct(column))
+                .where(column.is_not(None))
+                .where(column != "")
+            )
+        ).scalars().all()
+        for raw in rows:
+            code = normalize_observed_country_code(raw)
+            if code is not None:
+                observed.add(code)
+    return observed
+
+
+@router.get("/country-options", response_model=CountryOptionsOut)
+async def get_country_options(
+    db: AsyncSession = Depends(db_session_readonly),
+    _: None = Depends(require_permission(CONFIG_VIEW)),
+) -> CountryOptionsOut:
+    observed = await _observed_country_codes(db)
+    all_codes = set(BUILTIN_COUNTRY_NAMES) | observed
+    builtin_set = set(BUILTIN_COUNTRY_ORDER)
+    ordered_codes = [
+        *[code for code in BUILTIN_COUNTRY_ORDER if code in all_codes],
+        *sorted(all_codes - builtin_set),
+    ]
+    unknown_codes = sorted(
+        code for code in observed if code not in BUILTIN_COUNTRY_NAMES and code not in NON_EU_MEMBER_CODES
+    )
+    return CountryOptionsOut(
+        items=[
+            CountryOptionOut(
+                code=code,
+                label=country_label(code),
+                builtin=code in BUILTIN_COUNTRY_NAMES,
+                observed=code in observed,
+                can_be_eu_member=code not in NON_EU_MEMBER_CODES,
+            )
+            for code in ordered_codes
+        ],
+        unknown_country_codes=unknown_codes,
+    )
 
 
 @router.patch("/global", response_model=GlobalConfigOut)

@@ -9,6 +9,7 @@ import { useAuthStore } from '@/stores/auth'
 
 const {
   mockGetGlobalConfig,
+  mockGetCountryOptions,
   mockPatchGlobalConfig,
   mockGetGenerationToggle,
   mockPatchGenerationToggle,
@@ -18,6 +19,7 @@ const {
   mockConfirm,
 } = vi.hoisted(() => ({
   mockGetGlobalConfig: vi.fn(),
+  mockGetCountryOptions: vi.fn(),
   mockPatchGlobalConfig: vi.fn(),
   mockGetGenerationToggle: vi.fn(),
   mockPatchGenerationToggle: vi.fn(),
@@ -29,6 +31,7 @@ const {
 
 vi.mock('@/api/config', () => ({
   getGlobalConfig: (...args: unknown[]) => mockGetGlobalConfig(...args),
+  getCountryOptions: (...args: unknown[]) => mockGetCountryOptions(...args),
   patchGlobalConfig: (...args: unknown[]) => mockPatchGlobalConfig(...args),
   getGenerationToggle: (...args: unknown[]) => mockGetGenerationToggle(...args),
   patchGenerationToggle: (...args: unknown[]) => mockPatchGenerationToggle(...args),
@@ -64,6 +67,7 @@ const STUBS = {
   ElRadioGroup: true,
   ElRadioButton: true,
   ElTooltip: { template: '<div><slot /></div>' },
+  ElAlert: true,
   ElTag: { template: '<span><slot /></span>' },
 }
 
@@ -94,6 +98,16 @@ describe('GlobalConfigView', () => {
       can_enable: true,
       can_enable_reason: null,
     })
+    mockGetCountryOptions.mockResolvedValue({
+      items: [
+        { code: 'EU', label: 'EU - 欧盟', builtin: true, observed: true, can_be_eu_member: false },
+        { code: 'ZZ', label: 'ZZ - 无法识别国家', builtin: true, observed: false, can_be_eu_member: false },
+        { code: 'US', label: 'US - 美国', builtin: true, observed: true, can_be_eu_member: true },
+        { code: 'DE', label: 'DE - 德国', builtin: true, observed: true, can_be_eu_member: true },
+        { code: 'RO', label: 'RO', builtin: false, observed: true, can_be_eu_member: true },
+      ],
+      unknown_country_codes: ['RO'],
+    })
     const auth = useAuthStore()
     auth.setAuth('test-token', {
       id: 1,
@@ -115,6 +129,7 @@ describe('GlobalConfigView', () => {
 
     const vm = wrapper.vm as unknown as { form: GlobalConfig | null }
     expect(mockGetGlobalConfig).toHaveBeenCalledTimes(1)
+    expect(mockGetCountryOptions).toHaveBeenCalledTimes(1)
     expect(mockGetGenerationToggle).toHaveBeenCalledTimes(1)
     expect(vm.form?.restock_regions).toEqual(['US', 'EU'])
     expect(vm.form?.safety_stock_days).toBe(15)

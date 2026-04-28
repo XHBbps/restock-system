@@ -259,9 +259,11 @@
 import {
   createZipcodeRule,
   deleteZipcodeRule,
+  getCountryOptions,
   listWarehouses,
   listZipcodeRules,
   updateZipcodeRule,
+  type CountryOption,
   type Warehouse,
   type ZipcodeRule,
   type ZipcodeRuleInput,
@@ -302,7 +304,14 @@ const STRING_OPERATORS = [
 ] as const
 
 const OPERATORS = [...NUMBER_OPERATORS, ...STRING_OPERATORS] as const
-const countryOptions = COUNTRY_OPTIONS
+const countryOptions = ref<CountryOption[]>(
+  COUNTRY_OPTIONS.map((option) => ({
+    ...option,
+    builtin: true,
+    observed: false,
+    can_be_eu_member: !['EU', 'ZZ'].includes(option.code),
+  })),
+)
 const router = useRouter()
 
 const rows = ref<ZipcodeRule[]>([])
@@ -546,6 +555,15 @@ async function loadWarehouses(): Promise<void> {
     warehouses.value = await listWarehouses()
   } catch (error) {
     ElMessage.error(getZipcodeRuleActionErrorMessage(error, '加载仓库列表失败'))
+  }
+}
+
+async function loadCountryOptions(): Promise<void> {
+  try {
+    const resp = await getCountryOptions()
+    countryOptions.value = resp.items
+  } catch {
+    // 保留内置选项作为降级。
   }
 }
 
@@ -833,6 +851,7 @@ async function remove(row: ZipcodeRule): Promise<void> {
 
 onMounted(async () => {
   try {
+    await loadCountryOptions()
     await loadWarehouses()
     await reload()
   } finally {

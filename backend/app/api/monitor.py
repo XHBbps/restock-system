@@ -20,7 +20,12 @@ from app.core.logging import get_logger
 from app.core.permissions import MONITOR_VIEW, SYNC_OPERATE
 from app.core.timezone import now_beijing
 from app.models.api_call_log import ApiCallLog
-from app.models.order import OrderDetailFetchLog, OrderHeader, OrderItem
+from app.models.order import (
+    ORDER_SOURCE_AMAZON,
+    OrderDetailFetchLog,
+    OrderHeader,
+    OrderItem,
+)
 from app.models.product_listing import ProductListing
 from app.tasks.jobs.api_call_retry import (
     JOB_NAME as RETRY_FAILED_API_CALLS_JOB_NAME,
@@ -146,9 +151,11 @@ async def get_api_calls(
             .outerjoin(
                 OrderDetailFetchLog,
                 (OrderDetailFetchLog.shop_id == OrderHeader.shop_id)
-                & (OrderDetailFetchLog.amazon_order_id == OrderHeader.amazon_order_id),
+                & (OrderDetailFetchLog.amazon_order_id == OrderHeader.amazon_order_id)
+                & (OrderDetailFetchLog.source == OrderHeader.source),
             )
             .where(OrderHeader.purchase_date < cutoff)
+            .where(OrderHeader.source == ORDER_SOURCE_AMAZON)
             .where(OrderDetailFetchLog.amazon_order_id.is_(None))
             .where(_matched_order_detail_exists())
         )

@@ -146,11 +146,15 @@ async def sync_inventory_job(ctx: JobContext) -> None:
 
 **状态追踪**：每个 job 在 `sync_state` 表中维护最后运行时间、状态、错误信息。
 
-**EU 国家归一化**：同步层写入订单、商品、库存、出库在途数据时，会按 `global_config.eu_countries` 将成员国映射为字面值 `EU`，并在对应 `original_*` 字段保留原国家码。全局配置接口保存 `eu_countries` 且实际变化时，会在同一事务内调用 `backfill_order_eu_country_mapping()` 回填本地历史 `order_header`：源国家优先取 `original_country_code`，否则取当前 `country_code`；源国家属于当前 EU 集合时写 `country_code=marketplace_id='EU'` 且 `original_country_code=源国家`，否则恢复为源国家并清空 `original_country_code`。该回填只改本地库，不调用赛狐 API。
+**EU 国家归一化与新国家发现**：同步层写入订单、商品、库存、出库在途数据时，会按 `global_config.eu_countries` 将成员国映射为字面值 `EU`，并在对应 `original_*` 字段保留原国家码。多平台订单的 `marketplaceCode` / `extraInfo.warehouse_country` 若是有效 2 位字母国家码，会按原码入库；若该码已在 `eu_countries` 中才归并为 `EU`；空值或非法值才写为 `ZZ` 并记录结构化日志。全局配置接口保存 `eu_countries` 且实际变化时，会在同一事务内调用 `backfill_order_eu_country_mapping()` 回填本地历史 `order_header`：源国家优先取 `original_country_code`，否则取当前 `country_code`；源国家属于当前 EU 集合时写 `country_code=marketplace_id='EU'` 且 `original_country_code=源国家`，否则恢复为源国家并清空 `original_country_code`。该回填只改本地库，不调用赛狐 API。
+
+**动态国家选项**：`GET /api/config/country-options` 汇总内置常见国家与数据库已观测国家，观测来源包括订单 `country_code/original_country_code`、仓库 `country`、库存 `country/original_country`、出库 `target_country/original_target_country`。接口返回 `builtin`、`observed`、`can_be_eu_member` 与 `unknown_country_codes`，前端订单、库存、出库、仓库、邮编规则、补货区域和 EU 成员国配置均消费该接口；EU 成员国配置不允许 `EU` 与 `ZZ`。
+
+**订单列表同步**：`sync_order_list` 是订单列表唯一后台任务入口，内部合并两类赛狐来源：亚马逊订单接口 `/api/order/pageList.json` 按 `dateType=updateDateTime` 使用 `sync_state.last_success_at` 增量同步；多平台订单接口 `/api/multiplatform/order/list.json` 按 `dateType=purchase` 采用近 30 天滚动窗口同步。两类数据统一落入 `order_header` / `order_item`，通过 `source` 区分“亚马逊”与“多平台”，`order_platform` 保存展示平台名。多平台订单的状态会归一为 `Shipped / PartiallyShipped / Unshipped / Pending / Canceled / Unknown`，仅 `localSku` 非空明细写入 `order_item`，因此可直接参与 `step1_velocity` 销量统计。
 
 **出库记录同步**：`sync_out_records` 会把赛狐“其他出库”记录同步到 `in_transit_record` / `in_transit_item`，除在途状态观测所需字段外，还保留 `warehouseId`、`updateTime`、`type/typeName`、`commodityId`、`perPurchase`，用于数据页直接展示“出库”主表和明细表字段。`target_country` 改为从备注文本提取国家名（如 `20260410美国-赢捷-加州-散货-在途中` → `US`）；提取失败时保持空值，不再回退到 `targetFbaWarehouseId -> warehouse.country`。每次执行该同步任务后，还会顺带扫描历史 `target_country` 为空的旧记录并按同一备注规则回填，不覆盖已有值。
 
-**订单详情获取**：除自动 `sync_order_detail` 外，订单页还提供右侧独立“详情获取”组件，前端仅提交回溯天数到 `POST /api/sync/order-detail/refetch`。接口层会先检查活跃的 `refetch_order_detail`、`sync_order_detail`、`sync_all` 任务并直接返回现有 task_id，避免手动触发与定时 / 全量同步并发重复抓取；仅在无冲突时才按“最近 N 天”筛选本地缺少详情的全部订单并创建 `refetch_order_detail` TaskRun 后台任务，不再设置手动单次数量上限。该任务绕过 `order_detail_fetch_log` 的去重过滤，但继续复用既有失败分类、2 QPS / 2 并发抓取与落库逻辑，并按“已完成 X / 失败 Y / 总数 N”精确回写进度。
+**订单详情获取**：除自动 `sync_order_detail` 外，订单页还提供右侧独立“详情获取”组件，前端仅提交回溯天数到 `POST /api/sync/order-detail/refetch`。接口层会先检查活跃的 `refetch_order_detail`、`sync_order_detail`、`sync_all` 任务并直接返回现有 task_id，避免手动触发与定时 / 全量同步并发重复抓取；仅在无冲突时才按“最近 N 天”筛选本地缺少详情的 `source='亚马逊'` 订单并创建 `refetch_order_detail` TaskRun 后台任务，不再设置手动单次数量上限。该任务绕过 `order_detail_fetch_log` 的去重过滤，但继续复用既有失败分类、2 QPS / 2 并发抓取与落库逻辑，并按“已完成 X / 失败 Y / 总数 N”精确回写进度。多平台订单不调用 `/api/order/detailByOrderId.json`，订单详情表与拉取日志表均以 `shop_id + amazon_order_id + source` 作为主键口径。
 
 ### 3.3 任务队列系统（app/tasks）
 
@@ -255,7 +259,7 @@ _ENDPOINT_RATE_OVERRIDES = {
 # 默认 1 QPS per endpoint
 ```
 
-`retry_failed_api_calls` 在客户端 limiter 之外再按更保守间隔重放：1 QPS endpoint 间隔 1.5 秒，2 QPS endpoint 间隔 0.75 秒。
+`retry_failed_api_calls` 在客户端 limiter 之外再按更保守间隔重放：1 QPS endpoint 间隔 1.5 秒，2 QPS endpoint 间隔 0.75 秒。多平台订单接口 `/api/multiplatform/order/list.json` 属于订单列表同步来源，自动重试时的忙碌任务映射为 `sync_order_list` / `sync_all`。
 
 **Token 单飞**：并发 `get_token()` 调用共享同一个刷新 Future，避免同时发起多个刷新请求。
 
@@ -364,7 +368,7 @@ src/
 |---|---|
 | `suggestion.ts` | 建议单列表、当前建议、详情、条目 PATCH、删除；`Suggestion` 携带 `procurement_item_count` / `restock_item_count` / `procurement_snapshot_count` / `restock_snapshot_count`，`SuggestionItem` 携带 `purchase_qty` 与两组导出状态 |
 | `snapshot.ts` | `createProcurementSnapshot()`、`createRestockSnapshot()`、`listSnapshots(id, type?)`、详情与下载；`SnapshotOut.snapshot_type` 为 `procurement` / `restock` |
-| `config.ts` | `GlobalConfig` 暴露 `safety_stock_days`、`eu_countries`、`restock_regions` 等现行字段；`GenerationToggle` 暴露 `can_enable` / `can_enable_reason` |
+| `config.ts` | `GlobalConfig` 暴露 `safety_stock_days`、`eu_countries`、`restock_regions` 等现行字段；`CountryOptionsResponse` 封装 `GET /api/config/country-options` 的动态国家选项；`GenerationToggle` 暴露 `can_enable` / `can_enable_reason` |
 | `engine.ts` / `task.ts` | 手动触发必填补货日期字段 `demand_date` 的 `POST /api/engine/run`；`task.ts` 同时封装 `getTask()` 与 `listTasks()`，当前建议页会分别查询 `calc_engine` 的 `pending` / `running` 任务以复用进度 |
 
 所有 API 客户端继续通过 `api/client.ts` 注入 Bearer token，并复用统一错误处理与 401 跳转逻辑。
@@ -545,12 +549,13 @@ UPDATE global_config SET suggestion_generation_enabled=true, generation_toggle_u
 
 | 表 | 职责 | 关键约束 / 字段 |
 |---|---|---|
-| `global_config` | 全局配置单行表；包含 `target_days`、`buffer_days`、`lead_time_days`、`safety_stock_days`、`restock_regions`、`eu_countries`、`suggestion_generation_enabled`、`generation_toggle_updated_by / generation_toggle_updated_at`、同步与登录配置 | `CHECK id=1`；`safety_stock_days` 范围 1–90；`restock_regions=[]` 表示全部国家参与补货计算 |
+| `global_config` | 全局配置单行表；包含 `target_days`、`buffer_days`、`lead_time_days`、`safety_stock_days`、`restock_regions`、`eu_countries`、`suggestion_generation_enabled`、`generation_toggle_updated_by / generation_toggle_updated_at`、同步与登录配置 | `CHECK id=1`；`safety_stock_days` 范围 1–90；`restock_regions=[]` 表示全部国家参与补货计算；`eu_countries` 拒绝 `EU` 与 `ZZ` |
 | `sku_config` | SKU 启用 / 禁用与业务参数 | `commodity_sku` 唯一 |
 | `sku_mapping_rule` | 商品 SKU 到库存包裹 SKU 的映射规则 | `commodity_sku` 唯一；`enabled=false` 时规则保留但不参与引擎 |
 | `sku_mapping_component` | 映射规则组件行 | `inventory_sku` 全局唯一；`quantity > 0`；同一规则多行表示组合公式 |
 | `warehouse` | 海外仓/国内仓基础资料 | `country` 可为空；变更仓库国家会级联更新库存最新快照口径 |
-| `order_header` / `order_item` | 订单头与订单明细 | `order_header.country_code` 保存映射后国家，`original_country_code` 保存 EU 合并前国家；按 `shop_id + purchase_date`、`order_status + purchase_date` 建索引 |
+| `order_header` / `order_item` | 订单头与订单明细 | `order_header.source` 区分“亚马逊”/“多平台”，`order_platform` 保存展示平台名；`UNIQUE(shop_id, amazon_order_id, source)`；`country_code` 保存映射后国家，`original_country_code` 保存 EU 合并前国家；按 `shop_id + purchase_date`、`order_status + purchase_date` 建索引 |
+| `order_detail` / `order_detail_fetch_log` | 亚马逊订单邮编详情与拉取日志 | 主键均为 `shop_id + amazon_order_id + source`；当前详情任务只写 `source='亚马逊'` |
 | `product_listing` | 赛狐在线产品信息 | `marketplace_id` 保存映射后 2 字符国家码或 `EU`，`original_marketplace_id` 保存 EU 合并前国家 |
 | `inventory_snapshot_latest` | SKU × 仓库最新库存 | `country` 保存映射后国家，`original_country` 保存 EU 合并前国家；`warehouse_id + commodity_sku` 唯一 |
 | `in_transit_record` / `in_transit_item` | 出库 / 在途记录与明细 | `target_country` 保存映射后国家，`original_target_country` 保存 EU 合并前国家 |
@@ -937,6 +942,7 @@ VITE_API_PROXY_TARGET=http://localhost:8000
 
 | 日期 | 变更 | 相关 PROGRESS 章节 |
 |---|---|---|
+| 2026-04-28 | 国家选项改为“内置常见国家 + 数据库已观测国家”动态来源；新 2 位国家码按原码入库，EU 归类仍由管理员通过 `eu_countries` 维护，`EU` / `ZZ` 不可加入 EU 成员国 | PROGRESS.md §3.79 |
 | 2026-04-27 | 同步日志 / 接口监控新增赛狐 `40019` 精确自动重试队列：保存 `request_payload`，每 5 分钟按原始请求重放，成功标记 `resolved`，最多 5 次后 `permanent` | §3.75 |
 | 2026-04-27 | 库存明细新增未匹配标识与筛选：`is_package` 由 `product_listing.commodity_sku` 是否存在实时派生，前端展示为未匹配 / 已匹配，仓库分组统计随筛选口径重算 | §3.74 |
 | 2026-04-27 | 新增 SKU 映射规则配置与补货计算转换层：同仓库组件库存按公式组装为商品 SKU 视角库存，库存明细仍保留原始 SKU 展示 | §3.76 |

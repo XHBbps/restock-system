@@ -20,6 +20,9 @@ from sqlalchemy.sql import func
 
 from app.db.base import Base
 
+ORDER_SOURCE_AMAZON = "亚马逊"
+ORDER_SOURCE_MULTIPLATFORM = "多平台"
+
 
 class OrderHeader(Base):
     """订单骨架(列表接口同步)。
@@ -30,7 +33,7 @@ class OrderHeader(Base):
 
     __tablename__ = "order_header"
     __table_args__ = (
-        UniqueConstraint("shop_id", "amazon_order_id", name="uq_order_header_key"),
+        UniqueConstraint("shop_id", "amazon_order_id", "source", name="uq_order_header_key"),
         Index("ix_order_header_purchase_date", "purchase_date"),
         Index("ix_order_header_country_purchase", "country_code", "purchase_date"),
         Index("ix_order_header_shop_purchase", "shop_id", "purchase_date"),
@@ -41,6 +44,10 @@ class OrderHeader(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     shop_id: Mapped[str] = mapped_column(String(50), nullable=False)
     amazon_order_id: Mapped[str] = mapped_column(String(50), nullable=False)
+    source: Mapped[str] = mapped_column(String(20), nullable=False, default=ORDER_SOURCE_AMAZON)
+    order_platform: Mapped[str] = mapped_column(
+        String(50), nullable=False, default=ORDER_SOURCE_AMAZON
+    )
     marketplace_id: Mapped[str] = mapped_column(String(10), nullable=False)
     country_code: Mapped[str] = mapped_column(String(2), nullable=False)
     # EU 合并前的原始国家码（审计用，不对外暴露）
@@ -111,6 +118,9 @@ class OrderDetail(Base):
 
     shop_id: Mapped[str] = mapped_column(String(50), primary_key=True)
     amazon_order_id: Mapped[str] = mapped_column(String(50), primary_key=True)
+    source: Mapped[str] = mapped_column(
+        String(20), primary_key=True, default=ORDER_SOURCE_AMAZON
+    )
 
     postal_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
     country_code: Mapped[str | None] = mapped_column(String(2), nullable=True)
@@ -129,6 +139,9 @@ class OrderDetailFetchLog(Base):
 
     shop_id: Mapped[str] = mapped_column(String(50), primary_key=True)
     amazon_order_id: Mapped[str] = mapped_column(String(50), primary_key=True)
+    source: Mapped[str] = mapped_column(
+        String(20), primary_key=True, default=ORDER_SOURCE_AMAZON
+    )
     fetched_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

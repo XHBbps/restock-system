@@ -27,6 +27,13 @@ def test_global_config_patch_normalizes_eu_countries() -> None:
     assert patch.eu_countries == ["DE", "FR"]
 
 
+def test_global_config_patch_rejects_eu_or_unknown_as_eu_member() -> None:
+    with pytest.raises(ValidationError):
+        GlobalConfigPatch(eu_countries=["EU"])
+    with pytest.raises(ValidationError):
+        GlobalConfigPatch(eu_countries=["ZZ"])
+
+
 def test_global_config_patch_rejects_invalid_restock_region() -> None:
     with pytest.raises(ValidationError):
         GlobalConfigPatch(restock_regions=["USA"])

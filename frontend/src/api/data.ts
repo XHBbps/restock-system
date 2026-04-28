@@ -6,6 +6,8 @@ import client from './client'
 export interface DataOrderSummary {
   shopId: string
   amazonOrderId: string
+  source: string
+  orderPlatform: string
   marketplaceId: string
   countryCode: string
   orderStatus: string
@@ -68,10 +70,12 @@ export async function listOrders(params: {
 
 export async function getOrderDetail(
   shopId: string,
-  amazonOrderId: string
+  amazonOrderId: string,
+  source = '亚马逊'
 ): Promise<DataOrderDetail> {
   const { data } = await client.get<DataOrderDetail>(
-    `/api/data/orders/${encodeURIComponent(shopId)}/${encodeURIComponent(amazonOrderId)}`
+    `/api/data/orders/${encodeURIComponent(shopId)}/${encodeURIComponent(amazonOrderId)}`,
+    { params: { source } }
   )
   return data
 }

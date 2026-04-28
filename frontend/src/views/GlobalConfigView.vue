@@ -36,6 +36,14 @@
     <div class="config-sections">
       <div class="config-section">
         <div class="section-label">采补参数</div>
+        <el-alert
+          v-if="unknownCountryCodes.length"
+          class="country-discovery-alert"
+          type="warning"
+          :closable="false"
+          show-icon
+          :title="`新发现国家：${unknownCountryCodes.join('、')}`"
+        />
         <el-form :model="form" label-width="180px" style="max-width: 620px">
           <el-form-item label="国内中心仓周转天数">
             <el-input-number v-model="form.buffer_days" :min="1" :max="365" />
@@ -79,7 +87,7 @@
               clearable
             >
               <el-option
-                v-for="option in countryOptions"
+                v-for="option in euCountryOptions"
                 :key="option.code"
                 :label="option.label"
                 :value="option.code"
@@ -112,10 +120,12 @@
 
 <script setup lang="ts">
 import {
+  getCountryOptions,
   getGenerationToggle,
   getGlobalConfig,
   patchGenerationToggle,
   patchGlobalConfig,
+  type CountryOption as DynamicCountryOption,
   type GenerationToggle,
   type GlobalConfig,
 } from '@/api/config'
@@ -130,12 +140,23 @@ import { computed, onMounted, ref } from 'vue'
 const auth = useAuthStore()
 const form = ref<GlobalConfig | null>(null)
 const saving = ref(false)
+const countryOptions = ref<DynamicCountryOption[]>(
+  COUNTRY_OPTIONS.map((option) => ({
+    ...option,
+    builtin: true,
+    observed: false,
+    can_be_eu_member: !['EU', 'ZZ'].includes(option.code),
+  })),
+)
+const unknownCountryCodes = ref<string[]>([])
 
 const toggle = ref<GenerationToggle | null>(null)
 const toggleValue = ref(false)
 const togglePatching = ref(false)
 
-const countryOptions = computed(() => COUNTRY_OPTIONS)
+const euCountryOptions = computed(() =>
+  countryOptions.value.filter((option) => option.can_be_eu_member),
+)
 
 function formatDateTime(value: string | null | undefined): string {
   return value ? dayjs(value).format('YYYY-MM-DD HH:mm:ss') : '—'
@@ -188,8 +209,19 @@ async function loadToggle(): Promise<void> {
   }
 }
 
+async function loadCountryOptions(): Promise<void> {
+  try {
+    const resp = await getCountryOptions()
+    countryOptions.value = resp.items
+    unknownCountryCodes.value = resp.unknown_country_codes
+  } catch {
+    unknownCountryCodes.value = []
+  }
+}
+
 onMounted(async () => {
   try {
+    await loadCountryOptions()
     form.value = await getGlobalConfig()
     snapshotCalcParams()
   } catch (error) {
@@ -313,5 +345,10 @@ async function save(): Promise<void> {
   margin-top: $space-3;
   color: $color-text-secondary;
   font-size: $font-size-xs;
+}
+
+.country-discovery-alert {
+  max-width: 620px;
+  margin-bottom: $space-4;
 }
 </style>

@@ -108,7 +108,8 @@ async def load_all_sku_country_orders(
         .join(
             OrderDetail,
             (OrderDetail.shop_id == OrderHeader.shop_id)
-            & (OrderDetail.amazon_order_id == OrderHeader.amazon_order_id),
+            & (OrderDetail.amazon_order_id == OrderHeader.amazon_order_id)
+            & (OrderDetail.source == OrderHeader.source),
         )
         .where(OrderItem.commodity_sku.in_(commodity_skus))
         .where(OrderHeader.purchase_date >= earliest_dt)

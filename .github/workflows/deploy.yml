@@ -59,24 +59,92 @@ jobs:
           script: |
             const ref = process.env.RESOLVED_SHA;
             const inputRef = process.env.DEPLOY_REF;
-            const checkRuns = await github.paginate(github.rest.checks.listForRef, {
+            const requiredChecks = ['backend', 'frontend', 'docker-build', 'publish'];
+            const timeoutMs = 30 * 60 * 1000;
+            const intervalMs = 15 * 1000;
+            const deadline = Date.now() + timeoutMs;
+            const failedConclusions = new Set([
+              'failure',
+              'cancelled',
+              'timed_out',
+              'action_required',
+            ]);
+
+            const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+            while (Date.now() < deadline) {
+              const checkRuns = await github.paginate(github.rest.checks.listForRef, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: ref,
+                filter: 'latest',
+                per_page: 100,
+              });
+              const checksByName = new Map(checkRuns.map((check) => [check.name, check]));
+              const pending = [];
+
+              for (const checkName of requiredChecks) {
+                const check = checksByName.get(checkName);
+                if (!check) {
+                  pending.push(`${checkName}: not found`);
+                  continue;
+                }
+
+                if (check.status !== 'completed') {
+                  pending.push(`${checkName}: ${check.status}`);
+                  continue;
+                }
+
+                if (check.conclusion === 'success') {
+                  continue;
+                }
+
+                if (failedConclusions.has(check.conclusion)) {
+                  throw new Error(
+                    `Required check ${checkName} failed for ref ${inputRef} (${ref}) with conclusion ${check.conclusion}`,
+                  );
+                }
+
+                throw new Error(
+                  `Required check ${checkName} did not pass for ref ${inputRef} (${ref}); conclusion was ${check.conclusion}`,
+                );
+              }
+
+              if (pending.length === 0) {
+                core.info(`Required CI checks passed for ${inputRef} (${ref}): ${requiredChecks.join(', ')}`);
+                return;
+              }
+
+              core.info(`Waiting for required checks for ${inputRef} (${ref}): ${pending.join(', ')}`);
+              await sleep(intervalMs);
+            }
+
+            const finalCheckRuns = await github.paginate(github.rest.checks.listForRef, {
               owner: context.repo.owner,
               repo: context.repo.repo,
               ref: ref,
               filter: 'latest',
               per_page: 100,
             });
+            const finalChecksByName = new Map(finalCheckRuns.map((check) => [check.name, check]));
+            const unfinished = requiredChecks
+              .map((checkName) => {
+                const check = finalChecksByName.get(checkName);
+                if (!check) {
+                  return `${checkName}: not found`;
+                }
+                return `${checkName}: ${check.status}${check.conclusion ? `/${check.conclusion}` : ''}`;
+              })
+              .filter((status) => !status.endsWith('/success'));
 
-            const ciBackend  = checkRuns.find(c => c.name === 'backend');
-            const ciFrontend = checkRuns.find(c => c.name === 'frontend');
+            if (unfinished.length === 0) {
+              core.info(`Required CI checks passed for ${inputRef} (${ref}): ${requiredChecks.join(', ')}`);
+              return;
+            }
 
-            if (!ciBackend || ciBackend.conclusion !== 'success') {
-              core.setFailed(`Backend CI has not passed for ref ${inputRef} (${ref})`);
-            }
-            if (!ciFrontend || ciFrontend.conclusion !== 'success') {
-              core.setFailed(`Frontend CI has not passed for ref ${inputRef} (${ref})`);
-            }
-            core.info(`CI checks passed for ${inputRef} (${ref})`);
+            throw new Error(
+              `Timed out after 30 minutes waiting for required checks for ref ${inputRef} (${ref}): ${unfinished.join(', ')}`,
+            );
 
   deploy:
     needs: check-ci

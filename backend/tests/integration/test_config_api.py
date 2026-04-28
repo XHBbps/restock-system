@@ -9,7 +9,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.dashboard_snapshot import DashboardSnapshot
+from app.models.in_transit import InTransitRecord
+from app.models.inventory import InventorySnapshotLatest
 from app.models.order import OrderHeader
+from app.models.warehouse import Warehouse
 from tests.integration.factories import seed_global_config
 
 BEIJING = ZoneInfo("Asia/Shanghai")
@@ -189,6 +192,63 @@ async def test_patch_global_config_accepts_empty_restock_regions(
 
     assert resp.status_code == 200
     assert resp.json()["restock_regions"] == []
+
+
+@pytest.mark.asyncio
+async def test_get_country_options_merges_builtin_and_observed_countries(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    await seed_global_config(db_session)
+    now = datetime.now(BEIJING)
+    db_session.add(
+        Warehouse(
+            id="WH-RO",
+            name="Romania Warehouse",
+            type=3,
+            country="RO",
+            last_sync_at=now,
+        )
+    )
+    db_session.add(
+        InventorySnapshotLatest(
+            commodity_sku="SKU-1",
+            warehouse_id="WH-RO",
+            country="EU",
+            original_country="RO",
+            available=1,
+            reserved=0,
+        )
+    )
+    db_session.add(
+        InTransitRecord(
+            saihu_out_record_id="OUT-1",
+            target_country="ZZ",
+            original_target_country=None,
+            is_in_transit=True,
+            last_seen_at=now,
+        )
+    )
+    await _seed_order_header(
+        db_session,
+        order_id="111-0000004-0000004",
+        country_code="EU",
+        marketplace_id="EU",
+        original_country_code="RO",
+    )
+    await db_session.commit()
+
+    resp = await client.get("/api/config/country-options")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    by_code = {item["code"]: item for item in body["items"]}
+    assert by_code["US"]["label"] == "US - 美国"
+    assert by_code["RO"]["label"] == "RO"
+    assert by_code["RO"]["observed"] is True
+    assert by_code["RO"]["can_be_eu_member"] is True
+    assert by_code["EU"]["can_be_eu_member"] is False
+    assert by_code["ZZ"]["can_be_eu_member"] is False
+    assert body["unknown_country_codes"] == ["RO"]
 
 
 @pytest.mark.asyncio

@@ -28,6 +28,7 @@ SUPPORTED_ENDPOINT_JOBS: dict[str, tuple[str, ...]] = {
     "/api/warehouseManage/warehouseItemList.json": ("sync_inventory",),
     "/api/warehouseInOut/outRecords.json": ("sync_out_records",),
     "/api/order/pageList.json": ("sync_order_list",),
+    "/api/multiplatform/order/list.json": ("sync_order_list",),
     "/api/order/detailByOrderId.json": ("sync_order_detail", "refetch_order_detail"),
     "/api/shop/pageList.json": ("sync_shop",),
 }

@@ -27,7 +27,7 @@ from app.core.query import escape_like
 from app.core.timezone import BEIJING
 from app.models.in_transit import InTransitItem, InTransitRecord
 from app.models.inventory import InventorySnapshotLatest
-from app.models.order import OrderDetail, OrderHeader, OrderItem
+from app.models.order import ORDER_SOURCE_AMAZON, OrderDetail, OrderHeader, OrderItem
 from app.models.product_listing import ProductListing
 from app.models.shop import Shop
 from app.models.sku import SkuConfig
@@ -118,6 +118,7 @@ def _order_has_detail_expr() -> ColumnElement[int]:
         .where(
             OrderDetail.shop_id == OrderHeader.shop_id,
             OrderDetail.amazon_order_id == OrderHeader.amazon_order_id,
+            OrderDetail.source == OrderHeader.source,
             _order_detail_visible_predicate(),
         )
         .scalar_subquery()
@@ -151,6 +152,8 @@ def _apply_order_sort(stmt: Any, sort_by: str | None, sort_order: str) -> Any:
     amount_expr = func.coalesce(OrderHeader.order_total_amount.cast(Float), -1.0)
     sort_map: dict[str, tuple[Any, ...]] = {
         "amazonOrderId": (OrderHeader.amazon_order_id,),
+        "source": (OrderHeader.source,),
+        "orderPlatform": (OrderHeader.order_platform,),
         "shopId": (OrderHeader.shop_id,),
         "countryCode": (OrderHeader.country_code,),
         "orderStatus": (_order_status_sort_expr(),),
@@ -369,23 +372,34 @@ async def list_orders(
         ).all()
         item_count_map = {oid: int(c) for oid, c in cnt_rows}
 
-    detail_set: set[tuple[str, str]] = set()
+    detail_set: set[tuple[str, str, str]] = set()
     if rows:
-        keys = [(r.shop_id, r.amazon_order_id) for r in rows]
+        keys = [(r.shop_id, r.amazon_order_id, r.source) for r in rows]
         # * 必须用复合键过滤。只按 shop_id IN(...) 会拉回该 shop 的全部历史 detail,
         # 在数据量大时造成内存爆炸(review H-N1)。
         det_rows = (
             (
                 await db.execute(
-                    select(OrderDetail.shop_id, OrderDetail.amazon_order_id).where(
-                        tuple_(OrderDetail.shop_id, OrderDetail.amazon_order_id).in_(keys),
+                    select(
+                        OrderDetail.shop_id,
+                        OrderDetail.amazon_order_id,
+                        OrderDetail.source,
+                    ).where(
+                        tuple_(
+                            OrderDetail.shop_id,
+                            OrderDetail.amazon_order_id,
+                            OrderDetail.source,
+                        ).in_(keys),
                         _order_detail_visible_predicate(),
                     )
                 )
             )
             .all()
         )
-        detail_set = {(shop_id, amazon_order_id) for shop_id, amazon_order_id in det_rows}
+        detail_set = {
+            (shop_id, amazon_order_id, source)
+            for shop_id, amazon_order_id, source in det_rows
+        }
 
     items = [
         DataOrderSummary.model_validate(
@@ -395,6 +409,8 @@ async def list_orders(
                     for k in (
                         "shop_id",
                         "amazon_order_id",
+                        "source",
+                        "order_platform",
                         "marketplace_id",
                         "country_code",
                         "order_status",
@@ -407,7 +423,7 @@ async def list_orders(
                         "last_sync_at",
                     )
                 },
-                "has_detail": (r.shop_id, r.amazon_order_id) in detail_set,
+                "has_detail": (r.shop_id, r.amazon_order_id, r.source) in detail_set,
                 "item_count": item_count_map.get(r.id, 0),
             }
         )
@@ -420,18 +436,21 @@ async def list_orders(
 async def get_order_detail(
     shop_id: str = Path(...),
     amazon_order_id: str = Path(...),
+    source: str = Query(default=ORDER_SOURCE_AMAZON),
     db: AsyncSession = Depends(db_session_readonly),
     _: None = Depends(require_permission(DATA_BIZ_VIEW)),
 ) -> DataOrderDetail:
     header = (
         await db.execute(
             select(OrderHeader).where(
-                (OrderHeader.shop_id == shop_id) & (OrderHeader.amazon_order_id == amazon_order_id)
+                (OrderHeader.shop_id == shop_id)
+                & (OrderHeader.amazon_order_id == amazon_order_id)
+                & (OrderHeader.source == source)
             )
         )
     ).scalar_one_or_none()
     if header is None:
-        raise NotFound(f"订单 {shop_id}/{amazon_order_id} 不存在")
+        raise NotFound(f"订单 {shop_id}/{amazon_order_id}/{source} 不存在")
 
     item_rows = (
         (await db.execute(select(OrderItem).where(OrderItem.order_id == header.id))).scalars().all()
@@ -440,7 +459,9 @@ async def get_order_detail(
     detail = (
         await db.execute(
             select(OrderDetail).where(
-                (OrderDetail.shop_id == shop_id) & (OrderDetail.amazon_order_id == amazon_order_id)
+                (OrderDetail.shop_id == shop_id)
+                & (OrderDetail.amazon_order_id == amazon_order_id)
+                & (OrderDetail.source == source)
             )
         )
     ).scalar_one_or_none()
@@ -453,6 +474,8 @@ async def get_order_detail(
                 for k in (
                     "shop_id",
                     "amazon_order_id",
+                    "source",
+                    "order_platform",
                     "marketplace_id",
                     "country_code",
                     "order_status",

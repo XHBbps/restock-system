@@ -23,6 +23,24 @@ export async function patchGlobalConfig(patch: Partial<GlobalConfig>): Promise<G
   return data
 }
 
+export interface CountryOption {
+  code: string
+  label: string
+  builtin: boolean
+  observed: boolean
+  can_be_eu_member: boolean
+}
+
+export interface CountryOptionsResponse {
+  items: CountryOption[]
+  unknown_country_codes: string[]
+}
+
+export async function getCountryOptions(): Promise<CountryOptionsResponse> {
+  const { data } = await client.get<CountryOptionsResponse>('/api/config/country-options')
+  return data
+}
+
 // ========== SKU Config ==========
 export interface SkuConfig {
   commodity_sku: string

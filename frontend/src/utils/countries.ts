@@ -5,6 +5,7 @@ export interface CountryOption {
 
 export const COUNTRY_OPTIONS: CountryOption[] = [
   { code: 'EU', label: 'EU - 欧盟' },
+  { code: 'ZZ', label: 'ZZ - 无法识别国家' },
   { code: 'CN', label: 'CN - 中国' },
   { code: 'US', label: 'US - 美国' },
   { code: 'CA', label: 'CA - 加拿大' },

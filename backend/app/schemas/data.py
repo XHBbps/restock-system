@@ -46,6 +46,8 @@ class DataOrderItem(SaihuLikeModel):
 class DataOrderSummary(SaihuLikeModel):
     shop_id: str
     amazon_order_id: str
+    source: str
+    order_platform: str
     marketplace_id: str
     country_code: str
     order_status: str
@@ -74,6 +76,8 @@ class DataOrderDetail(SaihuLikeModel):
 
     shop_id: str
     amazon_order_id: str
+    source: str
+    order_platform: str
     marketplace_id: str
     country_code: str
     order_status: str

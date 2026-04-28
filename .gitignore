@@ -69,6 +69,8 @@ frontend/coverage/
 .env.*
 !.env.example
 !deploy/.env.dev.example
+# 服务器运维敏感信息本地交接文件，禁止提交
+docs/*.secrets.local
 
 # ========== Docker ==========
 # 不要忽略 deploy/docker-compose.yml / Dockerfile

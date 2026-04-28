@@ -26,7 +26,7 @@
         @change="reloadFirstPage"
         @clear="reloadFirstPage"
       >
-        <el-option v-for="c in COUNTRY_OPTIONS" :key="c.code" :label="c.code" :value="c.code" />
+        <el-option v-for="c in countryOptions" :key="c.code" :label="c.label" :value="c.code" />
       </el-select>
       <el-select
         v-model="filters.type_name"
@@ -131,6 +131,7 @@
 
 <script setup lang="ts">
 import { listOutRecords, listOutRecordTypes, type DataOutRecord } from '@/api/data'
+import { getCountryOptions, type CountryOption } from '@/api/config'
 import PageSectionCard from '@/components/PageSectionCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
 import { getActionErrorMessage } from '@/utils/apiError'
@@ -146,6 +147,14 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = ref(50)
 const loading = ref(false)
+const countryOptions = ref<CountryOption[]>(
+  COUNTRY_OPTIONS.map((option) => ({
+    ...option,
+    builtin: true,
+    observed: false,
+    can_be_eu_member: !['EU', 'ZZ'].includes(option.code),
+  })),
+)
 const typeOptions = ref<string[]>([])
 const sortState = ref<SortState>({ prop: 'updateTime', order: 'desc' })
 const filters = reactive({
@@ -198,7 +207,17 @@ async function loadTypeOptions(): Promise<void> {
   }
 }
 
+async function loadCountryOptions(): Promise<void> {
+  try {
+    const resp = await getCountryOptions()
+    countryOptions.value = resp.items
+  } catch {
+    // 保留内置选项作为降级。
+  }
+}
+
 onMounted(() => {
+  void loadCountryOptions()
   void loadTypeOptions()
   void reload()
 })
