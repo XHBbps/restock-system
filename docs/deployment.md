@@ -309,7 +309,7 @@ bash deploy/scripts/deploy.sh
 
 1. **校验环境变量** — `deploy/scripts/validate_env.sh` 检查必填项，并拦截 `.env.example` 中的示例占位值（包括 `LOGIN_PASSWORD=your_initial_login_password` 与非小写 `GHCR_OWNER`）
 2. **数据库备份** — `deploy/scripts/pg_backup.sh` 生成 `deploy/data/backups/<timestamp>.sql.gz`
-3. **拉取镜像** — `docker compose pull backend worker scheduler frontend`（`IMAGE_TAG` 默认取当前 git commit 的 `sha-<commit>`）
+3. **拉取镜像** — `docker compose pull backend worker scheduler frontend`（`IMAGE_TAG` 默认取当前 git commit 的 `sha-<commit>`）；应用镜像 pull 默认最多等待 600 秒（可用 `IMAGE_PULL_TIMEOUT_SECONDS` 覆盖），若 GHCR 拉取失败或超时，`deploy.sh` 会回退为在服务器本地执行 `docker compose build backend frontend`，再继续后续迁移与滚动更新（`worker` / `scheduler` 共用 backend 镜像）
 4. **执行迁移** — `docker compose run --rm backend alembic upgrade head`
 5. **滚动更新服务** — `docker compose up -d db backend worker scheduler frontend caddy`
 6. **冒烟检查** — `deploy/scripts/smoke_check.sh` 访问 `/healthz` 和 `/readyz`；生产默认通过 `--resolve` 将 `APP_DOMAIN` 指向 `127.0.0.1`，验证 Caddy + 后端路由但不公开健康端点

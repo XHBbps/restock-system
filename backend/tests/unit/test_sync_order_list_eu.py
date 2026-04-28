@@ -72,13 +72,13 @@ async def test_upsert_multiplatform_order_maps_fields_and_items() -> None:
             "orderNo": "ORDER-1",
             "platformName": "Wayfair",
             "marketplaceCode": "",
-            "extraInfo": {"warehouse_country": "us"},
-            "orderStatus": "已发货",
+            "extraInfo": "{\"warehouse_country\":\"us\"}",
+            "orderStatus": "Shipped",
             "currency": "USD",
             "totalAmount": "12.34",
             "purchaseDate": "2026-04-21 08:00:00",
             "payTime": "2026-04-21 09:00:00",
-            "orderItemList": [
+            "skuInfoVo": [
                 {
                     "orderItemId": "ITEM-1",
                     "localSku": "SKU-1",

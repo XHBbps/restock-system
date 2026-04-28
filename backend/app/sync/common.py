@@ -21,12 +21,17 @@ async def mark_sync_running(db: AsyncSession, job_name: str) -> datetime:
     return now
 
 
-async def mark_sync_success(db: AsyncSession, job_name: str, started: datetime) -> None:
-    now = now_beijing()
+async def mark_sync_success(
+    db: AsyncSession,
+    job_name: str,
+    started: datetime,
+    success_at: datetime | None = None,
+) -> None:
+    success_watermark = success_at or now_beijing()
     stmt = pg_insert(SyncState).values(
         job_name=job_name,
         last_run_at=started,
-        last_success_at=now,
+        last_success_at=success_watermark,
         last_status="success",
         last_error=None,
     )
@@ -34,7 +39,7 @@ async def mark_sync_success(db: AsyncSession, job_name: str, started: datetime) 
         index_elements=["job_name"],
         set_={
             "last_run_at": started,
-            "last_success_at": now,
+            "last_success_at": success_watermark,
             "last_status": "success",
             "last_error": None,
         },

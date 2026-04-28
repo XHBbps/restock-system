@@ -150,7 +150,7 @@ async def sync_inventory_job(ctx: JobContext) -> None:
 
 **动态国家选项**：`GET /api/config/country-options` 汇总内置常见国家与数据库已观测国家，观测来源包括订单 `country_code/original_country_code`、仓库 `country`、库存 `country/original_country`、出库 `target_country/original_target_country`。接口返回 `builtin`、`observed`、`can_be_eu_member` 与 `unknown_country_codes`，前端订单、库存、出库、仓库、邮编规则、补货区域和 EU 成员国配置均消费该接口；EU 成员国配置不允许 `EU` 与 `ZZ`。
 
-**订单列表同步**：`sync_order_list` 是订单列表唯一后台任务入口，内部合并两类赛狐来源：亚马逊订单接口 `/api/order/pageList.json` 按 `dateType=updateDateTime` 使用 `sync_state.last_success_at` 增量同步；多平台订单接口 `/api/multiplatform/order/list.json` 按 `dateType=purchase` 采用近 30 天滚动窗口同步。两类数据统一落入 `order_header` / `order_item`，通过 `source` 区分“亚马逊”与“多平台”，`order_platform` 保存展示平台名。多平台订单的状态会归一为 `Shipped / PartiallyShipped / Unshipped / Pending / Canceled / Unknown`，仅 `localSku` 非空明细写入 `order_item`，因此可直接参与 `step1_velocity` 销量统计。
+**订单列表同步**：`sync_order_list` 是订单列表唯一后台任务入口，内部合并两类赛狐来源：亚马逊订单接口 `/api/order/pageList.json` 按 `dateType=updateDateTime` 使用 `sync_state.last_success_at` 增量同步，成功后将本次查询窗口 `date_end` 写入 `last_success_at`，下次继续按 `last_success_at - overlap` 起算；多平台订单接口 `/api/multiplatform/order/list.json` 按 `dateType=purchase` 采用 6 个日历月滚动窗口同步，按赛狐文档传 `startDate` / `endDate` 且格式为 `yyyy-MM-dd`。两类数据统一落入 `order_header` / `order_item`，通过 `source` 区分“亚马逊”与“多平台”，`order_platform` 保存展示平台名。多平台订单的状态会归一为 `Shipped / PartiallyShipped / Unshipped / Pending / Canceled / Unknown`，明细优先读取文档字段 `skuInfoVo`，仅 `localSku` 非空明细写入 `order_item`，因此可直接参与 `step1_velocity` 销量统计。
 
 **出库记录同步**：`sync_out_records` 会把赛狐“其他出库”记录同步到 `in_transit_record` / `in_transit_item`，除在途状态观测所需字段外，还保留 `warehouseId`、`updateTime`、`type/typeName`、`commodityId`、`perPurchase`，用于数据页直接展示“出库”主表和明细表字段。`target_country` 改为从备注文本提取国家名（如 `20260410美国-赢捷-加州-散货-在途中` → `US`）；提取失败时保持空值，不再回退到 `targetFbaWarehouseId -> warehouse.country`。每次执行该同步任务后，还会顺带扫描历史 `target_country` 为空的旧记录并按同一备注规则回填，不覆盖已有值。
 
@@ -942,6 +942,7 @@ VITE_API_PROXY_TARGET=http://localhost:8000
 
 | 日期 | 变更 | 相关 PROGRESS 章节 |
 |---|---|---|
+| 2026-04-29 | 订单列表同步成功水位改为本次亚马逊查询窗口 `date_end`；多平台订单 `purchase` 滚动窗口改为 6 个日历月 | PROGRESS.md §3.82 |
 | 2026-04-28 | 国家选项改为“内置常见国家 + 数据库已观测国家”动态来源；新 2 位国家码按原码入库，EU 归类仍由管理员通过 `eu_countries` 维护，`EU` / `ZZ` 不可加入 EU 成员国 | PROGRESS.md §3.79 |
 | 2026-04-27 | 同步日志 / 接口监控新增赛狐 `40019` 精确自动重试队列：保存 `request_payload`，每 5 分钟按原始请求重放，成功标记 `resolved`，最多 5 次后 `permanent` | §3.75 |
 | 2026-04-27 | 库存明细新增未匹配标识与筛选：`is_package` 由 `product_listing.commodity_sku` 是否存在实时派生，前端展示为未匹配 / 已匹配，仓库分组统计随筛选口径重算 | §3.74 |
