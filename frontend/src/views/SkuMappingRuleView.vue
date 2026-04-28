@@ -433,6 +433,7 @@ onMounted(() => {
 
 .component-add-button.el-button {
   align-self: flex-start;
+  flex: 0 0 auto;
   height: 32px;
   min-width: max-content;
   padding: 0 12px;
@@ -443,6 +444,10 @@ onMounted(() => {
   font-weight: $font-weight-medium;
   white-space: nowrap;
   transition: $transition-fast;
+
+  :deep(span) {
+    white-space: nowrap;
+  }
 
   &:hover:not(.is-disabled),
   &:focus:not(.is-disabled) {
