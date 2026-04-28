@@ -434,12 +434,14 @@ onMounted(() => {
 .component-add-button.el-button {
   align-self: flex-start;
   height: 32px;
+  min-width: max-content;
   padding: 0 12px;
   border: 1px solid $color-border-default;
   border-radius: $radius-md;
   background: $color-bg-card;
   color: $color-text-primary;
   font-weight: $font-weight-medium;
+  white-space: nowrap;
   transition: $transition-fast;
 
   &:hover:not(.is-disabled),
