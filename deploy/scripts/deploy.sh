@@ -35,7 +35,7 @@ rollback_on_failure() {
 trap rollback_on_failure EXIT
 pull_or_build_application_images() {
     echo "[deploy] pulling application images"
-    if pull_or_build_application_images; then
+    if docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" pull backend worker scheduler frontend; then
         return 0
     fi
 
