@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-28（修复多平台订单列表接口参数：按赛狐文档传 `startDate/endDate` 且格式为 `yyyy-MM-dd`，并兼容 `skuInfoVo` 明细、英文订单状态与字符串 `extraInfo`。）
+> 最近更新：2026-04-28（部署脚本在 GHCR 应用镜像拉取失败时回退为服务器本地构建 backend/frontend，避免网络瞬断阻塞发布；多平台订单列表接口已按赛狐文档传 `startDate/endDate` 且格式为 `yyyy-MM-dd`。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -102,6 +102,11 @@
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
 
+### 3.81 部署镜像拉取失败回退本地构建（2026-04-28）
+
+- **发布容错**：`deploy/scripts/deploy.sh` 在 `docker compose pull backend worker scheduler frontend` 失败时，会自动回退为 `docker compose build backend frontend`，继续使用当前 `IMAGE_TAG=sha-<commit>` 在服务器本地构建应用镜像。
+- **服务口径**：`worker` 与 `scheduler` 共用 backend 镜像，因此回退构建 backend/frontend 即覆盖全部应用服务；数据库和 Caddy 镜像仍保持原有“尽量 pull，失败不阻塞”的行为。
+- **文档同步**：`docs/deployment.md` 的发布流程已补充 GHCR 拉取失败时的本地构建回退说明。
 ### 3.80 多平台订单同步参数修正（2026-04-28）
 
 - **接口参数**：`backend/app/saihu/endpoints/multiplatform_order.py` 按赛狐文档改为传 `startDate` / `endDate`，日期格式为 `yyyy-MM-dd`，避免 `/api/multiplatform/order/list.json` 返回 `40014 [endDate] 结束日期不能为空`。
