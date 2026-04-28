@@ -34,12 +34,14 @@ rollback_on_failure() {
 }
 trap rollback_on_failure EXIT
 pull_or_build_application_images() {
+    local pull_timeout="${IMAGE_PULL_TIMEOUT_SECONDS:-600}"
+
     echo "[deploy] pulling application images"
-    if docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" pull backend worker scheduler frontend; then
+    if timeout "$pull_timeout" docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" pull backend worker scheduler frontend; then
         return 0
     fi
 
-    echo "[deploy] WARNING: failed to pull application images; building backend/frontend locally" >&2
+    echo "[deploy] WARNING: failed or timed out pulling application images; building backend/frontend locally" >&2
     docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" build backend frontend
 }
 
