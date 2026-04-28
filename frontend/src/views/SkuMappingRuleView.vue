@@ -105,6 +105,7 @@
                 class="component-row__qty"
               />
               <el-button
+                class="component-delete-button"
                 :disabled="form.components.length === 1"
                 link
                 type="danger"
@@ -113,7 +114,7 @@
                 删除
               </el-button>
             </div>
-            <el-button text type="primary" @click="addComponent">添加组件</el-button>
+            <el-button class="component-add-button" @click="addComponent">添加组件</el-button>
           </div>
         </el-form-item>
         <el-form-item label="备注">
@@ -428,6 +429,42 @@ onMounted(() => {
 
 .component-row__qty {
   width: 132px;
+}
+
+.component-add-button.el-button {
+  align-self: flex-start;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid $color-border-default;
+  border-radius: $radius-md;
+  background: $color-bg-card;
+  color: $color-text-primary;
+  font-weight: $font-weight-medium;
+  transition: $transition-fast;
+
+  &:hover:not(.is-disabled),
+  &:focus:not(.is-disabled) {
+    border-color: $color-border-strong;
+    background: $color-bg-subtle;
+    color: $color-text-primary;
+  }
+}
+
+.component-delete-button.el-button.is-link.el-button--danger {
+  color: $color-danger;
+  transition:
+    color $transition-fast,
+    background-color $transition-fast;
+
+  &:hover:not(.is-disabled),
+  &:focus:not(.is-disabled) {
+    background: $color-danger-soft;
+    color: $color-danger-dark;
+  }
+
+  &.is-disabled {
+    color: $color-text-disabled;
+  }
 }
 
 .formula-preview {
