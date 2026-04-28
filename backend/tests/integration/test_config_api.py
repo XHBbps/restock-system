@@ -209,6 +209,7 @@ async def test_get_country_options_merges_builtin_and_observed_countries(
             last_sync_at=now,
         )
     )
+    await db_session.flush()
     db_session.add(
         InventorySnapshotLatest(
             commodity_sku="SKU-1",
