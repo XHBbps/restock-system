@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-28（国家选项改为“内置常见国家 + 数据库已观测国家”动态来源；多平台订单遇到新 2 位国家码按原码入库，非法国家才回落 `ZZ` 并记录结构化日志，EU 归类仍由管理员在全局参数中维护。）
+> 最近更新：2026-04-28（修复多平台订单列表接口参数：按赛狐文档传 `startDate/endDate` 且格式为 `yyyy-MM-dd`，并兼容 `skuInfoVo` 明细、英文订单状态与字符串 `extraInfo`。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -101,6 +101,13 @@
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.80 多平台订单同步参数修正（2026-04-28）
+
+- **接口参数**：`backend/app/saihu/endpoints/multiplatform_order.py` 按赛狐文档改为传 `startDate` / `endDate`，日期格式为 `yyyy-MM-dd`，避免 `/api/multiplatform/order/list.json` 返回 `40014 [endDate] 结束日期不能为空`。
+- **返回字段兼容**：`backend/app/sync/order_list.py` 兼容文档字段 `skuInfoVo` 作为多平台订单明细来源；`extraInfo` 若返回 JSON 字符串，会解析后继续读取 `warehouse_country`。
+- **状态映射**：多平台订单状态兼容英文枚举 `Pending / Unshipped / PartiallyShipped / Shipped / Completed / Canceled / Refunded`，继续归一到本地订单状态口径。
+- **测试**：新增 `backend/tests/unit/test_multiplatform_order_endpoint.py`，并更新 `backend/tests/unit/test_sync_order_list_eu.py` 覆盖请求体字段、`skuInfoVo`、英文状态与字符串 `extraInfo`。
 
 ### 3.79 动态国家选项与新国家入库口径（2026-04-28）
 

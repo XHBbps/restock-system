@@ -1,5 +1,6 @@
 """订单列表同步。"""
 
+import json
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -32,6 +33,15 @@ INITIAL_BACKFILL_DAYS = 30
 MULTIPLATFORM_ROLLING_DAYS = 30
 DEFAULT_OVERLAP_MINUTES = 5
 MULTIPLATFORM_STATUS_MAP: dict[str, str] = {
+    "Unknown": "Unknown",
+    "Pending": "Pending",
+    "Unshipped": "Unshipped",
+    "PartiallyShipped": "PartiallyShipped",
+    "Shipped": "Shipped",
+    "PartiallyCompleted": "PartiallyShipped",
+    "Completed": "Shipped",
+    "Canceled": "Canceled",
+    "Refunded": "Canceled",
     "已完成": "Shipped",
     "已发货": "Shipped",
     "部分发货": "PartiallyShipped",
@@ -89,8 +99,8 @@ async def sync_order_list_job(ctx: JobContext) -> None:
                 if order_count % batch_size == 0:
                     await db.commit()
             async for raw in list_multiplatform_orders(
-                date_start=multi_date_start.strftime("%Y-%m-%d %H:%M:%S"),
-                date_end=date_end.strftime("%Y-%m-%d %H:%M:%S"),
+                date_start=multi_date_start.strftime("%Y-%m-%d"),
+                date_end=date_end.strftime("%Y-%m-%d"),
                 date_type="purchase",
                 shop_ids=shop_ids,
                 on_page=_report_page,
@@ -390,6 +400,12 @@ def _multiplatform_country(
     country = normalize_observed_country_code(country_raw)
     if country is None:
         extra_info = raw.get("extraInfo")
+        if isinstance(extra_info, str):
+            try:
+                parsed_extra_info = json.loads(extra_info)
+            except json.JSONDecodeError:
+                parsed_extra_info = None
+            extra_info = parsed_extra_info
         if isinstance(extra_info, dict):
             country_raw = extra_info.get("warehouse_country")
             country = normalize_observed_country_code(country_raw)
@@ -406,6 +422,7 @@ def _multiplatform_country(
 
 def _multiplatform_items(raw: dict[str, Any]) -> list[dict[str, Any]]:
     for key in (
+        "skuInfoVo",
         "orderItemVoList",
         "orderItemList",
         "itemList",

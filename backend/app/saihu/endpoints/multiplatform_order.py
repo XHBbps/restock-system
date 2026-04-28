@@ -28,8 +28,8 @@ async def list_multiplatform_orders(
     page_no = 1
     while True:
         body: dict[str, Any] = {
-            "dateStart": date_start,
-            "dateEnd": date_end,
+            "startDate": date_start,
+            "endDate": date_end,
             "dateType": date_type,
             "pageNo": str(page_no),
             "pageSize": str(page_size),
