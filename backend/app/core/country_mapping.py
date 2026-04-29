@@ -20,6 +20,7 @@ for row in batch:
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import Any
 
 from sqlalchemy import case, func, or_, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -68,7 +69,7 @@ def apply_eu_mapping(country: str | None, eu_countries: set[str]) -> str | None:
     return normalized_country
 
 
-def _normalized_country_expr(source_country):
+def _normalized_country_expr(source_country: Any) -> Any:
     trimmed_upper = func.upper(func.trim(source_country))
     return case(
         *[
@@ -82,11 +83,11 @@ def _normalized_country_expr(source_country):
 async def _backfill_eu_mapping_for_columns(
     db: AsyncSession,
     *,
-    model,
-    country_column,
-    original_country_column,
+    model: type[Any],
+    country_column: Any,
+    original_country_column: Any,
     eu_countries: Iterable[str],
-    extra_country_columns: tuple = (),
+    extra_country_columns: tuple[Any, ...] = (),
 ) -> int:
     normalized_eu_countries = set(normalize_country_list_for_eu_members(eu_countries))
     source_country = func.coalesce(original_country_column, country_column)
