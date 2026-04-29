@@ -75,6 +75,7 @@ async def sync_order_list_job(ctx: JobContext) -> None:
     item_count = 0
     batch_size = 500
     try:
+
         async def _report_page(page_no: int, total_page: int, rows_count: int) -> None:
             if total_page <= 0:
                 return
@@ -116,7 +117,9 @@ async def sync_order_list_job(ctx: JobContext) -> None:
         async with async_session_factory() as db:
             await mark_sync_success(db, JOB_NAME, started, success_at=date_end)
         logger.info("sync_order_list_done", orders=order_count, items=item_count)
-        await ctx.progress(current_step="完成", step_detail=f"订单 {order_count} / 明细 {item_count}")
+        await ctx.progress(
+            current_step="完成", step_detail=f"订单 {order_count} / 明细 {item_count}"
+        )
     except Exception as exc:
         async with async_session_factory() as db:
             await mark_sync_failed(db, JOB_NAME, str(exc))
@@ -124,7 +127,9 @@ async def sync_order_list_job(ctx: JobContext) -> None:
 
 
 async def _compute_window(
-    db: AsyncSession, now: datetime, overlap_minutes: int = DEFAULT_OVERLAP_MINUTES,
+    db: AsyncSession,
+    now: datetime,
+    overlap_minutes: int = DEFAULT_OVERLAP_MINUTES,
 ) -> tuple[datetime, datetime]:
     state = (
         await db.execute(select(SyncState).where(SyncState.job_name == JOB_NAME))
@@ -204,7 +209,9 @@ async def _upsert_order(
         "order_platform": ORDER_SOURCE_AMAZON,
         "marketplace_id": marketplace_id,
         "country_code": country_code,
-        "original_country_code": original_country_code if mapped_country != original_country_code else None,
+        "original_country_code": (
+            original_country_code if mapped_country != original_country_code else None
+        ),
         "order_status": raw.get("orderStatus") or "Unknown",
         "order_total_currency": raw.get("orderTotalCurrency"),
         "order_total_amount": _to_decimal(raw.get("orderTotalAmount")),
@@ -217,9 +224,7 @@ async def _upsert_order(
     }
     header_stmt = pg_insert(OrderHeader).values(**header_values).returning(OrderHeader.id)
     update_set = {
-        k: v
-        for k, v in header_values.items()
-        if k not in ("shop_id", "amazon_order_id", "source")
+        k: v for k, v in header_values.items() if k not in ("shop_id", "amazon_order_id", "source")
     }
     header_stmt = header_stmt.on_conflict_do_update(  # type: ignore[attr-defined]
         constraint="uq_order_header_key",
@@ -229,7 +234,14 @@ async def _upsert_order(
 
     items_to_insert: list[dict[str, Any]] = []
     seen_item_ids: list[str] = []
-    for raw_item in raw.get("orderItemVoList") or []:
+    raw_items = raw.get("orderItemVoList")
+    raw_item_count = len(raw_items) if isinstance(raw_items, list) else 0
+    order_items = (
+        [item for item in raw_items if isinstance(item, dict)]
+        if isinstance(raw_items, list)
+        else []
+    )
+    for raw_item in order_items:
         order_item_id = raw_item.get("orderItemId")
         commodity_sku = raw_item.get("commoditySku")
         if not order_item_id or not commodity_sku:
@@ -273,8 +285,14 @@ async def _upsert_order(
                 OrderItem.order_item_id.not_in(seen_item_ids),
             )
         )
-    elif not items_to_insert:
-        await db.execute(delete(OrderItem).where(OrderItem.order_id == order_id))
+    else:
+        logger.warning(
+            "order_items_empty_preserve_existing",
+            source=ORDER_SOURCE_AMAZON,
+            shop_id=shop_id,
+            order_no=amazon_order_id,
+            raw_item_count=raw_item_count,
+        )
     return len(items_to_insert)
 
 
@@ -311,7 +329,9 @@ async def _upsert_multiplatform_order(
         "order_platform": platform_name,
         "marketplace_id": marketplace_id,
         "country_code": country_code,
-        "original_country_code": original_country_code if mapped_country != original_country_code else None,
+        "original_country_code": (
+            original_country_code if mapped_country != original_country_code else None
+        ),
         "order_status": order_status,
         "order_total_currency": order_currency,
         "order_total_amount": _to_decimal(raw.get("totalAmount")),
@@ -324,9 +344,7 @@ async def _upsert_multiplatform_order(
     }
     header_stmt = pg_insert(OrderHeader).values(**header_values).returning(OrderHeader.id)
     update_set = {
-        k: v
-        for k, v in header_values.items()
-        if k not in ("shop_id", "amazon_order_id", "source")
+        k: v for k, v in header_values.items() if k not in ("shop_id", "amazon_order_id", "source")
     }
     header_stmt = header_stmt.on_conflict_do_update(  # type: ignore[attr-defined]
         constraint="uq_order_header_key",
@@ -336,7 +354,8 @@ async def _upsert_multiplatform_order(
 
     items_to_insert: list[dict[str, Any]] = []
     seen_item_ids: list[str] = []
-    for index, raw_item in enumerate(_multiplatform_items(raw), start=1):
+    raw_items = _multiplatform_items(raw)
+    for index, raw_item in enumerate(raw_items, start=1):
         order_item_id = raw_item.get("orderItemId")
         commodity_sku = raw_item.get("localSku")
         if not commodity_sku:
@@ -389,7 +408,14 @@ async def _upsert_multiplatform_order(
             )
         )
     else:
-        await db.execute(delete(OrderItem).where(OrderItem.order_id == order_id))
+        logger.warning(
+            "order_items_empty_preserve_existing",
+            source=ORDER_SOURCE_MULTIPLATFORM,
+            shop_id=shop_id,
+            order_no=order_no,
+            platform_name=platform_name,
+            raw_item_count=len(raw_items),
+        )
     return len(items_to_insert)
 
 

@@ -10,6 +10,7 @@
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from fractions import Fraction
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -174,7 +175,7 @@ def explain_country_qty_split(
     eligible_set = set(eligible_warehouses)
 
     # 已知仓件数统计
-    known_counts: defaultdict[str, float] = defaultdict(float)
+    known_counts: defaultdict[str, Fraction] = defaultdict(Fraction)
     matched_order_qty = 0
     unknown_order_qty = 0
     for postal_code, qty in orders:
@@ -185,7 +186,7 @@ def explain_country_qty_split(
         if not eligible_winners:
             unknown_order_qty += qty
             continue
-        share = qty / len(eligible_winners)
+        share = Fraction(qty, len(eligible_winners))
         for wid in eligible_winners:
             known_counts[wid] += share
         matched_order_qty += qty
@@ -193,19 +194,25 @@ def explain_country_qty_split(
     total_known = sum(known_counts.values())
 
     if total_known > 0:
-        # 按真实比例分配
+        # 按真实比例分配；floor + 最大余数法保证总和精确等于 country_qty。
+        ordered_counts = [
+            (wid, known_counts[wid]) for wid in eligible_warehouses if wid in known_counts
+        ]
         result: dict[str, int] = {}
-        accumulated = 0
-        items = list(known_counts.items())
-        for i, (wid, cnt) in enumerate(items):
-            if i == len(items) - 1:
-                # 最后一仓兜底,吸收所有取整误差
-                result[wid] = country_qty - accumulated
-            else:
-                share = round(country_qty * cnt / total_known)
-                result[wid] = share
-                accumulated += share
-        # 清理 0 值
+        remainders: list[tuple[Fraction, int, str]] = []
+        allocated = 0
+        for order_index, (wid, cnt) in enumerate(ordered_counts):
+            exact = Fraction(country_qty) * cnt / total_known
+            base = exact.numerator // exact.denominator
+            result[wid] = base
+            allocated += base
+            remainders.append((exact - base, order_index, wid))
+
+        for _, _, wid in sorted(remainders, key=lambda item: (-item[0], item[1]))[
+            : country_qty - allocated
+        ]:
+            result[wid] += 1
+
         return CountryAllocationResult(
             warehouse_breakdown={k: v for k, v in result.items() if v > 0},
             allocation_mode="matched",

@@ -35,7 +35,7 @@ null
     "code":  0,
     "msg":  "success",
     "data":  {
-                 "access_token":  "b3d71a52-de7f-4c7d-b127-d56f3e0f8b40",
+                 "access_token":  "<ACCESS_TOKEN>",
                  "expires_in":  84850421
              },
     "ts":  1775613895621,

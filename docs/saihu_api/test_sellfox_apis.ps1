@@ -1,13 +1,20 @@
 param(
     [string]$BaseUrl = $(if ($env:SELLFOX_BASE_URL) { $env:SELLFOX_BASE_URL } else { 'https://openapi.sellfox.com' }),
-    [string]$AccessToken = $(if ($env:SELLFOX_ACCESS_TOKEN) { $env:SELLFOX_ACCESS_TOKEN } else { 'd20d9d20-5db0-429a-8390-3694265e297c' }),
+    [string]$AccessToken = $env:SELLFOX_ACCESS_TOKEN,
     [string]$ClientId = $(if ($env:SELLFOX_CLIENT_ID) { $env:SELLFOX_CLIENT_ID } else { '1111111' }),
-    [string]$ClientSecret = $(if ($env:SELLFOX_CLIENT_SECRET) { $env:SELLFOX_CLIENT_SECRET } else { 'fde212ff-588a-11ef-b1d4-0c42a1eda3d9' }),
+    [string]$ClientSecret = $env:SELLFOX_CLIENT_SECRET,
     [switch]$Compact
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+if (-not $AccessToken) {
+    throw 'SELLFOX_ACCESS_TOKEN is required.'
+}
+if (-not $ClientSecret) {
+    throw 'SELLFOX_CLIENT_SECRET is required.'
+}
 
 function Get-Sign {
     param(

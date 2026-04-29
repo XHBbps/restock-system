@@ -110,7 +110,7 @@
 | 2 | `step2_sale_days.py` | 库存 + 在途 + velocity + SKU 映射规则 | `sale_days[sku][country]` | `(available + reserved + in_transit) / velocity`；启用映射规则会先按同仓库组件库存换算商品 SKU 视角库存；velocity≤0 跳过 |
 | 3 | `step3_country_qty.py` | velocity + 库存 + 有效目标库存天数 | `country_qty[sku][country]` | `effective_target_days = target_days + max(demand_date - today, 0)`；`max(0, ceil(effective_target_days × velocity - (available + reserved + in_transit)))` |
 | 4 | `step4_total.py` | country_qty + velocity + 国内库存 + safety_stock_days | `purchase_qty[sku]` | `max(0, Σcountry_qty − (local.available + local.reserved) + ceil(Σvelocity × safety_stock_days))`；`Σcountry_qty` 使用 Step 3 的补货日期口径，`Σvelocity` 覆盖所有国家，不受 `restock_regions` 限制；`buffer_days` 不参与采购量 |
-| 5 | `step5_warehouse_split.py` | country_qty + 订单邮编 + 邮编规则 + 国家规则仓映射 | `warehouse_breakdown[country][wh_id]` | 按邮编规则分配到具体仓库；仅“该国家已配置邮编规则”的仓参与分仓与均分兜底；若无规则仓则该国家不分仓；若配置 `restock_regions`，仅消费这些国家的订单明细作为分仓依据；同优先级 tied 均分 |
+| 5 | `step5_warehouse_split.py` | country_qty + 订单邮编 + 邮编规则 + 国家规则仓映射 | `warehouse_breakdown[country][wh_id]` | 按邮编规则分配到具体仓库；仅“该国家已配置邮编规则”的仓参与分仓与均分兜底；若无规则仓则该国家不分仓；若配置 `restock_regions`，仅消费这些国家的订单明细作为分仓依据；同优先级 tied 均分；matched 模式使用 floor + 最大余数法取整，保证仓内分配合计等于国家补货量 |
 | 6 | `step6_timing.py` | sale_days + lead_time + country_qty | `urgent` + `restock_dates` | `urgent` 仍按任一正补货国家 `sale_days <= lead_time_days`；`restock_date[sku][country] = today + int(sale_days[sku][country]) − lead_time_days`，仅对正补货国家输出，缺少 sale_days 时记为 `null` |
 
 **运行上下文**：`EngineContext` 包含 `target_days`、`buffer_days`、`lead_time_days`、`safety_stock_days`、`restock_regions`、`eu_countries` 和本次请求的补货日期 `demand_date`。runner 会计算 `demand_days=max(demand_date - today, 0)` 并传给 Step 3 形成有效目标库存天数；`buffer_days` 作为全局配置快照保留，但当前仅用于追溯，不参与 `purchase_qty` 或 `restock_dates` 计算；`restock_regions` 保存前会走统一国家码标准化，`UK` 等别名按 ISO 代码去重为 `GB`；`global_config.eu_countries` 由同步层消费，保存该配置且实际变化时会同步回填历史订单、库存与在途国家码，`global_config_snapshot` 会冻结这些全局参数与 `demand_date` 以便追溯。
@@ -152,7 +152,7 @@ async def sync_inventory_job(ctx: JobContext) -> None:
 
 **国家时区约束**：`backend/app/core/timezone.py` 的 `country_to_tz()` 会先执行同一国家码别名标准化，因此 `UK` 使用 `GB` 的 `Europe/London`。除 `EU`、`ZZ` 这类非真实国家外，`BUILTIN_COUNTRY_NAMES` 的所有内置国家必须在 `COUNTRY_TO_TIMEZONE` 中配置 IANA 时区；对应单元测试作为防漏 tripwire。仍只是观测到但未内置的未知二字码会回退北京时间，并记录结构化 warning。
 
-**订单列表同步**：`sync_order_list` 是订单列表唯一后台任务入口，内部合并两类赛狐来源：亚马逊订单接口 `/api/order/pageList.json` 按 `dateType=updateDateTime` 使用 `sync_state.last_success_at` 增量同步，成功后将本次查询窗口 `date_end` 写入 `last_success_at`，下次继续按 `last_success_at - overlap` 起算；多平台订单接口 `/api/multiplatform/order/list.json` 按 `dateType=purchase` 采用 6 个日历月滚动窗口同步，按赛狐文档传 `startDate` / `endDate` 且格式为 `yyyy-MM-dd`。两类数据统一落入 `order_header` / `order_item`，通过 `source` 区分“亚马逊”与“多平台”，`order_platform` 保存展示平台名。多平台订单的状态会归一为 `Shipped / PartiallyShipped / Unshipped / Pending / Canceled / Unknown`，明细优先读取文档字段 `skuInfoVo`，仅 `localSku` 非空明细写入 `order_item`，因此可直接参与 `step1_velocity` 销量统计。
+**订单列表同步**：`sync_order_list` 是订单列表唯一后台任务入口，内部合并两类赛狐来源：亚马逊订单接口 `/api/order/pageList.json` 按 `dateType=updateDateTime` 使用 `sync_state.last_success_at` 增量同步，成功后将本次查询窗口 `date_end` 写入 `last_success_at`，下次继续按 `last_success_at - overlap` 起算；多平台订单接口 `/api/multiplatform/order/list.json` 按 `dateType=purchase` 采用 6 个日历月滚动窗口同步，按赛狐文档传 `startDate` / `endDate` 且格式为 `yyyy-MM-dd`。两类数据统一落入 `order_header` / `order_item`，通过 `source` 区分“亚马逊”与“多平台”，`order_platform` 保存展示平台名。多平台订单的状态会归一为 `Shipped / PartiallyShipped / Unshipped / Pending / Canceled / Unknown`，明细优先读取文档字段 `skuInfoVo`，仅 `localSku` 非空明细写入 `order_item`，因此可直接参与 `step1_velocity` 销量统计。明细清理采用“有效明细确认”策略：只有本次解析到至少一条有效明细时才删除未出现的旧 item；若赛狐响应缺失明细、明细为空或全部因关键字段缺失被跳过，则保留旧 `order_item` 并记录 warning。
 
 **出库记录同步**：`sync_out_records` 会把赛狐“其他出库”记录同步到 `in_transit_record` / `in_transit_item`，除在途状态观测所需字段外，还保留 `warehouseId`、`updateTime`、`type/typeName`、`commodityId`、`perPurchase`，用于数据页直接展示“出库”主表和明细表字段。`target_country` 改为从备注文本提取国家名（如 `20260410美国-赢捷-加州-散货-在途中` → `US`）；提取失败时保持空值，不再回退到 `targetFbaWarehouseId -> warehouse.country`。每次执行该同步任务后，还会顺带扫描历史 `target_country` 为空的旧记录并按同一备注规则回填，不覆盖已有值。
 
@@ -944,6 +944,7 @@ VITE_API_PROXY_TARGET=http://localhost:8000
 
 | 日期 | 变更 | 相关 PROGRESS 章节 |
 |---|---|---|
+| 2026-04-29 | Step 5 matched 分仓取整改为 floor + 最大余数法，订单列表同步在本次无有效明细时保留旧 item；赛狐示例凭据统一改为占位符 / 环境变量 | PROGRESS.md §3.84 |
 | 2026-04-29 | 国家代码进入动态国家选项、EU 成员国配置、补货区域配置和多平台订单国家字段前统一标准化；历史别名 `UK` 输出与保存为 ISO 代码 `GB`；EU 配置变化会回填订单、库存与在途本地数据；内置国家必须配置时区 | PROGRESS.md §3.83 |
 | 2026-04-29 | 订单列表同步成功水位改为本次亚马逊查询窗口 `date_end`；多平台订单 `purchase` 滚动窗口改为 6 个日历月 | PROGRESS.md §3.82 |
 | 2026-04-28 | 国家选项改为“内置常见国家 + 数据库已观测国家”动态来源；新 2 位国家码按原码入库，EU 归类仍由管理员通过 `eu_countries` 维护，`EU` / `ZZ` 不可加入 EU 成员国 | PROGRESS.md §3.79 |

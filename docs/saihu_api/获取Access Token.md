@@ -31,7 +31,7 @@ https://openapi.sellfox.com/api/oauth/v2/token.json?client_id=aaaa&client_secret
     "code": 0,
     "msg": "success",
     "data": {
-        "access_token": "d20d9d20-5db0-429a-8390-3694265e297c",
+        "access_token": "<ACCESS_TOKEN>",
         "expires_in": 86400000
     },
     "requestId": "b8d02feb-4892-4cc8-8cb7-890c1b333908"

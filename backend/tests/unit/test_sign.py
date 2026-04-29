@@ -1,15 +1,15 @@
 """赛狐签名算法单元测试。
 
-固定 fixture 来自 docs/saihu_api/开发指南/生产sign.md:
-    access_token = d20d9d20-5db0-429a-8390-3694265e297c
+固定 fixture 使用非敏感示例值，避免在仓库中保留真实形态凭据:
+    access_token = example-access-token
     client_id = 1111111
     method = post
     nonce = 888
     timestamp = 1668153260508
     url = /openapi/api/commodity/pageList.json
-    client_secret = fde212ff-588a-11ef-b1d4-0c42a1eda3d9
+    client_secret = example-client-secret
 预期签名:
-    57bcbd213461d47e99e9b781c11f3fb37937127824272a30b95ddb5cbfea881e
+    3e655bb2eb0ab93cbc5fd387cd1771fa3b79cb57fb3ccdd8f18c3d2a218710de
 """
 
 from app.saihu.sign import generate_sign, make_nonce
@@ -17,15 +17,15 @@ from app.saihu.sign import generate_sign, make_nonce
 
 def test_generate_sign_matches_official_fixture() -> None:
     sign = generate_sign(
-        access_token="d20d9d20-5db0-429a-8390-3694265e297c",
+        access_token="example-access-token",
         client_id="1111111",
         method="post",
         nonce=888,
         timestamp=1668153260508,
         url="/openapi/api/commodity/pageList.json",
-        client_secret="fde212ff-588a-11ef-b1d4-0c42a1eda3d9",
+        client_secret="example-client-secret",
     )
-    assert sign == "57bcbd213461d47e99e9b781c11f3fb37937127824272a30b95ddb5cbfea881e"
+    assert sign == "3e655bb2eb0ab93cbc5fd387cd1771fa3b79cb57fb3ccdd8f18c3d2a218710de"
 
 
 def test_generate_sign_is_deterministic() -> None:

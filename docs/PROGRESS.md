@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-29（国家码归一化 review 修复：补货区域复用别名标准化，EU 成员国变更会同步回填订单、库存与在途本地数据，并补齐 CZ/RO 时区与内置国家时区防漏测试。）
+> 最近更新：2026-04-29（Review 修复：清理赛狐示例凭据硬编码，Step 5 仓库拆分改为最大余数法避免超配，订单同步在空明细响应时保留旧明细。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -101,6 +101,13 @@
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.84 Review 修复：凭据清理、仓库拆分与订单明细保护（2026-04-29）
+
+- **赛狐示例凭据清理**：`docs/saihu_api/test_sellfox_apis.ps1` 不再提供默认 access token / client secret，改为必须从 `SELLFOX_ACCESS_TOKEN`、`SELLFOX_CLIENT_SECRET` 环境变量读取；`backend/tests/unit/test_sign.py` 改用非敏感示例值，`docs/saihu_api` 中真实形态 token / secret 已替换为 `<ACCESS_TOKEN>`、`<CLIENT_SECRET>` 等占位符。
+- **Step 5 仓库拆分修复**：`backend/app/engine/step5_warehouse_split.py` 的 matched 模式从逐仓 `round()` 改为 floor + 最大余数法，按规则仓顺序稳定处理余数，保证 `sum(warehouse_breakdown.values()) == country_qty`，避免小数量、多仓比例下超配。
+- **订单明细保护策略**：`backend/app/sync/order_list.py` 在亚马逊 `orderItemVoList` 或多平台 `skuInfoVo` 等明细缺失、为空、或全部因关键字段缺失被跳过时，不再删除本地旧 `order_item`；只有本次解析到有效明细时才清理未出现的旧 item，并记录结构化 warning 便于排查赛狐异常响应。
+- **测试**：补充 `backend/tests/unit/test_engine_step5.py` 的 `country_qty=5`、权重 `3/3/3/1` 超配回归用例；补充 `backend/tests/unit/test_sync_order_list_eu.py` 覆盖亚马逊与多平台空/无效明细不触发删除；签名单测固定断言更新为非敏感 fixture。
 
 ### 3.83 国家代码 ISO 标准化与成员国显示修复（2026-04-29）
 

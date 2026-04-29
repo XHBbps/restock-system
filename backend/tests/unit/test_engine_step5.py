@@ -326,17 +326,50 @@ def test_four_warehouse_ceil_regression_sum_equals_country_qty() -> None:
 
     4 warehouses with equal order counts, country_qty=5.
     With ceil: ceil(5*0.25)=2 × 3 non-last = 6 > 5, last=max(5-6,0)=0 → sum=6≠5.
-    With round: round(5*0.25)=1 × 3 = 3, last=5-3=2 → sum=5. Correct.
+    Current largest-remainder allocation keeps the total exact without relying on
+    a last-warehouse correction.
     """
     rules = [
-        ZipcodeRule(id=1, country="JP", prefix_length=1, value_type="number",
-                    operator="=", compare_value="1", warehouse_id="WH-A", priority=10),
-        ZipcodeRule(id=2, country="JP", prefix_length=1, value_type="number",
-                    operator="=", compare_value="2", warehouse_id="WH-B", priority=10),
-        ZipcodeRule(id=3, country="JP", prefix_length=1, value_type="number",
-                    operator="=", compare_value="3", warehouse_id="WH-C", priority=10),
-        ZipcodeRule(id=4, country="JP", prefix_length=1, value_type="number",
-                    operator="=", compare_value="4", warehouse_id="WH-D", priority=10),
+        ZipcodeRule(
+            id=1,
+            country="JP",
+            prefix_length=1,
+            value_type="number",
+            operator="=",
+            compare_value="1",
+            warehouse_id="WH-A",
+            priority=10,
+        ),
+        ZipcodeRule(
+            id=2,
+            country="JP",
+            prefix_length=1,
+            value_type="number",
+            operator="=",
+            compare_value="2",
+            warehouse_id="WH-B",
+            priority=10,
+        ),
+        ZipcodeRule(
+            id=3,
+            country="JP",
+            prefix_length=1,
+            value_type="number",
+            operator="=",
+            compare_value="3",
+            warehouse_id="WH-C",
+            priority=10,
+        ),
+        ZipcodeRule(
+            id=4,
+            country="JP",
+            prefix_length=1,
+            value_type="number",
+            operator="=",
+            compare_value="4",
+            warehouse_id="WH-D",
+            priority=10,
+        ),
     ]
     orders = [
         ("100-0000", 1),  # WH-A
@@ -353,6 +386,68 @@ def test_four_warehouse_ceil_regression_sum_equals_country_qty() -> None:
         country_warehouses=["WH-A", "WH-B", "WH-C", "WH-D"],
     )
     assert sum(result.values()) == 5
+
+
+def test_matched_split_uses_largest_remainder_without_over_allocation() -> None:
+    """3/3/3/1 权重分配 5 件时，总和必须保持 5，且不能靠最后一仓吸收负数。"""
+    rules = [
+        ZipcodeRule(
+            id=1,
+            country="JP",
+            prefix_length=1,
+            value_type="number",
+            operator="=",
+            compare_value="1",
+            warehouse_id="WH-A",
+            priority=10,
+        ),
+        ZipcodeRule(
+            id=2,
+            country="JP",
+            prefix_length=1,
+            value_type="number",
+            operator="=",
+            compare_value="2",
+            warehouse_id="WH-B",
+            priority=10,
+        ),
+        ZipcodeRule(
+            id=3,
+            country="JP",
+            prefix_length=1,
+            value_type="number",
+            operator="=",
+            compare_value="3",
+            warehouse_id="WH-C",
+            priority=10,
+        ),
+        ZipcodeRule(
+            id=4,
+            country="JP",
+            prefix_length=1,
+            value_type="number",
+            operator="=",
+            compare_value="4",
+            warehouse_id="WH-D",
+            priority=10,
+        ),
+    ]
+    result = split_country_qty(
+        sku="sku-A",
+        country="JP",
+        country_qty=5,
+        orders=[
+            ("100-0000", 3),
+            ("200-0000", 3),
+            ("300-0000", 3),
+            ("400-0000", 1),
+        ],
+        rules=rules,
+        country_warehouses=["WH-A", "WH-B", "WH-C", "WH-D"],
+    )
+
+    assert sum(result.values()) == 5
+    assert result == {"WH-A": 2, "WH-B": 2, "WH-C": 1}
 
 
 class _FakeDb:

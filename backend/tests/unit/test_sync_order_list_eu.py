@@ -61,6 +61,39 @@ async def test_upsert_order_applies_eu_mapping_and_preserves_original_country() 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "item_payload",
+    [
+        {},
+        {"orderItemVoList": []},
+        {"orderItemVoList": [{"orderItemId": "ITEM-1", "commoditySku": ""}]},
+    ],
+)
+async def test_upsert_order_preserves_existing_items_when_no_valid_items(
+    item_payload: dict[str, Any],
+) -> None:
+    from app.sync.order_list import _upsert_order
+
+    db = _FakeDb()
+    inserted = await _upsert_order(
+        db,  # type: ignore[arg-type]
+        {
+            "shopId": "SHOP-1",
+            "amazonOrderId": "AMZ-EMPTY",
+            "marketplaceId": "ATVPDKIKX0DER",
+            "purchaseDate": "2026-04-21 08:00:00",
+            "lastUpdateDate": "2026-04-21 09:00:00",
+            "orderStatus": "Shipped",
+            **item_payload,
+        },
+        set(),
+    )
+
+    assert inserted == 0
+    assert len(db.statements) == 1
+
+
+@pytest.mark.asyncio
 async def test_upsert_multiplatform_order_maps_fields_and_items() -> None:
     from app.sync.order_list import _upsert_multiplatform_order
 
@@ -72,7 +105,7 @@ async def test_upsert_multiplatform_order_maps_fields_and_items() -> None:
             "orderNo": "ORDER-1",
             "platformName": "Wayfair",
             "marketplaceCode": "",
-            "extraInfo": "{\"warehouse_country\":\"us\"}",
+            "extraInfo": '{"warehouse_country":"us"}',
             "orderStatus": "Shipped",
             "currency": "USD",
             "totalAmount": "12.34",
@@ -184,4 +217,37 @@ async def test_upsert_multiplatform_order_skips_missing_local_sku_item() -> None
     header_values = _compiled_params(db.statements[0])
     assert header_values["source"] == "多平台"
     assert header_values["order_status"] == "Pending"
-    assert len(db.statements) == 2
+    assert len(db.statements) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "item_payload",
+    [
+        {},
+        {"skuInfoVo": []},
+        {"skuInfoVo": [{"orderItemId": "ITEM-1", "localSku": ""}]},
+    ],
+)
+async def test_upsert_multiplatform_order_preserves_existing_items_when_no_valid_items(
+    item_payload: dict[str, Any],
+) -> None:
+    from app.sync.order_list import _upsert_multiplatform_order
+
+    db = _FakeDb()
+    inserted = await _upsert_multiplatform_order(
+        db,  # type: ignore[arg-type]
+        {
+            "shopId": "SHOP-1",
+            "orderNo": "ORDER-EMPTY",
+            "platformName": "Walmart",
+            "marketplaceCode": "US",
+            "orderStatus": "已发货",
+            "purchaseDate": "2026-04-21 08:00:00",
+            **item_payload,
+        },
+        set(),
+    )
+
+    assert inserted == 0
+    assert len(db.statements) == 1

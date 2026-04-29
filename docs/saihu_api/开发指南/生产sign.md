@@ -16,11 +16,11 @@
 ### 验签过程
 以上参数按照{参数名=参数值}格式拼接，
 ```
-access_token =d20d9d20-5db0-429a-8390-3694265e297c
+access_token =<ACCESS_TOKEN>
 ```
 所有参数之间按照参数名**排序后**用&隔开（requestBody中的业务参数不参与签名，一定要按照示例中的参数顺序）
 ```
-access_token=d20d9d20-5db0-429a-8390-3694265e297c&client_id=2323&method=post&nonce=13251&timestamp=1668153260508&url=/api/order/pageList.json
+access_token=<ACCESS_TOKEN>&client_id=2323&method=post&nonce=13251&timestamp=1668153260508&url=/api/order/pageList.json
 ```
 对于拼接后参数使用Hmac SHA256进行加密，应用的client_secret为加密密钥。
 ### JAVA开发示例
@@ -37,7 +37,7 @@ access_token=d20d9d20-5db0-429a-8390-3694265e297c&client_id=2323&method=post&non
         params.put("url", "/openapi/api/commodity/pageList.json");
         params.put("method", "post");
         // 通过接口获取的token信息
-        params.put("access_token", "d20d9d20-5db0-429a-8390-3694265e297c");
+        params.put("access_token", "<ACCESS_TOKEN>");
         // 开发者id
         params.put("client_id", "1111111");
         //请求时间戳 (ms)
@@ -71,10 +71,10 @@ import hmac
 import random
 import time
 
-access_token = 'd20d9d20-5db0-429a-8390-3694265e297c'
+access_token = '<ACCESS_TOKEN>'
 client_id = '1111111'
 url = '/api/sale/profit/shop/pageList.json'
-client_secret = 'fde212ff-588a-11ef-b1d4-0c42a1eda3d9'
+client_secret = '<CLIENT_SECRET>'
 
 
 def get_sign():
@@ -100,11 +100,11 @@ def get_sign():
 
 ### 签名秘钥
 ```
-fde212ff-588a-11ef-b1d4-0c42a1eda3d9
+<CLIENT_SECRET>
 ```
 ### 签名字符串
 ```
-access_token=d20d9d20-5db0-429a-8390-3694265e297c&client_id=1111111&method=post&nonce=888&timestamp=1668153260508&url=/openapi/api/commodity/pageList.json
+access_token=<ACCESS_TOKEN>&client_id=1111111&method=post&nonce=888&timestamp=1668153260508&url=/openapi/api/commodity/pageList.json
 ```
 
 ### 生成签名
@@ -114,5 +114,5 @@ access_token=d20d9d20-5db0-429a-8390-3694265e297c&client_id=1111111&method=post&
 
 ### 请求业务接口url示例
 ```
-https://openapi.sellfox.com/api/shop/pageList.json?access_token=d20d9d20-5db0-429a-8390-3694265e297c&client_id=1111111&timestamp=1668153260508&nonce=888&sign=57bcbd213461d47e99e9b781c11f3fb37937127824272a30b95ddb5cbfea881e
+https://openapi.sellfox.com/api/shop/pageList.json?access_token=<ACCESS_TOKEN>&client_id=1111111&timestamp=1668153260508&nonce=888&sign=<SIGN>
 ```
