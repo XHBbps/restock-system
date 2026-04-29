@@ -131,7 +131,7 @@
 ### 3.78 订单页接入多平台订单接口（2026-04-28）
 
 - **数据库字段**：`order_header` 新增 `source`、`order_platform`，历史数据默认回填为“亚马逊”；唯一约束调整为 `shop_id + amazon_order_id + source`。`order_detail` 与 `order_detail_fetch_log` 新增 `source` 并纳入主键，避免同店铺同订单号不同来源互相覆盖详情状态。
-- **同步任务**：`sync_order_list` 保持原任务名和入口不变，内部先按 `updateDateTime` 增量同步亚马逊订单，再按近 30 天 `purchase` 滚动同步多平台订单；`sync_all`、定时同步和 `/api/sync/orders` 无新增步骤。
+- **同步任务**：`sync_order_list` 保持原任务名和入口不变，内部先按 `updateDateTime` 增量同步亚马逊订单，再按 6 个日历月 `purchase` 滚动同步多平台订单；`sync_all`、定时同步和 `/api/sync/orders` 无新增步骤。
 - **字段归一**：亚马逊订单写 `source='亚马逊'`、`order_platform='亚马逊'`；多平台订单写 `source='多平台'`、`order_platform=platformName`，`orderNo` 继续落入内部 `amazon_order_id` 字段。多平台状态归一为 `Shipped / PartiallyShipped / Unshipped / Pending / Canceled / Unknown`，仅 `localSku` 非空的明细写入 `order_item`。
 - **补货计算**：多平台订单明细沿用现有 `order_item` 销量口径，归一状态为 `Shipped / PartiallyShipped` 且 SKU 有效时参与 `step1_velocity` 销量统计；`step5_warehouse_split` 的邮编分仓仍依赖订单详情，因此只消费带亚马逊详情的订单。
 - **详情拉取**：`sync_order_detail`、`refetch_order_detail` 与订单详情接口查询均带 `source` 口径；后台详情任务只筛选 `source='亚马逊'`，不会对多平台订单调用 `/api/order/detailByOrderId.json`。
