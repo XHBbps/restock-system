@@ -103,10 +103,12 @@ describe('GlobalConfigView', () => {
         { code: 'EU', label: 'EU - 欧盟', builtin: true, observed: true, can_be_eu_member: false },
         { code: 'ZZ', label: 'ZZ - 无法识别国家', builtin: true, observed: false, can_be_eu_member: false },
         { code: 'US', label: 'US - 美国', builtin: true, observed: true, can_be_eu_member: true },
+        { code: 'GB', label: 'GB - 英国', builtin: true, observed: true, can_be_eu_member: true },
+        { code: 'CZ', label: 'CZ - 捷克', builtin: true, observed: true, can_be_eu_member: true },
         { code: 'DE', label: 'DE - 德国', builtin: true, observed: true, can_be_eu_member: true },
-        { code: 'RO', label: 'RO', builtin: false, observed: true, can_be_eu_member: true },
+        { code: 'RO', label: 'RO - 罗马尼亚', builtin: true, observed: true, can_be_eu_member: true },
       ],
-      unknown_country_codes: ['RO'],
+      unknown_country_codes: [],
     })
     const auth = useAuthStore()
     auth.setAuth('test-token', {
@@ -133,6 +135,24 @@ describe('GlobalConfigView', () => {
     expect(mockGetGenerationToggle).toHaveBeenCalledTimes(1)
     expect(vm.form?.restock_regions).toEqual(['US', 'EU'])
     expect(vm.form?.safety_stock_days).toBe(15)
+  })
+
+  it('uses backend country option labels for member country selects', async () => {
+    mockGetGlobalConfig.mockResolvedValue(makeConfig())
+
+    const { default: View } = await import('../GlobalConfigView.vue')
+    const wrapper = shallowMount(View, { global: { stubs: STUBS } })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      countryOptions: Array<{ code: string; label: string }>
+      euCountryOptions: Array<{ code: string; label: string }>
+    }
+    expect(vm.countryOptions.map((option) => option.label)).toContain('GB - 英国')
+    expect(vm.countryOptions.map((option) => option.label)).toContain('CZ - 捷克')
+    expect(vm.countryOptions.map((option) => option.label)).toContain('RO - 罗马尼亚')
+    expect(vm.euCountryOptions.map((option) => option.code)).not.toContain('EU')
+    expect(vm.euCountryOptions.map((option) => option.code)).not.toContain('ZZ')
   })
 
   it('submits safety stock and EU countries when saving', async () => {

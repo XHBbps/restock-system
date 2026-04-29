@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from app.schemas.config import GlobalConfigPatch, ZipcodeRuleIn
+from app.schemas.config import GlobalConfigOut, GlobalConfigPatch, ZipcodeRuleIn
 
 
 def test_global_config_patch_accepts_valid_safety_stock_days() -> None:
@@ -22,9 +22,25 @@ def test_global_config_patch_normalizes_restock_regions() -> None:
 
 
 def test_global_config_patch_normalizes_eu_countries() -> None:
-    patch = GlobalConfigPatch(eu_countries=["de", " FR ", "", "de"])
+    patch = GlobalConfigPatch(eu_countries=["de", " FR ", "", "de", "uk", "gb"])
 
-    assert patch.eu_countries == ["DE", "FR"]
+    assert patch.eu_countries == ["DE", "FR", "GB"]
+
+
+def test_global_config_out_normalizes_existing_eu_countries() -> None:
+    config = GlobalConfigOut(
+        buffer_days=30,
+        target_days=60,
+        lead_time_days=50,
+        safety_stock_days=15,
+        restock_regions=[],
+        eu_countries=["UK", "RO"],
+        sync_interval_minutes=60,
+        scheduler_enabled=True,
+        shop_sync_mode="all",
+    )
+
+    assert config.eu_countries == ["GB", "RO"]
 
 
 def test_global_config_patch_rejects_eu_or_unknown_as_eu_member() -> None:

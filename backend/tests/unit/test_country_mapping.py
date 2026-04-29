@@ -6,6 +6,11 @@
 
 from __future__ import annotations
 
+from app.core.countries import (
+    country_label,
+    normalize_country_list_for_eu_members,
+    normalize_observed_country_code,
+)
 from app.core.country_mapping import apply_eu_mapping
 
 
@@ -20,6 +25,7 @@ def test_apply_eu_mapping_country_not_in_eu_set() -> None:
 def test_apply_eu_mapping_gb_not_in_eu() -> None:
     """UK (GB) 不在 eu_countries，应保持原值。"""
     assert apply_eu_mapping("GB", {"DE", "FR", "IT", "ES", "NL"}) == "GB"
+    assert apply_eu_mapping("UK", {"DE", "FR", "IT", "ES", "NL"}) == "GB"
 
 
 def test_apply_eu_mapping_none_input_returns_none() -> None:
@@ -40,3 +46,19 @@ def test_apply_eu_mapping_literal_eu_is_idempotent() -> None:
 def test_apply_eu_mapping_empty_string_returns_empty() -> None:
     """空字符串不在集合中，按原值返回（不转为 None 也不映射）。"""
     assert apply_eu_mapping("", {"DE", "FR"}) == ""
+
+
+def test_normalize_observed_country_code_applies_iso_alias() -> None:
+    assert normalize_observed_country_code("uk") == "GB"
+    assert normalize_observed_country_code(" GB ") == "GB"
+
+
+def test_normalize_country_list_for_eu_members_applies_alias_and_dedupes() -> None:
+    assert normalize_country_list_for_eu_members(["uk", "gb", "ro"]) == ["GB", "RO"]
+
+
+def test_country_label_uses_code_and_chinese_name() -> None:
+    assert country_label("UK") == "GB - 英国"
+    assert country_label("GB") == "GB - 英国"
+    assert country_label("CZ") == "CZ - 捷克"
+    assert country_label("RO") == "RO - 罗马尼亚"

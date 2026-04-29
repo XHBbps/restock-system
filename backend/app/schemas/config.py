@@ -28,6 +28,11 @@ class GlobalConfigOut(BaseModel):
     def validate_restock_regions(cls, value: list[str] | None) -> list[str]:
         return normalize_restock_regions(value)
 
+    @field_validator("eu_countries", mode="before")
+    @classmethod
+    def validate_eu_countries(cls, value: list[str] | None) -> list[str]:
+        return normalize_country_list_for_eu_members(value)
+
 
 class GlobalConfigPatch(BaseModel):
     buffer_days: int | None = Field(default=None, ge=1, le=365)

@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-29（订单列表同步成功水位改为本次亚马逊查询窗口结束时间，避免任务运行耗时超过 overlap 时漏同步；多平台订单同步窗口改为 6 个日历月滚动窗口。）
+> 最近更新：2026-04-29（国家代码统一走 ISO 二字码标准化，`UK` 等历史别名会归一为 `GB`；国家选项补齐 `GB - 英国`、`CZ - 捷克`、`RO - 罗马尼亚` 显示。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -97,10 +97,18 @@
 - **筛选控件高度统一**：`PageSectionCard` 的 `section-actions` 强制所有控件 32px 高度
 - **订单来源与状态展示**：`DataOrdersView.vue` 展示“来源”“订单平台”，订单状态中文映射覆盖已发货 / 部分发货 / 未发货 / 待处理 / 已取消 / 未知；多平台订单的详情状态显示为“不适用”
 - **全局参数页补货区域配置**：`GlobalConfigView.vue` 的“补货区域”多选已接入动态国家选项，保存前变更检测与配置变更提示已纳入 `restock_regions`
-- **动态国家选项**：`GET /api/config/country-options` 返回内置国家与订单、仓库、库存、出库在途中已观测国家的并集；订单、库存、出库、仓库、邮编规则、补货区域和 EU 成员国配置均改用该接口，接口不可用时前端降级使用内置选项。
+- **动态国家选项**：`GET /api/config/country-options` 返回内置国家与订单、仓库、库存、出库在途中已观测国家的并集，并在输出前统一标准化 ISO 二字码别名；订单、库存、出库、仓库、邮编规则、补货区域和 EU 成员国配置均改用该接口，接口不可用时前端降级使用内置选项。
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.83 国家代码 ISO 标准化与成员国显示修复（2026-04-29）
+
+- **统一规范化**：`backend/app/core/countries.py` 新增国家代码别名映射，当前 `UK` 统一归一为 ISO 标准代码 `GB`；观测国家、赛狐多平台国家字段和 EU 成员国配置均复用该函数。
+- **配置读写**：`GlobalConfigOut` 读取历史 `eu_countries=["UK","RO"]` 时返回 `["GB","RO"]`；`PATCH /api/config/global` 保存 `eu_countries` 时先标准化、去重，再用标准化集合触发 `backfill_order_eu_country_mapping()` 回填历史订单。
+- **国家选项显示**：`GET /api/config/country-options` 采集观测国家时会先标准化，因此历史 `UK` 只展示为 `GB - 英国`；内置中文名补齐 `CZ - 捷克`、`RO - 罗马尼亚`，这些代码不再进入 `unknown_country_codes`。
+- **前端降级选项**：`frontend/src/utils/countries.ts` 补齐 `CZ`、`RO` 的中文标签；正常路径仍以接口返回的 `label` 为唯一显示来源。
+- **测试**：补充 `backend/tests/unit/test_country_mapping.py`、`backend/tests/unit/test_config_schema.py`、`backend/tests/integration/test_config_api.py` 与 `frontend/src/views/__tests__/GlobalConfigView.test.ts` 覆盖别名标准化、成员国读写、国家选项和前端 label。
 
 ### 3.82 订单同步水位与多平台 6 个月窗口修复（2026-04-29）
 - **亚马逊水位口径**：`backend/app/sync/common.py` 的 `mark_sync_success()` 新增可选 `success_at` 参数，`sync_order_list` 成功后传入本次查询窗口的 `date_end`，避免任务完成时间晚于查询窗口结束时间时跳过运行期间产生的 `updateDateTime` 更新；其他同步任务未传 `success_at` 时仍使用完成时间作为成功水位。

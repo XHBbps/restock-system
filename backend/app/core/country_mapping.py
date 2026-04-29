@@ -24,6 +24,11 @@ from collections.abc import Iterable
 from sqlalchemy import case, func, or_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.countries import (
+    COUNTRY_CODE_ALIASES,
+    normalize_country_list_for_eu_members,
+    normalize_observed_country_code,
+)
 from app.models.global_config import GlobalConfig
 from app.models.order import OrderHeader
 
@@ -38,7 +43,7 @@ async def load_eu_countries(db: AsyncSession) -> set[str]:
     if config is None:
         return set()
     values = config.eu_countries or []
-    return {str(code).upper() for code in values if code}
+    return set(normalize_country_list_for_eu_members(values))
 
 
 def apply_eu_mapping(country: str | None, eu_countries: set[str]) -> str | None:
@@ -48,15 +53,17 @@ def apply_eu_mapping(country: str | None, eu_countries: set[str]) -> str | None:
     - `None` 保持 `None`
     - 空字符串 `''` 保持 `''`
     - 已经是 `'EU'` 的输入始终保持 `'EU'`（幂等）
+    - 合法 2 位字母国家码会先按别名表标准化，例如 `UK -> GB`
     - 空集合 → 等价于恒等函数
     """
     if country is None:
         return None
     if country == "EU":
         return "EU"
-    if country in eu_countries:
+    normalized_country = normalize_observed_country_code(country) or country
+    if normalized_country in eu_countries:
         return "EU"
-    return country
+    return normalized_country
 
 
 async def backfill_order_eu_country_mapping(
@@ -68,11 +75,18 @@ async def backfill_order_eu_country_mapping(
     源国家优先取 `original_country_code`，缺失时取当前 `country_code`。源国家属于
     `eu_countries` 时写为 `EU` 并保留原国家；否则恢复源国家并清空原国家字段。
     """
-    normalized_eu_countries = {str(code).strip().upper() for code in eu_countries if code}
+    normalized_eu_countries = set(normalize_country_list_for_eu_members(eu_countries))
     source_country = func.coalesce(OrderHeader.original_country_code, OrderHeader.country_code)
-    is_eu_country = source_country.in_(sorted(normalized_eu_countries))
-    mapped_country = case((is_eu_country, "EU"), else_=source_country)
-    mapped_original_country = case((is_eu_country, source_country), else_=None)
+    normalized_source_country = case(
+        *[
+            (source_country == alias, canonical)
+            for alias, canonical in sorted(COUNTRY_CODE_ALIASES.items())
+        ],
+        else_=source_country,
+    )
+    is_eu_country = normalized_source_country.in_(sorted(normalized_eu_countries))
+    mapped_country = case((is_eu_country, "EU"), else_=normalized_source_country)
+    mapped_original_country = case((is_eu_country, normalized_source_country), else_=None)
 
     result = await db.execute(
         update(OrderHeader)

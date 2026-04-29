@@ -146,9 +146,9 @@ async def sync_inventory_job(ctx: JobContext) -> None:
 
 **状态追踪**：每个 job 在 `sync_state` 表中维护最后运行时间、状态、错误信息。
 
-**EU 国家归一化与新国家发现**：同步层写入订单、商品、库存、出库在途数据时，会按 `global_config.eu_countries` 将成员国映射为字面值 `EU`，并在对应 `original_*` 字段保留原国家码。多平台订单的 `marketplaceCode` / `extraInfo.warehouse_country` 若是有效 2 位字母国家码，会按原码入库；若该码已在 `eu_countries` 中才归并为 `EU`；空值或非法值才写为 `ZZ` 并记录结构化日志。全局配置接口保存 `eu_countries` 且实际变化时，会在同一事务内调用 `backfill_order_eu_country_mapping()` 回填本地历史 `order_header`：源国家优先取 `original_country_code`，否则取当前 `country_code`；源国家属于当前 EU 集合时写 `country_code=marketplace_id='EU'` 且 `original_country_code=源国家`，否则恢复为源国家并清空 `original_country_code`。该回填只改本地库，不调用赛狐 API。
+**EU 国家归一化与新国家发现**：同步层写入订单、商品、库存、出库在途数据时，会按 `global_config.eu_countries` 将成员国映射为字面值 `EU`，并在对应 `original_*` 字段保留原国家码。进入国家选项、成员国配置和多平台订单国家字段的国家码先执行 `trim + uppercase + 两位字母校验 + 别名标准化`，当前 `UK` 统一标准化为 ISO 代码 `GB`。多平台订单的 `marketplaceCode` / `extraInfo.warehouse_country` 若是有效 2 位字母国家码，会按标准化后的原码入库；若该码已在 `eu_countries` 中才归并为 `EU`；空值或非法值才写为 `ZZ` 并记录结构化日志。全局配置接口保存 `eu_countries` 且实际变化时，会在同一事务内调用 `backfill_order_eu_country_mapping()` 回填本地历史 `order_header`：源国家优先取 `original_country_code`，否则取当前 `country_code`，并先按同一别名表标准化；源国家属于当前 EU 集合时写 `country_code=marketplace_id='EU'` 且 `original_country_code=标准化源国家`，否则恢复为标准化源国家并清空 `original_country_code`。该回填只改本地库，不调用赛狐 API。
 
-**动态国家选项**：`GET /api/config/country-options` 汇总内置常见国家与数据库已观测国家，观测来源包括订单 `country_code/original_country_code`、仓库 `country`、库存 `country/original_country`、出库 `target_country/original_target_country`。接口返回 `builtin`、`observed`、`can_be_eu_member` 与 `unknown_country_codes`，前端订单、库存、出库、仓库、邮编规则、补货区域和 EU 成员国配置均消费该接口；EU 成员国配置不允许 `EU` 与 `ZZ`。
+**动态国家选项**：`GET /api/config/country-options` 汇总内置常见国家与数据库已观测国家，观测来源包括订单 `country_code/original_country_code`、仓库 `country`、库存 `country/original_country`、出库 `target_country/original_target_country`。观测值会先走统一标准化，因此历史 `UK` 只会以 `GB` 输出；接口返回 `builtin`、`observed`、`can_be_eu_member` 与 `unknown_country_codes`，前端订单、库存、出库、仓库、邮编规则、补货区域和 EU 成员国配置均消费该接口；EU 成员国配置不允许 `EU` 与 `ZZ`。内置国家名包含 `GB - 英国`、`CZ - 捷克`、`RO - 罗马尼亚`。
 
 **订单列表同步**：`sync_order_list` 是订单列表唯一后台任务入口，内部合并两类赛狐来源：亚马逊订单接口 `/api/order/pageList.json` 按 `dateType=updateDateTime` 使用 `sync_state.last_success_at` 增量同步，成功后将本次查询窗口 `date_end` 写入 `last_success_at`，下次继续按 `last_success_at - overlap` 起算；多平台订单接口 `/api/multiplatform/order/list.json` 按 `dateType=purchase` 采用 6 个日历月滚动窗口同步，按赛狐文档传 `startDate` / `endDate` 且格式为 `yyyy-MM-dd`。两类数据统一落入 `order_header` / `order_item`，通过 `source` 区分“亚马逊”与“多平台”，`order_platform` 保存展示平台名。多平台订单的状态会归一为 `Shipped / PartiallyShipped / Unshipped / Pending / Canceled / Unknown`，明细优先读取文档字段 `skuInfoVo`，仅 `localSku` 非空明细写入 `order_item`，因此可直接参与 `step1_velocity` 销量统计。
 
@@ -549,7 +549,7 @@ UPDATE global_config SET suggestion_generation_enabled=true, generation_toggle_u
 
 | 表 | 职责 | 关键约束 / 字段 |
 |---|---|---|
-| `global_config` | 全局配置单行表；包含 `target_days`、`buffer_days`、`lead_time_days`、`safety_stock_days`、`restock_regions`、`eu_countries`、`suggestion_generation_enabled`、`generation_toggle_updated_by / generation_toggle_updated_at`、同步与登录配置 | `CHECK id=1`；`safety_stock_days` 范围 1–90；`restock_regions=[]` 表示全部国家参与补货计算；`eu_countries` 拒绝 `EU` 与 `ZZ` |
+| `global_config` | 全局配置单行表；包含 `target_days`、`buffer_days`、`lead_time_days`、`safety_stock_days`、`restock_regions`、`eu_countries`、`suggestion_generation_enabled`、`generation_toggle_updated_by / generation_toggle_updated_at`、同步与登录配置 | `CHECK id=1`；`safety_stock_days` 范围 1–90；`restock_regions=[]` 表示全部国家参与补货计算；`eu_countries` 保存和读取时标准化 ISO 二字码别名，并拒绝 `EU` 与 `ZZ` |
 | `sku_config` | SKU 启用 / 禁用与业务参数 | `commodity_sku` 唯一 |
 | `sku_mapping_rule` | 商品 SKU 到库存包裹 SKU 的映射规则 | `commodity_sku` 唯一；`enabled=false` 时规则保留但不参与引擎 |
 | `sku_mapping_component` | 映射规则组件行 | `inventory_sku` 全局唯一；`quantity > 0`；同一规则多行表示组合公式 |
@@ -942,6 +942,7 @@ VITE_API_PROXY_TARGET=http://localhost:8000
 
 | 日期 | 变更 | 相关 PROGRESS 章节 |
 |---|---|---|
+| 2026-04-29 | 国家代码进入动态国家选项、EU 成员国配置和多平台订单国家字段前统一标准化；历史别名 `UK` 输出与保存为 ISO 代码 `GB`，国家选项补齐 `CZ - 捷克`、`RO - 罗马尼亚` | PROGRESS.md §3.83 |
 | 2026-04-29 | 订单列表同步成功水位改为本次亚马逊查询窗口 `date_end`；多平台订单 `purchase` 滚动窗口改为 6 个日历月 | PROGRESS.md §3.82 |
 | 2026-04-28 | 国家选项改为“内置常见国家 + 数据库已观测国家”动态来源；新 2 位国家码按原码入库，EU 归类仍由管理员通过 `eu_countries` 维护，`EU` / `ZZ` 不可加入 EU 成员国 | PROGRESS.md §3.79 |
 | 2026-04-27 | 同步日志 / 接口监控新增赛狐 `40019` 精确自动重试队列：保存 `request_payload`，每 5 分钟按原始请求重放，成功标记 `resolved`，最多 5 次后 `permanent` | §3.75 |
