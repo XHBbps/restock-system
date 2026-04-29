@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import UserContext, db_session, get_current_user, require_permission
 from app.core.exceptions import BusinessError, ConflictError, NotFound
 from app.core.logging import get_logger
-from app.core.permissions import AUTH_MANAGE, AUTH_VIEW
+from app.core.permissions import AUTH_MANAGE, AUTH_VIEW, expand_permission_dependencies
 from app.models.permission import Permission
 from app.models.role import Role
 from app.models.role_permission import RolePermission
@@ -191,7 +191,17 @@ async def get_role_permissions(
     role_id: int,
     db: AsyncSession = Depends(db_session),
 ) -> list[str]:
-    await _get_role_or_404(db, role_id)
+    role = await _get_role_or_404(db, role_id)
+
+    if role.is_superadmin:
+        rows = (
+            await db.execute(
+                select(Permission.code)
+                .where(Permission.active.is_(True))
+                .order_by(Permission.sort_order)
+            )
+        ).scalars().all()
+        return list(rows)
 
     rows = (
         await db.execute(
@@ -225,38 +235,30 @@ async def update_role_permissions(
             await db.execute(
                 select(Permission.code)
                 .join(RolePermission, RolePermission.permission_id == Permission.id)
-                .where(RolePermission.role_id == role_id)
+                .where(RolePermission.role_id == role_id, Permission.active.is_(True))
             )
         ).scalars().all()
     )
 
-    new_codes = set(body.permission_codes)
+    perm_rows = (
+        await db.execute(
+            select(Permission.id, Permission.code).where(Permission.active.is_(True))
+        )
+    ).all()
+    active_code_to_id = {r.code: r.id for r in perm_rows}
+    active_codes = set(active_code_to_id)
+    new_codes = expand_permission_dependencies(body.permission_codes, active_codes)
+    missing = new_codes - active_codes
+    if missing:
+        raise BusinessError(f"权限代码不存在: {', '.join(sorted(missing))}")
 
-    # Resolve permission codes to IDs
-    if new_codes:
-        perm_rows = (
-            await db.execute(
-                select(Permission.id, Permission.code).where(
-                    Permission.code.in_(new_codes), Permission.active.is_(True)
-                )
-            )
-        ).all()
-        found_codes = {r.code for r in perm_rows}
-        missing = new_codes - found_codes
-        if missing:
-            raise BusinessError(f"权限代码不存在: {', '.join(sorted(missing))}")
-        perm_ids = [r.id for r in perm_rows]
-    else:
-        perm_ids = []
+    if new_codes == old_codes:
+        return
 
-    # Delete existing role_permission rows
     await db.execute(delete(RolePermission).where(RolePermission.role_id == role_id))
-
-    # Insert new rows
-    for pid in perm_ids:
+    for pid in [active_code_to_id[code] for code in sorted(new_codes)]:
         db.add(RolePermission(role_id=role_id, permission_id=pid))
 
-    # Bump perm_version for affected users
     await db.execute(
         update(SysUser)
         .where(SysUser.role_id == role_id)

@@ -5,6 +5,7 @@ REGISTRY 列表顺序即前端展示顺序；ALL_CODES 用于快速校验。
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Set
 from dataclasses import dataclass
 
 
@@ -70,3 +71,24 @@ REGISTRY: list[PermDef] = [
 ]
 
 ALL_CODES: frozenset[str] = frozenset(p.code for p in REGISTRY)
+
+VIEW_DEPENDENT_ACTIONS: frozenset[str] = frozenset(
+    {"edit", "operate", "manage", "delete", "export", "refresh", "new_cycle"}
+)
+
+
+def expand_permission_dependencies(
+    codes: Iterable[str],
+    available_codes: Set[str] | None = None,
+) -> set[str]:
+    """Return permission codes plus implied same-scope view permissions."""
+    available = available_codes if available_codes is not None else ALL_CODES
+    expanded = set(codes)
+    for code in tuple(expanded):
+        namespace, sep, action = code.partition(":")
+        if not sep or action not in VIEW_DEPENDENT_ACTIONS:
+            continue
+        view_code = f"{namespace}:view"
+        if view_code in available:
+            expanded.add(view_code)
+    return expanded

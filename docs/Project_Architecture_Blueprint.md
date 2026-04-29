@@ -277,6 +277,8 @@ _ENDPOINT_RATE_OVERRIDES = {
 | **时区** | 存储 UTC，展示北京时间；`parse_saihu_time` 按 marketplace_id 推断源时区再转换 | `core/timezone.py` |
 | **配置** | `pydantic-settings` 从环境变量/`.env` 加载，`get_settings()` 单例 | `config.py` |
 
+**RBAC 权限语义**：权限码注册表位于 `backend/app/core/permissions.py`。角色权限保存入口 `backend/app/api/auth_roles.py` 会调用 `expand_permission_dependencies()`，将同一命名空间内的操作类权限（`edit`、`operate`、`manage`、`delete`、`export`、`refresh`、`new_cycle`）自动补齐对应 `view` 权限，保证能执行操作的角色也能进入对应页面或读取必要数据。`GET /api/auth/roles/{role_id}/permissions` 返回的是角色有效权限集合；超管角色不依赖 `role_permission` 显式关联，读取时返回全部 active 权限码，写入仍被拒绝。权限集合未发生实际变化时不重写关联表，也不 bump `sys_user.perm_version`。
+
 ### 3.6 导出快照子系统（app/services + app/api/snapshot.py）
 
 **定位**：取代旧赛狐写入链路，改为“建议单 → 用户勾选采购/补货条目 → 生成不可变 Snapshot + Excel 文件 → 用户下载”的工作流。采购与补货从 API、快照版本、条目导出状态和 Excel 格式上完全拆分。
@@ -944,6 +946,7 @@ VITE_API_PROXY_TARGET=http://localhost:8000
 
 | 日期 | 变更 | 相关 PROGRESS 章节 |
 |---|---|---|
+| 2026-04-29 | 角色权限保存新增操作权限隐含查看权限补齐；无实际权限变化时不重写关联表、不 bump `perm_version`；超管权限读取返回全部 active 权限码 | PROGRESS.md §3.85 |
 | 2026-04-29 | Step 5 matched 分仓取整改为 floor + 最大余数法，订单列表同步在本次无有效明细时保留旧 item；赛狐示例凭据统一改为占位符 / 环境变量 | PROGRESS.md §3.84 |
 | 2026-04-29 | 国家代码进入动态国家选项、EU 成员国配置、补货区域配置和多平台订单国家字段前统一标准化；历史别名 `UK` 输出与保存为 ISO 代码 `GB`；EU 配置变化会回填订单、库存与在途本地数据；内置国家必须配置时区 | PROGRESS.md §3.83 |
 | 2026-04-29 | 订单列表同步成功水位改为本次亚马逊查询窗口 `date_end`；多平台订单 `purchase` 滚动窗口改为 6 个日历月 | PROGRESS.md §3.82 |

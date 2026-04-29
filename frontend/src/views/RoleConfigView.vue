@@ -150,6 +150,7 @@ import {
   type RoleOut,
 } from '@/api/auth-management'
 import PageSectionCard from '@/components/PageSectionCard.vue'
+import router from '@/router'
 import { useAuthStore } from '@/stores/auth'
 import { getActionErrorMessage } from '@/utils/apiError'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -168,8 +169,18 @@ const dialogMode = ref<'create' | 'edit'>('create')
 const editingRole = ref<RoleOut | null>(null)
 const form = reactive({ name: '', description: '' })
 const checkedCodes = ref<Set<string>>(new Set())
+const originalPermissionCodes = ref<Set<string>>(new Set())
 const saving = ref(false)
 const permLoading = ref(false)
+const VIEW_DEPENDENT_ACTIONS = new Set([
+  'edit',
+  'operate',
+  'manage',
+  'delete',
+  'export',
+  'refresh',
+  'new_cycle',
+])
 
 // ── Grouped permissions ──
 const permissionGroups = computed(() => {
@@ -197,14 +208,36 @@ function toggleGroup(perms: PermissionOut[], val: boolean): void {
     if (val) next.add(p.code)
     else next.delete(p.code)
   }
-  checkedCodes.value = next
+  checkedCodes.value = expandPermissionDependencies(next)
 }
 
 function toggleCode(code: string, val: boolean): void {
   const next = new Set(checkedCodes.value)
   if (val) next.add(code)
   else next.delete(code)
-  checkedCodes.value = next
+  checkedCodes.value = expandPermissionDependencies(next)
+}
+
+function expandPermissionDependencies(codes: Iterable<string>): Set<string> {
+  const available = new Set(permissions.value.map((p) => p.code))
+  const expanded = new Set(codes)
+  for (const code of [...expanded]) {
+    const [namespace, action] = code.split(':')
+    if (!namespace || !action || !VIEW_DEPENDENT_ACTIONS.has(action)) continue
+    const viewCode = `${namespace}:view`
+    if (available.has(viewCode)) {
+      expanded.add(viewCode)
+    }
+  }
+  return expanded
+}
+
+function setsEqual(left: Set<string>, right: Set<string>): boolean {
+  if (left.size !== right.size) return false
+  for (const item of left) {
+    if (!right.has(item)) return false
+  }
+  return true
 }
 
 // ── Permission label helper ──
@@ -249,6 +282,7 @@ function openCreate(): void {
   form.name = ''
   form.description = ''
   checkedCodes.value = new Set()
+  originalPermissionCodes.value = new Set()
   dialogVisible.value = true
 }
 
@@ -260,11 +294,13 @@ async function openEdit(role: RoleOut): Promise<void> {
 
   if (role.is_superadmin) {
     checkedCodes.value = new Set(permissions.value.map((p) => p.code))
+    originalPermissionCodes.value = new Set(checkedCodes.value)
   } else {
     permLoading.value = true
     try {
       const codes = await getRolePermissions(role.id)
-      checkedCodes.value = new Set(codes)
+      checkedCodes.value = expandPermissionDependencies(codes)
+      originalPermissionCodes.value = new Set(checkedCodes.value)
     } catch (err) {
       ElMessage.error(getActionErrorMessage(err, '加载角色权限失败'))
     } finally {
@@ -283,15 +319,41 @@ async function handleSave(): Promise<void> {
 
   saving.value = true
   try {
+    const nextPermissionCodes = expandPermissionDependencies(checkedCodes.value)
     if (dialogMode.value === 'create') {
       const newRole = await createRole({ name: form.name, description: form.description })
-      if (checkedCodes.value.size > 0) {
-        await updateRolePermissions(newRole.id, [...checkedCodes.value])
+      if (nextPermissionCodes.size > 0) {
+        await updateRolePermissions(newRole.id, [...nextPermissionCodes])
       }
       ElMessage.success('角色创建成功')
     } else if (editingRole.value && !editingRole.value.is_superadmin) {
+      const permissionChanged = !setsEqual(nextPermissionCodes, originalPermissionCodes.value)
+      const affectsCurrentUser = auth.user?.roleName === editingRole.value.name
+      if (permissionChanged && affectsCurrentUser) {
+        const confirmed = await ElMessageBox.confirm(
+          '保存后当前会话会失效，需要重新登录。是否继续？',
+          '确认修改当前角色权限',
+          {
+            confirmButtonText: '继续保存',
+            cancelButtonText: '取消',
+            type: 'warning',
+          },
+        )
+          .then(() => true)
+          .catch(() => false)
+        if (!confirmed) return
+      }
+
       await updateRole(editingRole.value.id, { name: form.name, description: form.description })
-      await updateRolePermissions(editingRole.value.id, [...checkedCodes.value])
+      if (permissionChanged) {
+        await updateRolePermissions(editingRole.value.id, [...nextPermissionCodes])
+        if (affectsCurrentUser) {
+          dialogVisible.value = false
+          auth.clearAuth()
+          await router.replace({ path: '/login' })
+          return
+        }
+      }
       ElMessage.success('角色更新成功')
     }
     dialogVisible.value = false
