@@ -57,6 +57,19 @@ async def test_patch_global_config_normalizes_restock_regions(
 
 
 @pytest.mark.asyncio
+async def test_patch_global_config_normalizes_restock_region_aliases(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    await seed_global_config(db_session)
+    await db_session.commit()
+
+    resp = await client.patch("/api/config/global", json={"restock_regions": ["UK"]})
+
+    assert resp.status_code == 200
+    assert resp.json()["restock_regions"] == ["GB"]
+
+
+@pytest.mark.asyncio
 async def test_patch_global_config_updates_safety_stock_and_eu_countries(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
@@ -129,6 +142,99 @@ async def test_patch_global_config_backfills_order_country_to_eu(
     assert updated.country_code == "EU"
     assert updated.marketplace_id == "EU"
     assert updated.original_country_code == "DE"
+
+
+@pytest.mark.asyncio
+async def test_patch_global_config_backfills_order_inventory_and_in_transit_country(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    await seed_global_config(db_session, eu_countries=[])
+    now = datetime.now(BEIJING)
+    db_session.add(
+        Warehouse(
+            id="WH-DE",
+            name="Germany Warehouse",
+            type=3,
+            country="DE",
+            last_sync_at=now,
+        )
+    )
+    order = await _seed_order_header(
+        db_session,
+        order_id="111-0000006-0000006",
+        country_code="DE",
+        marketplace_id="DE",
+    )
+    order_pk = order.id
+    inventory = InventorySnapshotLatest(
+        commodity_sku="SKU-DE",
+        warehouse_id="WH-DE",
+        country="DE",
+        original_country=None,
+        available=10,
+        reserved=1,
+    )
+    in_transit = InTransitRecord(
+        saihu_out_record_id="OUT-DE",
+        target_country="DE",
+        original_target_country=None,
+        is_in_transit=True,
+        last_seen_at=now,
+    )
+    db_session.add_all([inventory, in_transit])
+    await db_session.commit()
+
+    to_eu_resp = await client.patch("/api/config/global", json={"eu_countries": ["DE"]})
+
+    assert to_eu_resp.status_code == 200
+    db_session.expire_all()
+    order_to_eu = (
+        await db_session.execute(select(OrderHeader).where(OrderHeader.id == order_pk))
+    ).scalar_one()
+    inventory_to_eu = (
+        await db_session.execute(
+            select(InventorySnapshotLatest).where(
+                InventorySnapshotLatest.commodity_sku == "SKU-DE"
+            )
+        )
+    ).scalar_one()
+    in_transit_to_eu = (
+        await db_session.execute(
+            select(InTransitRecord).where(InTransitRecord.saihu_out_record_id == "OUT-DE")
+        )
+    ).scalar_one()
+    assert order_to_eu.country_code == "EU"
+    assert order_to_eu.original_country_code == "DE"
+    assert inventory_to_eu.country == "EU"
+    assert inventory_to_eu.original_country == "DE"
+    assert in_transit_to_eu.target_country == "EU"
+    assert in_transit_to_eu.original_target_country == "DE"
+
+    from_eu_resp = await client.patch("/api/config/global", json={"eu_countries": []})
+
+    assert from_eu_resp.status_code == 200
+    db_session.expire_all()
+    order_restored = (
+        await db_session.execute(select(OrderHeader).where(OrderHeader.id == order_pk))
+    ).scalar_one()
+    inventory_restored = (
+        await db_session.execute(
+            select(InventorySnapshotLatest).where(
+                InventorySnapshotLatest.commodity_sku == "SKU-DE"
+            )
+        )
+    ).scalar_one()
+    in_transit_restored = (
+        await db_session.execute(
+            select(InTransitRecord).where(InTransitRecord.saihu_out_record_id == "OUT-DE")
+        )
+    ).scalar_one()
+    assert order_restored.country_code == "DE"
+    assert order_restored.original_country_code is None
+    assert inventory_restored.country == "DE"
+    assert inventory_restored.original_country is None
+    assert in_transit_restored.target_country == "DE"
+    assert in_transit_restored.original_target_country is None
 
 
 @pytest.mark.asyncio

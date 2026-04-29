@@ -26,7 +26,7 @@ from app.core.countries import (
     country_label,
     normalize_observed_country_code,
 )
-from app.core.country_mapping import backfill_order_eu_country_mapping
+from app.core.country_mapping import backfill_eu_country_mapping
 from app.core.exceptions import ConflictError, NotFound, UnprocessableError, ValidationFailed
 from app.core.permissions import (
     CONFIG_EDIT,
@@ -286,7 +286,7 @@ async def patch_global(
         sensitive_old = {f: getattr(row, f, None) for f in sensitive_updates}
         await db.execute(update(GlobalConfig).where(GlobalConfig.id == 1).values(**updates))
         if "eu_countries" in updates and sensitive_old.get("eu_countries") != updates["eu_countries"]:
-            await backfill_order_eu_country_mapping(db, updates["eu_countries"])
+            await backfill_eu_country_mapping(db, updates["eu_countries"])
         if sensitive_updates and any(
             sensitive_old[f] != updates[f] for f in sensitive_updates
         ):

@@ -2,6 +2,8 @@
 
 from collections.abc import Iterable
 
+from app.core.countries import normalize_observed_country_code
+
 
 def normalize_restock_regions(value: Iterable[str] | None) -> list[str]:
     if value is None:
@@ -10,10 +12,11 @@ def normalize_restock_regions(value: Iterable[str] | None) -> list[str]:
     normalized: list[str] = []
     seen: set[str] = set()
     for item in value:
-        code = str(item or "").strip().upper()
-        if not code:
+        raw_code = str(item or "").strip().upper()
+        if not raw_code:
             continue
-        if len(code) != 2 or not code.isalpha():
+        code = normalize_observed_country_code(raw_code)
+        if code is None:
             raise ValueError(f"补货区域国家码无效: {item}")
         if code in seen:
             continue

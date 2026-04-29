@@ -30,6 +30,8 @@ from app.core.countries import (
     normalize_observed_country_code,
 )
 from app.models.global_config import GlobalConfig
+from app.models.in_transit import InTransitRecord
+from app.models.inventory import InventorySnapshotLatest
 from app.models.order import OrderHeader
 
 
@@ -66,6 +68,55 @@ def apply_eu_mapping(country: str | None, eu_countries: set[str]) -> str | None:
     return normalized_country
 
 
+def _normalized_country_expr(source_country):
+    trimmed_upper = func.upper(func.trim(source_country))
+    return case(
+        *[
+            (trimmed_upper == alias, canonical)
+            for alias, canonical in sorted(COUNTRY_CODE_ALIASES.items())
+        ],
+        else_=trimmed_upper,
+    )
+
+
+async def _backfill_eu_mapping_for_columns(
+    db: AsyncSession,
+    *,
+    model,
+    country_column,
+    original_country_column,
+    eu_countries: Iterable[str],
+    extra_country_columns: tuple = (),
+) -> int:
+    normalized_eu_countries = set(normalize_country_list_for_eu_members(eu_countries))
+    source_country = func.coalesce(original_country_column, country_column)
+    normalized_source_country = _normalized_country_expr(source_country)
+    is_eu_country = normalized_source_country.in_(sorted(normalized_eu_countries))
+    mapped_country = case((is_eu_country, "EU"), else_=normalized_source_country)
+    mapped_original_country = case((is_eu_country, normalized_source_country), else_=None)
+
+    where_clauses = [
+        country_column.is_distinct_from(mapped_country),
+        original_country_column.is_distinct_from(mapped_original_country),
+    ]
+    values = {
+        country_column.key: mapped_country,
+        original_country_column.key: mapped_original_country,
+    }
+    for extra_column in extra_country_columns:
+        where_clauses.append(extra_column.is_distinct_from(mapped_country))
+        values[extra_column.key] = mapped_country
+
+    result = await db.execute(
+        update(model)
+        .where(source_country.is_not(None))
+        .where(source_country != "")
+        .where(or_(*where_clauses))
+        .values(**values)
+    )
+    return int(result.rowcount or 0)  # type: ignore[attr-defined]
+
+
 async def backfill_order_eu_country_mapping(
     db: AsyncSession,
     eu_countries: Iterable[str],
@@ -75,32 +126,48 @@ async def backfill_order_eu_country_mapping(
     源国家优先取 `original_country_code`，缺失时取当前 `country_code`。源国家属于
     `eu_countries` 时写为 `EU` 并保留原国家；否则恢复源国家并清空原国家字段。
     """
-    normalized_eu_countries = set(normalize_country_list_for_eu_members(eu_countries))
-    source_country = func.coalesce(OrderHeader.original_country_code, OrderHeader.country_code)
-    normalized_source_country = case(
-        *[
-            (source_country == alias, canonical)
-            for alias, canonical in sorted(COUNTRY_CODE_ALIASES.items())
-        ],
-        else_=source_country,
+    return await _backfill_eu_mapping_for_columns(
+        db,
+        model=OrderHeader,
+        country_column=OrderHeader.country_code,
+        original_country_column=OrderHeader.original_country_code,
+        extra_country_columns=(OrderHeader.marketplace_id,),
+        eu_countries=eu_countries,
     )
-    is_eu_country = normalized_source_country.in_(sorted(normalized_eu_countries))
-    mapped_country = case((is_eu_country, "EU"), else_=normalized_source_country)
-    mapped_original_country = case((is_eu_country, normalized_source_country), else_=None)
 
-    result = await db.execute(
-        update(OrderHeader)
-        .where(
-            or_(
-                OrderHeader.country_code.is_distinct_from(mapped_country),
-                OrderHeader.marketplace_id.is_distinct_from(mapped_country),
-                OrderHeader.original_country_code.is_distinct_from(mapped_original_country),
-            )
-        )
-        .values(
-            country_code=mapped_country,
-            marketplace_id=mapped_country,
-            original_country_code=mapped_original_country,
-        )
+
+async def backfill_inventory_eu_country_mapping(
+    db: AsyncSession,
+    eu_countries: Iterable[str],
+) -> int:
+    return await _backfill_eu_mapping_for_columns(
+        db,
+        model=InventorySnapshotLatest,
+        country_column=InventorySnapshotLatest.country,
+        original_country_column=InventorySnapshotLatest.original_country,
+        eu_countries=eu_countries,
     )
-    return int(result.rowcount or 0)  # type: ignore[attr-defined]
+
+
+async def backfill_in_transit_eu_country_mapping(
+    db: AsyncSession,
+    eu_countries: Iterable[str],
+) -> int:
+    return await _backfill_eu_mapping_for_columns(
+        db,
+        model=InTransitRecord,
+        country_column=InTransitRecord.target_country,
+        original_country_column=InTransitRecord.original_target_country,
+        eu_countries=eu_countries,
+    )
+
+
+async def backfill_eu_country_mapping(
+    db: AsyncSession,
+    eu_countries: Iterable[str],
+) -> dict[str, int]:
+    return {
+        "orders": await backfill_order_eu_country_mapping(db, eu_countries),
+        "inventory": await backfill_inventory_eu_country_mapping(db, eu_countries),
+        "in_transit": await backfill_in_transit_eu_country_mapping(db, eu_countries),
+    }

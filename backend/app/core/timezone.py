@@ -11,6 +11,8 @@ from zoneinfo import ZoneInfo
 import structlog
 from dateutil import parser as date_parser
 
+from app.core.countries import NON_EU_MEMBER_CODES, normalize_observed_country_code
+
 _logger = structlog.get_logger(__name__)
 
 BEIJING = ZoneInfo("Asia/Shanghai")
@@ -46,11 +48,13 @@ COUNTRY_TO_TIMEZONE: dict[str, str] = {
     "CA": "America/Toronto",
     "MX": "America/Mexico_City",
     "GB": "Europe/London",
+    "CZ": "Europe/Prague",
     "DE": "Europe/Berlin",
     "FR": "Europe/Paris",
     "IT": "Europe/Rome",
     "ES": "Europe/Madrid",
     "NL": "Europe/Amsterdam",
+    "RO": "Europe/Bucharest",
     "BE": "Europe/Brussels",
     "SE": "Europe/Stockholm",
     "PL": "Europe/Warsaw",
@@ -75,18 +79,26 @@ def marketplace_to_country(marketplace_id: str | None) -> str | None:
     """
     if not marketplace_id:
         return None
+    normalized_country = normalize_observed_country_code(marketplace_id)
     # 订单详情直接返回二字码
-    if len(marketplace_id) == 2 and marketplace_id.isupper():
-        return marketplace_id
+    if normalized_country is not None:
+        return normalized_country
     return MARKETPLACE_ID_TO_COUNTRY.get(marketplace_id)
 
 
 def country_to_tz(country: str | None) -> ZoneInfo:
     """国家 -> ZoneInfo,未知国家回退北京。"""
-    if not country:
+    normalized_country = normalize_observed_country_code(country)
+    if not normalized_country:
         return BEIJING
-    tz_name = COUNTRY_TO_TIMEZONE.get(country)
+    tz_name = COUNTRY_TO_TIMEZONE.get(normalized_country)
     if not tz_name:
+        if normalized_country not in NON_EU_MEMBER_CODES:
+            _logger.warning(
+                "unknown_country_timezone_fallback",
+                country=normalized_country,
+                fallback_timezone=str(BEIJING),
+            )
         return BEIJING
     return ZoneInfo(tz_name)
 

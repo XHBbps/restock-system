@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-29（国家代码统一走 ISO 二字码标准化，`UK` 等历史别名会归一为 `GB`；国家选项补齐 `GB - 英国`、`CZ - 捷克`、`RO - 罗马尼亚` 显示。）
+> 最近更新：2026-04-29（国家码归一化 review 修复：补货区域复用别名标准化，EU 成员国变更会同步回填订单、库存与在途本地数据，并补齐 CZ/RO 时区与内置国家时区防漏测试。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -105,10 +105,13 @@
 ### 3.83 国家代码 ISO 标准化与成员国显示修复（2026-04-29）
 
 - **统一规范化**：`backend/app/core/countries.py` 新增国家代码别名映射，当前 `UK` 统一归一为 ISO 标准代码 `GB`；观测国家、赛狐多平台国家字段和 EU 成员国配置均复用该函数。
+- **补货区域别名归一**：`backend/app/core/restock_regions.py` 复用国家码标准化入口，保存 `restock_regions=["UK","GB"," ro "]` 时会归一去重为 `["GB","RO"]`，引擎继续消费标准化后的补货区域集合。
 - **配置读写**：`GlobalConfigOut` 读取历史 `eu_countries=["UK","RO"]` 时返回 `["GB","RO"]`；`PATCH /api/config/global` 保存 `eu_countries` 时先标准化、去重，再用标准化集合触发 `backfill_order_eu_country_mapping()` 回填历史订单。
+- **EU 本地回填扩展**：保存 `eu_countries` 且实际变化时，`backend/app/core/country_mapping.py` 会在同一事务内回填 `order_header`、`inventory_snapshot_latest`、`in_transit_record`；库存源国家优先取 `original_country`，在途源国家优先取 `original_target_country`，缺失时取当前国家字段，加入 EU 写 `EU + original_*`，移出 EU 恢复源国家并清空 `original_*`。
 - **国家选项显示**：`GET /api/config/country-options` 采集观测国家时会先标准化，因此历史 `UK` 只展示为 `GB - 英国`；内置中文名补齐 `CZ - 捷克`、`RO - 罗马尼亚`，这些代码不再进入 `unknown_country_codes`。
+- **时区防漏**：`backend/app/core/timezone.py` 补齐 `CZ -> Europe/Prague`、`RO -> Europe/Bucharest`，`country_to_tz()` 会先执行国家码别名标准化，因此 `UK` 使用 `GB` 的 `Europe/London`；单元测试约束除 `EU`、`ZZ` 外所有内置国家必须配置时区。
 - **前端降级选项**：`frontend/src/utils/countries.ts` 补齐 `CZ`、`RO` 的中文标签；正常路径仍以接口返回的 `label` 为唯一显示来源。
-- **测试**：补充 `backend/tests/unit/test_country_mapping.py`、`backend/tests/unit/test_config_schema.py`、`backend/tests/integration/test_config_api.py` 与 `frontend/src/views/__tests__/GlobalConfigView.test.ts` 覆盖别名标准化、成员国读写、国家选项和前端 label。
+- **测试**：补充 `backend/tests/unit/test_country_mapping.py`、`backend/tests/unit/test_config_schema.py`、`backend/tests/unit/test_timezone.py`、`backend/tests/integration/test_config_api.py` 与 `frontend/src/views/__tests__/GlobalConfigView.test.ts` 覆盖别名标准化、成员国读写、国家选项、EU 本地回填、时区映射和前端 label。
 
 ### 3.82 订单同步水位与多平台 6 个月窗口修复（2026-04-29）
 - **亚马逊水位口径**：`backend/app/sync/common.py` 的 `mark_sync_success()` 新增可选 `success_at` 参数，`sync_order_list` 成功后传入本次查询窗口的 `date_end`，避免任务完成时间晚于查询窗口结束时间时跳过运行期间产生的 `updateDateTime` 更新；其他同步任务未传 `success_at` 时仍使用完成时间作为成功水位。

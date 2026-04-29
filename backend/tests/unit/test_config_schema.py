@@ -16,9 +16,15 @@ def test_global_config_patch_rejects_invalid_safety_stock_days() -> None:
 
 
 def test_global_config_patch_normalizes_restock_regions() -> None:
-    patch = GlobalConfigPatch(restock_regions=["us", " GB ", "", "us"])
+    patch = GlobalConfigPatch(restock_regions=["us", " GB ", "", "us", "uk", " ro "])
 
-    assert patch.restock_regions == ["US", "GB"]
+    assert patch.restock_regions == ["US", "GB", "RO"]
+
+
+def test_global_config_patch_dedupes_restock_region_aliases() -> None:
+    patch = GlobalConfigPatch(restock_regions=["uk", "gb"])
+
+    assert patch.restock_regions == ["GB"]
 
 
 def test_global_config_patch_normalizes_eu_countries() -> None:
