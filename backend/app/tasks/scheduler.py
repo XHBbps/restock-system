@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from apscheduler.job import Job
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
@@ -11,7 +12,7 @@ from sqlalchemy import select
 
 from app.config import get_settings
 from app.core.logging import get_logger
-from app.core.timezone import BEIJING
+from app.core.timezone import BEIJING, now_beijing
 from app.db.session import async_session_factory
 from app.models.global_config import GlobalConfig
 from app.schemas.sync import SchedulerJobOut, SchedulerStatusOut
@@ -66,6 +67,13 @@ async def _load_scheduler_config() -> SchedulerRuntimeConfig:
 
 
 def _register_jobs(scheduler: AsyncIOScheduler, *, sync_interval_minutes: int) -> None:
+    scheduler.add_job(
+        _enqueue_safely,
+        trigger=CronTrigger(hour=3, minute=0, timezone=BEIJING),
+        args=["sync_shop"],
+        id="trigger_sync_shop",
+        replace_existing=True,
+    )
     for job_name in [
         "sync_product_listing",
         "sync_inventory",
@@ -111,6 +119,17 @@ def _register_jobs(scheduler: AsyncIOScheduler, *, sync_interval_minutes: int) -
     )
 
 
+def _next_run_time_iso(job: Job, *, enabled: bool) -> str | None:
+    if not enabled:
+        return None
+    next_run_time = getattr(job, "next_run_time", None)
+    if next_run_time is None:
+        trigger = getattr(job, "trigger", None)
+        if trigger is not None:
+            next_run_time = trigger.get_next_fire_time(None, now_beijing())
+    return next_run_time.isoformat() if next_run_time is not None else None
+
+
 async def setup_scheduler(force_reload: bool = False) -> AsyncIOScheduler:
     global _scheduler, _scheduler_signature
     config = await _load_scheduler_config()
@@ -137,11 +156,7 @@ async def scheduler_status() -> SchedulerStatusOut:
         jobs.append(
             SchedulerJobOut(
                 job_name=job_name,
-                next_run_time=(
-                    job.next_run_time.isoformat()
-                    if getattr(job, "next_run_time", None) is not None
-                    else None
-                ),
+                next_run_time=_next_run_time_iso(job, enabled=config.enabled),
             )
         )
 

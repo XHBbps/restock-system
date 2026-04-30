@@ -183,6 +183,7 @@ docker compose -f deploy/docker-compose.yml exec db psql -U postgres -d replenis
    ```
    - `scheduler_enabled=false`：被用户或配置关闭
    - `running=false`：进程异常
+   - `jobs[].next_run_time`：由状态接口返回下一次触发时间；API-only backend 进程不会真正启动 APScheduler，但仍会基于 trigger 推导该字段。若调度开启且所有自动任务的 `next_run_time` 都为空，优先检查 `backend/app/tasks/scheduler.py` 的调度注册和 `/api/sync/scheduler` 日志。
 
 3. **全局配置检查**
    ```sql
@@ -196,7 +197,7 @@ docker compose -f deploy/docker-compose.yml exec db psql -U postgres -d replenis
    - 保存时已做校验，非法表达式会被拦截
 
 5. **时区**：定时任务使用 `Asia/Shanghai`
-   - 03:30 `sync_warehouse`、02:00 `daily_archive`
+   - 03:00 `sync_shop`、03:30 `sync_warehouse`、02:00 `daily_archive`
    - 默认 08:00 `calc_engine`
 
 ### 3.3.1 SKU 映射规则与计算结果异常

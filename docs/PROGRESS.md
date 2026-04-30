@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-29（Review 修复：角色权限保存自动补齐查看权限，当前用户角色权限变更后主动重新登录，超管权限读取返回有效全集。）
+> 最近更新：2026-04-30（调度器状态接口修复：API 进程可推导下次执行时间，店铺基础同步纳入每日自动调度。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -48,6 +48,7 @@
   - `sync_product_listing` / `sync_inventory` / `sync_out_records` / `sync_order_list` / `sync_order_detail`
 - **失败调用自动重试任务**：`retry_failed_api_calls` 每 5 分钟扫描 `api_call_log` 中可精确还原的赛狐 `40019` 失败调用（必须有 `request_payload`），按原始 `endpoint + request_payload` 从老到新重放；相关同步任务活跃时跳过，成功后将原失败日志标记为 `resolved` 并从失败列表隐藏，最多自动重试 5 次。
 - **定时任务**（cron，Asia/Shanghai）：
+  - 03:00 `sync_shop`
   - 03:30 `sync_warehouse`
   - 02:00 `daily_archive`
   - 默认 08:00 `calc_engine`（可配置，`global_config.suggestion_generation_enabled` 控制是否实际产出建议）
@@ -101,6 +102,11 @@
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.86 调度器下次执行时间与店铺自动同步修复（2026-04-30）
+- **状态接口修复**：`backend/app/tasks/scheduler.py` 的 `scheduler_status()` 在 API-only backend 进程中不再依赖本进程 APScheduler 已启动；当 `job.next_run_time` 为空时，会通过 job trigger 和北京时间推导下一次触发时间，避免 `/api/sync/scheduler` 返回全空计划导致前端“自动同步下次执行”图表无内容。
+- **店铺基础同步纳入自动调度**：`sync_shop` 新增每日 03:00 APScheduler cron 入队，与前端“自动同步任务”列表口径一致；`sync_warehouse` 继续每日 03:30 执行，商品、库存、出库、订单列表、订单详情继续按 `sync_interval_minutes` 间隔执行。
+- **测试**：更新 `backend/tests/unit/test_scheduler_api.py`，覆盖 API 进程推导 next run 和 `sync_shop` 每日 cron 注册。
 
 ### 3.85 角色权限配置语义修复（2026-04-29）
 - **权限依赖补齐**：`backend/app/core/permissions.py` 新增 `expand_permission_dependencies()`，角色权限保存时会将 `*:edit`、`*:operate`、`*:manage`、`*:delete`、`*:export`、`*:refresh`、`*:new_cycle` 等操作权限自动补齐同组 `*:view`；若系统未注册对应 `view` 权限则保持原权限不变。`frontend/src/views/RoleConfigView.vue` 勾选和保存前也执行同一口径预览。
