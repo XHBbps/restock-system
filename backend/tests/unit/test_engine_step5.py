@@ -62,25 +62,26 @@ def test_real_distribution() -> None:
     assert 39 <= result.get("xiapu", 0) <= 41
 
 
-def test_unknown_warehouse_excluded_from_denominator() -> None:
-    """匹配不到规则的订单应从分母中剔除。"""
+def test_unknown_samples_are_evenly_split_instead_of_following_known_warehouse() -> None:
+    """未知样本占大头时,未知部分应均分到规则仓,不能全部跟随已知仓。"""
     rules = _jp_rules()
     orders = [
         ("640-8453", 5),  # haiyuan
-        # 无邮编订单视为未知仓
-        (None, 100),
-        ("", 100),
+        (None, 95),
     ]
-    result = split_country_qty(
+    result = explain_country_qty_split(
         sku="sku-A",
         country="JP",
-        country_qty=50,
+        country_qty=100,
         orders=orders,
         rules=rules,
         country_warehouses=["haiyuan", "xiapu"],
     )
-    # 已知仓只有 haiyuan,应得全部 50
-    assert result == {"haiyuan": 50}
+    # known 5 -> haiyuan; unknown 95 -> haiyuan 48 + xiapu 47
+    assert result.allocation_mode == "mixed_known_unknown"
+    assert result.matched_order_qty == 5
+    assert result.unknown_order_qty == 95
+    assert result.warehouse_breakdown == {"haiyuan": 53, "xiapu": 47}
 
 
 def test_zero_data_fallback_even_split() -> None:
@@ -115,7 +116,7 @@ def test_matched_warehouse_outside_eligible_list_becomes_unknown() -> None:
     )
 
     assert result.warehouse_breakdown == {"haiyuan": 50}
-    assert result.allocation_mode == "matched"
+    assert result.allocation_mode == "mixed_known_unknown"
     assert result.matched_order_qty == 5
     assert result.unknown_order_qty == 5
     assert result.eligible_warehouses == ["haiyuan"]
@@ -139,6 +140,24 @@ def test_all_unknown_samples_fallback_even() -> None:
     assert result.matched_order_qty == 0
     assert result.unknown_order_qty == 9
     assert result.warehouse_breakdown == {"haiyuan": 5, "xiapu": 4}
+
+
+def test_mixed_allocation_total_preserved() -> None:
+    result = split_country_qty(
+        sku="sku-A",
+        country="JP",
+        country_qty=101,
+        orders=[
+            ("640-8453", 10),
+            ("100-0001", 5),
+            (None, 40),
+            ("", 45),
+        ],
+        rules=_jp_rules(),
+        country_warehouses=["haiyuan", "xiapu"],
+    )
+
+    assert sum(result.values()) == 101
 
 
 def test_no_warehouse_returns_empty_with_reason() -> None:
@@ -473,6 +492,29 @@ async def test_load_all_sku_country_orders_applies_allowed_country_filter() -> N
 
     compiled_sql = str(db.executed[0])
     assert "order_header.country_code IN" in compiled_sql
+
+
+@pytest.mark.asyncio
+async def test_load_all_sku_country_orders_uses_left_join_and_effective_shipped_qty() -> None:
+    db = _FakeDb(
+        rows=[
+            ("sku-A", "US", None, 3),
+            ("sku-A", "US", "90210", 0),
+            ("sku-A", "US", "10001", -2),
+        ]
+    )
+
+    result = await load_all_sku_country_orders(
+        db,
+        commodity_skus=["sku-A"],
+        today=date(2026, 4, 8),
+    )
+
+    compiled_sql = str(db.executed[0])
+    assert "LEFT OUTER JOIN order_detail" in compiled_sql
+    assert "order_item.quantity_shipped - order_item.refund_num" in compiled_sql
+    assert "order_header.order_status IN" in compiled_sql
+    assert result == {("sku-A", "US"): [(None, 3)]}
 
 
 @pytest.mark.asyncio

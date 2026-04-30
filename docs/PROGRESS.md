@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-30（调度器状态接口修复：API 进程可推导下次执行时间，店铺基础同步纳入每日自动调度。）
+> 最近更新：2026-04-30（Step 5 分仓修复：无邮编/无详情/未命中规则的未知需求按国家规则仓均分，不再跟随少量已知邮编样本。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -63,7 +63,7 @@
   2. `step2_sale_days` — 可售天数 + 库存聚合（含在途）
   3. `step3_country_qty` — 各国补货量（`target_days + (demand_date - today)` 作为有效目标库存天数）
   4. `step4_total` — 总采购量（基于新的 Σcountry_qty − 本地库存 + ceil(Σvelocity × safety_stock_days)，clamp 到 0；`buffer_days` 不参与采购量）
-  5. `step5_warehouse_split` — 按邮编规则分配到具体仓库
+  5. `step5_warehouse_split` — 按邮编规则分配到具体仓库；有效发货订单以 `quantity_shipped - refund_num` 为样本数量，订单详情左连接，已知邮编命中部分按真实比例分配，未知部分按该国家已配置邮编规则的仓均分
   6. `step6_timing` — 紧急标志与补货日期（任一正补货国家 `sale_days <= lead_time_days` 即为紧急；`restock_date[sku][country] = today + int(sale_days[sku][country]) − lead_time_days`）
 - **补货区域过滤**：全局参数 `restock_regions` 支持按国家多选；为空数组时表示全部国家参与计算，配置后仅这些国家的订单会参与 `step1_velocity` 销量统计和 `step5_warehouse_split` 的国家订单分仓
 - **并发保护**：`pg_advisory_xact_lock(7429001)` 事务级锁，阻止并发引擎覆盖彼此
@@ -102,6 +102,12 @@
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.87 Step 5 未知分仓样本均分修复（2026-04-30）
+- **分仓样本口径**：`backend/app/engine/step5_warehouse_split.py` 的 `load_all_sku_country_orders()` 从订单详情内连接改为左连接，同 SKU + 国家下已发货/部分发货订单即使无详情、无邮编也会进入分仓样本；样本数量改为 `max(quantity_shipped - refund_num, 0)`，与 Step 1 销量口径一致，零或负数净发货不参与分仓。
+- **未知需求分配**：Step 5 先把订单样本拆成已知仓需求与未知仓需求；已知部分继续按邮编规则命中的仓库比例分配，未知部分按该国家已配置邮编规则的仓库均分，最终合并为 `warehouse_breakdown`。若全部未知，保持规则仓均分；若国家无规则仓，仍保持不拆仓。
+- **解释快照**：`allocation_snapshot` 保留原字段，混合场景 `allocation_mode` 记录为 `mixed_known_unknown`，并继续记录 `matched_order_qty`、`unknown_order_qty` 与 `eligible_warehouses`。
+- **测试**：更新 `backend/tests/unit/test_engine_step5.py`，覆盖未知样本不跟随已知仓、纯已知 60/40、全未知均分、无规则仓不拆仓、净发货数扣减与订单详情左连接。
 
 ### 3.86 调度器下次执行时间与店铺自动同步修复（2026-04-30）
 - **状态接口修复**：`backend/app/tasks/scheduler.py` 的 `scheduler_status()` 在 API-only backend 进程中不再依赖本进程 APScheduler 已启动；当 `job.next_run_time` 为空时，会通过 job trigger 和北京时间推导下一次触发时间，避免 `/api/sync/scheduler` 返回全空计划导致前端“自动同步下次执行”图表无内容。
@@ -163,7 +169,7 @@
 - **数据库字段**：`order_header` 新增 `source`、`order_platform`，历史数据默认回填为“亚马逊”；唯一约束调整为 `shop_id + amazon_order_id + source`。`order_detail` 与 `order_detail_fetch_log` 新增 `source` 并纳入主键，避免同店铺同订单号不同来源互相覆盖详情状态。
 - **同步任务**：`sync_order_list` 保持原任务名和入口不变，内部先按 `updateDateTime` 增量同步亚马逊订单，再按 6 个日历月 `purchase` 滚动同步多平台订单；`sync_all`、定时同步和 `/api/sync/orders` 无新增步骤。
 - **字段归一**：亚马逊订单写 `source='亚马逊'`、`order_platform='亚马逊'`；多平台订单写 `source='多平台'`、`order_platform=platformName`，`orderNo` 继续落入内部 `amazon_order_id` 字段。多平台状态归一为 `Shipped / PartiallyShipped / Unshipped / Pending / Canceled / Unknown`，仅 `localSku` 非空的明细写入 `order_item`。
-- **补货计算**：多平台订单明细沿用现有 `order_item` 销量口径，归一状态为 `Shipped / PartiallyShipped` 且 SKU 有效时参与 `step1_velocity` 销量统计；`step5_warehouse_split` 的邮编分仓仍依赖订单详情，因此只消费带亚马逊详情的订单。
+- **补货计算**：多平台订单明细沿用现有 `order_item` 销量口径，归一状态为 `Shipped / PartiallyShipped` 且 SKU 有效时参与 `step1_velocity` 销量统计；`step5_warehouse_split` 当前通过订单详情左连接消费有效发货订单，无详情或无邮编的多平台订单按未知需求参与规则仓均分。
 - **详情拉取**：`sync_order_detail`、`refetch_order_detail` 与订单详情接口查询均带 `source` 口径；后台详情任务只筛选 `source='亚马逊'`，不会对多平台订单调用 `/api/order/detailByOrderId.json`。
 - **前端展示**：订单列表新增“来源”“订单平台”列，详情弹窗展示对应字段；多平台订单详情状态显示“不适用”，点击详情仍可查看本地订单头与明细。
 - **40019 重试**：`retry_failed_api_calls` 支持 `/api/multiplatform/order/list.json`，其忙碌任务映射为 `sync_order_list` / `sync_all`，避免与正在运行的订单同步并发重放。

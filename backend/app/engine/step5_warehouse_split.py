@@ -1,10 +1,11 @@
 """Step 5:各国仓内分配(简化版 FR-033 + analyze G6)。
 
 策略:
-- 取该 SKU 在该国近 30 天已拉详情且有 postal_code 的订单
+- 取该 SKU 在该国近 30 天有效发货订单,订单详情左连接,无邮编也参与未知样本
 - 按 zipcode_rule 分配到具体仓 -> 未匹配的归"未知仓"
-- 已知仓总件数 > 0:按真实比例分配(不设阈值,不做小占比归零)
-- 已知仓总件数 = 0:均分到该国所有"已维护国家"的海外仓(零数据兜底)
+- 已知与未知同时存在时,先按样本件数拆成已知桶和未知桶
+- 已知桶按真实比例分配,未知桶均分到该国已配置邮编规则的仓
+- 已知仓总件数 = 0:均分到该国所有已配置邮编规则的仓(零数据兜底)
 """
 
 from collections import defaultdict
@@ -99,14 +100,16 @@ async def load_all_sku_country_orders(
     end_dt = datetime.combine(today, datetime.min.time(), tzinfo=BEIJING)
 
     stmt = (
+        # Step 5 的样本口径与 Step 1 销量一致:有效发货数 = shipped - refund。
+        # 订单详情使用左连接,让无详情/无邮编订单进入 unknown 分仓样本。
         select(
             OrderItem.commodity_sku,
             OrderHeader.country_code,
             OrderDetail.postal_code,
-            OrderItem.quantity_shipped,
+            (OrderItem.quantity_shipped - OrderItem.refund_num).label("effective_qty"),
         )
         .join(OrderHeader, OrderHeader.id == OrderItem.order_id)
-        .join(
+        .outerjoin(
             OrderDetail,
             (OrderDetail.shop_id == OrderHeader.shop_id)
             & (OrderDetail.amazon_order_id == OrderHeader.amazon_order_id)
@@ -123,9 +126,55 @@ async def load_all_sku_country_orders(
 
     grouped: dict[tuple[str, str], list[tuple[str | None, int]]] = {}
     for sku, country, postal, qty in rows:
+        effective_qty = max(int(qty or 0), 0)
+        if effective_qty <= 0:
+            continue
         key = (sku, country)
-        grouped.setdefault(key, []).append((postal, int(qty or 0)))
+        grouped.setdefault(key, []).append((postal, effective_qty))
     return grouped
+
+
+def _allocate_by_weights(
+    total_qty: int,
+    ordered_weights: list[tuple[str, Fraction]],
+) -> dict[str, int]:
+    """按权重分配整数数量,使用 floor + 最大余数法保证总和精确。"""
+    if total_qty <= 0 or not ordered_weights:
+        return {}
+
+    total_weight = sum(weight for _, weight in ordered_weights)
+    if total_weight <= 0:
+        return {}
+
+    result: dict[str, int] = {}
+    remainders: list[tuple[Fraction, int, str]] = []
+    allocated = 0
+    for order_index, (key, weight) in enumerate(ordered_weights):
+        exact = Fraction(total_qty) * weight / total_weight
+        base = exact.numerator // exact.denominator
+        result[key] = base
+        allocated += base
+        remainders.append((exact - base, order_index, key))
+
+    for _, _, key in sorted(remainders, key=lambda item: (-item[0], item[1]))[
+        : total_qty - allocated
+    ]:
+        result[key] += 1
+
+    return {key: qty for key, qty in result.items() if qty > 0}
+
+
+def _allocate_even(total_qty: int, warehouses: list[str]) -> dict[str, int]:
+    if total_qty <= 0 or not warehouses:
+        return {}
+
+    base = total_qty // len(warehouses)
+    remainder = total_qty - base * len(warehouses)
+    return {
+        wid: qty
+        for i, wid in enumerate(warehouses)
+        if (qty := base + (1 if i < remainder else 0)) > 0
+    }
 
 
 def split_country_qty(
@@ -194,28 +243,29 @@ def explain_country_qty_split(
     total_known = sum(known_counts.values())
 
     if total_known > 0:
-        # 按真实比例分配；floor + 最大余数法保证总和精确等于 country_qty。
+        # 已知桶按真实比例分配；未知桶按规则仓均分,再合并两部分。
+        bucket_allocations = _allocate_by_weights(
+            country_qty,
+            [
+                ("known", Fraction(matched_order_qty)),
+                ("unknown", Fraction(unknown_order_qty)),
+            ],
+        )
+        known_qty = bucket_allocations.get("known", 0)
+        unknown_qty = bucket_allocations.get("unknown", 0)
+
         ordered_counts = [
             (wid, known_counts[wid]) for wid in eligible_warehouses if wid in known_counts
         ]
-        result: dict[str, int] = {}
-        remainders: list[tuple[Fraction, int, str]] = []
-        allocated = 0
-        for order_index, (wid, cnt) in enumerate(ordered_counts):
-            exact = Fraction(country_qty) * cnt / total_known
-            base = exact.numerator // exact.denominator
-            result[wid] = base
-            allocated += base
-            remainders.append((exact - base, order_index, wid))
-
-        for _, _, wid in sorted(remainders, key=lambda item: (-item[0], item[1]))[
-            : country_qty - allocated
-        ]:
-            result[wid] += 1
+        result = _allocate_by_weights(known_qty, ordered_counts)
+        for wid, qty in _allocate_even(unknown_qty, eligible_warehouses).items():
+            result[wid] = result.get(wid, 0) + qty
 
         return CountryAllocationResult(
             warehouse_breakdown={k: v for k, v in result.items() if v > 0},
-            allocation_mode="matched",
+            allocation_mode=(
+                "mixed_known_unknown" if unknown_order_qty > 0 else "matched"
+            ),
             matched_order_qty=matched_order_qty,
             unknown_order_qty=unknown_order_qty,
             eligible_warehouses=eligible_warehouses,
@@ -230,11 +280,7 @@ def explain_country_qty_split(
             unknown_order_qty=unknown_order_qty,
             eligible_warehouses=[],
         )
-    base = country_qty // len(eligible_warehouses)
-    remainder = country_qty - base * len(eligible_warehouses)
-    result = {}
-    for i, wid in enumerate(eligible_warehouses):
-        result[wid] = base + (1 if i < remainder else 0)
+    result = _allocate_even(country_qty, eligible_warehouses)
     return CountryAllocationResult(
         warehouse_breakdown={k: v for k, v in result.items() if v > 0},
         allocation_mode="fallback_even",
