@@ -131,7 +131,7 @@ describe('SyncConsoleView', () => {
     const wrapper = await mountView(makeSchedulerStatus())
 
     const chart = wrapper.findComponent(DashboardChartCardStub)
-    expect(chart.props('description')).toBe('??????????????????')
+    expect(chart.props('description')).toBe('按计划时间查看自动任务的下一次触发点')
 
     const option = chart.props('option') as {
       xAxis: { type: string; min: number; max: number }
@@ -142,8 +142,8 @@ describe('SyncConsoleView', () => {
     expect(option.xAxis.type).toBe('time')
     expect(option.yAxis.type).toBe('category')
     expect(option.series[0].type).toBe('scatter')
-    expect(option.yAxis.data).toEqual(['??????', '????', '??????'])
-    expect(option.series[0].data.map((item) => item.value[1])).toEqual(['??????', '????', '??????'])
+    expect(option.yAxis.data).toEqual(['订单列表同步', '库存同步', '仓库基础同步'])
+    expect(option.series[0].data.map((item) => item.value[1])).toEqual(['订单列表同步', '库存同步', '仓库基础同步'])
     expect(option.series[0].data[0].itemStyle.color).toBe('#2563eb')
     expect(option.series[0].data[2].itemStyle.color).toBe('#71717a')
     expect(option.xAxis.min).toBe(new Date('2026-04-30T10:00:00+08:00').getTime())
@@ -159,9 +159,9 @@ describe('SyncConsoleView', () => {
 
     const html = option.tooltip.formatter({ data: option.series[0].data[0] })
 
-    expect(html).toContain('?????????')
-    expect(html).toContain(`?????${dayjs('2026-04-30T10:30:00+08:00').format('MM-DD HH:mm:ss')}`)
-    expect(html).toContain('?????30 ??')
+    expect(html).toContain('任务：订单列表同步')
+    expect(html).toContain(`下次执行：${dayjs('2026-04-30T10:30:00+08:00').format('MM-DD HH:mm:ss')}`)
+    expect(html).toContain('距离执行：30 分钟')
   })
 
   it('uses the scheduler disabled empty text when no jobs are scheduled', async () => {
@@ -169,7 +169,7 @@ describe('SyncConsoleView', () => {
     const chart = wrapper.findComponent(DashboardChartCardStub)
 
     expect(chart.props('empty')).toBe(true)
-    expect(chart.props('emptyText')).toBe('???????')
+    expect(chart.props('emptyText')).toBe('自动调度已关闭')
   })
 
   it('uses the fallback empty text when scheduler is enabled but has no jobs', async () => {
@@ -177,6 +177,6 @@ describe('SyncConsoleView', () => {
     const chart = wrapper.findComponent(DashboardChartCardStub)
 
     expect(chart.props('empty')).toBe(true)
-    expect(chart.props('emptyText')).toBe('????????')
+    expect(chart.props('emptyText')).toBe('暂无下次执行计划')
   })
 })
