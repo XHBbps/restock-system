@@ -22,9 +22,10 @@
 
     <DashboardChartCard
       title="自动同步下次执行"
+      description="按计划时间查看自动任务的下一次触发点"
       :option="nextRunChartOption"
-      :empty="autoScheduleRows.length === 0"
-      empty-text="暂无自动调度任务"
+      :empty="isNextRunChartEmpty"
+      :empty-text="nextRunChartEmptyText"
     />
 
     <DataTableCard title="调度器控制">
@@ -125,6 +126,28 @@ interface ActionCardViewModel {
   lastError: string
 }
 
+interface ScheduleChartRow {
+  jobLabel: string
+  nextRunAt: number
+  nextRunTime: string
+  minutesUntil: number
+  isSoon: boolean
+}
+
+interface ScheduleSeriesDataItem {
+  name: string
+  value: [number, string]
+  itemStyle: { color: string }
+  jobLabel: string
+  nextRunTime: string
+  minutesUntil: number
+}
+
+type TooltipFormatterParam =
+  | ScheduleSeriesDataItem
+  | { data?: ScheduleSeriesDataItem }
+  | Array<{ data?: ScheduleSeriesDataItem }>
+
 const auth = useAuthStore()
 const schedulerStatus = ref<SchedulerStatus | null>(null)
 const schedulerLoading = ref(false)
@@ -181,26 +204,97 @@ const autoScheduleRows = computed(() =>
     .slice(0, 8),
 )
 
+const scheduleChartRows = computed<ScheduleChartRow[]>(() => {
+  const now = dayjs()
+  return autoScheduleRows.value.map((item) => {
+    const nextRun = dayjs(item.next_run_time)
+    const minutesUntil = Math.max(nextRun.diff(now, 'minute'), 0)
+    return {
+      jobLabel: syncJobLabelMap[item.job_name] || item.job_name,
+      nextRunAt: nextRun.valueOf(),
+      nextRunTime: item.next_run_time || '',
+      minutesUntil,
+      isSoon: minutesUntil <= 60,
+    }
+  })
+})
+
+const isNextRunChartEmpty = computed(
+  () => schedulerStatus.value !== null && (schedulerStatus.value.enabled === false || autoScheduleRows.value.length === 0),
+)
+
+const nextRunChartEmptyText = computed(() =>
+  schedulerStatus.value?.enabled === false ? '自动调度已关闭' : '暂无下次执行计划',
+)
+
+function formatMinutesUntil(minutes: number): string {
+  if (minutes <= 0) return '即将执行'
+  if (minutes < 60) return `${minutes} 分钟`
+  const hours = Math.floor(minutes / 60)
+  const restMinutes = minutes % 60
+  if (restMinutes === 0) return `${hours} 小时`
+  return `${hours} 小时 ${restMinutes} 分钟`
+}
+
+function getTooltipData(params: TooltipFormatterParam): ScheduleSeriesDataItem | null {
+  if (Array.isArray(params)) {
+    return params[0]?.data || null
+  }
+  if ('data' in params) {
+    return params.data || null
+  }
+  return params as ScheduleSeriesDataItem
+}
+
 const nextRunChartOption = computed<EChartsCoreOption>(() => ({
-  grid: { left: 24, right: 24, top: 24, bottom: 24, containLabel: true },
-  tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+  grid: { left: 24, right: 32, top: 28, bottom: 36, containLabel: true },
+  tooltip: {
+    trigger: 'item',
+    formatter: (params: TooltipFormatterParam) => {
+      const data = getTooltipData(params)
+      if (!data) return ''
+      return [
+        `任务：${data.jobLabel}`,
+        `下次执行：${formatDetailTime(data.nextRunTime)}`,
+        `距离执行：${formatMinutesUntil(data.minutesUntil)}`,
+      ].join('<br/>')
+    },
+  },
   xAxis: {
-    type: 'value',
-    axisLabel: { color: '#71717a' },
+    type: 'time',
+    min: dayjs().valueOf(),
+    max:
+      Math.max(...scheduleChartRows.value.map((item) => item.nextRunAt), dayjs().add(1, 'hour').valueOf()) +
+      15 * 60 * 1000,
+    axisLabel: { color: '#71717a', formatter: '{HH}:{mm}' },
+    axisTick: { alignWithLabel: true },
     splitLine: { lineStyle: { color: '#f4f4f5' } },
   },
   yAxis: {
     type: 'category',
-    data: autoScheduleRows.value.map((item) => syncJobLabelMap[item.job_name] || item.job_name),
+    data: scheduleChartRows.value.map((item) => item.jobLabel),
     axisLabel: { color: '#71717a', width: 180, overflow: 'truncate' },
     axisTick: { show: false },
+    axisLine: { lineStyle: { color: '#e4e4e7' } },
   },
   series: [
     {
-      type: 'bar',
-      data: autoScheduleRows.value.map((item) => Math.max(dayjs(item.next_run_time).diff(dayjs(), 'minute'), 0)),
-      barWidth: 16,
-      itemStyle: { color: '#18181b', borderRadius: [0, 6, 6, 0] },
+      type: 'scatter',
+      symbolSize: 14,
+      data: scheduleChartRows.value.map((item) => ({
+        name: item.jobLabel,
+        value: [item.nextRunAt, item.jobLabel],
+        itemStyle: { color: item.isSoon ? '#2563eb' : '#71717a' },
+        jobLabel: item.jobLabel,
+        nextRunTime: item.nextRunTime,
+        minutesUntil: item.minutesUntil,
+      })),
+      markLine: {
+        symbol: 'none',
+        label: { formatter: '当前时间', color: '#52525b' },
+        lineStyle: { color: '#ef4444', type: 'dashed', width: 1 },
+        data: [{ xAxis: dayjs().valueOf() }],
+      },
     },
   ],
 }))
