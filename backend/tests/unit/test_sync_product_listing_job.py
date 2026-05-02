@@ -212,8 +212,54 @@ async def test_upsert_commodity_skips_blank_sku_and_maps_fields() -> None:
     assert params["name"] == "Name"
     assert params["state"] == "active"
     assert params["is_group"] is True
+    assert params["img_url"] == "https://example.test/a.png"
     assert params["purchase_days"] == 12
     assert params["child_skus"] == ["A", "B"]
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected_img_url"),
+    [
+        (
+            {
+                "imgUrl": "https://example.test/img-url.png",
+                "imageUrl": "https://example.test/image-url.png",
+                "mainImage": "https://example.test/main-image.png",
+            },
+            "https://example.test/img-url.png",
+        ),
+        (
+            {
+                "imgUrl": "",
+                "imageUrl": "https://example.test/image-url.png",
+                "mainImage": "https://example.test/main-image.png",
+            },
+            "https://example.test/image-url.png",
+        ),
+        (
+            {
+                "imageUrl": "",
+                "mainImage": "https://example.test/main-image.png",
+            },
+            "https://example.test/main-image.png",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_upsert_commodity_uses_image_field_priority(
+    raw: dict[str, object],
+    expected_img_url: str,
+) -> None:
+    import app.sync.product_listing as product_listing_module
+
+    db = _FakeDb()
+    assert await product_listing_module._upsert_commodity(  # type: ignore[arg-type]
+        db,
+        {"sku": "SKU-1", **raw},
+    ) is True
+
+    params = db.statements[-1].compile().params
+    assert params["img_url"] == expected_img_url
 
 
 @pytest.mark.asyncio

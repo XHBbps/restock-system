@@ -1,6 +1,12 @@
 <template>
   <div class="sku-card">
-    <img v-if="image" :src="image" :alt="name || sku" class="sku-image" />
+    <img
+      v-if="showImage"
+      :src="image || undefined"
+      :alt="name || sku"
+      class="sku-image"
+      @error="handleImageError"
+    />
     <div v-else class="sku-image-placeholder">{{ sku.slice(0, 2).toUpperCase() }}</div>
     <div class="sku-meta">
       <div class="sku-name">{{ name || sku }}</div>
@@ -11,12 +17,28 @@
 </template>
 
 <script setup lang="ts">
-defineProps<{
+import { computed, ref, watch } from 'vue'
+
+const props = defineProps<{
   sku: string
   name?: string | null
   image?: string | null
   blocker?: string | null
 }>()
+
+const imageLoadFailed = ref(false)
+const showImage = computed(() => Boolean(props.image) && !imageLoadFailed.value)
+
+watch(
+  () => props.image,
+  () => {
+    imageLoadFailed.value = false
+  }
+)
+
+function handleImageError(): void {
+  imageLoadFailed.value = true
+}
 </script>
 
 <style lang="scss" scoped>

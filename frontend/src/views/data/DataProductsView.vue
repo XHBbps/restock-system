@@ -58,18 +58,6 @@
       <el-table-column label="商品信息" min-width="300">
         <template #default="{ row }">
           <SkuCard :sku="row.commodity_sku" :name="row.commodity_name" :image="row.main_image" />
-          <div class="meta-line">
-            <span v-if="row.commodity_id" class="muted">ID：{{ row.commodity_id }}</span>
-            <span v-if="row.purchase_days !== null && row.purchase_days !== undefined" class="muted">
-              采购周期：{{ row.purchase_days }}
-            </span>
-            <el-tag v-if="row.state" size="small" :type="getMasterStateTagType(row.state)">
-              {{ row.state }}
-            </el-tag>
-            <el-tag v-if="row.is_group" size="small" type="warning">组合</el-tag>
-            <el-tag v-if="row.has_listing" size="small" type="success">有 listing</el-tag>
-            <el-tag v-else size="small" type="info">无 listing</el-tag>
-          </div>
         </template>
       </el-table-column>
 
@@ -186,31 +174,11 @@ function handlePageSizeChange(value: number): void {
   void reload(true)
 }
 
-function getMasterStateTagType(state: string): 'success' | 'warning' | 'info' | 'danger' {
-  const normalized = state.toLowerCase()
-  if (normalized.includes('active') || normalized.includes('on')) {
-    return 'success'
-  }
-  if (normalized.includes('pause') || normalized.includes('stop')) {
-    return 'warning'
-  }
-  if (normalized.includes('delete') || normalized.includes('invalid')) {
-    return 'danger'
-  }
-  return 'info'
-}
 </script>
 
 <style lang="scss" scoped>
 .expand-wrapper {
   padding: $space-3 $space-4;
-}
-
-.meta-line {
-  display: flex;
-  flex-wrap: wrap;
-  gap: $space-2;
-  margin-top: $space-2;
 }
 
 .muted {

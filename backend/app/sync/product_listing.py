@@ -163,6 +163,14 @@ def _infer_is_matched(raw: dict[str, Any]) -> bool:
     )
 
 
+def _commodity_image_url(raw: dict[str, Any]) -> str | None:
+    for field_name in ("imgUrl", "imageUrl", "mainImage"):
+        image_url = _normalize_optional_text(raw.get(field_name))
+        if image_url:
+            return image_url
+    return None
+
+
 async def _upsert_commodity(db: AsyncSession, raw: dict[str, Any]) -> bool:
     sku = _normalize_optional_text(raw.get("sku"))
     if not sku:
@@ -174,7 +182,7 @@ async def _upsert_commodity(db: AsyncSession, raw: dict[str, Any]) -> bool:
         "name": _normalize_optional_text(raw.get("name")),
         "state": _normalize_optional_text(raw.get("state")),
         "is_group": _to_bool(raw.get("isGroup")),
-        "img_url": _normalize_optional_text(raw.get("imgUrl")),
+        "img_url": _commodity_image_url(raw),
         "purchase_days": _to_int(raw.get("purchaseDays")),
         "child_skus": _normalize_child_skus(raw.get("childSkus")),
         "last_sync_at": now_beijing(),
