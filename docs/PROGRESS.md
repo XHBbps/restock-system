@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-04-30（Step 5 分仓修复：无邮编/无详情/未命中规则的未知需求按国家规则仓均分，不再跟随少量已知邮编样本。）
+> 最近更新：2026-05-02（SKU 映射规则支持替代组合：`group_no` 同组 AND、跨组 OR，海外仓/本地仓库存换算统一按组合可组装数求和。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -102,6 +102,14 @@
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.88 SKU 映射替代组合改造（2026-05-02）
+- **数据库迁移**：`sku_mapping_component` 新增 `group_no`，默认值为 1，旧组件行自动归入“组合 1”；保留 `sku_mapping_rule.commodity_sku` 唯一与 `sku_mapping_component.inventory_sku` 全局唯一，继续避免同一库存 SKU 被多个商品重复消费。
+- **规则语义**：同一商品 SKU 下，相同 `group_no` 的组件是 AND 组合，不同 `group_no` 是 OR 替代方案。`A=B+C+D` 表示一个组合，`A=B 或 C 或 D` 表示三个单组件组合，`A=B+C+D 或 E+F+G` 表示两个组合。
+- **计算口径**：`backend/app/engine/sku_mapping.py` 改为每仓库、每组合分别计算可组装数量；单组件组合按 `库存数 // quantity`，多组件组合按 `min(各组件库存数 // quantity)`，同商品同仓库的多个替代组合结果相加。Step 2 海外仓库存/在途换算和 Step 4 本地仓采购量抵扣共用该口径，不跨仓拼组件。
+- **导入导出与 API**：映射组件 DTO 增加 `group_no`，校验 `group_no >= 1`、组件数量为正、库存 SKU 不重复；导出模板新增“组合编号”列，导入兼容旧模板，缺少“组合编号”时默认组合 1。
+- **前端页面**：`frontend/src/views/SkuMappingRuleView.vue` 的组件编辑器改为按“方案”分组展示，公式预览使用 `或` 连接替代组合；新增/编辑 payload 会携带 `group_no`。
+- **测试**：补充 `backend/tests/unit/test_engine_sku_mapping.py`、`backend/tests/unit/test_sku_mapping_import.py` 与 `frontend/src/views/__tests__/SkuMappingRuleView.test.ts`，覆盖替代单组件、替代多组件、不跨仓、本地仓无国家字段、旧/新模板导入、重复库存 SKU 和前端公式/payload。
 
 ### 3.87 Step 5 未知分仓样本均分修复（2026-04-30）
 - **分仓样本口径**：`backend/app/engine/step5_warehouse_split.py` 的 `load_all_sku_country_orders()` 从订单详情内连接改为左连接，同 SKU + 国家下已发货/部分发货订单即使无详情、无邮编也会进入分仓样本；样本数量改为 `max(quantity_shipped - refund_num, 0)`，与 Step 1 销量口径一致，零或负数净发货不参与分仓。

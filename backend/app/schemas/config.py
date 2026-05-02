@@ -93,6 +93,7 @@ class SkuConfigPatch(BaseModel):
 
 # ==================== SKU Mapping Rules ====================
 class SkuMappingComponentIn(BaseModel):
+    group_no: int = Field(default=1, ge=1, le=999999)
     inventory_sku: str = Field(..., min_length=1, max_length=100)
     quantity: int = Field(..., ge=1, le=999999)
 

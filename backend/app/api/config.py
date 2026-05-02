@@ -498,8 +498,14 @@ async def patch_sku_config(
 # SKU Mapping Rules
 # ============================================================
 def _mapping_formula(rule: SkuMappingRule) -> str:
-    parts = [f"{component.quantity}*{component.inventory_sku}" for component in rule.components]
-    return f"{rule.commodity_sku}=" + "+".join(parts)
+    groups: dict[int, list[SkuMappingComponent]] = {}
+    for component in rule.components:
+        groups.setdefault(component.group_no, []).append(component)
+    group_parts = [
+        "+".join(f"{component.quantity}*{component.inventory_sku}" for component in groups[group_no])
+        for group_no in sorted(groups)
+    ]
+    return f"{rule.commodity_sku}=" + " 或 ".join(group_parts)
 
 
 def _mapping_rule_out(rule: SkuMappingRule) -> SkuMappingRuleOut:
@@ -553,6 +559,7 @@ async def _replace_mapping_components(
         db.add(
             SkuMappingComponent(
                 rule_id=rule.id,
+                group_no=component.group_no,
                 inventory_sku=component.inventory_sku,
                 quantity=component.quantity,
             )
@@ -645,12 +652,13 @@ async def export_sku_mapping_rules(
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "映射规则"
-    sheet.append(["商品SKU", "库存SKU", "组件数量", "启用", "备注"])
+    sheet.append(["商品SKU", "组合编号", "库存SKU", "组件数量", "启用", "备注"])
     for rule in rows:
         for component in rule.components:
             sheet.append(
                 [
                     rule.commodity_sku,
+                    component.group_no,
                     component.inventory_sku,
                     component.quantity,
                     "是" if rule.enabled else "否",
@@ -711,6 +719,14 @@ def _normalize_import_rows(raw_rows: list[dict[str, Any]]) -> dict[str, SkuMappi
             continue
         commodity_sku = str(raw.get("商品SKU") or "").strip()
         inventory_sku = str(raw.get("库存SKU") or "").strip()
+        group_no_raw = raw.get("组合编号")
+        if group_no_raw in (None, ""):
+            group_no = 1
+        else:
+            try:
+                group_no = int(group_no_raw)
+            except (TypeError, ValueError):
+                group_no = 0
         quantity_raw = raw.get("组件数量")
         if quantity_raw is None:
             quantity = 0
@@ -730,6 +746,8 @@ def _normalize_import_rows(raw_rows: list[dict[str, Any]]) -> dict[str, SkuMappi
             errors.append({"row": idx, "message": "商品SKU不能为空"})
         if not inventory_sku:
             errors.append({"row": idx, "message": "库存SKU不能为空"})
+        if group_no <= 0:
+            errors.append({"row": idx, "message": "组合编号必须为正整数"})
         if quantity <= 0:
             errors.append({"row": idx, "message": "组件数量必须为正整数"})
         if inventory_sku:
@@ -737,7 +755,7 @@ def _normalize_import_rows(raw_rows: list[dict[str, Any]]) -> dict[str, SkuMappi
             if previous_row is not None:
                 errors.append({"row": idx, "message": f"库存SKU与第 {previous_row} 行重复：{inventory_sku}"})
             seen_inventory[inventory_sku] = idx
-        if not commodity_sku or not inventory_sku or quantity <= 0:
+        if not commodity_sku or not inventory_sku or group_no <= 0 or quantity <= 0:
             continue
 
         entry = grouped.setdefault(
@@ -748,7 +766,9 @@ def _normalize_import_rows(raw_rows: list[dict[str, Any]]) -> dict[str, SkuMappi
             errors.append({"row": idx, "message": f"同一商品SKU的启用状态不一致：{commodity_sku}"})
         if entry["remark"] != remark:
             errors.append({"row": idx, "message": f"同一商品SKU的备注不一致：{commodity_sku}"})
-        entry["components"].append({"inventory_sku": inventory_sku, "quantity": quantity})
+        entry["components"].append(
+            {"group_no": group_no, "inventory_sku": inventory_sku, "quantity": quantity}
+        )
 
     if errors:
         raise ValidationFailed("导入校验失败", detail={"errors": errors})
@@ -848,7 +868,11 @@ async def patch_sku_mapping_rule(
 
     new_commodity_sku = patch.commodity_sku if patch.commodity_sku is not None else rule.commodity_sku
     new_components = patch.components if patch.components is not None else [
-        SkuMappingComponentIn(inventory_sku=item.inventory_sku, quantity=item.quantity)
+        SkuMappingComponentIn(
+            group_no=item.group_no,
+            inventory_sku=item.inventory_sku,
+            quantity=item.quantity,
+        )
         for item in rule.components
     ]
     await _validate_mapping_unique(

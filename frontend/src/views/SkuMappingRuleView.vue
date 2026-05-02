@@ -87,34 +87,51 @@
         </el-form-item>
         <el-form-item label="组件">
           <div class="component-editor">
-            <div
-              v-for="(component, index) in form.components"
-              :key="index"
-              class="component-row"
+            <section
+              v-for="group in formGroups"
+              :key="group.groupNo"
+              class="component-group"
             >
-              <el-input
-                v-model="component.inventory_sku"
-                placeholder="库存SKU"
-                class="component-row__sku"
-              />
-              <el-input-number
-                v-model="component.quantity"
-                :min="1"
-                :step="1"
-                step-strictly
-                class="component-row__qty"
-              />
-              <el-button
-                class="component-delete-button"
-                :disabled="form.components.length === 1"
-                link
-                type="danger"
-                @click="removeComponent(index)"
+              <div class="component-group__header">
+                <span>方案 {{ group.groupNo }}</span>
+                <el-button link type="primary" @click="addComponent(group.groupNo)">添加组件</el-button>
+              </div>
+              <div
+                v-for="{ component, index } in group.components"
+                :key="index"
+                class="component-row"
               >
-                删除
-              </el-button>
-            </div>
-            <el-button class="component-add-button" @click="addComponent">添加组件</el-button>
+                <el-input-number
+                  v-model="component.group_no"
+                  :min="1"
+                  :step="1"
+                  step-strictly
+                  class="component-row__group"
+                />
+                <el-input
+                  v-model="component.inventory_sku"
+                  placeholder="库存SKU"
+                  class="component-row__sku"
+                />
+                <el-input-number
+                  v-model="component.quantity"
+                  :min="1"
+                  :step="1"
+                  step-strictly
+                  class="component-row__qty"
+                />
+                <el-button
+                  class="component-delete-button"
+                  :disabled="form.components.length === 1"
+                  link
+                  type="danger"
+                  @click="removeComponent(index)"
+                >
+                  删除
+                </el-button>
+              </div>
+            </section>
+            <el-button class="component-add-button" @click="addGroup">添加方案</el-button>
           </div>
         </el-form-item>
         <el-form-item label="备注">
@@ -179,15 +196,34 @@ const form = reactive<SkuMappingRuleInput>({
   commodity_sku: '',
   enabled: true,
   remark: '',
-  components: [{ inventory_sku: '', quantity: 1 }],
+  components: [{ group_no: 1, inventory_sku: '', quantity: 1 }],
+})
+
+const formGroups = computed(() => {
+  const groups = new Map<number, Array<{ component: SkuMappingRuleInput['components'][number]; index: number }>>()
+  form.components.forEach((component, index) => {
+    const groupNo = Number(component.group_no) || 1
+    const rows = groups.get(groupNo) ?? []
+    rows.push({ component, index })
+    groups.set(groupNo, rows)
+  })
+  return Array.from(groups.entries())
+    .sort(([left], [right]) => left - right)
+    .map(([groupNo, components]) => ({ groupNo, components }))
 })
 
 const formulaPreview = computed(() => {
   const sku = form.commodity_sku.trim() || '商品SKU'
-  const parts = form.components
-    .filter((component) => component.inventory_sku.trim())
-    .map((component) => `${component.quantity || 1}*${component.inventory_sku.trim()}`)
-  return `${sku}=${parts.length ? parts.join('+') : '库存SKU组件'}`
+  const groups = formGroups.value
+    .map((group) =>
+      group.components
+        .map(({ component }) => component)
+        .filter((component) => component.inventory_sku.trim())
+        .map((component) => `${component.quantity || 1}*${component.inventory_sku.trim()}`)
+        .join('+'),
+    )
+    .filter(Boolean)
+  return `${sku}=${groups.length ? groups.join(' 或 ') : '库存SKU组件'}`
 })
 
 async function reload(): Promise<void> {
@@ -218,7 +254,7 @@ function resetForm(): void {
     commodity_sku: '',
     enabled: true,
     remark: '',
-    components: [{ inventory_sku: '', quantity: 1 }],
+    components: [{ group_no: 1, inventory_sku: '', quantity: 1 }],
   })
 }
 
@@ -235,6 +271,7 @@ function openEdit(row: SkuMappingRule): void {
     enabled: row.enabled,
     remark: row.remark || '',
     components: row.components.map((component) => ({
+      group_no: component.group_no,
       inventory_sku: component.inventory_sku,
       quantity: component.quantity,
     })),
@@ -247,8 +284,13 @@ function resetDialog(): void {
   resetForm()
 }
 
-function addComponent(): void {
-  form.components.push({ inventory_sku: '', quantity: 1 })
+function addComponent(groupNo = 1): void {
+  form.components.push({ group_no: groupNo, inventory_sku: '', quantity: 1 })
+}
+
+function addGroup(): void {
+  const nextGroupNo = Math.max(0, ...form.components.map((component) => Number(component.group_no) || 0)) + 1
+  addComponent(nextGroupNo)
 }
 
 function removeComponent(index: number): void {
@@ -263,11 +305,16 @@ function buildPayload(): SkuMappingRuleInput | null {
     return null
   }
   const components = form.components.map((component) => ({
+    group_no: Number(component.group_no),
     inventory_sku: component.inventory_sku.trim(),
     quantity: Number(component.quantity),
   }))
   if (components.some((component) => !component.inventory_sku)) {
     ElMessage.warning('请输入库存SKU')
+    return null
+  }
+  if (components.some((component) => !Number.isInteger(component.group_no) || component.group_no <= 0)) {
+    ElMessage.warning('组合编号必须为正整数')
     return null
   }
   if (components.some((component) => !Number.isInteger(component.quantity) || component.quantity <= 0)) {
@@ -283,7 +330,7 @@ function buildPayload(): SkuMappingRuleInput | null {
     commodity_sku: commoditySku,
     enabled: form.enabled,
     remark: form.remark?.trim() || null,
-    components,
+    components: components.sort((left, right) => left.group_no - right.group_no),
   }
 }
 
@@ -417,14 +464,37 @@ onMounted(() => {
   width: 100%;
 }
 
+.component-group {
+  display: flex;
+  flex-direction: column;
+  gap: $space-2;
+  padding: $space-3;
+  border: 1px solid $color-border-default;
+  border-radius: $radius-md;
+  background: $color-bg-subtle;
+}
+
+.component-group__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: $color-text-secondary;
+  font-size: $font-size-sm;
+  font-weight: $font-weight-medium;
+}
+
 .component-row {
   display: flex;
   align-items: center;
   gap: $space-2;
 }
 
+.component-row__group {
+  width: 96px;
+}
+
 .component-row__sku {
-  width: 300px;
+  width: 260px;
 }
 
 .component-row__qty {
@@ -500,6 +570,11 @@ onMounted(() => {
 @media (max-width: 820px) {
   .form-field,
   .component-row__sku {
+    width: 100%;
+  }
+
+  .component-row__group,
+  .component-row__qty {
     width: 100%;
   }
 

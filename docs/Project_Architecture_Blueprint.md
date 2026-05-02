@@ -107,7 +107,7 @@
 | Step | 文件 | 输入 | 输出 | 规则 |
 |---|---|---|---|---|
 | 1 | `step1_velocity.py` | 近 30 天订单 | `velocity[sku][country]` | 加权日均销量：7日×0.5 + 14日×0.3 + 30日×0.2；若 `global_config.restock_regions` 非空，仅这些国家参与补货国家维度计算 |
-| 2 | `step2_sale_days.py` | 库存 + 在途 + velocity + SKU 映射规则 | `sale_days[sku][country]` | `(available + reserved + in_transit) / velocity`；启用映射规则会先按同仓库组件库存换算商品 SKU 视角库存；velocity≤0 跳过 |
+| 2 | `step2_sale_days.py` | 库存 + 在途 + velocity + SKU 映射规则 | `sale_days[sku][country]` | `(available + reserved + in_transit) / velocity`；启用映射规则会先按同仓库、同组合组件库存换算商品 SKU 视角库存，跨组合替代方案求和；velocity≤0 跳过 |
 | 3 | `step3_country_qty.py` | velocity + 库存 + 有效目标库存天数 | `country_qty[sku][country]` | `effective_target_days = target_days + max(demand_date - today, 0)`；`max(0, ceil(effective_target_days × velocity - (available + reserved + in_transit)))` |
 | 4 | `step4_total.py` | country_qty + velocity + 国内库存 + safety_stock_days | `purchase_qty[sku]` | `max(0, Σcountry_qty − (local.available + local.reserved) + ceil(Σvelocity × safety_stock_days))`；`Σcountry_qty` 使用 Step 3 的补货日期口径，`Σvelocity` 覆盖所有国家，不受 `restock_regions` 限制；`buffer_days` 不参与采购量 |
 | 5 | `step5_warehouse_split.py` | country_qty + 有效发货订单 + 订单邮编 + 邮编规则 + 国家规则仓映射 | `warehouse_breakdown[country][wh_id]` | 订单详情左连接，样本数量为 `max(quantity_shipped - refund_num, 0)`；按邮编规则分配到具体仓库，已知部分按命中比例分配，未知部分按该国家已配置邮编规则的仓均分；仅规则仓参与分仓与均分兜底；若无规则仓则该国家不分仓；若配置 `restock_regions`，仅消费这些国家的订单作为分仓依据；同优先级 tied 均分；整数分配使用 floor + 最大余数法，保证仓内合计等于国家补货量 |
@@ -115,7 +115,7 @@
 
 **运行上下文**：`EngineContext` 包含 `target_days`、`buffer_days`、`lead_time_days`、`safety_stock_days`、`restock_regions`、`eu_countries` 和本次请求的补货日期 `demand_date`。runner 会计算 `demand_days=max(demand_date - today, 0)` 并传给 Step 3 形成有效目标库存天数；`buffer_days` 作为全局配置快照保留，但当前仅用于追溯，不参与 `purchase_qty` 或 `restock_dates` 计算；`restock_regions` 保存前会走统一国家码标准化，`UK` 等别名按 ISO 代码去重为 `GB`；`global_config.eu_countries` 由同步层消费，保存该配置且实际变化时会同步回填历史订单、库存与在途国家码，`global_config_snapshot` 会冻结这些全局参数与 `demand_date` 以便追溯。
 
-**SKU 映射转换层**：`backend/app/engine/sku_mapping.py` 只在计算读取阶段消费 `sku_mapping_rule` / `sku_mapping_component`，不会改写同步落库的 `inventory_snapshot_latest`、`in_transit_record` 或库存明细展示。规则含义为“1 个商品 SKU 需要 N 个库存 SKU 组件”：`A=2*B` 按同仓库 `floor(B/2)` 计算，`A=1*B+2*C` 按同仓库 `min(floor(B/1), floor(C/2))` 计算；组件不能跨仓库、跨国家组合。Step 2 会把海外仓库存和有目标仓库 ID 的组件在途合并后计算可组装数量，再按国家汇总到商品 SKU；Step 4 会按国内仓同仓库组件库存计算可组装数量，再汇总为本地商品 SKU 库存。停用规则保留但不参与计算；未映射且不等于商品 SKU 的库存 SKU 不进入补货计算。
+**SKU 映射转换层**：`backend/app/engine/sku_mapping.py` 只在计算读取阶段消费 `sku_mapping_rule` / `sku_mapping_component`，不会改写同步落库的 `inventory_snapshot_latest`、`in_transit_record` 或库存明细展示。`sku_mapping_component.group_no` 表示替代组合编号：同一 `commodity_sku` 下相同 `group_no` 的组件是 AND，不同 `group_no` 是 OR。`A=2*B` 按同仓库 `floor(B/2)` 计算，`A=1*B+2*C` 按同仓库 `min(floor(B/1), floor(C/2))` 计算，`A=B 或 C 或 D` 按同仓库各单组件组合可组装数求和，`A=B+C+D 或 E+F+G` 则两个组合分别取最小组件数后求和；组件不能跨仓库、跨国家组合。Step 2 会把海外仓库存和有目标仓库 ID 的组件在途合并后按组合计算可组装数量，再按国家汇总到商品 SKU；Step 4 会按国内仓同仓库组件库存按组合计算可组装数量，再汇总为本地商品 SKU 库存。停用规则保留但不参与计算；未映射且不等于商品 SKU 的库存 SKU 不进入补货计算。
 
 **持久化**：一次完整计算在事务内执行，受 `pg_advisory_xact_lock(7429001)` 保护；runner 不再按 `restock_dates[country] <= demand_date` 过滤补货国家，补货国家是否进入本次建议只由 Step 3 的正补货量与 `restock_regions` 白名单决定。若 `purchase_qty <= 0` 且国家补货合计为 0，则跳过该 SKU；若仅安全库存触发采购但无国家补货量，仍保留为采购-only 条目，并保持 `country_breakdown` / `warehouse_breakdown` / `allocation_snapshot` / `restock_dates` 为空、`total_qty=0`、`urgent=false`；若无条目则返回 `None`，不归档旧 `draft`、不关闭生成开关、不生成空建议单；成功生成非空建议单后才归档旧 `draft`，写入 `suggestion` / `suggestion_item`，统计 `procurement_item_count`、`restock_item_count`，并由 `calc_engine_job` 将 `global_config.suggestion_generation_enabled` 自动翻 OFF。
 
@@ -473,7 +473,7 @@ async function reload() {
 | `SuggestionListView` | 顶部 `PageSectionCard.actions` 展示生成开关只读状态 tag 与当前建议 `补货日期`；发起区使用默认空的补货日期选择器，提交前校验空值与早于北京时间今天；`loadToggle()` + `loadActiveEngineTask()` 在 `onMounted` / `onActivated` 双钩子刷新开关与活跃 `calc_engine` 任务，活跃任务存在时复用 `TaskProgress` 并禁用日期选择器与生成按钮。列表页已收敛为生成与导出视角，不再保留旧赛狐写入时代的选择列、批量动作和状态筛选死代码。 |
 | `SuggestionDetailView` | 勾选 `export_status='pending'` 的条目 → “导出 Excel”按钮走一步式 `POST /api/suggestions/{id}/snapshots` + `GET /api/snapshots/{id}/download` blob 流程（失败时仍在 `finally` 中 `await load()` 刷新快照历史，并区分”导出成功但下载失败”的独立错误文案）；右侧新增”历史快照区”`PageSectionCard`（6 列，按 `version` 降序，可重复下载）；导出前会先探测生成开关，探测失败时按 fail-close 禁用按钮；`SkuCard` 停止传入 `:blocker`（组件 prop 仍保留但所有调用点不再传值）；条目 `isEditable` 改为 `export_status !== 'exported'`（对应 snapshot 条目不可变的约束，见 §9.5 Don'ts）。 |
 | `GlobalConfigView` | 新增”生成开关卡片”：`el-switch` 即时保存，翻 ON 时弹 `ElMessageBox` 二次确认”将归档全部 draft”，`PATCH` 失败时回滚开关状态并提示；无 `config:edit` 时控件只读并提示”无权限操作此开关”。 |
-| `SkuMappingRuleView` | 位于“设置 > 基础配置 > 映射规则”，通过 `GET /api/config/sku-mapping-rules` 服务端分页、搜索商品 SKU / 库存 SKU、按启用状态筛选；支持新增、编辑、启停、删除、Excel/CSV 导入与 Excel 导出。 |
+| `SkuMappingRuleView` | 位于“设置 > 基础配置 > 映射规则”，通过 `GET /api/config/sku-mapping-rules` 服务端分页、搜索商品 SKU / 库存 SKU、按启用状态筛选；支持新增、编辑、启停、删除、Excel/CSV 导入与 Excel 导出；编辑器按 `group_no` 展示“方案”，公式预览用 `或` 连接替代组合。 |
 | `HistoryView` | 参见 §4.5 — 状态筛选 3 项，快照数 + 导出状态列，`canDelete` 基于 `snapshot_count === 0`。 |
 
 ---
@@ -558,7 +558,7 @@ UPDATE global_config SET suggestion_generation_enabled=true, generation_toggle_u
 | `global_config` | 全局配置单行表；包含 `target_days`、`buffer_days`、`lead_time_days`、`safety_stock_days`、`restock_regions`、`eu_countries`、`suggestion_generation_enabled`、`generation_toggle_updated_by / generation_toggle_updated_at`、同步与登录配置 | `CHECK id=1`；`safety_stock_days` 范围 1–90；`restock_regions=[]` 表示全部国家参与补货计算；`eu_countries` 保存和读取时标准化 ISO 二字码别名，并拒绝 `EU` 与 `ZZ` |
 | `sku_config` | SKU 启用 / 禁用与业务参数 | `commodity_sku` 唯一 |
 | `sku_mapping_rule` | 商品 SKU 到库存包裹 SKU 的映射规则 | `commodity_sku` 唯一；`enabled=false` 时规则保留但不参与引擎 |
-| `sku_mapping_component` | 映射规则组件行 | `inventory_sku` 全局唯一；`quantity > 0`；同一规则多行表示组合公式 |
+| `sku_mapping_component` | 映射规则组件行 | `inventory_sku` 全局唯一；`group_no > 0`；`quantity > 0`；同一 `group_no` 内多行表示 AND 组合，不同 `group_no` 表示 OR 替代方案 |
 | `warehouse` | 海外仓/国内仓基础资料 | `country` 可为空；变更仓库国家会级联更新库存最新快照口径 |
 | `order_header` / `order_item` | 订单头与订单明细 | `order_header.source` 区分“亚马逊”/“多平台”，`order_platform` 保存展示平台名；`UNIQUE(shop_id, amazon_order_id, source)`；`country_code` 保存映射后国家，`original_country_code` 保存 EU 合并前国家；按 `shop_id + purchase_date`、`order_status + purchase_date` 建索引 |
 | `order_detail` / `order_detail_fetch_log` | 亚马逊订单邮编详情与拉取日志 | 主键均为 `shop_id + amazon_order_id + source`；当前详情任务只写 `source='亚马逊'` |
@@ -948,6 +948,7 @@ VITE_API_PROXY_TARGET=http://localhost:8000
 
 | 日期 | 变更 | 相关 PROGRESS 章节 |
 |---|---|---|
+| 2026-05-02 | SKU 映射规则支持替代组合：`sku_mapping_component.group_no` 同组 AND、跨组 OR，Step 2/Step 4 按仓库内各组合可组装数求和，导入导出模板新增“组合编号”并兼容旧模板 | PROGRESS.md §3.88 |
 | 2026-04-30 | Step 5 分仓样本改为订单详情左连接与净发货数口径；未知需求按国家规则仓均分后再与已知邮编分配结果合并 | PROGRESS.md §3.87 |
 | 2026-04-29 | 角色权限保存新增操作权限隐含查看权限补齐；无实际权限变化时不重写关联表、不 bump `perm_version`；超管权限读取返回全部 active 权限码 | PROGRESS.md §3.85 |
 | 2026-04-29 | Step 5 matched 分仓取整改为 floor + 最大余数法，订单列表同步在本次无有效明细时保留旧 item；赛狐示例凭据统一改为占位符 / 环境变量 | PROGRESS.md §3.84 |

@@ -4,7 +4,17 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -41,7 +51,7 @@ class SkuMappingRule(Base):
     components: Mapped[list[SkuMappingComponent]] = relationship(
         back_populates="rule",
         cascade="all, delete-orphan",
-        order_by="SkuMappingComponent.id",
+        order_by=lambda: (SkuMappingComponent.group_no, SkuMappingComponent.id),
         lazy="selectin",
     )
 
@@ -53,6 +63,9 @@ class SkuMappingComponent(Base):
     __table_args__ = (
         UniqueConstraint("inventory_sku", name="uq_sku_mapping_component_inventory_sku"),
         Index("ix_sku_mapping_component_rule_id", "rule_id"),
+        Index("ix_sku_mapping_component_rule_group", "rule_id", "group_no"),
+        CheckConstraint("group_no > 0", name="ck_sku_mapping_component_group_no_positive"),
+        CheckConstraint("quantity > 0", name="ck_sku_mapping_component_quantity_positive"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -61,6 +74,7 @@ class SkuMappingComponent(Base):
         ForeignKey("sku_mapping_rule.id", ondelete="CASCADE"),
         nullable=False,
     )
+    group_no: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     inventory_sku: Mapped[str] = mapped_column(String(100), nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(

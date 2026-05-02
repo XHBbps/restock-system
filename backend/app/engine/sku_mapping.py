@@ -21,7 +21,8 @@ class MappingComponent:
     quantity: int
 
 
-MappingRules = dict[str, list[MappingComponent]]
+MappingGroup = list[MappingComponent]
+MappingRules = dict[str, list[MappingGroup]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,21 +44,30 @@ async def load_active_mapping_rules(
     if commodity_skus is not None:
         stmt = stmt.where(SkuMappingRule.commodity_sku.in_(commodity_skus))
     rows = (await db.execute(stmt)).scalars().all()
-    return {
-        row.commodity_sku: [
-            MappingComponent(
-                inventory_sku=component.inventory_sku,
-                quantity=component.quantity,
+    rules: MappingRules = {}
+    for row in rows:
+        groups: dict[int, MappingGroup] = defaultdict(list)
+        for component in row.components:
+            groups[component.group_no].append(
+                MappingComponent(
+                    inventory_sku=component.inventory_sku,
+                    quantity=component.quantity,
+                )
             )
-            for component in row.components
-        ]
-        for row in rows
-        if row.components
-    }
+        if groups:
+            rules[row.commodity_sku] = [groups[group_no] for group_no in sorted(groups)]
+    return rules
 
 
 def component_skus_for_rules(rules: MappingRules) -> list[str]:
-    return sorted({component.inventory_sku for components in rules.values() for component in components})
+    return sorted(
+        {
+            component.inventory_sku
+            for groups in rules.values()
+            for components in groups
+            for component in components
+        }
+    )
 
 
 async def load_inventory_totals_by_warehouse(
@@ -164,24 +174,25 @@ def compute_mapped_stock_by_country(
         return {}
 
     warehouse_ids = {warehouse_id for _, warehouse_id in component_stock}
-    for commodity_sku, components in rules.items():
+    for commodity_sku, groups in rules.items():
         for warehouse_id in warehouse_ids:
-            country: str | None = None
-            buildable: int | None = None
-            for component in components:
-                stock = component_stock.get((component.inventory_sku, warehouse_id))
-                if stock is None:
-                    buildable = 0
-                    break
-                country = country or stock.country
-                buildable_for_component = stock.total // component.quantity
-                buildable = (
-                    buildable_for_component
-                    if buildable is None
-                    else min(buildable, buildable_for_component)
-                )
-            if country and buildable and buildable > 0:
-                result[(commodity_sku, country)] += buildable
+            for components in groups:
+                country: str | None = None
+                buildable: int | None = None
+                for component in components:
+                    stock = component_stock.get((component.inventory_sku, warehouse_id))
+                    if stock is None:
+                        buildable = 0
+                        break
+                    country = country or stock.country
+                    buildable_for_component = stock.total // component.quantity
+                    buildable = (
+                        buildable_for_component
+                        if buildable is None
+                        else min(buildable, buildable_for_component)
+                    )
+                if country and buildable and buildable > 0:
+                    result[(commodity_sku, country)] += buildable
     return dict(result)
 
 
@@ -195,20 +206,21 @@ def compute_mapped_stock_total_by_sku(
         return {}
 
     warehouse_ids = {warehouse_id for _, warehouse_id in component_stock}
-    for commodity_sku, components in rules.items():
+    for commodity_sku, groups in rules.items():
         for warehouse_id in warehouse_ids:
-            buildable: int | None = None
-            for component in components:
-                stock = component_stock.get((component.inventory_sku, warehouse_id))
-                if stock is None:
-                    buildable = 0
-                    break
-                buildable_for_component = stock.total // component.quantity
-                buildable = (
-                    buildable_for_component
-                    if buildable is None
-                    else min(buildable, buildable_for_component)
-                )
-            if buildable and buildable > 0:
-                totals[commodity_sku] += buildable
+            for components in groups:
+                buildable: int | None = None
+                for component in components:
+                    stock = component_stock.get((component.inventory_sku, warehouse_id))
+                    if stock is None:
+                        buildable = 0
+                        break
+                    buildable_for_component = stock.total // component.quantity
+                    buildable = (
+                        buildable_for_component
+                        if buildable is None
+                        else min(buildable, buildable_for_component)
+                    )
+                if buildable and buildable > 0:
+                    totals[commodity_sku] += buildable
     return dict(totals)

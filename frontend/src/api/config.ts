@@ -76,6 +76,7 @@ export async function initSkuConfigs(): Promise<{ created: number; total: number
 // ========== SKU Mapping Rules ==========
 export interface SkuMappingComponent {
   id: number
+  group_no: number
   inventory_sku: string
   quantity: number
 }
@@ -93,6 +94,7 @@ export interface SkuMappingRule {
 }
 
 export interface SkuMappingComponentInput {
+  group_no: number
   inventory_sku: string
   quantity: number
 }
