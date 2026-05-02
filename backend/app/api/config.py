@@ -720,11 +720,12 @@ def _normalize_import_rows(raw_rows: list[dict[str, Any]]) -> dict[str, SkuMappi
         commodity_sku = str(raw.get("商品SKU") or "").strip()
         inventory_sku = str(raw.get("库存SKU") or "").strip()
         group_no_raw = raw.get("组合编号")
-        if group_no_raw in (None, ""):
+        group_no_text = str(group_no_raw or "").strip()
+        if not group_no_text:
             group_no = 1
         else:
             try:
-                group_no = int(group_no_raw)
+                group_no = int(group_no_text)
             except (TypeError, ValueError):
                 group_no = 0
         quantity_raw = raw.get("组件数量")
