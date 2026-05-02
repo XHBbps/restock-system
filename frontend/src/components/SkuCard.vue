@@ -2,12 +2,12 @@
   <div class="sku-card">
     <img
       v-if="showImage"
-      :src="image || undefined"
+      :src="imageSrc"
       :alt="name || sku"
       class="sku-image"
       @error="handleImageError"
     />
-    <div v-else class="sku-image-placeholder">{{ sku.slice(0, 2).toUpperCase() }}</div>
+    <div v-else class="sku-image-placeholder">无图</div>
     <div class="sku-meta">
       <div class="sku-name">{{ name || sku }}</div>
       <div class="sku-code">{{ sku }}</div>
@@ -27,7 +27,8 @@ const props = defineProps<{
 }>()
 
 const imageLoadFailed = ref(false)
-const showImage = computed(() => Boolean(props.image) && !imageLoadFailed.value)
+const imageSrc = computed(() => props.image?.trim() || '')
+const showImage = computed(() => Boolean(imageSrc.value) && !imageLoadFailed.value)
 
 watch(
   () => props.image,

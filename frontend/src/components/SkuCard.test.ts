@@ -6,7 +6,24 @@ import { describe, expect, it } from 'vitest'
 import SkuCard from './SkuCard.vue'
 
 describe('SkuCard', () => {
-  it('falls back to the SKU placeholder when the image fails to load', async () => {
+  it('shows the no-image placeholder when no image is provided', () => {
+    const wrapper = mount(SkuCard, {
+      props: {
+        sku: 'SKU-1',
+        name: 'Product',
+      },
+      global: {
+        stubs: {
+          ElTag: true,
+        },
+      },
+    })
+
+    expect(wrapper.find('img.sku-image').exists()).toBe(false)
+    expect(wrapper.find('.sku-image-placeholder').text()).toBe('无图')
+  })
+
+  it('falls back to the no-image placeholder when the image fails to load', async () => {
     const wrapper = mount(SkuCard, {
       props: {
         sku: 'SKU-1',
@@ -25,7 +42,7 @@ describe('SkuCard', () => {
     await wrapper.find('img.sku-image').trigger('error')
 
     expect(wrapper.find('img.sku-image').exists()).toBe(false)
-    expect(wrapper.find('.sku-image-placeholder').text()).toBe('SK')
+    expect(wrapper.find('.sku-image-placeholder').text()).toBe('无图')
   })
 
   it('tries the new image URL after the image prop changes', async () => {
