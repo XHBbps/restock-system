@@ -275,8 +275,13 @@ class SkuOverviewItem(BaseModel):
     """SKU-level row with config + aggregated listing info."""
 
     commodity_sku: str
+    commodity_id: str | None = None
     commodity_name: str | None = None
     main_image: str | None = None
+    state: str | None = None
+    is_group: bool | None = None
+    purchase_days: int | None = None
+    has_listing: bool = False
     enabled: bool
     lead_time_days: int | None = None
     listing_count: int

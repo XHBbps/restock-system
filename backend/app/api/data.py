@@ -25,12 +25,14 @@ from app.core.exceptions import NotFound
 from app.core.permissions import DATA_BASE_VIEW, DATA_BIZ_VIEW, SYNC_VIEW
 from app.core.query import escape_like
 from app.core.timezone import BEIJING
+from app.models.commodity import CommodityMaster
 from app.models.in_transit import InTransitItem, InTransitRecord
 from app.models.inventory import InventorySnapshotLatest
 from app.models.order import ORDER_SOURCE_AMAZON, OrderDetail, OrderHeader, OrderItem
 from app.models.product_listing import ProductListing
 from app.models.shop import Shop
 from app.models.sku import SkuConfig
+from app.models.sku_mapping import SkuMappingComponent
 from app.models.warehouse import Warehouse
 from app.schemas.data import (
     DataInventoryItem,
@@ -218,12 +220,23 @@ def _apply_inventory_filters(
             (InventorySnapshotLatest.available > 0) | (InventorySnapshotLatest.reserved > 0)
         )
     if is_package is not None:
+        commodity_exists = (
+            select(CommodityMaster.sku)
+            .where(CommodityMaster.sku == InventorySnapshotLatest.commodity_sku)
+            .exists()
+        )
         listing_exists = (
             select(ProductListing.id)
             .where(ProductListing.commodity_sku == InventorySnapshotLatest.commodity_sku)
             .exists()
         )
-        stmt = stmt.where(~listing_exists if is_package else listing_exists)
+        component_exists = (
+            select(SkuMappingComponent.id)
+            .where(SkuMappingComponent.inventory_sku == InventorySnapshotLatest.commodity_sku)
+            .exists()
+        )
+        known_sku_exists = commodity_exists | listing_exists | component_exists
+        stmt = stmt.where(~known_sku_exists if is_package else known_sku_exists)
     return stmt
 
 
@@ -537,6 +550,18 @@ async def list_inventory(
     name_map: dict[str, tuple[str | None, str | None]] = {}
     matched_skus: set[str] = set()
     if sku_codes:
+        commodity_rows = (
+            await db.execute(
+                select(
+                    CommodityMaster.sku,
+                    CommodityMaster.name,
+                    CommodityMaster.img_url,
+                ).where(CommodityMaster.sku.in_(sku_codes))
+            )
+        ).all()
+        for sku, name, img in commodity_rows:
+            matched_skus.add(sku)
+            name_map[sku] = (name, img)
         pl_rows = (
             await db.execute(
                 select(
@@ -550,6 +575,14 @@ async def list_inventory(
             if sk is not None:
                 matched_skus.add(sk)
                 name_map.setdefault(sk, (name, img))
+        component_skus = (
+            await db.execute(
+                select(SkuMappingComponent.inventory_sku).where(
+                    SkuMappingComponent.inventory_sku.in_(sku_codes)
+                )
+            )
+        ).scalars().all()
+        matched_skus.update(component_skus)
 
     items: list[DataInventoryItem] = []
     for inv, wh_name, wh_type in rows:
@@ -644,6 +677,18 @@ async def list_inventory_warehouse_groups(
     name_map: dict[str, tuple[str | None, str | None]] = {}
     matched_skus: set[str] = set()
     if sku_codes:
+        commodity_rows = (
+            await db.execute(
+                select(
+                    CommodityMaster.sku,
+                    CommodityMaster.name,
+                    CommodityMaster.img_url,
+                ).where(CommodityMaster.sku.in_(sku_codes))
+            )
+        ).all()
+        for sku, name, img in commodity_rows:
+            matched_skus.add(sku)
+            name_map[sku] = (name, img)
         pl_rows = (
             await db.execute(
                 select(
@@ -657,6 +702,14 @@ async def list_inventory_warehouse_groups(
             if sk is not None:
                 matched_skus.add(sk)
                 name_map.setdefault(sk, (name, img))
+        component_skus = (
+            await db.execute(
+                select(SkuMappingComponent.inventory_sku).where(
+                    SkuMappingComponent.inventory_sku.in_(sku_codes)
+                )
+            )
+        ).scalars().all()
+        matched_skus.update(component_skus)
 
     items_by_warehouse: dict[str, list[DataInventoryItem]] = {warehouse_id: [] for warehouse_id in warehouse_ids}
     for inv, wh_name, wh_type in item_rows:
@@ -956,21 +1009,29 @@ async def list_sku_overview(
     """Return SKU-level overview: config + aggregated listings, paginated by SKU."""
     from app.schemas.data import SkuListingItem, SkuOverviewItem
 
-    base = select(SkuConfig).order_by(SkuConfig.commodity_sku)
+    base = (
+        select(SkuConfig, CommodityMaster)
+        .outerjoin(CommodityMaster, CommodityMaster.sku == SkuConfig.commodity_sku)
+        .order_by(SkuConfig.commodity_sku)
+    )
     if enabled is not None:
         base = base.where(SkuConfig.enabled.is_(enabled))
     if keyword:
-        base = base.where(SkuConfig.commodity_sku.ilike(f"%{escape_like(keyword)}%", escape="\\"))
+        keyword_like = f"%{escape_like(keyword)}%"
+        base = base.where(
+            or_(
+                SkuConfig.commodity_sku.ilike(keyword_like, escape="\\"),
+                CommodityMaster.name.ilike(keyword_like, escape="\\"),
+            )
+        )
 
     total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
-    sku_rows = (
-        (await db.execute(base.offset((page - 1) * page_size).limit(page_size))).scalars().all()
-    )
+    sku_rows = (await db.execute(base.offset((page - 1) * page_size).limit(page_size))).all()
 
     if not sku_rows:
         return SkuOverviewListOut(items=[], total=int(total or 0), page=page, page_size=page_size)
 
-    sku_codes = [r.commodity_sku for r in sku_rows]
+    sku_codes = [r[0].commodity_sku for r in sku_rows]
 
     listing_rows = (
         (
@@ -991,18 +1052,27 @@ async def list_sku_overview(
         listings_by_sku.setdefault(pl.commodity_sku, []).append(pl)
 
     items: list[SkuOverviewItem] = []
-    for sku_cfg in sku_rows:
+    for sku_cfg, commodity in sku_rows:
         sku = sku_cfg.commodity_sku
         sku_listings = listings_by_sku.get(sku, [])
-        name = sku_listings[0].commodity_name if sku_listings else None
-        image = sku_listings[0].main_image if sku_listings else None
+        name = commodity.name if commodity is not None else None
+        image = commodity.img_url if commodity is not None else None
+        if name is None and sku_listings:
+            name = sku_listings[0].commodity_name
+        if image is None and sku_listings:
+            image = sku_listings[0].main_image
         total_day30 = sum((pl.day30_sale_num or 0) for pl in sku_listings)
 
         items.append(
             SkuOverviewItem(
                 commodity_sku=sku,
+                commodity_id=commodity.commodity_id if commodity is not None else None,
                 commodity_name=name,
                 main_image=image,
+                state=commodity.state if commodity is not None else None,
+                is_group=commodity.is_group if commodity is not None else None,
+                purchase_days=commodity.purchase_days if commodity is not None else None,
+                has_listing=bool(sku_listings),
                 enabled=sku_cfg.enabled,
                 lead_time_days=sku_cfg.lead_time_days,
                 listing_count=len(sku_listings),

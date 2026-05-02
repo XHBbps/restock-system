@@ -38,6 +38,7 @@ from app.core.permissions import (
 )
 from app.core.query import escape_like
 from app.core.timezone import now_beijing
+from app.models.commodity import CommodityMaster
 from app.models.dashboard_snapshot import DashboardSnapshot
 from app.models.global_config import GlobalConfig
 from app.models.in_transit import InTransitRecord
@@ -152,30 +153,29 @@ def _warehouse_out_from_row(row: Any) -> WarehouseOut:
 
 
 async def init_sku_configs_from_listings(db: AsyncSession) -> int:
-    sku_rows = (
-        (
-            await db.execute(
-                select(
-                    ProductListing.commodity_sku,
-                    ProductListing.is_matched,
-                    ProductListing.online_status,
-                )
-                .where(ProductListing.commodity_sku.is_not(None))
-                .order_by(ProductListing.commodity_sku)
-            )
-        )
+    sku_codes = sorted(
+        (await db.execute(select(CommodityMaster.sku).order_by(CommodityMaster.sku)))
+        .scalars()
         .all()
     )
-    if not sku_rows:
-        return 0
-    sku_enabled_map: dict[str, bool] = {}
-    for commodity_sku, is_matched, online_status in sku_rows:
-        if commodity_sku is None:
-            continue
-        sku_enabled_map[commodity_sku] = sku_enabled_map.get(commodity_sku, False) or (
-            bool(is_matched) and str(online_status or "").strip().lower() == "active"
+    if not sku_codes:
+        sku_codes = sorted(
+            {
+                sku
+                for sku in (
+                    await db.execute(
+                        select(ProductListing.commodity_sku)
+                        .where(ProductListing.commodity_sku.is_not(None))
+                        .order_by(ProductListing.commodity_sku)
+                    )
+                )
+                .scalars()
+                .all()
+                if sku is not None
+            }
         )
-    sku_codes = sorted(sku_enabled_map)
+    if not sku_codes:
+        return 0
 
     existing_codes = set(
         (
@@ -192,7 +192,7 @@ async def init_sku_configs_from_listings(db: AsyncSession) -> int:
 
     await db.execute(
         pg_insert(SkuConfig).values(
-            [{"commodity_sku": code, "enabled": sku_enabled_map[code]} for code in missing_codes]
+            [{"commodity_sku": code, "enabled": False} for code in missing_codes]
         )
     )
     await db.commit()
@@ -435,6 +435,17 @@ async def list_sku_configs(
     sku_codes = [r.commodity_sku for r in rows]
     name_map: dict[str, tuple[str | None, str | None]] = {}
     if sku_codes:
+        commodity_rows = (
+            await db.execute(
+                select(
+                    CommodityMaster.sku,
+                    CommodityMaster.name,
+                    CommodityMaster.img_url,
+                ).where(CommodityMaster.sku.in_(sku_codes))
+            )
+        ).all()
+        for sku, name, img in commodity_rows:
+            name_map[sku] = (name, img)
         listing_rows = (
             await db.execute(
                 select(

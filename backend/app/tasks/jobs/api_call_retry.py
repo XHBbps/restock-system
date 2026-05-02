@@ -23,6 +23,7 @@ JOB_NAME = "retry_failed_api_calls"
 MAX_AUTO_RETRY_ATTEMPTS = 5
 DEFAULT_BATCH_SIZE = 50
 SUPPORTED_ENDPOINT_JOBS: dict[str, tuple[str, ...]] = {
+    "/api/commodity/pageList.json": ("sync_product_listing",),
     "/api/order/api/product/pageList.json": ("sync_product_listing",),
     "/api/warehouseManage/warehouseList.json": ("sync_warehouse",),
     "/api/warehouseManage/warehouseItemList.json": ("sync_inventory",),

@@ -6,6 +6,7 @@ export interface MonitorDisplayMeta {
 }
 
 const SAIHU_ENDPOINT_LABELS: Record<string, string> = {
+  '/api/commodity/pageList.json': '商品主数据同步',
   '/api/order/api/product/pageList.json': '商品列表同步',
   '/api/warehouseManage/warehouseList.json': '仓库列表同步',
   '/api/warehouseManage/warehouseItemList.json': '库存同步',

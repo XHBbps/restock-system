@@ -36,7 +36,7 @@ export const manualSyncActions: SyncActionDefinition[] = [
   {
     key: 'sync_product_listing',
     jobName: 'sync_product_listing',
-    label: '商品同步',
+    label: '商品主数据同步',
     url: '/api/sync/product-listing',
   },
   {
@@ -78,8 +78,8 @@ export const autoSyncDefinitions: AutoSyncDefinition[] = [
   },
   {
     jobName: 'sync_product_listing',
-    label: '商品基础同步',
-    cadence: '建议每 1-2 小时执行 1 次。',
+    label: '商品主数据同步',
+    cadence: '建议每 1-2 小时执行 1 次，先同步商品主数据，再同步在线产品 listing。',
   },
   {
     jobName: 'sync_inventory',

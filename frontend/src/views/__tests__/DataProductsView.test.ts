@@ -75,8 +75,13 @@ function buildResponse(total = 88) {
     items: [
       {
         commodity_sku: 'SKU-1',
+        commodity_id: 'CID-1',
         commodity_name: 'Product',
         main_image: null,
+        state: 'active',
+        is_group: false,
+        purchase_days: 12,
+        has_listing: false,
         enabled: true,
         lead_time_days: 30,
         listing_count: 1,

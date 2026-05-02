@@ -20,6 +20,9 @@ class _AllResult:
     def __init__(self, values):
         self._values = values
 
+    def scalars(self):
+        return self
+
     def all(self):
         return self._values
 
@@ -61,6 +64,8 @@ async def test_list_inventory_warehouse_groups_returns_grouped_page() -> None:
             _AllResult([group_row]),
             _AllResult([(_inventory_row(), "Warehouse", 1)]),
             _AllResult([("SKU-1", "Product", "https://example.test/img.jpg")]),
+            _AllResult([]),
+            _AllResult([]),
         ]
     )
 
@@ -112,6 +117,8 @@ async def test_list_inventory_marks_unmatched_sku_as_package() -> None:
             _ScalarResult(1),
             _AllResult([(_inventory_row(sku="PKG-1"), "Warehouse", 1)]),
             _AllResult([]),
+            _AllResult([]),
+            _AllResult([]),
         ]
     )
 
@@ -151,6 +158,8 @@ async def test_list_inventory_warehouse_groups_applies_non_package_filter() -> N
             _AllResult([group_row]),
             _AllResult([(_inventory_row(sku="SKU-1"), "Warehouse", 1)]),
             _AllResult([("SKU-1", "Product", None)]),
+            _AllResult([]),
+            _AllResult([]),
         ]
     )
 

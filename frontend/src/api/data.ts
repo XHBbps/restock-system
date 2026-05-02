@@ -258,8 +258,13 @@ export interface SkuListingItem {
 
 export interface SkuOverviewItem {
   commodity_sku: string
+  commodity_id: string | null
   commodity_name: string | null
   main_image: string | null
+  state: string | null
+  is_group: boolean | null
+  purchase_days: number | null
+  has_listing: boolean
   enabled: boolean
   lead_time_days: number | null
   listing_count: number

@@ -1,5 +1,5 @@
 <template>
-  <PageSectionCard title="商品">
+  <PageSectionCard title="商品主数据">
     <template #actions>
       <el-input
         v-model="filters.keyword"
@@ -23,7 +23,9 @@
         :loading="initLoading"
         :disabled="!auth.hasPermission('data_base:edit')"
         @click="initFromListings"
-      >从商品同步初始化</el-button>
+      >
+        同步商品主数据
+      </el-button>
     </template>
 
     <el-table v-loading="loading" :data="rows" row-key="commodity_sku">
@@ -32,16 +34,13 @@
           <div class="expand-wrapper">
             <el-table :data="row.listings" size="small" :show-header="true">
               <el-table-column label="站点" prop="marketplace_id" min-width="120" />
-              <el-table-column label="卖家SKU" prop="seller_sku" min-width="160" show-overflow-tooltip />
+              <el-table-column label="卖家 SKU" prop="seller_sku" min-width="160" show-overflow-tooltip />
               <el-table-column label="7天销量" prop="day7_sale_num" width="100" align="right" />
               <el-table-column label="14天销量" prop="day14_sale_num" width="100" align="right" />
               <el-table-column label="30天销量" prop="day30_sale_num" width="100" align="right" />
               <el-table-column label="在售状态" width="100" align="center">
                 <template #default="{ row: listing }">
-                  <el-tag
-                    :type="getListingOnlineStatusMeta(listing.online_status).tagType"
-                    size="small"
-                  >
+                  <el-tag :type="getListingOnlineStatusMeta(listing.online_status).tagType" size="small">
                     {{ getListingOnlineStatusMeta(listing.online_status).label }}
                   </el-tag>
                 </template>
@@ -56,9 +55,21 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="商品信息" min-width="280">
+      <el-table-column label="商品信息" min-width="300">
         <template #default="{ row }">
           <SkuCard :sku="row.commodity_sku" :name="row.commodity_name" :image="row.main_image" />
+          <div class="meta-line">
+            <span v-if="row.commodity_id" class="muted">ID：{{ row.commodity_id }}</span>
+            <span v-if="row.purchase_days !== null && row.purchase_days !== undefined" class="muted">
+              采购周期：{{ row.purchase_days }}
+            </span>
+            <el-tag v-if="row.state" size="small" :type="getMasterStateTagType(row.state)">
+              {{ row.state }}
+            </el-tag>
+            <el-tag v-if="row.is_group" size="small" type="warning">组合</el-tag>
+            <el-tag v-if="row.has_listing" size="small" type="success">有 listing</el-tag>
+            <el-tag v-else size="small" type="info">无 listing</el-tag>
+          </div>
         </template>
       </el-table-column>
 
@@ -72,7 +83,7 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="站点数" prop="listing_count" width="100" align="right" />
+      <el-table-column label="listing数" prop="listing_count" width="100" align="right" />
       <el-table-column label="30天总销量" prop="total_day30_sales" width="120" align="right" />
     </el-table>
 
@@ -142,20 +153,18 @@ async function updateEnabled(row: SkuOverviewItem, value: boolean): Promise<void
     ElMessage.success(`已${value ? '启用' : '禁用'} ${row.commodity_sku}`)
   } catch (err) {
     row.enabled = !value
-    ElMessage.error(getActionErrorMessage(err, '更新失败。'))
+    ElMessage.error(getActionErrorMessage(err, '更新失败'))
   }
 }
-
-
 
 async function initFromListings(): Promise<void> {
   initLoading.value = true
   try {
     const resp = await initSkuConfigs()
     await reload(true)
-    ElMessage.success(`已初始化 ${resp.created} 个 SKU，当前共 ${resp.total} 个配置。`)
+    ElMessage.success(`已补齐 ${resp.created} 条 SKU 配置，当前共 ${resp.total} 条`)
   } catch (err) {
-    ElMessage.error(getActionErrorMessage(err, '初始化 SKU 配置失败。'))
+    ElMessage.error(getActionErrorMessage(err, '同步商品主数据失败'))
   } finally {
     initLoading.value = false
   }
@@ -176,11 +185,32 @@ function handlePageSizeChange(value: number): void {
   pageSize.value = value
   void reload(true)
 }
+
+function getMasterStateTagType(state: string): 'success' | 'warning' | 'info' | 'danger' {
+  const normalized = state.toLowerCase()
+  if (normalized.includes('active') || normalized.includes('on')) {
+    return 'success'
+  }
+  if (normalized.includes('pause') || normalized.includes('stop')) {
+    return 'warning'
+  }
+  if (normalized.includes('delete') || normalized.includes('invalid')) {
+    return 'danger'
+  }
+  return 'info'
+}
 </script>
 
 <style lang="scss" scoped>
 .expand-wrapper {
   padding: $space-3 $space-4;
+}
+
+.meta-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $space-2;
+  margin-top: $space-2;
 }
 
 .muted {

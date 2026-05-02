@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-05-02（SKU 映射规则支持替代组合：`group_no` 同组 AND、跨组 OR，海外仓/本地仓库存换算统一按组合可组装数求和。）
+> 最近更新：2026-05-03（商品同步接入赛狐 SKU 主数据 `/api/commodity/pageList.json`，商品页改为主数据口径，新发现 SKU 默认禁用。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -39,6 +39,7 @@
 - **EU 合并同步口径**：订单、商品、出库、库存同步均按全局 eu_countries 将 EU 成员国合并到 EU，并在 original_* 字段保存原国家码；calc_engine 已移出 APScheduler 定时注册，仅保留手动生成入口。
 - **新国家发现口径**：多平台订单同步遇到有效 2 位国家码时直接落入 `order_header.country_code` 并参与计算；若该国家已配置到 `eu_countries`，则归并为 `EU` 并在 `original_country_code` 保留原码；空值或非法国家码才写为 `ZZ` 并记录结构化日志。
 - **订单列表同步来源**：`sync_order_list` 内部同时调用亚马逊订单接口 `/api/order/pageList.json` 与多平台订单接口 `/api/multiplatform/order/list.json`；亚马逊按 `updateDateTime` 增量窗口同步，成功后将本次查询 `date_end` 写入 `sync_state.last_success_at`；多平台按 6 个日历月 `purchase` 滚动窗口同步，统一落入 `order_header` / `order_item` 并通过 `source` 区分。
+- **商品主数据同步来源**：`sync_product_listing` 先调用赛狐 SKU 主数据接口 `/api/commodity/pageList.json` 写入 `commodity_master`，再调用在线产品 listing 接口 `/api/order/api/product/pageList.json` 补充店铺、站点、sellerSku 与近 7/14/30 天销量。同步新发现的 SKU 只补建 `sku_config(enabled=false)`，不自动扩大补货计算 SKU 集合。
 
 - **调度器开关**：`GET/POST /api/sync/scheduler`，开关状态持久化到 `global_config.scheduler_enabled`
 - **调度参数实时生效**：`sync_interval_minutes`、`calc_cron` 保存后立即 reload
@@ -95,6 +96,7 @@
   - `DashboardPageHeader` / `DashboardStatCard` / `DashboardSection` / `DashboardChartCard` / `DataTableCard`
   - `BaseChart`（ECharts 封装）
 - **数据加载模式**：订单页、历史记录页、商品页、库存页、出库记录页使用“后端分页 + 后端筛选”；仓库、店铺等低增长基础页仍保留轻量分页
+- **商品页主数据口径**：`DataProductsView.vue` 通过 `/api/data/sku-overview` 展示 `commodity_master + sku_config`，商品名、图片、状态、组合标识、采购周期优先取主数据；listing 仅作为展开明细和销量参考，无 listing 的商品 SKU 也会显示。
 - **筛选控件高度统一**：`PageSectionCard` 的 `section-actions` 强制所有控件 32px 高度
 - **订单来源与状态展示**：`DataOrdersView.vue` 展示“来源”“订单平台”，订单状态中文映射覆盖已发货 / 部分发货 / 未发货 / 待处理 / 已取消 / 未知；多平台订单的详情状态显示为“不适用”
 - **全局参数页补货区域配置**：`GlobalConfigView.vue` 的“补货区域”多选已接入动态国家选项，保存前变更检测与配置变更提示已纳入 `restock_regions`
@@ -102,6 +104,15 @@
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.89 商品主数据同步接入（2026-05-03）
+- **赛狐接口**：新增 `backend/app/saihu/endpoints/commodity.py`，封装 `POST /api/commodity/pageList.json`，分页请求体为 `pageNo/pageSize`，默认不加 `state`、`isGroup` 过滤，避免漏掉停售、组合 SKU 或加工 SKU。
+- **数据库迁移**：`backend/alembic/versions/20260503_1000_add_commodity_master.py` 新增 `commodity_master` 表，主键为赛狐返回的 `sku`，保存 `commodity_id/name/state/is_group/img_url/purchase_days/child_skus/last_sync_at` 等主数据字段。
+- **同步任务**：`backend/app/sync/product_listing.py` 的 `sync_product_listing` 调整为“商品主数据 → 在线产品 listing”两段同步；主数据和 listing 新发现的 SKU 都只补建 `sku_config(enabled=false)`，已存在的 `enabled` 与 `lead_time_days` 不覆盖。`run_engine` 仍只读取 `SkuConfig.enabled=True`。
+- **商品页接口**：`GET /api/data/sku-overview` 改为 `SkuConfig` 左连接 `CommodityMaster`，搜索支持 SKU 与商品名；返回新增 `commodity_id/state/is_group/purchase_days/has_listing`，商品名和图片优先使用主数据，listing 仅用于展开明细和销量汇总。
+- **库存匹配口径**：库存页未匹配判断改为“存在商品主数据 SKU、listing 商品 SKU 或映射组件库存 SKU”即视为已匹配，接入完整商品 SKU 后减少库存 SKU 误判。
+- **前端与监控**：`frontend/src/views/data/DataProductsView.vue` 改为“商品主数据”展示，`frontend/src/config/sync.ts` 与 `frontend/src/utils/monitoring.ts` 将商品同步文案更新为“商品主数据同步”；赛狐 `40019` 精确重试映射新增 `/api/commodity/pageList.json -> sync_product_listing`。
+- **测试**：新增 `backend/tests/unit/test_saihu_commodity_endpoint.py`、`backend/tests/unit/test_data_sku_overview_api.py`，并更新商品同步、SKU 初始化、库存匹配与商品页前端测试，覆盖分页请求、空 SKU 跳过、默认禁用、主数据优先和无 listing 展示。
 
 ### 3.88 SKU 映射替代组合改造（2026-05-02）
 - **数据库迁移**：`sku_mapping_component` 新增 `group_no`，默认值为 1，旧组件行自动归入“组合 1”；保留 `sku_mapping_rule.commodity_sku` 唯一与 `sku_mapping_component.inventory_sku` 全局唯一，继续避免同一库存 SKU 被多个商品重复消费。

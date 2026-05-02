@@ -5,6 +5,7 @@ Alembic env.py 通过 `from app.models import *` 触发所有模型注册到 Bas
 
 from app.models.access_token import AccessTokenCache
 from app.models.api_call_log import ApiCallLog
+from app.models.commodity import CommodityMaster
 from app.models.dashboard_snapshot import DashboardSnapshot
 from app.models.excel_export_log import ExcelExportLog
 from app.models.global_config import GlobalConfig
@@ -30,6 +31,7 @@ from app.models.zipcode_rule import ZipcodeRule
 __all__ = [
     "AccessTokenCache",
     "ApiCallLog",
+    "CommodityMaster",
     "DashboardSnapshot",
     "ExcelExportLog",
     "GlobalConfig",

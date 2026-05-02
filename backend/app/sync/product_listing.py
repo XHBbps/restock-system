@@ -1,4 +1,6 @@
-"""Sync online product listings from Saihu."""
+"""Sync Saihu commodity master data and online product listings."""
+
+from __future__ import annotations
 
 from typing import Any
 
@@ -11,8 +13,10 @@ from app.core.exceptions import ValidationFailed
 from app.core.logging import get_logger
 from app.core.timezone import marketplace_to_country, now_beijing
 from app.db.session import async_session_factory
+from app.models.commodity import CommodityMaster
 from app.models.product_listing import ProductListing
 from app.models.sku import SkuConfig
+from app.saihu.endpoints.commodity import list_commodities
 from app.saihu.endpoints.product_listing import list_product_listings
 from app.sync.common import mark_sync_failed, mark_sync_running, mark_sync_success
 from app.tasks.jobs import JobContext, register
@@ -24,43 +28,70 @@ _UNMATCHED_LISTING_NULLABLE_COLUMNS = ("commodity_sku", "commodity_id")
 
 @register(JOB_NAME)
 async def sync_product_listing_job(ctx: JobContext) -> None:
-    await ctx.progress(current_step="开始同步在线产品信息", total_steps=1)
+    await ctx.progress(current_step="同步商品主数据", total_steps=2)
     async with async_session_factory() as db:
         started = await mark_sync_running(db, JOB_NAME)
 
-    inserted = 0
+    commodity_count = 0
+    listing_count = 0
     try:
         async with async_session_factory() as db:
             await _ensure_product_listing_schema_compatible(db)
             eu_countries = await load_eu_countries(db)
 
-        async def _report_page(page_no: int, total_page: int, rows_count: int) -> None:
+        async def _report_commodity_page(page_no: int, total_page: int, rows_count: int) -> None:
             if total_page <= 0:
                 return
             await ctx.progress(
                 total_steps=total_page,
-                step_detail=f"第 {page_no} / {total_page} 页，当前页 {rows_count} 条，已处理 {inserted} 条",
+                step_detail=(
+                    f"商品主数据第 {page_no} / {total_page} 页，"
+                    f"当前页 {rows_count} 条，已处理 {commodity_count} 条"
+                ),
+            )
+
+        async with async_session_factory() as db:
+            async for raw in list_commodities(on_page=_report_commodity_page):
+                if await _upsert_commodity(db, raw):
+                    commodity_count += 1
+            created_commodity_sku_configs = await _backfill_sku_configs_from_commodities(db)
+            await db.commit()
+
+        async def _report_listing_page(page_no: int, total_page: int, rows_count: int) -> None:
+            if total_page <= 0:
+                return
+            await ctx.progress(
+                total_steps=total_page,
+                step_detail=(
+                    f"在线产品 listing 第 {page_no} / {total_page} 页，"
+                    f"当前页 {rows_count} 条，已处理 {listing_count} 条"
+                ),
             )
 
         async with async_session_factory() as db:
             async for raw in list_product_listings(
                 only_matched=False,
                 only_active=False,
-                on_page=_report_page,
+                on_page=_report_listing_page,
             ):
                 await _upsert_listing(db, raw, eu_countries)
-                inserted += 1
-            created_sku_configs = await _backfill_sku_configs_from_synced_listings(db)
+                listing_count += 1
+            created_listing_sku_configs = await _backfill_sku_configs_from_synced_listings(db)
             await db.commit()
 
         async with async_session_factory() as db:
             await mark_sync_success(db, JOB_NAME, started)
         logger.info(
             "sync_product_listing_done",
-            count=inserted,
-            sku_config_created=created_sku_configs,
+            commodity_count=commodity_count,
+            listing_count=listing_count,
+            commodity_sku_config_created=created_commodity_sku_configs,
+            listing_sku_config_created=created_listing_sku_configs,
         )
-        await ctx.progress(current_step="完成", step_detail=f"共 {inserted} 条 listing")
+        await ctx.progress(
+            current_step="完成",
+            step_detail=f"商品主数据 {commodity_count} 条，listing {listing_count} 条",
+        )
     except Exception as exc:
         async with async_session_factory() as db:
             await mark_sync_failed(db, JOB_NAME, str(exc))
@@ -81,11 +112,12 @@ async def _ensure_product_listing_schema_compatible(db: AsyncSession) -> None:
     )
     rows = result.mappings().all()
     nullable_map = {
-        str(row["column_name"]): str(row["is_nullable"]).upper() == "YES"
-        for row in rows
+        str(row["column_name"]): str(row["is_nullable"]).upper() == "YES" for row in rows
     }
     incompatible = [
-        column for column in _UNMATCHED_LISTING_NULLABLE_COLUMNS if nullable_map.get(column) is not True
+        column
+        for column in _UNMATCHED_LISTING_NULLABLE_COLUMNS
+        if nullable_map.get(column) is not True
     ]
     if incompatible:
         columns = ", ".join(incompatible)
@@ -110,10 +142,51 @@ def _normalize_optional_text(value: Any) -> str | None:
     return text or None
 
 
+def _to_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    text_value = str(value or "").strip().lower()
+    return text_value in {"1", "true", "yes", "y"}
+
+
+def _normalize_child_skus(value: Any) -> list[Any] | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, list):
+        return value
+    return [value]
+
+
 def _infer_is_matched(raw: dict[str, Any]) -> bool:
     return bool(_normalize_optional_text(raw.get("commodityId"))) and bool(
         _normalize_optional_text(raw.get("commoditySku"))
     )
+
+
+async def _upsert_commodity(db: AsyncSession, raw: dict[str, Any]) -> bool:
+    sku = _normalize_optional_text(raw.get("sku"))
+    if not sku:
+        return False
+
+    values = {
+        "sku": sku,
+        "commodity_id": _normalize_optional_text(raw.get("id")),
+        "name": _normalize_optional_text(raw.get("name")),
+        "state": _normalize_optional_text(raw.get("state")),
+        "is_group": _to_bool(raw.get("isGroup")),
+        "img_url": _normalize_optional_text(raw.get("imgUrl")),
+        "purchase_days": _to_int(raw.get("purchaseDays")),
+        "child_skus": _normalize_child_skus(raw.get("childSkus")),
+        "last_sync_at": now_beijing(),
+    }
+
+    stmt = pg_insert(CommodityMaster).values(**values)
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["sku"],
+        set_={key: value for key, value in values.items() if key != "sku"},
+    )
+    await db.execute(stmt)
+    return True
 
 
 async def _upsert_listing(
@@ -156,37 +229,50 @@ async def _upsert_listing(
     stmt = stmt.on_conflict_do_update(
         index_elements=["shop_id", "marketplace_id", "seller_sku"],
         set_={
-            k: v for k, v in values.items() if k not in ("shop_id", "marketplace_id", "seller_sku")
+            key: value
+            for key, value in values.items()
+            if key not in ("shop_id", "marketplace_id", "seller_sku")
         },
     )
     await db.execute(stmt)
 
 
-async def _backfill_sku_configs_from_synced_listings(db: AsyncSession) -> int:
-    sku_rows = (
-        (
-            await db.execute(
-                select(
-                    ProductListing.commodity_sku,
-                    ProductListing.is_matched,
-                    ProductListing.online_status,
-                )
-                .where(ProductListing.commodity_sku.is_not(None))
-                .order_by(ProductListing.commodity_sku)
-            )
-        )
+async def _backfill_sku_configs_from_commodities(db: AsyncSession) -> int:
+    sku_codes = sorted(
+        (await db.execute(select(CommodityMaster.sku).order_by(CommodityMaster.sku)))
+        .scalars()
         .all()
     )
-    if not sku_rows:
+    return await _insert_missing_sku_configs(db, sku_codes, enabled=False)
+
+
+async def _backfill_sku_configs_from_synced_listings(db: AsyncSession) -> int:
+    sku_codes = sorted(
+        {
+            sku
+            for sku in (
+                await db.execute(
+                    select(ProductListing.commodity_sku)
+                    .where(ProductListing.commodity_sku.is_not(None))
+                    .order_by(ProductListing.commodity_sku)
+                )
+            )
+            .scalars()
+            .all()
+            if sku is not None
+        }
+    )
+    return await _insert_missing_sku_configs(db, sku_codes, enabled=False)
+
+
+async def _insert_missing_sku_configs(
+    db: AsyncSession,
+    sku_codes: list[str],
+    *,
+    enabled: bool,
+) -> int:
+    if not sku_codes:
         return 0
-    sku_enabled_map: dict[str, bool] = {}
-    for commodity_sku, is_matched, online_status in sku_rows:
-        if commodity_sku is None:
-            continue
-        sku_enabled_map[commodity_sku] = sku_enabled_map.get(commodity_sku, False) or (
-            bool(is_matched) and str(online_status or "").strip().lower() == "active"
-        )
-    sku_codes = sorted(sku_enabled_map)
 
     existing_codes = set(
         (
@@ -203,7 +289,7 @@ async def _backfill_sku_configs_from_synced_listings(db: AsyncSession) -> int:
 
     await db.execute(
         pg_insert(SkuConfig).values(
-            [{"commodity_sku": code, "enabled": sku_enabled_map[code]} for code in missing_codes]
+            [{"commodity_sku": code, "enabled": enabled} for code in missing_codes]
         )
     )
     return len(missing_codes)
