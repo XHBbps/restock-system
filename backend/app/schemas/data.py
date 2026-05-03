@@ -98,7 +98,6 @@ class DataOrderDetail(SaihuLikeModel):
     is_buyer_requested_cancel: bool
     last_sync_at: datetime
     items: list[DataOrderItem]
-    postal_code: str | None = None
     state_or_region: str | None = None
     city: str | None = None
     detail_address: str | None = None

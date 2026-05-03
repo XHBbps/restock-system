@@ -5,7 +5,7 @@ from __future__ import annotations
 from calendar import monthrange
 from collections import defaultdict
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -179,7 +179,8 @@ async def _upsert_package_ship_order(
     platform_name = str(raw.get("platformName") or "").strip() or ORDER_SOURCE_PACKAGE
     shop_name = str(raw.get("shopName") or "").strip() or None
     package_status = str(raw.get("packageStatus") or raw.get("status") or "").strip() or "Unknown"
-    address = raw.get("address") if isinstance(raw.get("address"), dict) else {}
+    raw_address = raw.get("address")
+    address = cast(dict[str, Any], raw_address) if isinstance(raw_address, dict) else {}
     postal_code = _clean_text(address.get("postalCode") if isinstance(address, dict) else None)
     country_code, original_country_code = _resolve_package_country(
         raw,
