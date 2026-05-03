@@ -61,7 +61,9 @@ class SkuMappingComponent(Base):
 
     __tablename__ = "sku_mapping_component"
     __table_args__ = (
-        UniqueConstraint("inventory_sku", name="uq_sku_mapping_component_inventory_sku"),
+        UniqueConstraint(
+            "rule_id", "inventory_sku", name="uq_sku_mapping_component_rule_inventory"
+        ),
         Index("ix_sku_mapping_component_rule_id", "rule_id"),
         Index("ix_sku_mapping_component_rule_group", "rule_id", "group_no"),
         CheckConstraint("group_no > 0", name="ck_sku_mapping_component_group_no_positive"),

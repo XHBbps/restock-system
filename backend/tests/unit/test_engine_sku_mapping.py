@@ -37,6 +37,52 @@ def test_multi_component_mapping_uses_min_per_warehouse() -> None:
     assert result == {("A", "US"): 3}
 
 
+def test_shared_overseas_components_are_allocated_by_country_velocity() -> None:
+    result = compute_mapped_stock_by_country(
+        {
+            "A": [
+                [
+                    MappingComponent(inventory_sku="B", quantity=1),
+                    MappingComponent(inventory_sku="C", quantity=1),
+                    MappingComponent(inventory_sku="D", quantity=1),
+                ]
+            ],
+            "A1": [
+                [
+                    MappingComponent(inventory_sku="B", quantity=1),
+                    MappingComponent(inventory_sku="C", quantity=1),
+                    MappingComponent(inventory_sku="E", quantity=1),
+                ]
+            ],
+        },
+        {
+            ("B", "WH-US-1"): WarehouseStock(country="US", total=100),
+            ("C", "WH-US-1"): WarehouseStock(country="US", total=100),
+            ("D", "WH-US-1"): WarehouseStock(country="US", total=100),
+            ("E", "WH-US-1"): WarehouseStock(country="US", total=100),
+        },
+        velocity={
+            "A": {"US": 3.0},
+            "A1": {"US": 1.0},
+        },
+    )
+
+    assert result == {("A", "US"): 75, ("A1", "US"): 25}
+
+
+def test_shared_overseas_components_equal_split_when_any_consumer_missing_velocity() -> None:
+    result = compute_mapped_stock_by_country(
+        {
+            "A": [[MappingComponent(inventory_sku="B", quantity=1)]],
+            "A1": [[MappingComponent(inventory_sku="B", quantity=1)]],
+        },
+        {("B", "WH-US-1"): WarehouseStock(country="US", total=9)},
+        velocity={"A": {"US": 3.0}, "A1": {}},
+    )
+
+    assert result == {("A", "US"): 5, ("A1", "US"): 4}
+
+
 def test_components_cannot_be_combined_across_warehouses() -> None:
     result = compute_mapped_stock_by_country(
         {
@@ -84,6 +130,22 @@ def test_local_alternative_groups_sum_without_country() -> None:
     )
 
     assert result == {"A": 5}
+
+
+def test_shared_local_components_are_allocated_by_total_velocity() -> None:
+    result = compute_mapped_stock_total_by_sku(
+        {
+            "A": [[MappingComponent(inventory_sku="B", quantity=1)]],
+            "A1": [[MappingComponent(inventory_sku="B", quantity=1)]],
+        },
+        {("B", "LOCAL-1"): WarehouseStock(country=None, total=9)},
+        velocity={
+            "A": {"US": 2.0, "CA": 1.0},
+            "A1": {"US": 1.0},
+        },
+    )
+
+    assert result == {"A": 7, "A1": 2}
 
 
 def test_alternative_single_component_groups_sum_within_warehouse() -> None:

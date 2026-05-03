@@ -32,11 +32,36 @@ def test_sku_mapping_formula_separates_alternative_groups() -> None:
     assert _mapping_formula(rule) == "A=1*B+2*C 或 1*D"
 
 
+def test_sku_mapping_component_unique_constraint_is_rule_scoped() -> None:
+    unique_names = {
+        getattr(constraint, "name", "")
+        for constraint in SkuMappingComponent.__table_args__
+        if getattr(constraint, "name", "").startswith("uq_")
+    }
+
+    assert "uq_sku_mapping_component_rule_inventory" in unique_names
+    assert "uq_sku_mapping_component_inventory_sku" not in unique_names
+
+
 def test_sku_mapping_import_accepts_group_no_column() -> None:
     rules = _normalize_import_rows(
         [
-            {"商品SKU": "A", "组合编号": "1", "库存SKU": "B", "组件数量": "1", "启用": "是", "备注": ""},
-            {"商品SKU": "A", "组合编号": "2", "库存SKU": "C", "组件数量": "2", "启用": "是", "备注": ""},
+            {
+                "商品SKU": "A",
+                "组合编号": "1",
+                "库存SKU": "B",
+                "组件数量": "1",
+                "启用": "是",
+                "备注": "",
+            },
+            {
+                "商品SKU": "A",
+                "组合编号": "2",
+                "库存SKU": "C",
+                "组件数量": "2",
+                "启用": "是",
+                "备注": "",
+            },
         ]
     )
 
@@ -48,19 +73,39 @@ def test_sku_mapping_import_rejects_invalid_group_no() -> None:
     with pytest.raises(ValidationFailed) as exc:
         _normalize_import_rows(
             [
-                {"商品SKU": "A", "组合编号": "0", "库存SKU": "B", "组件数量": "1", "启用": "是", "备注": ""}
+                {
+                    "商品SKU": "A",
+                    "组合编号": "0",
+                    "库存SKU": "B",
+                    "组件数量": "1",
+                    "启用": "是",
+                    "备注": "",
+                }
             ]
         )
 
     assert exc.value.detail["errors"][0]["message"] == "组合编号必须为正整数"
 
 
-def test_sku_mapping_import_rejects_duplicate_inventory_sku() -> None:
+def test_sku_mapping_import_allows_shared_inventory_sku_across_commodity_skus() -> None:
+    rules = _normalize_import_rows(
+        [
+            {"商品SKU": "A", "库存SKU": "B", "组件数量": "1", "启用": "是", "备注": ""},
+            {"商品SKU": "C", "库存SKU": "B", "组件数量": "1", "启用": "是", "备注": ""},
+        ]
+    )
+
+    assert set(rules) == {"A", "C"}
+    assert rules["A"].components[0].inventory_sku == "B"
+    assert rules["C"].components[0].inventory_sku == "B"
+
+
+def test_sku_mapping_import_rejects_duplicate_inventory_sku_in_same_rule() -> None:
     with pytest.raises(ValidationFailed) as exc:
         _normalize_import_rows(
             [
                 {"商品SKU": "A", "库存SKU": "B", "组件数量": "1", "启用": "是", "备注": ""},
-                {"商品SKU": "C", "库存SKU": "B", "组件数量": "1", "启用": "是", "备注": ""},
+                {"商品SKU": "A", "库存SKU": "B", "组件数量": "1", "启用": "是", "备注": ""},
             ]
         )
 

@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-05-03（商品同步接入赛狐 SKU 主数据 `/api/commodity/pageList.json`，商品页改为主数据口径，新发现 SKU 默认禁用。）
+> 最近更新：2026-05-03（SKU 映射规则允许不同商品共享同一库存 SKU，引擎按近期销量比例分配共享组件库存。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -105,6 +105,12 @@
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
 
+### 3.90 SKU 映射共享库存按销量分配（2026-05-03）
+- **数据库迁移**：`backend/alembic/versions/20260503_1500_allow_shared_sku_mapping_components.py` 移除 `sku_mapping_component.inventory_sku` 全局唯一约束，新增 `rule_id + inventory_sku` 唯一约束；不同商品映射规则可复用同一库存 SKU，同一商品规则内仍禁止重复组件。
+- **接口与导入**：`backend/app/api/config.py` 不再拦截跨商品库存 SKU 复用；Excel/CSV 导入只校验同一商品规则内的重复库存 SKU。`backend/app/schemas/config.py` 的校验文案同步调整为“同一商品规则内库存SKU重复”。
+- **引擎分配**：`backend/app/engine/sku_mapping.py` 在同一仓库、同一组件 SKU 维度先按启用商品规则分配共享组件库存，再按组合短板计算可组装数量；Step 2 使用仓库所在国家的 `velocity[sku][country]` 分配，Step 4 使用 SKU 全国家 velocity 合计分配；若共享 SKU 中任一启用商品没有正销量信号，则该组件在共享商品间均分。停用规则不参与共享分配，商品 SKU 自身库存仍直接计入。
+- **测试**：补充 `backend/tests/unit/test_engine_sku_mapping.py` 与 `backend/tests/unit/test_sku_mapping_import.py`，覆盖共享组件按比例分配、无销量均分、本地仓合计销量口径、跨商品导入复用成功、同规则重复失败和模型唯一约束口径。
+
 ### 3.89 商品主数据同步接入（2026-05-03）
 - **赛狐接口**：新增 `backend/app/saihu/endpoints/commodity.py`，封装 `POST /api/commodity/pageList.json`，分页请求体为 `pageNo/pageSize`，默认不加 `state`、`isGroup` 过滤，避免漏掉停售、组合 SKU 或加工 SKU。
 - **数据库迁移**：`backend/alembic/versions/20260503_1000_add_commodity_master.py` 新增 `commodity_master` 表，主键为赛狐返回的 `sku`，保存 `commodity_id/name/state/is_group/img_url/purchase_days/child_skus/last_sync_at` 等主数据字段。
@@ -115,7 +121,7 @@
 - **测试**：新增 `backend/tests/unit/test_saihu_commodity_endpoint.py`、`backend/tests/unit/test_data_sku_overview_api.py`，并更新商品同步、SKU 初始化、库存匹配与商品页前端测试，覆盖分页请求、空 SKU 跳过、默认禁用、主数据优先和无 listing 展示。
 
 ### 3.88 SKU 映射替代组合改造（2026-05-02）
-- **数据库迁移**：`sku_mapping_component` 新增 `group_no`，默认值为 1，旧组件行自动归入“组合 1”；保留 `sku_mapping_rule.commodity_sku` 唯一与 `sku_mapping_component.inventory_sku` 全局唯一，继续避免同一库存 SKU 被多个商品重复消费。
+- **数据库迁移**：`sku_mapping_component` 新增 `group_no`，默认值为 1，旧组件行自动归入“组合 1”；当时仍保留 `sku_mapping_rule.commodity_sku` 唯一与 `sku_mapping_component.inventory_sku` 全局唯一，后续 §3.90 已将组件唯一约束收窄为同一规则内唯一。
 - **规则语义**：同一商品 SKU 下，相同 `group_no` 的组件是 AND 组合，不同 `group_no` 是 OR 替代方案。`A=B+C+D` 表示一个组合，`A=B 或 C 或 D` 表示三个单组件组合，`A=B+C+D 或 E+F+G` 表示两个组合。
 - **计算口径**：`backend/app/engine/sku_mapping.py` 改为每仓库、每组合分别计算可组装数量；单组件组合按 `库存数 // quantity`，多组件组合按 `min(各组件库存数 // quantity)`，同商品同仓库的多个替代组合结果相加。Step 2 海外仓库存/在途换算和 Step 4 本地仓采购量抵扣共用该口径，不跨仓拼组件。
 - **导入导出与 API**：映射组件 DTO 增加 `group_no`，校验 `group_no >= 1`、组件数量为正、库存 SKU 不重复；导出模板新增“组合编号”列，导入兼容旧模板，缺少“组合编号”时默认组合 1。
@@ -202,7 +208,7 @@
 
 ### 3.76 SKU 映射规则与补货计算接入（2026-04-27）
 
-- **数据库表**：新增 `sku_mapping_rule` / `sku_mapping_component`，一条商品 SKU 只能有一条规则；`sku_mapping_component.inventory_sku` 全局唯一，避免同一库存包裹 SKU 被多个商品规则重复消费。
+- **数据库表**：新增 `sku_mapping_rule` / `sku_mapping_component`，一条商品 SKU 只能有一条规则；初始版本要求 `sku_mapping_component.inventory_sku` 全局唯一，后续 §3.90 已改为允许跨商品规则共享库存 SKU，并在引擎计算时按销量比例分配共享组件库存。
 - **配置接口**：新增 `GET/POST/PATCH/DELETE /api/config/sku-mapping-rules`，支持按商品 SKU / 库存 SKU 搜索、启用状态筛选、分页；新增 `/export` Excel 导出与 `/import` Excel/CSV 导入，导入列为“商品SKU、库存SKU、组件数量、启用、备注”，整批校验失败时不写入。
 - **前端页面**：新增 `frontend/src/views/SkuMappingRuleView.vue`，入口在“设置 > 基础配置 > 映射规则”，查看使用 `config:view`，新增、编辑、启停、删除、导入使用 `config:edit`。
 - **计算口径**：`backend/app/engine/sku_mapping.py` 提供同仓库组装计算；`step2_sale_days.py` 在海外库存 + 在途读取后叠加映射可组装数量，`step4_total.py` 在本地库存读取后叠加映射可组装数量。`A=2*B` 按 `floor(B/2)`，`A=1*B+2*C` 按同仓库 `min(floor(B/1), floor(C/2))`；组件分散在不同仓库不跨仓组合。

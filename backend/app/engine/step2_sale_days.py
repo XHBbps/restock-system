@@ -142,6 +142,7 @@ async def run_step2(
         mapped = compute_mapped_stock_by_country(
             rules,
             merge_warehouse_stock(component_inventory, component_transit),
+            velocity=velocity,
         )
         for key, quantity in mapped.items():
             current = oversea.setdefault(key, {"available": 0, "reserved": 0})

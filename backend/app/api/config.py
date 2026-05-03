@@ -224,12 +224,14 @@ async def _observed_country_codes(db: AsyncSession) -> set[str]:
     observed: set[str] = set()
     for column in columns:
         rows = (
-            await db.execute(
-                select(distinct(column))
-                .where(column.is_not(None))
-                .where(column != "")
+            (
+                await db.execute(
+                    select(distinct(column)).where(column.is_not(None)).where(column != "")
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for raw in rows:
             code = normalize_observed_country_code(raw)
             if code is not None:
@@ -250,7 +252,9 @@ async def get_country_options(
         *sorted(all_codes - builtin_set),
     ]
     unknown_codes = sorted(
-        code for code in observed if code not in BUILTIN_COUNTRY_NAMES and code not in NON_EU_MEMBER_CODES
+        code
+        for code in observed
+        if code not in BUILTIN_COUNTRY_NAMES and code not in NON_EU_MEMBER_CODES
     )
     return CountryOptionsOut(
         items=[
@@ -285,15 +289,14 @@ async def patch_global(
         sensitive_updates = GLOBAL_CONFIG_SENSITIVE_FIELDS & updates.keys()
         sensitive_old = {f: getattr(row, f, None) for f in sensitive_updates}
         await db.execute(update(GlobalConfig).where(GlobalConfig.id == 1).values(**updates))
-        if "eu_countries" in updates and sensitive_old.get("eu_countries") != updates["eu_countries"]:
-            await backfill_eu_country_mapping(db, updates["eu_countries"])
-        if sensitive_updates and any(
-            sensitive_old[f] != updates[f] for f in sensitive_updates
+        if (
+            "eu_countries" in updates
+            and sensitive_old.get("eu_countries") != updates["eu_countries"]
         ):
+            await backfill_eu_country_mapping(db, updates["eu_countries"])
+        if sensitive_updates and any(sensitive_old[f] != updates[f] for f in sensitive_updates):
             await db.execute(
-                update(DashboardSnapshot)
-                .where(DashboardSnapshot.id == 1)
-                .values(stale=True)
+                update(DashboardSnapshot).where(DashboardSnapshot.id == 1).values(stale=True)
             )
         await db.commit()
         if {"sync_interval_minutes", "scheduler_enabled"} & updates.keys():
@@ -320,7 +323,9 @@ async def _compute_can_enable(db: AsyncSession) -> tuple[bool, str | None]:
     if draft.procurement_item_count > 0:
         procurement_count = (
             await db.execute(
-                select(func.count()).select_from(SuggestionSnapshot).where(
+                select(func.count())
+                .select_from(SuggestionSnapshot)
+                .where(
                     SuggestionSnapshot.suggestion_id == draft.id,
                     SuggestionSnapshot.snapshot_type == "procurement",
                 )
@@ -332,7 +337,9 @@ async def _compute_can_enable(db: AsyncSession) -> tuple[bool, str | None]:
     if draft.restock_item_count > 0:
         restock_count = (
             await db.execute(
-                select(func.count()).select_from(SuggestionSnapshot).where(
+                select(func.count())
+                .select_from(SuggestionSnapshot)
+                .where(
                     SuggestionSnapshot.suggestion_id == draft.id,
                     SuggestionSnapshot.snapshot_type == "restock",
                 )
@@ -513,7 +520,9 @@ def _mapping_formula(rule: SkuMappingRule) -> str:
     for component in rule.components:
         groups.setdefault(component.group_no, []).append(component)
     group_parts = [
-        "+".join(f"{component.quantity}*{component.inventory_sku}" for component in groups[group_no])
+        "+".join(
+            f"{component.quantity}*{component.inventory_sku}" for component in groups[group_no]
+        )
         for group_no in sorted(groups)
     ]
     return f"{rule.commodity_sku}=" + " 或 ".join(group_parts)
@@ -537,27 +546,15 @@ async def _validate_mapping_unique(
     db: AsyncSession,
     *,
     commodity_sku: str,
-    components: list[SkuMappingComponentIn],
     current_rule_id: int | None = None,
 ) -> None:
     existing_rule = (
-        await db.execute(select(SkuMappingRule).where(SkuMappingRule.commodity_sku == commodity_sku))
+        await db.execute(
+            select(SkuMappingRule).where(SkuMappingRule.commodity_sku == commodity_sku)
+        )
     ).scalar_one_or_none()
     if existing_rule is not None and existing_rule.id != current_rule_id:
         raise ConflictError(f"商品SKU {commodity_sku} 已存在映射规则")
-
-    component_skus = [component.inventory_sku for component in components]
-    component_stmt = (
-        select(SkuMappingComponent.inventory_sku, SkuMappingRule.commodity_sku)
-        .join(SkuMappingRule, SkuMappingRule.id == SkuMappingComponent.rule_id)
-        .where(SkuMappingComponent.inventory_sku.in_(component_skus))
-    )
-    if current_rule_id is not None:
-        component_stmt = component_stmt.where(SkuMappingComponent.rule_id != current_rule_id)
-    component_rows = (await db.execute(component_stmt)).all()
-    if component_rows:
-        inventory_sku, owner_sku = component_rows[0]
-        raise ConflictError(f"库存SKU {inventory_sku} 已归属商品SKU {owner_sku}")
 
 
 async def _replace_mapping_components(
@@ -608,13 +605,20 @@ async def list_sku_mapping_rules(
 
     total = (await db.execute(count_stmt)).scalar_one()
     rows = (
-        await db.execute(
-            base.order_by(SkuMappingRule.commodity_sku)
-            .offset((page - 1) * page_size)
-            .limit(page_size)
+        (
+            await db.execute(
+                base.order_by(SkuMappingRule.commodity_sku)
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
         )
-    ).scalars().unique().all()
-    return SkuMappingRuleListOut(items=[_mapping_rule_out(row) for row in rows], total=int(total or 0))
+        .scalars()
+        .unique()
+        .all()
+    )
+    return SkuMappingRuleListOut(
+        items=[_mapping_rule_out(row) for row in rows], total=int(total or 0)
+    )
 
 
 @router.post("/sku-mapping-rules", response_model=SkuMappingRuleOut, status_code=201)
@@ -626,7 +630,6 @@ async def create_sku_mapping_rule(
     await _validate_mapping_unique(
         db,
         commodity_sku=body.commodity_sku,
-        components=body.components,
     )
     rule = SkuMappingRule(
         commodity_sku=body.commodity_sku,
@@ -653,12 +656,16 @@ async def export_sku_mapping_rules(
     _: None = Depends(require_permission(CONFIG_VIEW)),
 ) -> StreamingResponse:
     rows = (
-        await db.execute(
-            select(SkuMappingRule)
-            .options(selectinload(SkuMappingRule.components))
-            .order_by(SkuMappingRule.commodity_sku)
+        (
+            await db.execute(
+                select(SkuMappingRule)
+                .options(selectinload(SkuMappingRule.components))
+                .order_by(SkuMappingRule.commodity_sku)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     workbook = Workbook()
     sheet = workbook.active
@@ -711,14 +718,16 @@ def _read_mapping_import_rows(filename: str, content: bytes) -> list[dict[str, A
     headers = [str(cell or "").strip() for cell in rows[0]]
     result: list[dict[str, Any]] = []
     for row in rows[1:]:
-        result.append({headers[idx]: row[idx] if idx < len(row) else None for idx in range(len(headers))})
+        result.append(
+            {headers[idx]: row[idx] if idx < len(row) else None for idx in range(len(headers))}
+        )
     return result
 
 
 def _normalize_import_rows(raw_rows: list[dict[str, Any]]) -> dict[str, SkuMappingRuleIn]:
     errors: list[dict[str, Any]] = []
     grouped: dict[str, dict[str, Any]] = {}
-    seen_inventory: dict[str, int] = {}
+    seen_inventory: dict[str, dict[str, int]] = {}
     required_headers = {"商品SKU", "库存SKU", "组件数量", "启用", "备注"}
 
     for idx, raw in enumerate(raw_rows, start=2):
@@ -762,11 +771,14 @@ def _normalize_import_rows(raw_rows: list[dict[str, Any]]) -> dict[str, SkuMappi
             errors.append({"row": idx, "message": "组合编号必须为正整数"})
         if quantity <= 0:
             errors.append({"row": idx, "message": "组件数量必须为正整数"})
-        if inventory_sku:
-            previous_row = seen_inventory.get(inventory_sku)
+        if inventory_sku and commodity_sku:
+            commodity_seen = seen_inventory.setdefault(commodity_sku, {})
+            previous_row = commodity_seen.get(inventory_sku)
             if previous_row is not None:
-                errors.append({"row": idx, "message": f"库存SKU与第 {previous_row} 行重复：{inventory_sku}"})
-            seen_inventory[inventory_sku] = idx
+                errors.append(
+                    {"row": idx, "message": f"库存SKU与第 {previous_row} 行重复：{inventory_sku}"}
+                )
+            commodity_seen[inventory_sku] = idx
         if not commodity_sku or not inventory_sku or group_no <= 0 or quantity <= 0:
             continue
 
@@ -811,29 +823,20 @@ async def import_sku_mapping_rules(
         raise ValidationFailed("导入文件没有有效数据")
 
     commodity_skus = set(rules)
-    component_skus = [component.inventory_sku for rule in rules.values() for component in rule.components]
-    conflicts = (
-        await db.execute(
-            select(SkuMappingComponent.inventory_sku, SkuMappingRule.commodity_sku)
-            .join(SkuMappingRule, SkuMappingRule.id == SkuMappingComponent.rule_id)
-            .where(SkuMappingComponent.inventory_sku.in_(component_skus))
-            .where(SkuMappingRule.commodity_sku.not_in(commodity_skus))
-        )
-    ).all()
-    if conflicts:
-        errors = [
-            {"row": None, "message": f"库存SKU {sku} 已归属商品SKU {owner}"}
-            for sku, owner in conflicts
-        ]
-        raise ValidationFailed("导入校验失败", detail={"errors": errors})
-
+    component_skus = [
+        component.inventory_sku for rule in rules.values() for component in rule.components
+    ]
     existing_rows = (
-        await db.execute(
-            select(SkuMappingRule)
-            .options(selectinload(SkuMappingRule.components))
-            .where(SkuMappingRule.commodity_sku.in_(commodity_skus))
+        (
+            await db.execute(
+                select(SkuMappingRule)
+                .options(selectinload(SkuMappingRule.components))
+                .where(SkuMappingRule.commodity_sku.in_(commodity_skus))
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     existing_map = {row.commodity_sku: row for row in existing_rows}
     created = 0
     updated = 0
@@ -878,19 +881,12 @@ async def patch_sku_mapping_rule(
     if rule is None:
         raise NotFound(f"映射规则 {rule_id} 不存在")
 
-    new_commodity_sku = patch.commodity_sku if patch.commodity_sku is not None else rule.commodity_sku
-    new_components = patch.components if patch.components is not None else [
-        SkuMappingComponentIn(
-            group_no=item.group_no,
-            inventory_sku=item.inventory_sku,
-            quantity=item.quantity,
-        )
-        for item in rule.components
-    ]
+    new_commodity_sku = (
+        patch.commodity_sku if patch.commodity_sku is not None else rule.commodity_sku
+    )
     await _validate_mapping_unique(
         db,
         commodity_sku=new_commodity_sku,
-        components=new_components,
         current_rule_id=rule.id,
     )
 

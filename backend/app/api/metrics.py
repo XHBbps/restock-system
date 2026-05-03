@@ -318,7 +318,7 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
         }
     else:
         live_country_qty = live_country_qty_all
-    local_stock = await load_local_inventory(db, enabled_skus) if enabled_skus else {}
+    local_stock = await load_local_inventory(db, enabled_skus, velocity) if enabled_skus else {}
     restock_sku_count = 0
     for sku in enabled_skus:
         sku_country_qty = live_country_qty.get(sku, {})

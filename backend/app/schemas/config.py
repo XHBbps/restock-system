@@ -139,7 +139,7 @@ class SkuMappingRuleIn(BaseModel):
         seen: set[str] = set()
         for component in self.components:
             if component.inventory_sku in seen:
-                raise ValueError(f"库存SKU重复：{component.inventory_sku}")
+                raise ValueError(f"同一商品规则内库存SKU重复：{component.inventory_sku}")
             seen.add(component.inventory_sku)
         return self
 
@@ -175,7 +175,7 @@ class SkuMappingRulePatch(BaseModel):
         seen: set[str] = set()
         for component in self.components:
             if component.inventory_sku in seen:
-                raise ValueError(f"库存SKU重复：{component.inventory_sku}")
+                raise ValueError(f"同一商品规则内库存SKU重复：{component.inventory_sku}")
             seen.add(component.inventory_sku)
         return self
 
@@ -218,7 +218,9 @@ class WarehouseOut(BaseModel):
 
 
 class WarehouseCountryPatch(BaseModel):
-    country: str | None = Field(default=None, min_length=2, max_length=2, description="ISO 二字码或 null 清除")
+    country: str | None = Field(
+        default=None, min_length=2, max_length=2, description="ISO 二字码或 null 清除"
+    )
 
 
 class CountryOptionOut(BaseModel):
@@ -266,9 +268,7 @@ class ZipcodeRuleIn(BaseModel):
     country: str = Field(..., min_length=2, max_length=2)
     prefix_length: int = Field(..., ge=1, le=10)
     value_type: Literal["number", "string"]
-    operator: Literal[
-        "=", "!=", ">", ">=", "<", "<=", "contains", "not_contains", "between"
-    ]
+    operator: Literal["=", "!=", ">", ">=", "<", "<=", "contains", "not_contains", "between"]
     compare_value: str = Field(..., min_length=1, max_length=200)
     warehouse_id: str
     priority: int = Field(default=100, ge=1)

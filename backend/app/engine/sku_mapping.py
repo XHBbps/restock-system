@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+from math import floor
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,12 +24,41 @@ class MappingComponent:
 
 MappingGroup = list[MappingComponent]
 MappingRules = dict[str, list[MappingGroup]]
+ComponentConsumers = dict[str, list[str]]
 
 
 @dataclass(frozen=True, slots=True)
 class WarehouseStock:
     country: str | None
     total: int
+
+
+def mapping_component_consumers(rules: MappingRules) -> ComponentConsumers:
+    consumers: defaultdict[str, set[str]] = defaultdict(set)
+    for commodity_sku, groups in rules.items():
+        for components in groups:
+            for component in components:
+                consumers[component.inventory_sku].add(commodity_sku)
+    return {
+        inventory_sku: sorted(commodity_skus) for inventory_sku, commodity_skus in consumers.items()
+    }
+
+
+def _country_weights_by_sku(velocity: dict[str, dict[str, float]]) -> dict[str, dict[str, float]]:
+    weights_by_country: defaultdict[str, dict[str, float]] = defaultdict(dict)
+    for commodity_sku, country_map in velocity.items():
+        for country, weight in country_map.items():
+            weights_by_country[country][commodity_sku] = weight
+    return dict(weights_by_country)
+
+
+def _local_weights_by_sku(velocity: dict[str, dict[str, float]]) -> dict[str, dict[str, float]]:
+    return {
+        "": {
+            commodity_sku: sum(country_map.values())
+            for commodity_sku, country_map in velocity.items()
+        }
+    }
 
 
 async def load_active_mapping_rules(
@@ -68,6 +98,68 @@ def component_skus_for_rules(rules: MappingRules) -> list[str]:
             for component in components
         }
     )
+
+
+def _allocate_integer_quantity(
+    total: int,
+    consumers: list[str],
+    weights: dict[str, float],
+) -> dict[str, int]:
+    if total <= 0 or not consumers:
+        return dict.fromkeys(consumers, 0)
+    if len(consumers) == 1:
+        return {consumers[0]: total}
+
+    positive_weights = [weights.get(consumer, 0.0) for consumer in consumers]
+    use_equal_split = any(weight <= 0 for weight in positive_weights)
+    if use_equal_split:
+        positive_weights = [1.0] * len(consumers)
+
+    weight_sum = sum(positive_weights)
+    if weight_sum <= 0:
+        positive_weights = [1.0] * len(consumers)
+        weight_sum = float(len(consumers))
+
+    raw_shares = [total * weight / weight_sum for weight in positive_weights]
+    allocated = [floor(share) for share in raw_shares]
+    remainder = total - sum(allocated)
+    if remainder > 0:
+        fractional_order = sorted(
+            range(len(consumers)),
+            key=lambda idx: (-(raw_shares[idx] - allocated[idx]), consumers[idx]),
+        )
+        for idx in fractional_order[:remainder]:
+            allocated[idx] += 1
+    return {consumer: allocated[idx] for idx, consumer in enumerate(consumers)}
+
+
+def _build_component_allocation(
+    rules: MappingRules,
+    component_stock: dict[tuple[str, str], WarehouseStock],
+    weights_by_country: dict[str, dict[str, float]],
+    *,
+    fixed_weight_country: str | None = None,
+) -> dict[tuple[str, str, str], WarehouseStock]:
+    allocations: dict[tuple[str, str, str], WarehouseStock] = {}
+    consumers_by_component = mapping_component_consumers(rules)
+    for (component_sku, warehouse_id), stock in component_stock.items():
+        consumers = consumers_by_component.get(component_sku)
+        if not consumers:
+            continue
+        weight_country = (
+            fixed_weight_country if fixed_weight_country is not None else stock.country or ""
+        )
+        country_weights = weights_by_country.get(weight_country, {})
+        weights = {
+            commodity_sku: country_weights.get(commodity_sku, 0.0) for commodity_sku in consumers
+        }
+        splits = _allocate_integer_quantity(stock.total, consumers, weights)
+        for commodity_sku, quantity in splits.items():
+            allocations[(commodity_sku, component_sku, warehouse_id)] = WarehouseStock(
+                country=stock.country,
+                total=quantity,
+            )
+    return allocations
 
 
 async def load_inventory_totals_by_warehouse(
@@ -160,19 +252,28 @@ def merge_warehouse_stock(
             if current is None:
                 merged[key] = stock
                 continue
-            merged[key] = WarehouseStock(country=current.country or stock.country, total=current.total + stock.total)
+            merged[key] = WarehouseStock(
+                country=current.country or stock.country, total=current.total + stock.total
+            )
     return merged
 
 
 def compute_mapped_stock_by_country(
     rules: MappingRules,
     component_stock: dict[tuple[str, str], WarehouseStock],
+    *,
+    velocity: dict[str, dict[str, float]] | None = None,
 ) -> dict[tuple[str, str], int]:
     """Return assembled commodity stock aggregated by ``(commodity_sku, country)``."""
     result: defaultdict[tuple[str, str], int] = defaultdict(int)
     if not rules or not component_stock:
         return {}
 
+    allocations = _build_component_allocation(
+        rules,
+        component_stock,
+        _country_weights_by_sku(velocity) if velocity is not None else {},
+    )
     warehouse_ids = {warehouse_id for _, warehouse_id in component_stock}
     for commodity_sku, groups in rules.items():
         for warehouse_id in warehouse_ids:
@@ -180,7 +281,7 @@ def compute_mapped_stock_by_country(
                 country: str | None = None
                 buildable: int | None = None
                 for component in components:
-                    stock = component_stock.get((component.inventory_sku, warehouse_id))
+                    stock = allocations.get((commodity_sku, component.inventory_sku, warehouse_id))
                     if stock is None:
                         buildable = 0
                         break
@@ -199,19 +300,27 @@ def compute_mapped_stock_by_country(
 def compute_mapped_stock_total_by_sku(
     rules: MappingRules,
     component_stock: dict[tuple[str, str], WarehouseStock],
+    *,
+    velocity: dict[str, dict[str, float]] | None = None,
 ) -> dict[str, int]:
     """Return assembled local stock aggregated by commodity SKU."""
     totals: defaultdict[str, int] = defaultdict(int)
     if not rules or not component_stock:
         return {}
 
+    allocations = _build_component_allocation(
+        rules,
+        component_stock,
+        _local_weights_by_sku(velocity) if velocity is not None else {},
+        fixed_weight_country="",
+    )
     warehouse_ids = {warehouse_id for _, warehouse_id in component_stock}
     for commodity_sku, groups in rules.items():
         for warehouse_id in warehouse_ids:
             for components in groups:
                 buildable: int | None = None
                 for component in components:
-                    stock = component_stock.get((component.inventory_sku, warehouse_id))
+                    stock = allocations.get((commodity_sku, component.inventory_sku, warehouse_id))
                     if stock is None:
                         buildable = 0
                         break

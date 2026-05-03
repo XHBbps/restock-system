@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
-from app.engine.context import EngineContext, LocalStock
+from app.engine.context import EngineContext, LocalStock, VelocityMap
 from app.engine.sku_mapping import (
     component_skus_for_rules,
     compute_mapped_stock_total_by_sku,
@@ -24,6 +24,7 @@ logger = get_logger(__name__)
 async def load_local_inventory(
     db: AsyncSession,
     commodity_skus: list[str] | None,
+    velocity: VelocityMap | None = None,
 ) -> dict[str, LocalStock]:
     stmt = (
         select(
@@ -48,13 +49,19 @@ async def load_local_inventory(
             component_skus,
             warehouse_type=1,
         )
-        mapped_totals = compute_mapped_stock_total_by_sku(rules, component_inventory)
+        mapped_totals = compute_mapped_stock_total_by_sku(
+            rules,
+            component_inventory,
+            velocity=velocity,
+        )
         for sku, quantity in mapped_totals.items():
             current = result.get(sku)
             if current is None:
                 result[sku] = LocalStock(available=quantity, reserved=0)
             else:
-                result[sku] = LocalStock(available=current.available + quantity, reserved=current.reserved)
+                result[sku] = LocalStock(
+                    available=current.available + quantity, reserved=current.reserved
+                )
     return result
 
 

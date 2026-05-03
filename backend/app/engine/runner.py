@@ -109,7 +109,7 @@ async def run_engine(
             country_qty = country_qty_all
 
         await ctx.progress(current_step="Step 4: 计算采购量")
-        local_stock = await load_local_inventory(db, sku_list)
+        local_stock = await load_local_inventory(db, sku_list, velocity)
 
         await ctx.progress(current_step="Step 5: 计算分仓")
         country_warehouses = await load_country_warehouses(db)
