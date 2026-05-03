@@ -31,7 +31,6 @@ from app.engine import calc_engine_job as _job_calc  # noqa: F401
 from app.models.global_config import GlobalConfig
 from app.sync import all as _job_all  # noqa: F401
 from app.sync import inventory as _job_inv  # noqa: F401
-from app.sync import order_detail as _job_od  # noqa: F401
 from app.sync import order_list as _job_ol  # noqa: F401
 from app.sync import out_records as _job_or  # noqa: F401
 from app.sync import product_listing as _job_pl  # noqa: F401

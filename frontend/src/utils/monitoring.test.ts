@@ -40,7 +40,7 @@ describe('getTaskTerminalFeedback', () => {
 describe('formatMonitorEndpoint', () => {
   it('maps known saihu endpoints to Chinese labels', () => {
     expect(formatMonitorEndpoint('/api/order/detailByOrderId.json')).toEqual({
-      label: '订单详情同步',
+      label: '历史日志展示：旧订单详情同步',
       raw: '/api/order/detailByOrderId.json',
     })
   })

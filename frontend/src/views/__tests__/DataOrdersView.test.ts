@@ -13,7 +13,7 @@ const mockMessageSuccess = vi.fn()
 vi.mock('@/api/data', () => ({
   listOrders: (...args: unknown[]) => mockListOrders(...args),
   listDataShops: (...args: unknown[]) => mockListDataShops(...args),
-  getOrderDetail: (...args: unknown[]) => mockGetOrderDetail(...args),
+  getOrderDetail: (...args: unknown[]) => mockGetOrderDetail(...args)
 }))
 
 vi.mock('element-plus', async () => {
@@ -22,15 +22,15 @@ vi.mock('element-plus', async () => {
     ...actual,
     ElMessage: {
       error: (...args: unknown[]) => mockMessageError(...args),
-      success: (...args: unknown[]) => mockMessageSuccess(...args),
-    },
+      success: (...args: unknown[]) => mockMessageSuccess(...args)
+    }
   }
 })
 
 const STUBS = {
   PageSectionCard: {
     props: ['title'],
-    template: '<div><h1>{{ title }}</h1><slot name="actions" /><slot /></div>',
+    template: '<div><h1>{{ title }}</h1><slot name="actions" /><slot /></div>'
   },
   TablePaginationBar: {
     props: ['currentPage', 'pageSize', 'total'],
@@ -52,10 +52,8 @@ const STUBS = {
           size-100
         </button>
       </div>
-    `,
+    `
   },
-  TaskProgress: true,
-  OrderDetailFetchAction: true,
   ElInput: {
     props: ['modelValue', 'placeholder'],
     emits: ['update:modelValue', 'input', 'keyup.enter', 'clear'],
@@ -69,18 +67,18 @@ const STUBS = {
         />
         <button type="button" class="input-clear" @click="$emit('update:modelValue', ''); $emit('clear')">clear</button>
       </div>
-    `,
+    `
   },
   ElSelect: defineComponent({
     props: {
       modelValue: {
         type: String,
-        default: '',
+        default: ''
       },
       placeholder: {
         type: String,
-        default: '',
-      },
+        default: ''
+      }
     },
     emits: ['update:modelValue', 'change', 'clear'],
     template: `
@@ -102,15 +100,15 @@ const STUBS = {
           US
         </button>
         <button
-          v-if="placeholder === '状态'"
+          v-if="placeholder === '包裹状态'"
           type="button"
           class="status-shipped"
-          @click="$emit('update:modelValue', 'Shipped'); $emit('change', 'Shipped')"
+          @click="$emit('update:modelValue', 'has_shipped'); $emit('change', 'has_shipped')"
         >
-          Shipped
+          has_shipped
         </button>
       </div>
-    `,
+    `
   }),
   ElOption: true,
   ElDatePicker: {
@@ -124,33 +122,41 @@ const STUBS = {
       >
         date
       </button>
-    `,
+    `
   },
   ElTable: { template: '<div><slot /></div>' },
   ElTableColumn: {
     props: ['label', 'prop'],
-    template: '<div><span>{{ label }}</span></div>',
+    template: '<div><span>{{ label }}</span></div>'
   },
   ElTag: { template: '<span><slot /></span>' },
   ElButton: { template: '<button type="button" @click="$emit(\'click\')"><slot /></button>' },
   ElDialog: { template: '<div><slot /></div>' },
   ElAlert: true,
-  ElEmpty: true,
+  ElEmpty: true
 }
 
 const GLOBAL_CONFIG = {
   stubs: STUBS,
   directives: {
-    loading: {},
-  },
+    loading: {}
+  }
 }
 
-function buildOrdersResponse(overrides: Partial<{ total: number; page: number; pageSize: number }> = {}) {
+function buildOrdersResponse(
+  overrides: Partial<{ total: number; page: number; pageSize: number }> = {}
+) {
   return {
     items: [
       {
         shopId: 'SHOP-1',
         amazonOrderId: 'ORDER-1',
+        source: '订单处理',
+        orderPlatform: 'Amazon',
+        packageSn: 'PKG-1',
+        packageStatus: 'has_shipped',
+        shopName: 'Main Shop',
+        postalCode: '90210',
         marketplaceId: 'ATVPDKIKX0DER',
         countryCode: 'US',
         orderStatus: 'Shipped',
@@ -162,13 +168,13 @@ function buildOrdersResponse(overrides: Partial<{ total: number; page: number; p
         refundStatus: null,
         lastSyncAt: '2026-04-16T11:00:00+08:00',
         hasDetail: true,
-        itemCount: 2,
-      },
+        itemCount: 2
+      }
     ],
     total: 188,
     page: 1,
     pageSize: 50,
-    ...overrides,
+    ...overrides
   }
 }
 
@@ -180,9 +186,9 @@ describe('DataOrdersView', () => {
     mockListDataShops.mockResolvedValue({
       items: [
         { id: 'SHOP-1', name: '店铺 1' },
-        { id: 'SHOP-2', name: '店铺 2' },
+        { id: 'SHOP-2', name: '店铺 2' }
       ],
-      total: 2,
+      total: 2
     })
     mockGetOrderDetail.mockResolvedValue({})
   })
@@ -204,7 +210,7 @@ describe('DataOrdersView', () => {
       sku: undefined,
       sort_by: 'purchaseDate',
       sort_order: 'desc',
-      status: undefined,
+      status: undefined
     })
   })
 
@@ -220,8 +226,8 @@ describe('DataOrdersView', () => {
     expect(mockListOrders).toHaveBeenLastCalledWith(
       expect.objectContaining({
         page: 3,
-        page_size: 50,
-      }),
+        page_size: 50
+      })
     )
   })
 
@@ -240,8 +246,8 @@ describe('DataOrdersView', () => {
     expect(mockListOrders).toHaveBeenLastCalledWith(
       expect.objectContaining({
         page: 1,
-        shop_id: 'SHOP-2',
-      }),
+        shop_id: 'SHOP-2'
+      })
     )
   })
 
@@ -251,7 +257,7 @@ describe('DataOrdersView', () => {
     await flushPromises()
     mockListOrders.mockClear()
 
-    const skuInput = wrapper.find('input[placeholder="SKU / 订单号"]')
+    const skuInput = wrapper.find('input[placeholder="SKU / 订单号 / 包裹号"]')
     await skuInput.setValue('SKU-1')
     expect(mockListOrders).not.toHaveBeenCalled()
 
@@ -263,8 +269,8 @@ describe('DataOrdersView', () => {
     expect(mockListOrders).toHaveBeenLastCalledWith(
       expect.objectContaining({
         page: 1,
-        sku: 'SKU-1',
-      }),
+        sku: 'SKU-1'
+      })
     )
 
     mockListOrders.mockClear()
@@ -275,8 +281,8 @@ describe('DataOrdersView', () => {
     expect(mockListOrders).toHaveBeenLastCalledWith(
       expect.objectContaining({
         page: 1,
-        sku: 'SKU-2',
-      }),
+        sku: 'SKU-2'
+      })
     )
   })
 })

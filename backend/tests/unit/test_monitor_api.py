@@ -1,5 +1,4 @@
 import pytest
-from sqlalchemy.dialects import postgresql
 
 from app.api.monitor import get_api_calls
 
@@ -31,29 +30,13 @@ class _FakeDb:
 
 
 @pytest.mark.asyncio
-async def test_get_api_calls_counts_only_orders_related_to_matched_skus() -> None:
-    db = _FakeDb([
-        _RowsResult([]),
-        _ScalarResult(2),
-    ])
+async def test_get_api_calls_returns_endpoint_overview_only() -> None:
+    db = _FakeDb([_RowsResult([])])
 
     result = await get_api_calls(hours=24, db=db, _={})  # type: ignore[arg-type]
 
     assert result.endpoints == []
-    assert result.postal_compliance_warning == 2
-
-    compliance_stmt = db.executed[-1]
-    sql = str(
-        compliance_stmt.compile(
-            dialect=postgresql.dialect(),
-            compile_kwargs={"literal_binds": True},
-        )
-    ).lower()
-
-    assert "exists (" in sql
-    assert "order_item" in sql
-    assert "product_listing" in sql
-    assert "product_listing.is_matched is true" in sql
+    assert len(db.executed) == 1
 
 
 @pytest.mark.asyncio
@@ -67,7 +50,6 @@ async def test_get_api_calls_last_call_sql_has_no_embedded_python_import() -> No
     db = _FakeDb([
         _RowsResult([("GET /foo", 10, 8, None)]),  # non-empty -> enters if-branch
         _RowsResult([]),                            # the buggy last_rows query
-        _ScalarResult(0),                           # postal_compliance
     ])
 
     await get_api_calls(hours=24, db=db, _={})  # type: ignore[arg-type]

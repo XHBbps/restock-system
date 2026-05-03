@@ -17,23 +17,16 @@ from app.tasks.jobs.api_call_retry import (
 
 def test_retry_interval_uses_conservative_endpoint_qps() -> None:
     assert retry_interval_seconds("/api/shop/pageList.json") == 1.5
-    assert retry_interval_seconds("/api/order/detailByOrderId.json") == 0.75
+    assert retry_interval_seconds("/api/order/detailByOrderId.json") == 1.5
 
 
-def test_busy_job_names_include_sync_all_and_order_detail_refetch() -> None:
-    assert busy_job_names_for_endpoint("/api/order/pageList.json") == (
+def test_busy_job_names_include_sync_all_for_package_orders() -> None:
+    assert busy_job_names_for_endpoint("/api/packageShip/v1/getPackagePage.json") == (
         "sync_order_list",
         "sync_all",
     )
-    assert busy_job_names_for_endpoint("/api/multiplatform/order/list.json") == (
-        "sync_order_list",
-        "sync_all",
-    )
-    assert busy_job_names_for_endpoint("/api/order/detailByOrderId.json") == (
-        "sync_order_detail",
-        "refetch_order_detail",
-        "sync_all",
-    )
+    assert busy_job_names_for_endpoint("/api/order/pageList.json") == ()
+    assert busy_job_names_for_endpoint("/api/order/detailByOrderId.json") == ()
 
 
 def test_payload_call_ids_filters_invalid_values() -> None:
@@ -44,6 +37,7 @@ def test_payload_call_ids_filters_invalid_values() -> None:
 
 def test_retryable_row_requires_40019_payload_and_non_terminal_status() -> None:
     row = SimpleNamespace(
+        endpoint="/api/shop/pageList.json",
         saihu_code=40019,
         request_payload={"pageNo": "1"},
         retry_source_log_id=None,
@@ -91,9 +85,7 @@ async def test_saihu_client_log_queues_final_40019_with_payload(monkeypatch) -> 
 
     class _Db:
         async def execute(self, stmt):
-            captured.update(
-                stmt.compile(dialect=postgresql.dialect()).params
-            )
+            captured.update(stmt.compile(dialect=postgresql.dialect()).params)
 
         async def commit(self):
             pass

@@ -59,8 +59,12 @@ def _make_row(**overrides):
         "id": 101,
         "shop_id": "SHOP-1",
         "amazon_order_id": "ORDER-1",
-        "source": "亚马逊",
-        "order_platform": "亚马逊",
+        "source": "订单处理",
+        "order_platform": "Amazon",
+        "package_sn": "PKG-1",
+        "package_status": "has_shipped",
+        "shop_name": "Main Shop",
+        "postal_code": "90210",
         "marketplace_id": "ATVPDKIKX0DER",
         "country_code": "US",
         "order_status": "Shipped",
@@ -83,7 +87,7 @@ async def test_list_orders_applies_shop_filter_and_returns_paginated_payload() -
             _ScalarResult(1),
             _RowsResult([_make_row(shop_id="SHOP-2")]),
             _AllResult([(101, 3)]),
-            _AllResult([("SHOP-2", "ORDER-1", "亚马逊")]),
+            _AllResult([("SHOP-2", "ORDER-1", "订单处理")]),
         ]
     )
 
@@ -114,7 +118,10 @@ async def test_list_orders_applies_shop_filter_and_returns_paginated_payload() -
     assert "order_header.shop_id = :shop_id_1" in compiled_sql
 
     detail_sql = str(db.statements[3])
-    assert "SELECT order_detail.shop_id, order_detail.amazon_order_id, order_detail.source" in detail_sql
+    assert (
+        "SELECT order_detail.shop_id, order_detail.amazon_order_id, order_detail.source"
+        in detail_sql
+    )
 
 
 @pytest.mark.asyncio

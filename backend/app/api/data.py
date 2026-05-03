@@ -28,7 +28,12 @@ from app.core.timezone import BEIJING
 from app.models.commodity import CommodityMaster
 from app.models.in_transit import InTransitItem, InTransitRecord
 from app.models.inventory import InventorySnapshotLatest
-from app.models.order import ORDER_SOURCE_AMAZON, OrderDetail, OrderHeader, OrderItem
+from app.models.order import (
+    ORDER_SOURCE_PACKAGE,
+    OrderDetail,
+    OrderHeader,
+    OrderItem,
+)
 from app.models.product_listing import ProductListing
 from app.models.shop import Shop
 from app.models.sku import SkuConfig
@@ -102,9 +107,7 @@ OUT_RECORD_IN_TRANSIT_SORT_ORDER = 0
 OUT_RECORD_INACTIVE_SORT_ORDER = 1
 
 
-def _apply_direction(
-    columns: tuple[Any, ...], sort_order: str
-) -> list[Any]:
+def _apply_direction(columns: tuple[Any, ...], sort_order: str) -> list[Any]:
     # 与 api/suggestion.py 同样的妥协：InstrumentedAttribute[T] 不是
     # ColumnElement[object] 的子类（参数不协变），用 tuple[Any, ...] 最宽松
     return [column.asc() if sort_order == "asc" else column.desc() for column in columns]
@@ -125,7 +128,10 @@ def _order_has_detail_expr() -> ColumnElement[int]:
         )
         .scalar_subquery()
     )
-    return case((visible_detail_exists > 0, 1), else_=0)
+    return case(
+        ((visible_detail_exists > 0) | OrderHeader.postal_code.is_not(None), 1),
+        else_=0,
+    )
 
 
 def _order_detail_visible_predicate() -> ColumnElement[bool]:
@@ -156,6 +162,16 @@ def _apply_order_sort(stmt: Any, sort_by: str | None, sort_order: str) -> Any:
         "amazonOrderId": (OrderHeader.amazon_order_id,),
         "source": (OrderHeader.source,),
         "orderPlatform": (OrderHeader.order_platform,),
+        "packageSn": (OrderHeader.package_sn,),
+        "packageStatus": (OrderHeader.package_status,),
+        "shopName": (
+            case((OrderHeader.shop_name.is_(None), 1), else_=0),
+            OrderHeader.shop_name,
+        ),
+        "postalCode": (
+            case((OrderHeader.postal_code.is_(None), 1), else_=0),
+            OrderHeader.postal_code,
+        ),
         "shopId": (OrderHeader.shop_id,),
         "countryCode": (OrderHeader.country_code,),
         "orderStatus": (_order_status_sort_expr(),),
@@ -307,7 +323,9 @@ def _apply_out_record_sort(stmt: Any, sort_by: str | None, sort_order: str) -> A
         "type": (InTransitRecord.type,),
         "lastSeenAt": (InTransitRecord.last_seen_at,),
     }
-    columns = sort_map.get(sort_by or "", (InTransitRecord.update_time, InTransitRecord.last_seen_at))
+    columns = sort_map.get(
+        sort_by or "", (InTransitRecord.update_time, InTransitRecord.last_seen_at)
+    )
     return stmt.order_by(
         *_apply_direction(columns, sort_order),
         InTransitRecord.update_time.desc(),
@@ -353,7 +371,9 @@ async def list_orders(
     if shop_id:
         base = base.where(OrderHeader.shop_id == shop_id)
     if status:
-        base = base.where(OrderHeader.order_status == status)
+        base = base.where(
+            (OrderHeader.package_status == status) | (OrderHeader.order_status == status)
+        )
     if sku:
         # 在 amazon_order_id 或通过 order_item JOIN 匹配 commodity_sku
         subq = (
@@ -363,6 +383,7 @@ async def list_orders(
         )
         base = base.where(
             (OrderHeader.amazon_order_id.ilike(f"%{escape_like(sku)}%", escape="\\"))
+            | (OrderHeader.package_sn.ilike(f"%{escape_like(sku)}%", escape="\\"))
             | (OrderHeader.id.in_(select(subq.c.order_id)))
         )
 
@@ -391,27 +412,23 @@ async def list_orders(
         # * 必须用复合键过滤。只按 shop_id IN(...) 会拉回该 shop 的全部历史 detail,
         # 在数据量大时造成内存爆炸(review H-N1)。
         det_rows = (
-            (
-                await db.execute(
-                    select(
+            await db.execute(
+                select(
+                    OrderDetail.shop_id,
+                    OrderDetail.amazon_order_id,
+                    OrderDetail.source,
+                ).where(
+                    tuple_(
                         OrderDetail.shop_id,
                         OrderDetail.amazon_order_id,
                         OrderDetail.source,
-                    ).where(
-                        tuple_(
-                            OrderDetail.shop_id,
-                            OrderDetail.amazon_order_id,
-                            OrderDetail.source,
-                        ).in_(keys),
-                        _order_detail_visible_predicate(),
-                    )
+                    ).in_(keys),
+                    _order_detail_visible_predicate(),
                 )
             )
-            .all()
-        )
+        ).all()
         detail_set = {
-            (shop_id, amazon_order_id, source)
-            for shop_id, amazon_order_id, source in det_rows
+            (shop_id, amazon_order_id, source) for shop_id, amazon_order_id, source in det_rows
         }
 
     items = [
@@ -424,6 +441,10 @@ async def list_orders(
                         "amazon_order_id",
                         "source",
                         "order_platform",
+                        "package_sn",
+                        "package_status",
+                        "shop_name",
+                        "postal_code",
                         "marketplace_id",
                         "country_code",
                         "order_status",
@@ -436,7 +457,10 @@ async def list_orders(
                         "last_sync_at",
                     )
                 },
-                "has_detail": (r.shop_id, r.amazon_order_id, r.source) in detail_set,
+                "has_detail": (
+                    (r.shop_id, r.amazon_order_id, r.source) in detail_set
+                    or bool(getattr(r, "postal_code", None))
+                ),
                 "item_count": item_count_map.get(r.id, 0),
             }
         )
@@ -449,19 +473,23 @@ async def list_orders(
 async def get_order_detail(
     shop_id: str = Path(...),
     amazon_order_id: str = Path(...),
-    source: str = Query(default=ORDER_SOURCE_AMAZON),
+    source: str = Query(default=ORDER_SOURCE_PACKAGE),
+    package_sn: str | None = Query(default=None),
     db: AsyncSession = Depends(db_session_readonly),
     _: None = Depends(require_permission(DATA_BIZ_VIEW)),
 ) -> DataOrderDetail:
-    header = (
-        await db.execute(
-            select(OrderHeader).where(
-                (OrderHeader.shop_id == shop_id)
-                & (OrderHeader.amazon_order_id == amazon_order_id)
-                & (OrderHeader.source == source)
-            )
-        )
-    ).scalar_one_or_none()
+    header_stmt = select(OrderHeader).where(
+        (OrderHeader.shop_id == shop_id)
+        & (OrderHeader.amazon_order_id == amazon_order_id)
+        & (OrderHeader.source == source)
+    )
+    if package_sn is not None:
+        header_stmt = header_stmt.where(OrderHeader.package_sn == package_sn)
+    else:
+        header_stmt = header_stmt.order_by(
+            OrderHeader.purchase_date.desc(), OrderHeader.id.desc()
+        ).limit(1)
+    header = (await db.execute(header_stmt)).scalar_one_or_none()
     if header is None:
         raise NotFound(f"订单 {shop_id}/{amazon_order_id}/{source} 不存在")
 
@@ -479,7 +507,14 @@ async def get_order_detail(
         )
     ).scalar_one_or_none()
 
-    # 用 from_attributes 把 ORM header 直接映射到 DTO,detail 字段手动补
+    detail_payload = {
+        "postal_code": header.postal_code or (detail.postal_code if detail else None),
+        "state_or_region": detail.state_or_region if detail else None,
+        "city": detail.city if detail else None,
+        "detail_address": detail.detail_address if detail else None,
+        "receiver_name": detail.receiver_name if detail else None,
+        "detail_fetched_at": detail.fetched_at if detail else None,
+    }
     return DataOrderDetail.model_validate(
         {
             **{
@@ -489,6 +524,10 @@ async def get_order_detail(
                     "amazon_order_id",
                     "source",
                     "order_platform",
+                    "package_sn",
+                    "package_status",
+                    "shop_name",
+                    "postal_code",
                     "marketplace_id",
                     "country_code",
                     "order_status",
@@ -503,7 +542,7 @@ async def get_order_detail(
                 )
             },
             "items": [DataOrderItem.model_validate(it) for it in item_rows],
-            **_disabled_order_detail_fields(detail),
+            **detail_payload,
         }
     )
 
@@ -576,12 +615,16 @@ async def list_inventory(
                 matched_skus.add(sk)
                 name_map.setdefault(sk, (name, img))
         component_skus = (
-            await db.execute(
-                select(SkuMappingComponent.inventory_sku).where(
-                    SkuMappingComponent.inventory_sku.in_(sku_codes)
+            (
+                await db.execute(
+                    select(SkuMappingComponent.inventory_sku).where(
+                        SkuMappingComponent.inventory_sku.in_(sku_codes)
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         matched_skus.update(component_skus)
 
     items: list[DataInventoryItem] = []
@@ -662,7 +705,11 @@ async def list_inventory_warehouse_groups(
         )
         .join(Warehouse, Warehouse.id == InventorySnapshotLatest.warehouse_id)
         .where(InventorySnapshotLatest.warehouse_id.in_(warehouse_ids))
-        .order_by(Warehouse.name.asc(), InventorySnapshotLatest.warehouse_id.asc(), InventorySnapshotLatest.commodity_sku.asc())
+        .order_by(
+            Warehouse.name.asc(),
+            InventorySnapshotLatest.warehouse_id.asc(),
+            InventorySnapshotLatest.commodity_sku.asc(),
+        )
     )
     item_stmt = _apply_inventory_filters(
         item_stmt,
@@ -703,15 +750,21 @@ async def list_inventory_warehouse_groups(
                 matched_skus.add(sk)
                 name_map.setdefault(sk, (name, img))
         component_skus = (
-            await db.execute(
-                select(SkuMappingComponent.inventory_sku).where(
-                    SkuMappingComponent.inventory_sku.in_(sku_codes)
+            (
+                await db.execute(
+                    select(SkuMappingComponent.inventory_sku).where(
+                        SkuMappingComponent.inventory_sku.in_(sku_codes)
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         matched_skus.update(component_skus)
 
-    items_by_warehouse: dict[str, list[DataInventoryItem]] = {warehouse_id: [] for warehouse_id in warehouse_ids}
+    items_by_warehouse: dict[str, list[DataInventoryItem]] = {
+        warehouse_id: [] for warehouse_id in warehouse_ids
+    }
     for inv, wh_name, wh_type in item_rows:
         name, image = name_map.get(inv.commodity_sku, (None, None))
         items_by_warehouse.setdefault(inv.warehouse_id, []).append(
@@ -938,13 +991,17 @@ async def list_data_shops(
 ) -> DataShopListOut:
     total = (await db.execute(select(func.count()).select_from(Shop))).scalar_one()
     rows = (
-        await db.execute(
-            select(Shop)
-            .order_by(Shop.marketplace_id, Shop.id)
-            .limit(page_size)
-            .offset((page - 1) * page_size)
+        (
+            await db.execute(
+                select(Shop)
+                .order_by(Shop.marketplace_id, Shop.id)
+                .limit(page_size)
+                .offset((page - 1) * page_size)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     items = [DataShop.model_validate(r) for r in rows]
     return DataShopListOut(
         items=items,

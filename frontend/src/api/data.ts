@@ -8,6 +8,10 @@ export interface DataOrderSummary {
   amazonOrderId: string
   source: string
   orderPlatform: string
+  packageSn: string
+  packageStatus: string | null
+  shopName: string | null
+  postalCode: string | null
   marketplaceId: string
   countryCode: string
   orderStatus: string
@@ -37,7 +41,6 @@ export interface DataOrderItem {
 export interface DataOrderDetail extends Omit<DataOrderSummary, 'hasDetail' | 'itemCount'> {
   isBuyerRequestedCancel: boolean
   items: DataOrderItem[]
-  postalCode: string | null
   stateOrRegion: string | null
   city: string | null
   detailAddress: string | null
@@ -71,11 +74,12 @@ export async function listOrders(params: {
 export async function getOrderDetail(
   shopId: string,
   amazonOrderId: string,
-  source = '亚马逊'
+  source = '订单处理',
+  packageSn = ''
 ): Promise<DataOrderDetail> {
   const { data } = await client.get<DataOrderDetail>(
     `/api/data/orders/${encodeURIComponent(shopId)}/${encodeURIComponent(amazonOrderId)}`,
-    { params: { source } }
+    { params: { source, package_sn: packageSn } }
   )
   return data
 }

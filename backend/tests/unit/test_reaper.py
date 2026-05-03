@@ -34,7 +34,7 @@ class _FakeSessionFactory:
     def __init__(self, db: _FakeDb) -> None:
         self._db = db
 
-    def __call__(self) -> "_FakeSessionCtx":
+    def __call__(self) -> _FakeSessionCtx:
         return _FakeSessionCtx(self._db)
 
 

@@ -511,9 +511,11 @@ async def test_load_all_sku_country_orders_uses_left_join_and_effective_shipped_
     )
 
     compiled_sql = str(db.executed[0])
-    assert "LEFT OUTER JOIN order_detail" in compiled_sql
+    assert "LEFT OUTER JOIN order_detail" not in compiled_sql
+    assert "order_header.postal_code" in compiled_sql
     assert "order_item.quantity_shipped - order_item.refund_num" in compiled_sql
-    assert "order_header.order_status IN" in compiled_sql
+    assert "order_header.source =" in compiled_sql
+    assert "order_header.package_status" in compiled_sql
     assert result == {("sku-A", "US"): [(None, 3)]}
 
 

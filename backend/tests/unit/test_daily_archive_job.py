@@ -30,7 +30,7 @@ class _FakeSessionFactory:
     def __init__(self, databases: list[_FakeDb]) -> None:
         self._queue = list(databases)
 
-    def __call__(self) -> "_FakeSessionCtx":
+    def __call__(self) -> _FakeSessionCtx:
         return _FakeSessionCtx(self._queue.pop(0))
 
 

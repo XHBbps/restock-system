@@ -1,5 +1,4 @@
 from datetime import datetime
-from types import SimpleNamespace
 
 import pytest
 
@@ -190,54 +189,3 @@ async def test_set_scheduler_status_stops_scheduler(monkeypatch) -> None:
 
     assert fake_db.committed is True
     assert result.enabled is False
-
-
-@pytest.mark.asyncio
-async def test_refetch_order_detail_returns_empty_when_no_targets(monkeypatch) -> None:
-    import app.api.sync as sync_api_module
-
-    class _FakeDb:
-        pass
-
-    async def fake_get_active_order_detail_task(_db):
-        return None
-
-    async def fake_find_refetch_targets(*_args, **_kwargs):
-        return []
-
-    monkeypatch.setattr(sync_api_module, "_get_active_order_detail_task", fake_get_active_order_detail_task)
-    monkeypatch.setattr(sync_api_module, "find_refetch_targets", fake_find_refetch_targets)
-    monkeypatch.setattr(sync_api_module, "enqueue_task", pytest.fail)
-
-    result = await sync_api_module.refetch_order_detail(
-        sync_api_module.OrderDetailRefetchIn(days=7, shop_id=None),
-        db=_FakeDb(),  # type: ignore[arg-type]
-        _={},
-    )
-
-    assert result.task_id is None
-    assert result.matched_count == 0
-
-
-@pytest.mark.asyncio
-async def test_refetch_order_detail_reuses_active_conflict_task(monkeypatch) -> None:
-    import app.api.sync as sync_api_module
-
-    class _FakeDb:
-        pass
-
-    async def fake_get_active_order_detail_task(_db):
-        return SimpleNamespace(id=88, job_name="sync_order_detail", trigger_source="scheduler")
-
-    monkeypatch.setattr(sync_api_module, "_get_active_order_detail_task", fake_get_active_order_detail_task)
-    monkeypatch.setattr(sync_api_module, "find_refetch_targets", pytest.fail)
-    monkeypatch.setattr(sync_api_module, "enqueue_task", pytest.fail)
-
-    result = await sync_api_module.refetch_order_detail(
-        sync_api_module.OrderDetailRefetchIn(days=7, shop_id=None),
-        db=_FakeDb(),  # type: ignore[arg-type]
-        _={},
-    )
-
-    assert result.task_id == 88
-    assert result.existing is True

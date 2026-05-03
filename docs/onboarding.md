@@ -366,7 +366,6 @@ Conventional Commits：
 | `@/components/SkuCard` | 商品展示 |
 | `@/components/StatusTag` | 状态标签 |
 | `@/components/TaskProgress` | 长任务进度展示 |
-| `@/components/sync/OrderDetailFetchAction` | 订单页“详情获取”动作组件，统一封装回溯天数、触发逻辑与任务冲突提示 |
 | `@/utils/format` | `formatShortTime` / `formatDateTime` / `formatUpdateTime` / `formatDetailTime` / `clampPage`；其中 `formatUpdateTime` 统一输出 `YYYY-MM-DD HH:mm`，用于数据页“同步时间”和出库记录“更新时间/同步时间” |
 | `@/utils/warehouse` | `warehouseTypeLabel` / `warehouseTypeTag` |
 | `@/utils/countries` | `COUNTRY_OPTIONS` 内置国家兜底与 `getCountryLabel()` 展示映射；新建国家下拉优先调用 `GET /api/config/country-options`，接口不可用时再降级到内置选项 |

@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Path, Query
 from pydantic import BaseModel
-from sqlalchemy import case, exists, func, or_, select, text
+from sqlalchemy import case, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
@@ -20,13 +20,6 @@ from app.core.logging import get_logger
 from app.core.permissions import MONITOR_VIEW, SYNC_OPERATE
 from app.core.timezone import now_beijing
 from app.models.api_call_log import ApiCallLog
-from app.models.order import (
-    ORDER_SOURCE_AMAZON,
-    OrderDetailFetchLog,
-    OrderHeader,
-    OrderItem,
-)
-from app.models.product_listing import ProductListing
 from app.tasks.jobs.api_call_retry import (
     JOB_NAME as RETRY_FAILED_API_CALLS_JOB_NAME,
 )
@@ -37,21 +30,6 @@ from app.tasks.queue import enqueue_task
 
 router = APIRouter(prefix="/api/monitor", tags=["monitor"])
 logger = get_logger(__name__)
-
-
-def _matched_order_detail_exists() -> Any:
-    return exists(
-        select(1)
-        .select_from(OrderItem)
-        .join(
-            ProductListing,
-            (ProductListing.shop_id == OrderHeader.shop_id)
-            & (ProductListing.seller_sku == OrderItem.seller_sku),
-        )
-        .where(OrderItem.order_id == OrderHeader.id)
-        .where(ProductListing.is_matched.is_(True))
-        .where(ProductListing.seller_sku.is_not(None))
-    )
 
 
 # ============================================================
@@ -70,7 +48,6 @@ class EndpointStats(BaseModel):
 
 class ApiCallsOverview(BaseModel):
     endpoints: list[EndpointStats]
-    postal_compliance_warning: int  # 60 天合规计数(FR-004 + analyze U4)
 
 
 @router.get("/api-calls", response_model=ApiCallsOverview)
@@ -142,29 +119,7 @@ async def get_api_calls(
             )
         )
 
-    # FR-004 合规监测:> 50 天 且 已配对 SKU 相关 且 未拉过详情
-    cutoff = now_beijing() - timedelta(days=50)
-    compliance_warning = (
-        await db.execute(
-            select(func.count())
-            .select_from(OrderHeader)
-            .outerjoin(
-                OrderDetailFetchLog,
-                (OrderDetailFetchLog.shop_id == OrderHeader.shop_id)
-                & (OrderDetailFetchLog.amazon_order_id == OrderHeader.amazon_order_id)
-                & (OrderDetailFetchLog.source == OrderHeader.source),
-            )
-            .where(OrderHeader.purchase_date < cutoff)
-            .where(OrderHeader.source == ORDER_SOURCE_AMAZON)
-            .where(OrderDetailFetchLog.amazon_order_id.is_(None))
-            .where(_matched_order_detail_exists())
-        )
-    ).scalar_one()
-
-    return ApiCallsOverview(
-        endpoints=endpoints,
-        postal_compliance_warning=int(compliance_warning or 0),
-    )
+    return ApiCallsOverview(endpoints=endpoints)
 
 
 class RecentCallOut(BaseModel):

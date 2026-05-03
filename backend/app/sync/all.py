@@ -1,7 +1,6 @@
 """Composite full-sync job."""
 
 from app.sync.inventory import sync_inventory_job
-from app.sync.order_detail import sync_order_detail_job
 from app.sync.order_list import sync_order_list_job
 from app.sync.out_records import sync_out_records_job
 from app.sync.product_listing import sync_product_listing_job
@@ -14,9 +13,8 @@ SYNC_ALL_STEPS: list[tuple[str, JobHandler]] = [
     ("仓库列表", sync_warehouse_job),
     ("在线产品", sync_product_listing_job),
     ("库存明细", sync_inventory_job),
-    ("其他出库", sync_out_records_job),
-    ("订单列表", sync_order_list_job),
-    ("订单详情", sync_order_detail_job),
+    ("出库记录", sync_out_records_job),
+    ("订单处理列表", sync_order_list_job),
 ]
 
 

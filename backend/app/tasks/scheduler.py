@@ -79,7 +79,6 @@ def _register_jobs(scheduler: AsyncIOScheduler, *, sync_interval_minutes: int) -
         "sync_inventory",
         "sync_out_records",
         "sync_order_list",
-        "sync_order_detail",
     ]:
         scheduler.add_job(
             _enqueue_safely,

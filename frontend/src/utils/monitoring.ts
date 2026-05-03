@@ -11,10 +11,11 @@ const SAIHU_ENDPOINT_LABELS: Record<string, string> = {
   '/api/warehouseManage/warehouseList.json': '仓库列表同步',
   '/api/warehouseManage/warehouseItemList.json': '库存同步',
   '/api/warehouseInOut/outRecords.json': '出库记录同步',
-  '/api/order/pageList.json': '订单列表同步',
-  '/api/multiplatform/order/list.json': '多平台订单同步',
-  '/api/order/detailByOrderId.json': '订单详情同步',
-  '/api/shop/pageList.json': '店铺同步',
+  '/api/packageShip/v1/getPackagePage.json': '订单处理列表同步',
+  '/api/order/pageList.json': '历史日志展示：旧订单列表同步',
+  '/api/multiplatform/order/list.json': '历史日志展示：旧多平台订单同步',
+  '/api/order/detailByOrderId.json': '历史日志展示：旧订单详情同步',
+  '/api/shop/pageList.json': '店铺同步'
 }
 
 const INTERNAL_API_PREFIX_LABELS: Array<{ prefix: string; label: string }> = [
@@ -26,7 +27,7 @@ const INTERNAL_API_PREFIX_LABELS: Array<{ prefix: string; label: string }> = [
   { prefix: '/api/data/', label: '基础数据查询接口' },
   { prefix: '/api/suggestions/', label: '补货建议接口' },
   { prefix: '/api/config/', label: '系统配置接口' },
-  { prefix: '/api/auth/', label: '认证接口' },
+  { prefix: '/api/auth/', label: '认证接口' }
 ]
 
 const RESOURCE_EXTENSION_LABELS: Array<{ pattern: RegExp; label: string }> = [
@@ -34,7 +35,7 @@ const RESOURCE_EXTENSION_LABELS: Array<{ pattern: RegExp; label: string }> = [
   { pattern: /\.css$/i, label: '样式资源' },
   { pattern: /\.(png|jpg|jpeg|gif|svg|webp|ico|bmp)$/i, label: '图片资源' },
   { pattern: /\.(woff2?|ttf|otf|eot)$/i, label: '字体资源' },
-  { pattern: /\.map$/i, label: '源码映射' },
+  { pattern: /\.map$/i, label: '源码映射' }
 ]
 
 export function getPercentileIndex(length: number, percentile: number): number {
@@ -67,7 +68,7 @@ export function formatMonitorEndpoint(endpoint: string): MonitorDisplayMeta {
 
 export function formatPerformanceResourceName(
   name: string,
-  initiatorType?: string | null,
+  initiatorType?: string | null
 ): MonitorDisplayMeta {
   const raw = normalizeMonitorResourceName(name) || name
   const path = stripQueryAndHash(raw)
@@ -76,11 +77,13 @@ export function formatPerformanceResourceName(
   if (normalizedType === 'navigation') {
     return {
       label: `页面导航：${path || '/'}`,
-      raw,
+      raw
     }
   }
 
-  const internalApiLabel = INTERNAL_API_PREFIX_LABELS.find((item) => path.startsWith(item.prefix))?.label
+  const internalApiLabel = INTERNAL_API_PREFIX_LABELS.find((item) =>
+    path.startsWith(item.prefix)
+  )?.label
   if (internalApiLabel) {
     return { label: internalApiLabel, raw }
   }
@@ -88,7 +91,7 @@ export function formatPerformanceResourceName(
   if (path === '/' || path.endsWith('.html')) {
     return {
       label: `页面导航：${path || '/'}`,
-      raw,
+      raw
     }
   }
 
@@ -108,7 +111,7 @@ export function formatPerformanceResourceName(
 
   return {
     label: `资源文件：${getFileLabel(path)}`,
-    raw,
+    raw
   }
 }
 
@@ -152,14 +155,8 @@ function stripExtension(value: string): string {
 }
 
 function formatViteResourceLabel(path: string): string | null {
-  if (path.startsWith('/@vite/')) {
-    return `Vite 开发资源：${getFileLabel(path)}`
-  }
-  if (path.startsWith('/src/')) {
-    return `本地源码资源：${getFileLabel(path)}`
-  }
-  if (path.startsWith('/assets/')) {
-    return `构建产物资源：${getFileLabel(path)}`
-  }
+  if (path.startsWith('/@vite/')) return `Vite 开发资源：${getFileLabel(path)}`
+  if (path.startsWith('/src/')) return `本地源码资源：${getFileLabel(path)}`
+  if (path.startsWith('/assets/')) return `构建产物资源：${getFileLabel(path)}`
   return null
 }

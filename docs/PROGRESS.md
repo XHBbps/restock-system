@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-05-03（SKU 映射规则允许不同商品共享同一库存 SKU，引擎按近期销量比例分配共享组件库存。）
+> 最近更新：2026-05-03（旧订单详情抓取 job 与旧赛狐订单 endpoint 封装已删除，历史表保留。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -38,7 +38,7 @@
 ### 2.2 同步与调度
 - **EU 合并同步口径**：订单、商品、出库、库存同步均按全局 eu_countries 将 EU 成员国合并到 EU，并在 original_* 字段保存原国家码；calc_engine 已移出 APScheduler 定时注册，仅保留手动生成入口。
 - **新国家发现口径**：多平台订单同步遇到有效 2 位国家码时直接落入 `order_header.country_code` 并参与计算；若该国家已配置到 `eu_countries`，则归并为 `EU` 并在 `original_country_code` 保留原码；空值或非法国家码才写为 `ZZ` 并记录结构化日志。
-- **订单列表同步来源**：`sync_order_list` 内部同时调用亚马逊订单接口 `/api/order/pageList.json` 与多平台订单接口 `/api/multiplatform/order/list.json`；亚马逊按 `updateDateTime` 增量窗口同步，成功后将本次查询 `date_end` 写入 `sync_state.last_success_at`；多平台按 6 个日历月 `purchase` 滚动窗口同步，统一落入 `order_header` / `order_item` 并通过 `source` 区分。
+- **订单处理列表同步来源**：`sync_order_list` 当前只调用赛狐订单处理列表 `/api/packageShip/v1/getPackagePage.json`，按 `purchaseDateStart/purchaseDateEnd` 拉取滚动 12 个月窗口，`pageSize=200`，继续复用全局店铺过滤；包裹数据统一写入 `source='订单处理'`，并保存 `package_sn/package_status/shop_name/postal_code/order_platform`。同步开始前会清理旧 `source in ('亚马逊','多平台')` 的订单头、明细、详情和详情抓取日志，避免切换后重复计算。
 - **商品主数据同步来源**：`sync_product_listing` 先调用赛狐 SKU 主数据接口 `/api/commodity/pageList.json` 写入 `commodity_master`，再调用在线产品 listing 接口 `/api/order/api/product/pageList.json` 补充店铺、站点、sellerSku 与近 7/14/30 天销量。同步新发现的 SKU 只补建 `sku_config(enabled=false)`，不自动扩大补货计算 SKU 集合。
 
 - **调度器开关**：`GET/POST /api/sync/scheduler`，开关状态持久化到 `global_config.scheduler_enabled`
@@ -46,7 +46,7 @@
 - **cron 校验**：非法表达式在保存前拦截
 - **手动触发**：`POST /api/sync/shop` 及其他 sync 端点
 - **自动同步任务**（APScheduler 间隔触发）：
-  - `sync_product_listing` / `sync_inventory` / `sync_out_records` / `sync_order_list` / `sync_order_detail`
+  - `sync_product_listing` / `sync_inventory` / `sync_out_records` / `sync_order_list`
 - **失败调用自动重试任务**：`retry_failed_api_calls` 每 5 分钟扫描 `api_call_log` 中可精确还原的赛狐 `40019` 失败调用（必须有 `request_payload`），按原始 `endpoint + request_payload` 从老到新重放；相关同步任务活跃时跳过，成功后将原失败日志标记为 `resolved` 并从失败列表隐藏，最多自动重试 5 次。
 - **定时任务**（cron，Asia/Shanghai）：
   - 03:00 `sync_shop`
@@ -54,7 +54,7 @@
   - 02:00 `daily_archive`
   - 默认 08:00 `calc_engine`（可配置，`global_config.suggestion_generation_enabled` 控制是否实际产出建议）
 - **信息总览快照刷新任务**：`refresh_dashboard_snapshot` 通过 TaskRun 入队执行；`GET /api/metrics/dashboard` 只读返回现有快照 / 活跃任务状态，手动“刷新快照”是默认触发入口
-- **订单详情同步与详情获取**：`sync_order_detail` 当前按 2 QPS / 2 并发保守抓取，且仅处理 `source='亚马逊'` 的订单；订单页提供右侧独立“详情获取”组件，仅提供天数选择与触发按钮；手动触发会优先复用活跃的 `refetch_order_detail`、`sync_order_detail` 或 `sync_all` 任务，避免并发重复抓取，且不再对手动详情获取施加单次数量上限；任务执行中会按“已完成 X / 失败 Y / 总数 N”持续回写精确进度
+- **旧订单详情抓取链路已删除**：订单处理列表已包含补货计算需要的订单、SKU、国家、邮编和包裹状态；自动 `sync_order_detail`、手动 `refetch_order_detail`、订单页“详情获取”入口、旧订单详情 job 模块和旧赛狐订单 endpoint 封装均已删除。`order_detail` / `order_detail_fetch_log` 作为历史表保留，订单详情弹窗只展示本地订单头与明细。
 
 ### 2.3 补货计算引擎
 - **采购/补货拆分**：引擎同时产出 SKU 级 `purchase_qty` 与国家/仓库级 `country_breakdown` / `warehouse_breakdown` / `restock_dates`，并分别统计 `procurement_item_count`、`restock_item_count`；成功生成后自动关闭生成开关，等待导出与人工开新周期。
@@ -64,7 +64,7 @@
   2. `step2_sale_days` — 可售天数 + 库存聚合（含在途）
   3. `step3_country_qty` — 各国补货量（`target_days + (demand_date - today)` 作为有效目标库存天数）
   4. `step4_total` — 总采购量（基于新的 Σcountry_qty − 本地库存 + ceil(Σvelocity × safety_stock_days)，clamp 到 0；`buffer_days` 不参与采购量）
-  5. `step5_warehouse_split` — 按邮编规则分配到具体仓库；有效发货订单以 `quantity_shipped - refund_num` 为样本数量，订单详情左连接，已知邮编命中部分按真实比例分配，未知部分按该国家已配置邮编规则的仓均分
+  5. `step5_warehouse_split` — 按邮编规则分配到具体仓库；订单样本来自 `source='订单处理'` 且 `package_status!='has_canceled'` 的包裹订单，以 `quantity_shipped - refund_num` 为样本数量，优先使用 `order_header.postal_code`，已知邮编命中部分按真实比例分配，未知部分按该国家已配置邮编规则的仓均分
   6. `step6_timing` — 紧急标志与补货日期（任一正补货国家 `sale_days <= lead_time_days` 即为紧急；`restock_date[sku][country] = today + int(sale_days[sku][country]) − lead_time_days`）
 - **补货区域过滤**：全局参数 `restock_regions` 支持按国家多选；为空数组时表示全部国家参与计算，配置后仅这些国家的订单会参与 `step1_velocity` 销量统计和 `step5_warehouse_split` 的国家订单分仓
 - **并发保护**：`pg_advisory_xact_lock(7429001)` 事务级锁，阻止并发引擎覆盖彼此
@@ -98,12 +98,28 @@
 - **数据加载模式**：订单页、历史记录页、商品页、库存页、出库记录页使用“后端分页 + 后端筛选”；仓库、店铺等低增长基础页仍保留轻量分页
 - **商品页主数据口径**：`DataProductsView.vue` 通过 `/api/data/sku-overview` 展示 `commodity_master + sku_config`，商品名、图片、状态、组合标识、采购周期优先取主数据；listing 仅作为展开明细和销量参考，无 listing 的商品 SKU 也会显示。
 - **筛选控件高度统一**：`PageSectionCard` 的 `section-actions` 强制所有控件 32px 高度
-- **订单来源与状态展示**：`DataOrdersView.vue` 展示“来源”“订单平台”，订单状态中文映射覆盖已发货 / 部分发货 / 未发货 / 待处理 / 已取消 / 未知；多平台订单的详情状态显示为“不适用”
+- **订单处理列表展示**：`DataOrdersView.vue` 展示包裹号、包裹状态、店铺名称、平台、国家、邮编与本地订单明细；筛选支持 SKU / 订单号 / 包裹号，状态筛选使用订单处理列表包裹状态。
 - **全局参数页补货区域配置**：`GlobalConfigView.vue` 的“补货区域”多选已接入动态国家选项，保存前变更检测与配置变更提示已纳入 `restock_regions`
 - **动态国家选项**：`GET /api/config/country-options` 返回内置国家与订单、仓库、库存、出库在途中已观测国家的并集，并在输出前统一标准化 ISO 二字码别名；订单、库存、出库、仓库、邮编规则、补货区域和 EU 成员国配置均改用该接口，接口不可用时前端降级使用内置选项。
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.91 订单同步切换为订单处理列表接口（2026-05-03）
+- **赛狐接口**：`backend/app/saihu/endpoints/package_ship.py` 新增 `POST /api/packageShip/v1/getPackagePage.json` 封装；`sync_order_list` 改为只按 `purchaseDateStart/purchaseDateEnd` 同步滚动 12 个月订单处理列表，`pageSize=200`，继续支持 `shopIdList` 店铺过滤。
+- **落库字段**：`backend/alembic/versions/20260503_1700_use_package_order_source.py` 为 `order_header` 新增 `package_sn/package_status/shop_name/postal_code`，唯一键调整为 `shop_id + amazon_order_id + source + package_sn`。新数据统一写 `source='订单处理'`，`order_platform=platformName`，包裹内 `orders` 生成订单头，`items.commoditySku` 写入 `order_item.commodity_sku`，`quantityOrdered` 同时作为下单数和计算数。
+- **旧来源清理**：每次订单处理列表同步前会删除旧 `source in ('亚马逊','多平台')` 的 `order_header`、级联明细、`order_detail` 与 `order_detail_fetch_log`，避免旧亚马逊 / 多平台订单与新包裹订单重复参与销量计算。
+- **补货计算口径**：`step1_velocity` 和 `step5_warehouse_split` 只消费 `source='订单处理'`；除 `package_status='has_canceled'` 的已作废包裹外，其余包裹状态都参与销量和分仓样本。Step 5 邮编优先读取 `order_header.postal_code`。
+- **入口停用**：`sync_all` 与 APScheduler 不再入队 `sync_order_detail`；`POST /api/sync/order-detail/refetch`、前端 `OrderDetailFetchAction` 和相关手动详情获取 API 已移除。`retry_failed_api_calls` 仅把 `/api/packageShip/v1/getPackagePage.json` 映射到 `sync_order_list / sync_all`，旧订单列表、旧多平台订单和旧订单详情接口不再自动重放。
+- **前端展示**：订单页改为包裹订单视图，展示包裹号、包裹状态、店铺名称、平台、国家、邮编和本地订单明细，详情弹窗不再依赖订单详情抓取。
+- **测试**：新增 `backend/tests/unit/test_package_ship_endpoint.py`，并更新订单同步、EU 映射、Step 1 / Step 5、数据订单 API、失败重试、同步控制和订单页前端测试，覆盖分页请求体、拆包唯一键、旧来源清理、已作废包裹排除和本地详情展示。
+
+### 3.92 旧订单详情与旧订单接口残留清理（2026-05-03）
+- **后端删除**：删除旧订单详情 job 模块 `backend/app/sync/order_detail.py`，删除旧赛狐订单 endpoint 封装 `backend/app/saihu/endpoints/order_list.py`、`multiplatform_order.py`、`order_detail.py`。数据库 `order_detail` / `order_detail_fetch_log` 表和 ORM 模型继续保留，仅作为历史数据结构。
+- **监控口径**：`GET /api/monitor/api-calls` 不再返回基于旧亚马逊订单详情抓取的 `postal_compliance_warning`；旧订单详情合规统计 SQL 已移除。
+- **限流与重试**：`/api/order/detailByOrderId.json` 不再有独立 QPS 覆盖，按默认 1 QPS 口径展示；`retry_failed_api_calls` 仍只支持当前可还原 endpoint，旧订单列表、旧多平台订单和旧订单详情接口不参与自动重放。
+- **前端历史日志展示**：`frontend/src/utils/monitoring.ts` 保留旧 endpoint 名称映射，但标注为“历史日志展示：旧订单列表同步 / 旧多平台订单同步 / 旧订单详情同步”，仅用于既有 `api_call_log` 展示。
+- **测试清理**：删除旧 job / endpoint 单测 `test_sync_order_detail_job.py`、`test_sync_order_detail_classification.py`、`test_multiplatform_order_endpoint.py`，并更新监控、限流、重试和前端 monitoring 测试。
 
 ### 3.90 SKU 映射共享库存按销量分配（2026-05-03）
 - **数据库迁移**：`backend/alembic/versions/20260503_1500_allow_shared_sku_mapping_components.py` 移除 `sku_mapping_component.inventory_sku` 全局唯一约束，新增 `rule_id + inventory_sku` 唯一约束；不同商品映射规则可复用同一库存 SKU，同一商品规则内仍禁止重复组件。
@@ -217,7 +233,7 @@
 ### 3.75 同步日志 40019 精确自动重试（2026-04-27）
 - **日志字段**：`api_call_log` 新增 `request_payload`、`retry_status`、`auto_retry_attempts`、`next_retry_at`、`resolved_at`、`last_retry_error`、`retry_source_log_id`。`SaihuClient.post()` 会保存原始请求 payload；最终仍为 `40019` 的可还原调用初始化为 `queued`，历史无 payload 的 `40019` 标记为 `unsupported`。
 - **后台任务**：新增 `retry_failed_api_calls` TaskRun job，由 APScheduler 每 5 分钟入队，使用 TaskRun dedupe 避免并发；任务只处理 `saihu_code=40019`、`retry_status='queued'`、`request_payload IS NOT NULL`、`auto_retry_attempts < 5`、`retry_source_log_id IS NULL` 的原始失败日志，并按 `called_at ASC, id ASC` 从老到新执行。
-- **冲突与限速**：重试前按 endpoint 检查相关 `pending/running` TaskRun；`sync_all` 视为所有 endpoint 忙碌，订单详情额外检查 `sync_order_detail` / `refetch_order_detail`。重放间隔按 QPS 保守计算：1 QPS 为 1.5 秒，2 QPS 为 0.75 秒。
+- **冲突与限速**：重试前按 endpoint 检查相关 `pending/running` TaskRun；`sync_all` 视为所有 endpoint 忙碌，当前订单处理列表接口检查 `sync_order_list`。重放间隔按 QPS 保守计算，当前默认 1 QPS endpoint 为 1.5 秒。
 - **终态**：重试成功时原失败日志标记 `resolved` 并从失败列表隐藏；再次 `40019` 未满 5 次继续 `queued`，第 5 次标记 `permanent`；非 `40019` 失败或其他异常直接标记 `permanent`。
 - **前端与 API**：`GET /api/monitor/api-calls/recent` 返回重试状态、尝试次数和 `can_retry`；`only_failed=true` 默认排除 `resolved` 和自动重试子日志。`POST /api/monitor/api-calls/{id}/retry` 改为单条精确重试入口，仅允许可还原的 `40019` 日志入队。
 
@@ -730,10 +746,10 @@
 - **H4 编辑口径修正**：`total_qty` 与 `country_breakdown` 脱钩，国家补货量不再要求与总采购量一致
 - **step3**：返回类型从 `tuple[dict, dict]` 简化为 `dict[str, dict[str, int]]`
 
-### 3.8 赛狐订单详情接口特殊限流
+### 3.8 赛狐订单详情接口特殊限流（历史记录，当前已移除）
 
-- `/api/order/detailByOrderId.json` 独立配置 3 QPS（其他接口维持默认 1 QPS）
-- 通过 `saihu/rate_limit.py` 的 `_ENDPOINT_RATE_OVERRIDES` 映射
+- 历史上 `/api/order/detailByOrderId.json` 曾独立配置 QPS 覆盖。
+- 当前旧订单详情抓取链路已删除，`saihu/rate_limit.py` 不再保留该 endpoint 特例；遗留日志按默认 1 QPS 口径展示。
 
 ### 3.9 zipcode_matcher 鲁棒性
 

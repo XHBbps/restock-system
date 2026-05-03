@@ -14,7 +14,6 @@ export interface EndpointStats {
 
 export interface ApiCallsOverview {
   endpoints: EndpointStats[]
-  postal_compliance_warning: number
 }
 
 export interface RecentCall {

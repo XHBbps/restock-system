@@ -381,11 +381,12 @@ async def test_snapshot_download_410_with_purged_log_shows_retention_message(
     client, seed_suggestion, ensure_global_config, db_session, monkeypatch
 ):
     """retention 已标记 file_purged_at → 410 带"已过期清理"明确提示。"""
+    from sqlalchemy import update
+
     from app.config import get_settings
     from app.core.timezone import now_beijing
     from app.models.excel_export_log import ExcelExportLog
     from app.models.suggestion_snapshot import SuggestionSnapshot
-    from sqlalchemy import update
 
     _set_export_dir(monkeypatch)
     sid = seed_suggestion["suggestion_id"]

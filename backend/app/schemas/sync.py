@@ -1,6 +1,6 @@
 from datetime import date
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, field_validator
 
 from app.core.timezone import now_beijing
 
@@ -20,20 +20,6 @@ class SchedulerStatusOut(BaseModel):
 
 class SchedulerToggleIn(BaseModel):
     enabled: bool
-
-
-class OrderDetailRefetchIn(BaseModel):
-    days: int = Field(default=7, ge=1)
-    shop_id: str | None = None
-
-
-class OrderDetailRefetchOut(BaseModel):
-    task_id: int | None = None
-    existing: bool = False
-    matched_count: int
-    queued_count: int
-    active_job_name: str | None = None
-    active_trigger_source: str | None = None
 
 
 class EngineRunIn(BaseModel):

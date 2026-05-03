@@ -1,33 +1,45 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import client from '../client'
-import { refetchOrderDetail } from '../sync'
+import { getSchedulerStatus, setSchedulerStatus } from '../sync'
 
 describe('api/sync', () => {
   afterEach(() => {
     vi.restoreAllMocks()
   })
 
-  it('posts order-detail refetch payload', async () => {
+  it('fetches scheduler status', async () => {
+    const get = vi.spyOn(client, 'get').mockResolvedValue({
+      data: {
+        enabled: true,
+        running: true,
+        timezone: 'Asia/Hong_Kong',
+        sync_interval_minutes: 60,
+        calc_cron: '0 4 * * *',
+        jobs: []
+      }
+    })
+
+    const result = await getSchedulerStatus()
+
+    expect(get).toHaveBeenCalledWith('/api/sync/scheduler')
+    expect(result.enabled).toBe(true)
+  })
+
+  it('posts scheduler toggle payload', async () => {
     const post = vi.spyOn(client, 'post').mockResolvedValue({
       data: {
-        task_id: 12,
-        existing: false,
-        active_job_name: null,
-        active_trigger_source: null,
-        matched_count: 20,
-        queued_count: 20,
-      },
+        enabled: false,
+        running: false,
+        timezone: 'Asia/Hong_Kong',
+        sync_interval_minutes: 60,
+        jobs: []
+      }
     })
 
-    const result = await refetchOrderDetail({
-      days: 7,
-    })
+    const result = await setSchedulerStatus(false)
 
-    expect(post).toHaveBeenCalledWith('/api/sync/order-detail/refetch', {
-      days: 7,
-    })
-    expect(result.task_id).toBe(12)
-    expect(result.queued_count).toBe(20)
+    expect(post).toHaveBeenCalledWith('/api/sync/scheduler', { enabled: false })
+    expect(result.enabled).toBe(false)
   })
 })

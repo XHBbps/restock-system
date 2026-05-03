@@ -1,7 +1,6 @@
 """每接口独立的 QPS 限流(aiolimiter)。
 
 赛狐限制:大部分业务接口每秒最多 1 次请求;超过会触发 40019。
-部分接口(如订单详情)允许更高 QPS。
 token 接口另有独立限制,但本模块只管理业务接口。
 """
 
@@ -16,11 +15,8 @@ _LIMITERS: dict[str, AsyncLimiter] = {}
 _DEFAULT_RATE = 1
 _DEFAULT_PERIOD = 1.0
 
-# 特定接口的 QPS 覆盖
-# 实际联调中 order_detail 对并发较敏感，当前按 2 QPS 保守放行。
-_ENDPOINT_RATE_OVERRIDES: dict[str, int] = {
-    "/api/order/detailByOrderId.json": 2,
-}
+# 特定接口的 QPS 覆盖。当前没有遗留订单接口特例，保留映射用于后续扩展。
+_ENDPOINT_RATE_OVERRIDES: dict[str, int] = {}
 
 
 def get_endpoint_qps(endpoint: str) -> int:

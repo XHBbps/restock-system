@@ -2,7 +2,7 @@
 
 公式(FR-028):
     effective[order_item] = max(quantity_shipped - refund_num, 0)
-    过滤 order_status ∈ {Shipped, PartiallyShipped}
+    过滤 source='订单处理' 且 package_status != 'has_canceled'
     过滤 purchase_date ∈ [昨天-29, 昨天](不含今天)
     按 (commodity_sku, country, date) 聚合 SUM(effective)
 
@@ -21,9 +21,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.timezone import BEIJING
 from app.engine.context import VelocityMap
-from app.models.order import OrderHeader, OrderItem
+from app.models.order import ORDER_SOURCE_PACKAGE, OrderHeader, OrderItem
 
-VALID_STATUSES = ("Shipped", "PartiallyShipped")
+CANCELED_PACKAGE_STATUS = "has_canceled"
+
 WINDOW_DAYS = 30
 
 
@@ -94,7 +95,8 @@ async def load_velocity_inputs(
             OrderItem.refund_num,
         )
         .join(OrderHeader, OrderHeader.id == OrderItem.order_id)
-        .where(OrderHeader.order_status.in_(VALID_STATUSES))
+        .where(OrderHeader.source == ORDER_SOURCE_PACKAGE)
+        .where(func.coalesce(OrderHeader.package_status, "") != CANCELED_PACKAGE_STATUS)
         .where(OrderHeader.purchase_date >= earliest_dt)
         .where(OrderHeader.purchase_date < end_dt)
     )

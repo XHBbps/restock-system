@@ -48,6 +48,10 @@ class DataOrderSummary(SaihuLikeModel):
     amazon_order_id: str
     source: str
     order_platform: str
+    package_sn: str
+    package_status: str | None = None
+    shop_name: str | None = None
+    postal_code: str | None = None
     marketplace_id: str
     country_code: str
     order_status: str
@@ -78,6 +82,10 @@ class DataOrderDetail(SaihuLikeModel):
     amazon_order_id: str
     source: str
     order_platform: str
+    package_sn: str
+    package_status: str | None = None
+    shop_name: str | None = None
+    postal_code: str | None = None
     marketplace_id: str
     country_code: str
     order_status: str

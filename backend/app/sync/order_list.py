@@ -1,8 +1,10 @@
-"""订单列表同步。"""
+"""Package shipment order list sync."""
 
-import json
+from __future__ import annotations
+
 from calendar import monthrange
-from datetime import datetime, timedelta
+from collections import defaultdict
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import delete, select
@@ -12,68 +14,64 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.countries import normalize_observed_country_code, normalize_source_country_or_unknown
 from app.core.country_mapping import apply_eu_mapping, load_eu_countries
 from app.core.logging import get_logger
-from app.core.timezone import marketplace_to_country, now_beijing, parse_saihu_time
+from app.core.timezone import now_beijing, parse_saihu_time
 from app.db.session import async_session_factory
 from app.models.order import (
     ORDER_SOURCE_AMAZON,
     ORDER_SOURCE_MULTIPLATFORM,
+    ORDER_SOURCE_PACKAGE,
+    OrderDetail,
+    OrderDetailFetchLog,
     OrderHeader,
     OrderItem,
 )
 from app.models.shop import Shop
-from app.models.sync_state import SyncState
-from app.saihu.endpoints.multiplatform_order import list_multiplatform_orders
-from app.saihu.endpoints.order_list import list_orders
+from app.saihu.endpoints.package_ship import list_package_ship_orders
 from app.sync.common import mark_sync_failed, mark_sync_running, mark_sync_success
 from app.tasks.jobs import JobContext, register
 
 logger = get_logger(__name__)
 JOB_NAME = "sync_order_list"
 
-INITIAL_BACKFILL_DAYS = 30
-MULTIPLATFORM_ROLLING_MONTHS = 6
-DEFAULT_OVERLAP_MINUTES = 5
-MULTIPLATFORM_STATUS_MAP: dict[str, str] = {
-    "Unknown": "Unknown",
-    "Pending": "Pending",
-    "Unshipped": "Unshipped",
-    "PartiallyShipped": "PartiallyShipped",
-    "Shipped": "Shipped",
-    "PartiallyCompleted": "PartiallyShipped",
-    "Completed": "Shipped",
-    "Canceled": "Canceled",
-    "Refunded": "Canceled",
-    "已完成": "Shipped",
-    "已发货": "Shipped",
-    "部分发货": "PartiallyShipped",
-    "待发货": "Unshipped",
-    "未付款": "Pending",
-    "已取消": "Canceled",
-}
-SHIPMENT_STATUSES = {"Shipped", "PartiallyShipped"}
+ORDER_SYNC_ROLLING_MONTHS = 12
+PACKAGE_PAGE_SIZE = 200
+DEFAULT_BATCH_SIZE = 200
+LEGACY_ORDER_SOURCES = (ORDER_SOURCE_AMAZON, ORDER_SOURCE_MULTIPLATFORM)
+CANCELED_PACKAGE_STATUS = "has_canceled"
 
 
 @register(JOB_NAME)
 async def sync_order_list_job(ctx: JobContext) -> None:
-    await ctx.progress(current_step="同步订单列表", total_steps=1)
+    await ctx.progress(current_step="同步包裹订单列表", total_steps=1)
     async with async_session_factory() as db:
         started = await mark_sync_running(db, JOB_NAME)
-        date_start, date_end = await _compute_window(db, started)
-        multi_date_start = _subtract_calendar_months(started, MULTIPLATFORM_ROLLING_MONTHS)
+        date_start, date_end = _compute_window(started)
         shop_ids = await _resolve_shop_ids(db)
         eu_countries = await load_eu_countries(db)
 
-    logger.info("sync_order_list_window", start=date_start, end=date_end, shops=len(shop_ids or []))
+    logger.info(
+        "sync_order_list_window",
+        start=date_start,
+        end=date_end,
+        shops=len(shop_ids or []),
+    )
+
+    async with async_session_factory() as db:
+        await _cleanup_legacy_orders(db)
+        await db.commit()
+
     if shop_ids == []:
         async with async_session_factory() as db:
-            await mark_sync_success(db, JOB_NAME, started)
+            await mark_sync_success(db, JOB_NAME, started, success_at=date_end)
         logger.info("sync_order_list_skipped_no_enabled_shops", start=date_start, end=date_end)
-        await ctx.progress(current_step="完成", step_detail="未启用任何店铺，跳过同步 0 / 0")
+        await ctx.progress(
+            current_step="完成", step_detail="未启用任何店铺，已清理旧订单并跳过同步 0 / 0"
+        )
         return
 
+    package_count = 0
     order_count = 0
     item_count = 0
-    batch_size = 500
     try:
 
         async def _report_page(page_no: int, total_page: int, rows_count: int) -> None:
@@ -82,43 +80,38 @@ async def sync_order_list_job(ctx: JobContext) -> None:
             await ctx.progress(
                 total_steps=total_page,
                 step_detail=(
-                    f"第 {page_no} / {total_page} 页，当前页 {rows_count} 单，"
-                    f"已处理 {order_count} 单 / {item_count} 行"
+                    f"第 {page_no} / {total_page} 页，当前页 {rows_count} 个包裹，"
+                    f"已处理 {order_count} 订单 / {item_count} 明细"
                 ),
             )
 
         async with async_session_factory() as db:
-            async for raw in list_orders(
-                date_start=date_start.strftime("%Y-%m-%d %H:%M:%S"),
-                date_end=date_end.strftime("%Y-%m-%d %H:%M:%S"),
-                date_type="updateDateTime",
+            async for raw in list_package_ship_orders(
+                purchase_date_start=date_start.strftime("%Y-%m-%d %H:%M:%S"),
+                purchase_date_end=date_end.strftime("%Y-%m-%d %H:%M:%S"),
                 shop_ids=shop_ids,
+                page_size=PACKAGE_PAGE_SIZE,
                 on_page=_report_page,
             ):
-                ic = await _upsert_order(db, raw, eu_countries)
-                order_count += 1
-                item_count += ic
-                if order_count % batch_size == 0:
-                    await db.commit()
-            async for raw in list_multiplatform_orders(
-                date_start=multi_date_start.strftime("%Y-%m-%d"),
-                date_end=date_end.strftime("%Y-%m-%d"),
-                date_type="purchase",
-                shop_ids=shop_ids,
-                on_page=_report_page,
-            ):
-                ic = await _upsert_multiplatform_order(db, raw, eu_countries)
-                order_count += 1
-                item_count += ic
-                if order_count % batch_size == 0:
+                orders_added, items_added = await _upsert_package_ship_order(db, raw, eu_countries)
+                package_count += 1
+                order_count += orders_added
+                item_count += items_added
+                if package_count % DEFAULT_BATCH_SIZE == 0:
                     await db.commit()
             await db.commit()
 
         async with async_session_factory() as db:
             await mark_sync_success(db, JOB_NAME, started, success_at=date_end)
-        logger.info("sync_order_list_done", orders=order_count, items=item_count)
+        logger.info(
+            "sync_order_list_done",
+            packages=package_count,
+            orders=order_count,
+            items=item_count,
+        )
         await ctx.progress(
-            current_step="完成", step_detail=f"订单 {order_count} / 明细 {item_count}"
+            current_step="完成",
+            step_detail=f"包裹 {package_count} / 订单 {order_count} / 明细 {item_count}",
         )
     except Exception as exc:
         async with async_session_factory() as db:
@@ -126,19 +119,8 @@ async def sync_order_list_job(ctx: JobContext) -> None:
         raise
 
 
-async def _compute_window(
-    db: AsyncSession,
-    now: datetime,
-    overlap_minutes: int = DEFAULT_OVERLAP_MINUTES,
-) -> tuple[datetime, datetime]:
-    state = (
-        await db.execute(select(SyncState).where(SyncState.job_name == JOB_NAME))
-    ).scalar_one_or_none()
-    if state and state.last_success_at:
-        date_start = state.last_success_at - timedelta(minutes=overlap_minutes)
-    else:
-        date_start = now - timedelta(days=INITIAL_BACKFILL_DAYS)
-    return date_start, now
+def _compute_window(now: datetime) -> tuple[datetime, datetime]:
+    return _subtract_calendar_months(now, ORDER_SYNC_ROLLING_MONTHS), now
 
 
 def _subtract_calendar_months(value: datetime, months: int) -> datetime:
@@ -150,7 +132,6 @@ def _subtract_calendar_months(value: datetime, months: int) -> datetime:
 
 
 async def _resolve_shop_ids(db: AsyncSession) -> list[str] | None:
-    """根据全局参数 shop_sync_mode 决定是否过滤 shop_ids。"""
     from app.models.global_config import GlobalConfig
 
     config = (
@@ -170,322 +151,338 @@ async def _resolve_shop_ids(db: AsyncSession) -> list[str] | None:
     return list(rows) if rows else []
 
 
-async def _upsert_order(
+async def _cleanup_legacy_orders(db: AsyncSession) -> None:
+    await db.execute(
+        delete(OrderDetailFetchLog).where(OrderDetailFetchLog.source.in_(LEGACY_ORDER_SOURCES))
+    )
+    await db.execute(delete(OrderDetail).where(OrderDetail.source.in_(LEGACY_ORDER_SOURCES)))
+    await db.execute(delete(OrderHeader).where(OrderHeader.source.in_(LEGACY_ORDER_SOURCES)))
+
+
+async def _upsert_package_ship_order(
     db: AsyncSession,
     raw: dict[str, Any],
     eu_countries: set[str] | None = None,
-) -> int:
-    shop_id = str(raw.get("shopId") or "")
-    amazon_order_id = str(raw.get("amazonOrderId") or "")
-    if not shop_id or not amazon_order_id:
-        return 0
-
-    marketplace_id_raw = raw.get("marketplaceId") or ""
-    original_country_code = marketplace_to_country(marketplace_id_raw)
-    if original_country_code is None:
-        original_country_code = normalize_observed_country_code(marketplace_id_raw) or ""
-    mapped_country = apply_eu_mapping(original_country_code, eu_countries or set()) or ""
-    country_code = mapped_country or "ZZ"
-    if country_code == "ZZ":
+) -> tuple[int, int]:
+    shop_id = str(raw.get("shopId") or "").strip()
+    package_sn = str(
+        raw.get("packageSn") or raw.get("packageNo") or raw.get("packageId") or ""
+    ).strip()
+    if not shop_id or not package_sn:
         logger.warning(
-            "order_country_unrecognized",
-            source=ORDER_SOURCE_AMAZON,
-            shop_id=shop_id,
-            order_no=amazon_order_id,
-            marketplace_id=marketplace_id_raw,
-            fallback_country="ZZ",
+            "package_ship_order_skipped_missing_key",
+            shop_id=shop_id or None,
+            package_sn=package_sn or None,
         )
-    marketplace_id = country_code
+        return 0, 0
 
-    purchase_date = parse_saihu_time(raw.get("purchaseDate"), marketplace_id_raw) or now_beijing()
-    last_update_date = (
-        parse_saihu_time(raw.get("lastUpdateDate"), marketplace_id_raw) or purchase_date
-    )
-
-    header_values = {
-        "shop_id": shop_id,
-        "amazon_order_id": amazon_order_id,
-        "source": ORDER_SOURCE_AMAZON,
-        "order_platform": ORDER_SOURCE_AMAZON,
-        "marketplace_id": marketplace_id,
-        "country_code": country_code,
-        "original_country_code": (
-            original_country_code if mapped_country != original_country_code else None
-        ),
-        "order_status": raw.get("orderStatus") or "Unknown",
-        "order_total_currency": raw.get("orderTotalCurrency"),
-        "order_total_amount": _to_decimal(raw.get("orderTotalAmount")),
-        "fulfillment_channel": raw.get("fulfillmentChannel"),
-        "purchase_date": purchase_date,
-        "last_update_date": last_update_date,
-        "is_buyer_requested_cancel": str(raw.get("isBuyerRequestedCancel") or "0") == "1",
-        "refund_status": str(raw.get("refundStatus") or "") or None,
-        "last_sync_at": now_beijing(),
-    }
-    header_stmt = pg_insert(OrderHeader).values(**header_values).returning(OrderHeader.id)
-    update_set = {
-        k: v for k, v in header_values.items() if k not in ("shop_id", "amazon_order_id", "source")
-    }
-    header_stmt = header_stmt.on_conflict_do_update(  # type: ignore[attr-defined]
-        constraint="uq_order_header_key",
-        set_=update_set,
-    )
-    order_id = (await db.execute(header_stmt)).scalar_one()
-
-    items_to_insert: list[dict[str, Any]] = []
-    seen_item_ids: list[str] = []
-    raw_items = raw.get("orderItemVoList")
-    raw_item_count = len(raw_items) if isinstance(raw_items, list) else 0
-    order_items = (
-        [item for item in raw_items if isinstance(item, dict)]
-        if isinstance(raw_items, list)
-        else []
-    )
-    for raw_item in order_items:
-        order_item_id = raw_item.get("orderItemId")
-        commodity_sku = raw_item.get("commoditySku")
-        if not order_item_id or not commodity_sku:
-            continue
-        oid = str(order_item_id)
-        seen_item_ids.append(oid)
-        items_to_insert.append(
-            {
-                "order_id": order_id,
-                "order_item_id": oid,
-                "commodity_sku": commodity_sku,
-                "seller_sku": raw_item.get("sellerSku"),
-                "quantity_ordered": _to_int(raw_item.get("quantityOrdered")),
-                "quantity_shipped": _to_int(raw_item.get("quantityShipped")),
-                "quantity_unfulfillable": _to_int(raw_item.get("quantityUnfulfillable")),
-                "refund_num": _to_int(raw_item.get("refundNum")),
-                "item_price_currency": raw_item.get("itemPriceCurrency"),
-                "item_price_amount": _to_decimal(raw_item.get("itemPriceAmount")),
-            }
-        )
-    if items_to_insert:
-        item_stmt = pg_insert(OrderItem).values(items_to_insert)
-        item_stmt = item_stmt.on_conflict_do_update(
-            index_elements=["order_id", "order_item_id"],
-            set_={
-                "commodity_sku": item_stmt.excluded.commodity_sku,
-                "seller_sku": item_stmt.excluded.seller_sku,
-                "quantity_ordered": item_stmt.excluded.quantity_ordered,
-                "quantity_shipped": item_stmt.excluded.quantity_shipped,
-                "quantity_unfulfillable": item_stmt.excluded.quantity_unfulfillable,
-                "refund_num": item_stmt.excluded.refund_num,
-                "item_price_currency": item_stmt.excluded.item_price_currency,
-                "item_price_amount": item_stmt.excluded.item_price_amount,
-            },
-        )
-        await db.execute(item_stmt)
-    if seen_item_ids:
-        await db.execute(
-            delete(OrderItem).where(
-                OrderItem.order_id == order_id,
-                OrderItem.order_item_id.not_in(seen_item_ids),
-            )
-        )
-    else:
-        logger.warning(
-            "order_items_empty_preserve_existing",
-            source=ORDER_SOURCE_AMAZON,
-            shop_id=shop_id,
-            order_no=amazon_order_id,
-            raw_item_count=raw_item_count,
-        )
-    return len(items_to_insert)
-
-
-async def _upsert_multiplatform_order(
-    db: AsyncSession,
-    raw: dict[str, Any],
-    eu_countries: set[str] | None = None,
-) -> int:
-    shop_id = str(raw.get("shopId") or "")
-    order_no = str(raw.get("orderNo") or "")
-    if not shop_id or not order_no:
-        return 0
-
-    platform_name = str(raw.get("platformName") or "").strip() or ORDER_SOURCE_MULTIPLATFORM
-    original_country_code = _multiplatform_country(
+    platform_name = str(raw.get("platformName") or "").strip() or ORDER_SOURCE_PACKAGE
+    shop_name = str(raw.get("shopName") or "").strip() or None
+    package_status = str(raw.get("packageStatus") or raw.get("status") or "").strip() or "Unknown"
+    address = raw.get("address") if isinstance(raw.get("address"), dict) else {}
+    postal_code = _clean_text(address.get("postalCode") if isinstance(address, dict) else None)
+    country_code, original_country_code = _resolve_package_country(
         raw,
+        address,
         shop_id=shop_id,
-        order_no=order_no,
+        package_sn=package_sn,
         platform_name=platform_name,
+        eu_countries=eu_countries or set(),
     )
-    mapped_country = apply_eu_mapping(original_country_code, eu_countries or set()) or ""
-    country_code = mapped_country or original_country_code
-    marketplace_id = country_code
+    marketplace_id = _clean_text(raw.get("marketplaceId")) or country_code
 
-    purchase_date = parse_saihu_time(raw.get("purchaseDate"), country_code) or now_beijing()
-    last_update_date = parse_saihu_time(raw.get("payTime"), country_code) or purchase_date
-    order_status = _normalize_multiplatform_status(raw.get("orderStatus"))
-    order_currency = raw.get("currency")
+    orders = _extract_package_orders(raw)
+    package_items = _extract_package_items(raw)
+    order_map = _normalize_orders_from_package(raw, orders, package_items)
+    if not order_map:
+        logger.warning(
+            "package_ship_order_missing_amazon_order_id",
+            shop_id=shop_id,
+            package_sn=package_sn,
+        )
+        return 0, 0
 
-    header_values = {
-        "shop_id": shop_id,
-        "amazon_order_id": order_no,
-        "source": ORDER_SOURCE_MULTIPLATFORM,
-        "order_platform": platform_name,
-        "marketplace_id": marketplace_id,
-        "country_code": country_code,
-        "original_country_code": (
-            original_country_code if mapped_country != original_country_code else None
-        ),
-        "order_status": order_status,
-        "order_total_currency": order_currency,
-        "order_total_amount": _to_decimal(raw.get("totalAmount")),
-        "fulfillment_channel": None,
-        "purchase_date": purchase_date,
-        "last_update_date": last_update_date,
-        "is_buyer_requested_cancel": order_status == "Canceled",
-        "refund_status": None,
-        "last_sync_at": now_beijing(),
-    }
-    header_stmt = pg_insert(OrderHeader).values(**header_values).returning(OrderHeader.id)
-    update_set = {
-        k: v for k, v in header_values.items() if k not in ("shop_id", "amazon_order_id", "source")
-    }
-    header_stmt = header_stmt.on_conflict_do_update(  # type: ignore[attr-defined]
-        constraint="uq_order_header_key",
-        set_=update_set,
-    )
-    order_id = (await db.execute(header_stmt)).scalar_one()
+    items_by_order = _group_items_by_order(package_items, order_map)
 
-    items_to_insert: list[dict[str, Any]] = []
-    seen_item_ids: list[str] = []
-    raw_items = _multiplatform_items(raw)
-    for index, raw_item in enumerate(raw_items, start=1):
-        order_item_id = raw_item.get("orderItemId")
-        commodity_sku = raw_item.get("localSku")
-        if not commodity_sku:
+    orders_inserted = 0
+    items_inserted = 0
+    for amazon_order_id, order_meta in order_map.items():
+        purchase_date = _parse_order_date(
+            order_meta.get("purchaseDate") or raw.get("purchaseDate"),
+            raw.get("purchaseDate"),
+            marketplace_id,
+        )
+        last_update_date = _parse_order_date(
+            order_meta.get("lastUpdateDate") or raw.get("updateTime") or raw.get("lastUpdateDate"),
+            raw.get("updateTime") or raw.get("lastUpdateDate") or order_meta.get("purchaseDate"),
+            marketplace_id,
+        )
+        header_values = {
+            "shop_id": shop_id,
+            "amazon_order_id": amazon_order_id,
+            "source": ORDER_SOURCE_PACKAGE,
+            "order_platform": platform_name,
+            "package_sn": package_sn,
+            "package_status": package_status,
+            "shop_name": shop_name,
+            "postal_code": postal_code,
+            "marketplace_id": marketplace_id,
+            "country_code": country_code,
+            "original_country_code": (
+                original_country_code
+                if original_country_code and original_country_code != country_code
+                else None
+            ),
+            "order_status": package_status,
+            "order_total_currency": _clean_text(
+                order_meta.get("orderTotalCurrency") or raw.get("orderTotalCurrency")
+            ),
+            "order_total_amount": _to_decimal(
+                order_meta.get("orderTotalAmount") or raw.get("orderTotalAmount")
+            ),
+            "fulfillment_channel": _clean_text(
+                order_meta.get("fulfillmentChannel") or raw.get("fulfillmentChannel")
+            ),
+            "purchase_date": purchase_date,
+            "last_update_date": last_update_date,
+            "is_buyer_requested_cancel": package_status == CANCELED_PACKAGE_STATUS,
+            "refund_status": None,
+            "last_sync_at": now_beijing(),
+        }
+        header_stmt = pg_insert(OrderHeader).values(**header_values).returning(OrderHeader.id)
+        update_set = {
+            k: v
+            for k, v in header_values.items()
+            if k not in ("shop_id", "amazon_order_id", "source", "package_sn")
+        }
+        header_stmt = header_stmt.on_conflict_do_update(  # type: ignore[attr-defined]
+            constraint="uq_order_header_key",
+            set_=update_set,
+        )
+        order_id = (await db.execute(header_stmt)).scalar_one()
+        orders_inserted += 1
+
+        order_items = items_by_order.get(amazon_order_id, [])
+        seen_item_ids: list[str] = []
+        item_values: list[dict[str, Any]] = []
+        for index, raw_item in enumerate(order_items, start=1):
+            commodity_sku = _clean_text(raw_item.get("commoditySku"))
+            if not commodity_sku:
+                logger.warning(
+                    "package_ship_item_skipped_missing_commodity_sku",
+                    shop_id=shop_id,
+                    package_sn=package_sn,
+                    amazon_order_id=amazon_order_id,
+                    item_index=index,
+                )
+                continue
+            order_item_id = (
+                _clean_text(raw_item.get("orderItemId"))
+                or f"{package_sn}:{amazon_order_id}:{index}"
+            )
+            seen_item_ids.append(order_item_id)
+            quantity = _to_int(
+                raw_item.get("quantityOrdered")
+                or raw_item.get("saleNum")
+                or raw_item.get("quantity")
+                or raw_item.get("qty")
+            )
+            item_values.append(
+                {
+                    "order_id": order_id,
+                    "order_item_id": order_item_id,
+                    "commodity_sku": commodity_sku,
+                    "seller_sku": _clean_text(raw_item.get("sellerSku")) or None,
+                    "quantity_ordered": quantity,
+                    "quantity_shipped": quantity,
+                    "quantity_unfulfillable": 0,
+                    "refund_num": 0,
+                    "item_price_currency": _clean_text(
+                        raw_item.get("itemPriceCurrency") or raw_item.get("currency")
+                    ),
+                    "item_price_amount": _to_decimal(
+                        raw_item.get("itemPriceAmount") or raw_item.get("price")
+                    ),
+                }
+            )
+        if item_values:
+            item_stmt = pg_insert(OrderItem).values(item_values)
+            item_stmt = item_stmt.on_conflict_do_update(
+                index_elements=["order_id", "order_item_id"],
+                set_={
+                    "commodity_sku": item_stmt.excluded.commodity_sku,
+                    "seller_sku": item_stmt.excluded.seller_sku,
+                    "quantity_ordered": item_stmt.excluded.quantity_ordered,
+                    "quantity_shipped": item_stmt.excluded.quantity_shipped,
+                    "quantity_unfulfillable": item_stmt.excluded.quantity_unfulfillable,
+                    "refund_num": item_stmt.excluded.refund_num,
+                    "item_price_currency": item_stmt.excluded.item_price_currency,
+                    "item_price_amount": item_stmt.excluded.item_price_amount,
+                },
+            )
+            await db.execute(item_stmt)
+            items_inserted += len(item_values)
+        if seen_item_ids:
+            await db.execute(
+                delete(OrderItem).where(
+                    OrderItem.order_id == order_id,
+                    OrderItem.order_item_id.not_in(seen_item_ids),
+                )
+            )
+        else:
             logger.warning(
-                "multiplatform_order_item_skipped_missing_local_sku",
+                "package_ship_order_items_empty_preserve_existing",
                 shop_id=shop_id,
-                order_no=order_no,
-                platform_name=platform_name,
-                order_item_id=order_item_id,
+                package_sn=package_sn,
+                amazon_order_id=amazon_order_id,
+                raw_item_count=len(order_items),
+            )
+
+    return orders_inserted, items_inserted
+
+
+def _normalize_orders_from_package(
+    raw: dict[str, Any],
+    orders: list[dict[str, Any]],
+    package_items: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    order_map: dict[str, dict[str, Any]] = {}
+    for order in orders:
+        amazon_order_id = _clean_text(
+            order.get("amazonOrderId") or order.get("orderNo") or order.get("orderId")
+        )
+        if not amazon_order_id:
+            continue
+        order_map[amazon_order_id] = order
+
+    if not order_map:
+        fallback_order_id = _clean_text(
+            raw.get("amazonOrderId") or raw.get("orderNo") or raw.get("orderId")
+        )
+        if fallback_order_id:
+            order_map[fallback_order_id] = {
+                "amazonOrderId": fallback_order_id,
+                "purchaseDate": raw.get("purchaseDate"),
+                "lastUpdateDate": raw.get("updateTime") or raw.get("lastUpdateDate"),
+            }
+
+    if not order_map:
+        item_order_ids = []
+        for item in package_items:
+            order_id = _clean_text(
+                item.get("amazonOrderId") or item.get("orderNo") or item.get("orderId")
+            )
+            if order_id and order_id not in item_order_ids:
+                item_order_ids.append(order_id)
+        for order_id in item_order_ids:
+            order_map[order_id] = {
+                "amazonOrderId": order_id,
+                "purchaseDate": raw.get("purchaseDate"),
+                "lastUpdateDate": raw.get("updateTime") or raw.get("lastUpdateDate"),
+            }
+    return order_map
+
+
+def _group_items_by_order(
+    package_items: list[dict[str, Any]],
+    order_map: dict[str, dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    sole_order_id = next(iter(order_map)) if len(order_map) == 1 else None
+    for item in package_items:
+        amazon_order_id = _clean_text(
+            item.get("amazonOrderId") or item.get("orderNo") or item.get("orderId")
+        )
+        if not amazon_order_id:
+            amazon_order_id = sole_order_id
+        if not amazon_order_id or amazon_order_id not in order_map:
+            logger.warning(
+                "package_ship_item_skipped_missing_order_id",
+                amazon_order_id=amazon_order_id,
             )
             continue
-        oid = str(order_item_id or f"line-{index}")
-        sale_num = _to_int(raw_item.get("saleNum"))
-        seen_item_ids.append(oid)
-        items_to_insert.append(
-            {
-                "order_id": order_id,
-                "order_item_id": oid,
-                "commodity_sku": str(commodity_sku),
-                "seller_sku": raw_item.get("msku"),
-                "quantity_ordered": sale_num,
-                "quantity_shipped": sale_num if order_status in SHIPMENT_STATUSES else 0,
-                "quantity_unfulfillable": 0,
-                "refund_num": 0,
-                "item_price_currency": raw_item.get("currency") or order_currency,
-                "item_price_amount": _to_decimal(raw_item.get("originalPrice")),
-            }
-        )
-    if items_to_insert:
-        item_stmt = pg_insert(OrderItem).values(items_to_insert)
-        item_stmt = item_stmt.on_conflict_do_update(
-            index_elements=["order_id", "order_item_id"],
-            set_={
-                "commodity_sku": item_stmt.excluded.commodity_sku,
-                "seller_sku": item_stmt.excluded.seller_sku,
-                "quantity_ordered": item_stmt.excluded.quantity_ordered,
-                "quantity_shipped": item_stmt.excluded.quantity_shipped,
-                "quantity_unfulfillable": item_stmt.excluded.quantity_unfulfillable,
-                "refund_num": item_stmt.excluded.refund_num,
-                "item_price_currency": item_stmt.excluded.item_price_currency,
-                "item_price_amount": item_stmt.excluded.item_price_amount,
-            },
-        )
-        await db.execute(item_stmt)
-    if seen_item_ids:
-        await db.execute(
-            delete(OrderItem).where(
-                OrderItem.order_id == order_id,
-                OrderItem.order_item_id.not_in(seen_item_ids),
-            )
-        )
-    else:
-        logger.warning(
-            "order_items_empty_preserve_existing",
-            source=ORDER_SOURCE_MULTIPLATFORM,
-            shop_id=shop_id,
-            order_no=order_no,
-            platform_name=platform_name,
-            raw_item_count=len(raw_items),
-        )
-    return len(items_to_insert)
+        grouped[amazon_order_id].append(item)
+    return dict(grouped)
 
 
-def _normalize_multiplatform_status(raw_status: Any) -> str:
-    status = str(raw_status or "").strip()
-    return MULTIPLATFORM_STATUS_MAP.get(status, "Unknown")
-
-
-def _multiplatform_country(
-    raw: dict[str, Any],
-    *,
-    shop_id: str,
-    order_no: str,
-    platform_name: str,
-) -> str:
-    country_raw = raw.get("marketplaceCode")
-    country = normalize_observed_country_code(country_raw)
-    if country is None:
-        extra_info = raw.get("extraInfo")
-        if isinstance(extra_info, str):
-            try:
-                parsed_extra_info = json.loads(extra_info)
-            except json.JSONDecodeError:
-                parsed_extra_info = None
-            extra_info = parsed_extra_info
-        if isinstance(extra_info, dict):
-            country_raw = extra_info.get("warehouse_country")
-            country = normalize_observed_country_code(country_raw)
-    if country is not None:
-        return country
-    return normalize_source_country_or_unknown(
-        country_raw,
-        event="multiplatform_order_country_unrecognized",
-        shop_id=shop_id,
-        order_no=order_no,
-        platform_name=platform_name,
-    )
-
-
-def _multiplatform_items(raw: dict[str, Any]) -> list[dict[str, Any]]:
-    for key in (
-        "skuInfoVo",
-        "orderItemVoList",
-        "orderItemList",
-        "itemList",
-        "items",
-        "detailList",
-        "orderDetails",
-    ):
+def _extract_package_orders(raw: dict[str, Any]) -> list[dict[str, Any]]:
+    for key in ("orders", "orderList", "orderInfoList", "orderInfos", "packageOrderList"):
         value = raw.get(key)
         if isinstance(value, list):
             return [item for item in value if isinstance(item, dict)]
     return []
 
 
-def _to_int(v: Any, default: int = 0) -> int:
-    if v is None or v == "":
+def _extract_package_items(raw: dict[str, Any]) -> list[dict[str, Any]]:
+    for key in ("items", "itemList", "packageItemList", "orderItemList", "skuInfoVo", "details"):
+        value = raw.get(key)
+        if isinstance(value, list):
+            return [item for item in value if isinstance(item, dict)]
+    return []
+
+
+def _resolve_package_country(
+    raw: dict[str, Any],
+    address: dict[str, Any],
+    *,
+    shop_id: str,
+    package_sn: str,
+    platform_name: str,
+    eu_countries: set[str],
+) -> tuple[str, str | None]:
+    del raw
+    country_raw = address.get("countryCode")
+    country = normalize_observed_country_code(country_raw)
+    if country is not None:
+        mapped = apply_eu_mapping(country, eu_countries)
+        return mapped or country, country
+
+    country_raw = address.get("country")
+    country = normalize_observed_country_code(country_raw)
+    if country is not None:
+        mapped = apply_eu_mapping(country, eu_countries)
+        return mapped or country, country
+
+    fallback = normalize_source_country_or_unknown(
+        country_raw,
+        event="package_ship_order_country_unrecognized",
+        shop_id=shop_id,
+        package_sn=package_sn,
+        platform_name=platform_name,
+    )
+    return fallback, None
+
+
+def _parse_order_date(raw: Any, fallback: Any, marketplace_id: str) -> datetime:
+    parsed = parse_saihu_time(_clean_text(raw), marketplace_id)
+    if parsed is not None:
+        return parsed
+    fallback_parsed = parse_saihu_time(_clean_text(fallback), marketplace_id)
+    return fallback_parsed or now_beijing()
+
+
+def _clean_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _to_int(value: Any, default: int = 0) -> int:
+    if value is None or value == "":
         return default
     try:
-        return int(float(v))
+        return int(float(value))
     except (TypeError, ValueError):
         return default
 
 
-def _to_decimal(v: Any) -> Any:
-    if v is None or v == "":
+def _to_decimal(value: Any) -> Any:
+    if value is None or value == "":
         return None
     from decimal import Decimal, InvalidOperation
 
     try:
-        return Decimal(str(v))
+        return Decimal(str(value))
     except (InvalidOperation, TypeError, ValueError):
         return None

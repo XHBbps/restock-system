@@ -28,9 +28,7 @@ SUPPORTED_ENDPOINT_JOBS: dict[str, tuple[str, ...]] = {
     "/api/warehouseManage/warehouseList.json": ("sync_warehouse",),
     "/api/warehouseManage/warehouseItemList.json": ("sync_inventory",),
     "/api/warehouseInOut/outRecords.json": ("sync_out_records",),
-    "/api/order/pageList.json": ("sync_order_list",),
-    "/api/multiplatform/order/list.json": ("sync_order_list",),
-    "/api/order/detailByOrderId.json": ("sync_order_detail", "refetch_order_detail"),
+    "/api/packageShip/v1/getPackagePage.json": ("sync_order_list",),
     "/api/shop/pageList.json": ("sync_shop",),
 }
 
@@ -62,8 +60,7 @@ async def retry_failed_api_calls_job(ctx: JobContext) -> None:
         retried += 1
         await ctx.progress(
             step_detail=(
-                f"已处理 {index} / 总数 {total}，已重试 {retried}，"
-                f"跳过忙碌 {skipped_busy}"
+                f"已处理 {index} / 总数 {total}，已重试 {retried}，" f"跳过忙碌 {skipped_busy}"
             ),
             total_steps=total or None,
         )
@@ -82,7 +79,9 @@ def retry_interval_seconds(endpoint: str) -> float:
 
 
 def busy_job_names_for_endpoint(endpoint: str) -> tuple[str, ...]:
-    jobs = SUPPORTED_ENDPOINT_JOBS.get(endpoint, ())
+    jobs = SUPPORTED_ENDPOINT_JOBS.get(endpoint)
+    if not jobs:
+        return ()
     return (*jobs, "sync_all")
 
 
@@ -125,6 +124,7 @@ async def _load_retry_candidates(*, call_ids: list[int] | None = None) -> list[A
 def _is_retryable_row(row: ApiCallLog) -> bool:
     return (
         row.saihu_code == 40019
+        and row.endpoint in SUPPORTED_ENDPOINT_JOBS
         and isinstance(row.request_payload, dict)
         and row.retry_source_log_id is None
         and row.retry_status not in {"resolved", "permanent", "unsupported"}

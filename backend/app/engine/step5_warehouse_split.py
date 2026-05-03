@@ -1,7 +1,7 @@
 """Step 5:各国仓内分配(简化版 FR-033 + analyze G6)。
 
 策略:
-- 取该 SKU 在该国近 30 天有效发货订单,订单详情左连接,无邮编也参与未知样本
+- 取该 SKU 在该国近 30 天非已作废包裹订单,优先使用订单头邮编,无邮编也参与未知样本
 - 按 zipcode_rule 分配到具体仓 -> 未匹配的归"未知仓"
 - 已知与未知同时存在时,先按样本件数拆成已知桶和未知桶
 - 已知桶按真实比例分配,未知桶均分到该国已配置邮编规则的仓
@@ -13,16 +13,17 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from fractions import Fraction
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.timezone import BEIJING
 from app.engine.zipcode_matcher import ZipcodeRule, match_warehouses
-from app.models.order import OrderDetail, OrderHeader, OrderItem
+from app.models.order import ORDER_SOURCE_PACKAGE, OrderHeader, OrderItem
 from app.models.warehouse import Warehouse
 from app.models.zipcode_rule import ZipcodeRule as ZipcodeRuleModel
 
 WINDOW_DAYS = 30
+CANCELED_PACKAGE_STATUS = "has_canceled"
 
 
 @dataclass
@@ -100,25 +101,19 @@ async def load_all_sku_country_orders(
     end_dt = datetime.combine(today, datetime.min.time(), tzinfo=BEIJING)
 
     stmt = (
-        # Step 5 的样本口径与 Step 1 销量一致:有效发货数 = shipped - refund。
-        # 订单详情使用左连接,让无详情/无邮编订单进入 unknown 分仓样本。
+        # Step 5 uses the same effective quantity and package status scope as Step 1.
         select(
             OrderItem.commodity_sku,
             OrderHeader.country_code,
-            OrderDetail.postal_code,
+            OrderHeader.postal_code,
             (OrderItem.quantity_shipped - OrderItem.refund_num).label("effective_qty"),
         )
         .join(OrderHeader, OrderHeader.id == OrderItem.order_id)
-        .outerjoin(
-            OrderDetail,
-            (OrderDetail.shop_id == OrderHeader.shop_id)
-            & (OrderDetail.amazon_order_id == OrderHeader.amazon_order_id)
-            & (OrderDetail.source == OrderHeader.source),
-        )
         .where(OrderItem.commodity_sku.in_(commodity_skus))
         .where(OrderHeader.purchase_date >= earliest_dt)
         .where(OrderHeader.purchase_date < end_dt)
-        .where(OrderHeader.order_status.in_(("Shipped", "PartiallyShipped")))
+        .where(OrderHeader.source == ORDER_SOURCE_PACKAGE)
+        .where(func.coalesce(OrderHeader.package_status, "") != CANCELED_PACKAGE_STATUS)
     )
     if allowed_countries is not None:
         stmt = stmt.where(OrderHeader.country_code.in_(sorted(allowed_countries)))
@@ -263,9 +258,7 @@ def explain_country_qty_split(
 
         return CountryAllocationResult(
             warehouse_breakdown={k: v for k, v in result.items() if v > 0},
-            allocation_mode=(
-                "mixed_known_unknown" if unknown_order_qty > 0 else "matched"
-            ),
+            allocation_mode=("mixed_known_unknown" if unknown_order_qty > 0 else "matched"),
             matched_order_qty=matched_order_qty,
             unknown_order_qty=unknown_order_qty,
             eligible_warehouses=eligible_warehouses,
