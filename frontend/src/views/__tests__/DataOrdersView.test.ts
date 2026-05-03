@@ -151,7 +151,6 @@ function buildOrdersResponse(
       {
         shopId: 'SHOP-1',
         amazonOrderId: 'ORDER-1',
-        source: '订单处理',
         orderPlatform: 'Amazon',
         packageSn: 'PKG-1',
         packageStatus: 'has_shipped',
@@ -257,7 +256,7 @@ describe('DataOrdersView', () => {
     await flushPromises()
     mockListOrders.mockClear()
 
-    const skuInput = wrapper.find('input[placeholder="SKU / 订单号 / 包裹号"]')
+    const skuInput = wrapper.find('input[placeholder="SKU / 订单号"]')
     await skuInput.setValue('SKU-1')
     expect(mockListOrders).not.toHaveBeenCalled()
 
@@ -278,7 +277,7 @@ describe('DataOrdersView', () => {
     await skuInput.trigger('keyup.enter')
     await flushPromises()
 
-    expect(mockListOrders).toHaveBeenLastCalledWith(
+      expect(mockListOrders).toHaveBeenLastCalledWith(
       expect.objectContaining({
         page: 1,
         sku: 'SKU-2'

@@ -160,7 +160,6 @@ def _apply_order_sort(stmt: Any, sort_by: str | None, sort_order: str) -> Any:
     amount_expr = func.coalesce(OrderHeader.order_total_amount.cast(Float), -1.0)
     sort_map: dict[str, tuple[Any, ...]] = {
         "amazonOrderId": (OrderHeader.amazon_order_id,),
-        "source": (OrderHeader.source,),
         "orderPlatform": (OrderHeader.order_platform,),
         "packageSn": (OrderHeader.package_sn,),
         "packageStatus": (OrderHeader.package_status,),
@@ -383,7 +382,6 @@ async def list_orders(
         )
         base = base.where(
             (OrderHeader.amazon_order_id.ilike(f"%{escape_like(sku)}%", escape="\\"))
-            | (OrderHeader.package_sn.ilike(f"%{escape_like(sku)}%", escape="\\"))
             | (OrderHeader.id.in_(select(subq.c.order_id)))
         )
 
@@ -439,7 +437,6 @@ async def list_orders(
                     for k in (
                         "shop_id",
                         "amazon_order_id",
-                        "source",
                         "order_platform",
                         "package_sn",
                         "package_status",
@@ -473,7 +470,6 @@ async def list_orders(
 async def get_order_detail(
     shop_id: str = Path(...),
     amazon_order_id: str = Path(...),
-    source: str = Query(default=ORDER_SOURCE_PACKAGE),
     package_sn: str | None = Query(default=None),
     db: AsyncSession = Depends(db_session_readonly),
     _: None = Depends(require_permission(DATA_BIZ_VIEW)),
@@ -481,7 +477,7 @@ async def get_order_detail(
     header_stmt = select(OrderHeader).where(
         (OrderHeader.shop_id == shop_id)
         & (OrderHeader.amazon_order_id == amazon_order_id)
-        & (OrderHeader.source == source)
+        & (OrderHeader.source == ORDER_SOURCE_PACKAGE)
     )
     if package_sn is not None:
         header_stmt = header_stmt.where(OrderHeader.package_sn == package_sn)
@@ -491,7 +487,7 @@ async def get_order_detail(
         ).limit(1)
     header = (await db.execute(header_stmt)).scalar_one_or_none()
     if header is None:
-        raise NotFound(f"订单 {shop_id}/{amazon_order_id}/{source} 不存在")
+        raise NotFound(f"订单 {shop_id}/{amazon_order_id}/{ORDER_SOURCE_PACKAGE} 不存在")
 
     item_rows = (
         (await db.execute(select(OrderItem).where(OrderItem.order_id == header.id))).scalars().all()
@@ -502,7 +498,7 @@ async def get_order_detail(
             select(OrderDetail).where(
                 (OrderDetail.shop_id == shop_id)
                 & (OrderDetail.amazon_order_id == amazon_order_id)
-                & (OrderDetail.source == source)
+                & (OrderDetail.source == ORDER_SOURCE_PACKAGE)
             )
         )
     ).scalar_one_or_none()
@@ -522,7 +518,6 @@ async def get_order_detail(
                 for k in (
                     "shop_id",
                     "amazon_order_id",
-                    "source",
                     "order_platform",
                     "package_sn",
                     "package_status",

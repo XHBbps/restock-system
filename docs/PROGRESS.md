@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-05-03（补齐 AT、CH、CY、DK、EE、FI、LT、LV、MT、SI 国家中文名与时区；确认本次 ZZ 来自赛狐包裹列表缺失国家字段。）
+> 最近更新：2026-05-03（订单处理列表国家改为读取顶层 `marketplace`；订单页移除来源/包裹号展示与搜索；补齐 AT、CH、CY、DK、EE、FI、LT、LV、MT、SI 国家中文名与时区。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -38,7 +38,7 @@
 ### 2.2 同步与调度
 - **EU 合并同步口径**：订单、商品、出库、库存同步均按全局 eu_countries 将 EU 成员国合并到 EU，并在 original_* 字段保存原国家码；calc_engine 已移出 APScheduler 定时注册，仅保留手动生成入口。
 - **新国家发现口径**：多平台订单同步遇到有效 2 位国家码时直接落入 `order_header.country_code` 并参与计算；若该国家已配置到 `eu_countries`，则归并为 `EU` 并在 `original_country_code` 保留原码；空值或非法国家码才写为 `ZZ` 并记录结构化日志。
-- **订单处理列表同步来源**：`sync_order_list` 当前只调用赛狐订单处理列表 `/api/packageShip/v1/getPackagePage.json`，按 `purchaseDateStart/purchaseDateEnd` 拉取滚动 12 个月窗口，`pageSize=200`，继续复用全局店铺过滤；包裹数据统一写入 `source='订单处理'`，并保存 `package_sn/package_status/shop_name/postal_code/order_platform`。同步开始前会清理旧 `source in ('亚马逊','多平台')` 的订单头、明细、详情和详情抓取日志，避免切换后重复计算。
+- **订单处理列表同步来源**：`sync_order_list` 当前只调用赛狐订单处理列表 `/api/packageShip/v1/getPackagePage.json`，按 `purchaseDateStart/purchaseDateEnd` 拉取滚动 12 个月窗口，`pageSize=200`，继续复用全局店铺过滤；订单国家现在统一读取响应顶层 `marketplace` 字段，空值或非法值回落 `ZZ`，`address.countryCode/address.country` 不再作为国家来源。包裹数据统一写入 `source='订单处理'`，并保存 `package_sn/package_status/shop_name/postal_code/order_platform`。同步开始前会清理旧 `source in ('亚马逊','多平台')` 的订单头、明细、详情和详情抓取日志，避免切换后重复计算。
 - **商品主数据同步来源**：`sync_product_listing` 先调用赛狐 SKU 主数据接口 `/api/commodity/pageList.json` 写入 `commodity_master`，再调用在线产品 listing 接口 `/api/order/api/product/pageList.json` 补充店铺、站点、sellerSku 与近 7/14/30 天销量。同步新发现的 SKU 只补建 `sku_config(enabled=false)`，不自动扩大补货计算 SKU 集合。
 
 - **调度器开关**：`GET/POST /api/sync/scheduler`，开关状态持久化到 `global_config.scheduler_enabled`
@@ -98,7 +98,7 @@
 - **数据加载模式**：订单页、历史记录页、商品页、库存页、出库记录页使用“后端分页 + 后端筛选”；仓库、店铺等低增长基础页仍保留轻量分页
 - **商品页主数据口径**：`DataProductsView.vue` 通过 `/api/data/sku-overview` 展示 `commodity_master + sku_config`，商品名、图片、状态、组合标识、采购周期优先取主数据；listing 仅作为展开明细和销量参考，无 listing 的商品 SKU 也会显示。
 - **筛选控件高度统一**：`PageSectionCard` 的 `section-actions` 强制所有控件 32px 高度
-- **订单处理列表展示**：`DataOrdersView.vue` 展示包裹号、包裹状态、店铺名称、平台、国家、邮编与本地订单明细；筛选支持 SKU / 订单号 / 包裹号，状态筛选使用订单处理列表包裹状态。
+- **订单处理列表展示**：`DataOrdersView.vue` 展示包裹状态、店铺名称、平台、国家、邮编与本地订单明细；筛选支持 SKU / 订单号，状态筛选使用订单处理列表包裹状态。来源和包裹号不再作为页面展示或搜索字段，平台字段改为标签样式，店铺仅显示名称，订单明细中的商品 SKU 固定使用 `commoditySku`。
 - **全局参数页补货区域配置**：`GlobalConfigView.vue` 的“补货区域”多选已接入动态国家选项，保存前变更检测与配置变更提示已纳入 `restock_regions`
 - **动态国家选项**：`GET /api/config/country-options` 返回内置国家与订单、仓库、库存、出库在途中已观测国家的并集，并在输出前统一标准化 ISO 二字码别名；订单、库存、出库、仓库、邮编规则、补货区域和 EU 成员国配置均改用该接口，接口不可用时前端降级使用内置选项。
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
@@ -108,8 +108,14 @@
 ### 3.93 新观测国家展示补齐与 ZZ 原因确认（2026-05-03）
 - **国家展示**：`backend/app/core/countries.py` 与 `frontend/src/utils/countries.ts` 补齐 `AT - 奥地利`、`CH - 瑞士`、`CY - 塞浦路斯`、`DK - 丹麦`、`EE - 爱沙尼亚`、`FI - 芬兰`、`LT - 立陶宛`、`LV - 拉脱维亚`、`MT - 马耳他`、`SI - 斯洛文尼亚`。动态国家选项和前端本地 `getCountryLabel()` 均会按“国家码 - 中文名”展示，不再仅显示原始代码。
 - **时区约束**：`backend/app/core/timezone.py` 为上述内置国家补齐 IANA 时区，保持“内置国家必须有时区映射”的单测约束。
-- **ZZ 原因**：生产订单重新同步后，`ZZ` 主要集中在 Temu 半托管、Walmart、TikTok、Wayfair 等非 Amazon 平台；worker 结构化日志显示 `package_ship_order_country_unrecognized` 的 `raw_country=null`，即赛狐包裹列表响应的 `address.countryCode/address.country` 均为空。当前同步层只在国家字段缺失或不是有效两位国家码时写入 `ZZ`，不会按店铺名或平台名猜测国家。
+- **ZZ 原因**：生产订单重新同步后，`ZZ` 主要集中在 Temu 半托管、Walmart、TikTok、Wayfair 等非 Amazon 平台；当前同步层以赛狐包裹列表顶层 `marketplace` 为唯一国家来源，只在该字段缺失或不是有效两位国家码时写入 `ZZ`，不会按地址、店铺名或平台名猜测国家。
 - **验证**：`pytest -p no:cacheprovider tests/unit/test_country_mapping.py tests/unit/test_timezone.py -q` 通过；`cmd /c npx vitest run src/utils/countries.test.ts` 通过。
+
+### 3.94 订单页口径清理与国家来源切换（2026-05-03）
+- **国家来源**：`backend/app/sync/order_list.py` 现在只读取赛狐订单处理列表响应顶层 `marketplace` 作为订单国家来源；有效二字码继续按 EU 配置映射到 `EU`，无法识别或为空时写入 `ZZ`。`address.countryCode` / `address.country` 不再参与国家解析。
+- **页面口径**：`backend/app/api/data.py` 与 `backend/app/schemas/data.py` 的订单列表 / 详情 DTO 去掉了 `source` 对前端的展示字段；`frontend/src/views/data/DataOrdersView.vue` 移除了来源与包裹号展示/搜索，平台改为标签样式，店铺仅显示名称，详情基础信息不再显示店铺 ID / 来源 / 包裹号，明细商品列固定使用 `commoditySku`。
+- **详情定位**：前端详情接口仍可带 `package_sn` 作为内部精确定位参数，但不再把 `source` 作为页面输入；订单页搜索也不再按包裹号匹配。
+- **历史数据修复**：不做一次性 SQL 猜测回填；历史订单国家口径通过重新执行 `sync_order_list` 任务回填，剩余 `ZZ` 代表赛狐包裹列表本身没有返回可识别国家码。
 
 ### 3.91 订单同步切换为订单处理列表接口（2026-05-03）
 - **赛狐接口**：`backend/app/saihu/endpoints/package_ship.py` 新增 `POST /api/packageShip/v1/getPackagePage.json` 封装；`sync_order_list` 改为只按 `purchaseDateStart/purchaseDateEnd` 同步滚动 12 个月订单处理列表，`pageSize=200`，继续支持 `shopIdList` 店铺过滤。
@@ -117,7 +123,7 @@
 - **旧来源清理**：每次订单处理列表同步前会删除旧 `source in ('亚马逊','多平台')` 的 `order_header`、级联明细、`order_detail` 与 `order_detail_fetch_log`，避免旧亚马逊 / 多平台订单与新包裹订单重复参与销量计算。
 - **补货计算口径**：`step1_velocity` 和 `step5_warehouse_split` 只消费 `source='订单处理'`；除 `package_status='has_canceled'` 的已作废包裹外，其余包裹状态都参与销量和分仓样本。Step 5 邮编优先读取 `order_header.postal_code`。
 - **入口停用**：`sync_all` 与 APScheduler 不再入队 `sync_order_detail`；`POST /api/sync/order-detail/refetch`、前端 `OrderDetailFetchAction` 和相关手动详情获取 API 已移除。`retry_failed_api_calls` 仅把 `/api/packageShip/v1/getPackagePage.json` 映射到 `sync_order_list / sync_all`，旧订单列表、旧多平台订单和旧订单详情接口不再自动重放。
-- **前端展示**：订单页改为包裹订单视图，展示包裹号、包裹状态、店铺名称、平台、国家、邮编和本地订单明细，详情弹窗不再依赖订单详情抓取。
+- **前端展示**：订单页改为包裹订单视图，展示包裹状态、店铺名称、平台、国家、邮编和本地订单明细，详情弹窗不再依赖订单详情抓取；来源和包裹号不再展示或参与搜索，包裹号仅保留为详情内部定位字段。
 - **测试**：新增 `backend/tests/unit/test_package_ship_endpoint.py`，并更新订单同步、EU 映射、Step 1 / Step 5、数据订单 API、失败重试、同步控制和订单页前端测试，覆盖分页请求体、拆包唯一键、旧来源清理、已作废包裹排除和本地详情展示。
 
 ### 3.92 旧订单详情与旧订单接口残留清理（2026-05-03）

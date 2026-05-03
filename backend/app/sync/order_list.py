@@ -184,7 +184,6 @@ async def _upsert_package_ship_order(
     postal_code = _clean_text(address.get("postalCode") if isinstance(address, dict) else None)
     country_code, original_country_code = _resolve_package_country(
         raw,
-        address,
         shop_id=shop_id,
         package_sn=package_sn,
         platform_name=platform_name,
@@ -424,21 +423,13 @@ def _extract_package_items(raw: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _resolve_package_country(
     raw: dict[str, Any],
-    address: dict[str, Any],
     *,
     shop_id: str,
     package_sn: str,
     platform_name: str,
     eu_countries: set[str],
 ) -> tuple[str, str | None]:
-    del raw
-    country_raw = address.get("countryCode")
-    country = normalize_observed_country_code(country_raw)
-    if country is not None:
-        mapped = apply_eu_mapping(country, eu_countries)
-        return mapped or country, country
-
-    country_raw = address.get("country")
+    country_raw = raw.get("marketplace")
     country = normalize_observed_country_code(country_raw)
     if country is not None:
         mapped = apply_eu_mapping(country, eu_countries)

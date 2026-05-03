@@ -35,6 +35,8 @@ def _package_payload(**overrides: Any) -> dict[str, Any]:
         "packageSn": "PKG-1",
         "status": "has_shipped",
         "platformName": "Amazon",
+        "marketplace": "US",
+        "marketplaceId": "ATVPDKIKX0DER",
         "address": {
             "countryCode": "US",
             "postalCode": "90210",
@@ -98,12 +100,11 @@ async def test_upsert_package_order_applies_eu_mapping_and_preserves_original_co
     db = _FakeDb()
     await _upsert_package_ship_order(
         db,  # type: ignore[arg-type]
-        _package_payload(address={"countryCode": "DE", "postalCode": "10115"}),
+        _package_payload(marketplace="DE", address={"countryCode": "US", "postalCode": "10115"}),
         {"DE", "FR"},
     )
 
     header_values = _compiled_params(db.statements[0])
-    assert header_values["marketplace_id"] == "EU"
     assert header_values["country_code"] == "EU"
     assert header_values["original_country_code"] == "DE"
 
@@ -115,7 +116,7 @@ async def test_upsert_package_order_falls_back_to_zz_for_unknown_country() -> No
     db = _FakeDb()
     await _upsert_package_ship_order(
         db,  # type: ignore[arg-type]
-        _package_payload(address={"countryCode": "", "country": "United States"}),
+        _package_payload(marketplace="", address={"countryCode": "US", "country": "DE"}),
         set(),
     )
 

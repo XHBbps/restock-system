@@ -14,7 +14,7 @@
         />
         <el-input
           v-model="filters.sku"
-          placeholder="SKU / 订单号 / 包裹号"
+          placeholder="SKU / 订单号"
           clearable
           style="width: 220px"
           @input="scheduleSkuReload"
@@ -39,7 +39,7 @@
           style="width: 160px"
           @change="reloadFirstPage"
         >
-          <el-option v-for="s in shopOptions" :key="s" :label="s" :value="s" />
+          <el-option v-for="s in shopOptions" :key="s.id" :label="s.name" :value="s.id" />
         </el-select>
         <el-select
           v-model="filters.status"
@@ -60,17 +60,6 @@
 
     <el-table v-loading="loading" :data="rows" table-layout="auto" @sort-change="handleSortChange">
       <el-table-column
-        label="包裹号"
-        prop="packageSn"
-        min-width="150"
-        sortable="custom"
-        show-overflow-tooltip
-      >
-        <template #default="{ row }">
-          <span class="mono nowrap">{{ row.packageSn || '-' }}</span>
-        </template>
-      </el-table-column>
-      <el-table-column
         label="订单号"
         prop="amazonOrderId"
         min-width="190"
@@ -89,15 +78,7 @@
         show-overflow-tooltip
       >
         <template #default="{ row }">
-          <span>{{ row.shopName || row.shopId }}</span>
-          <span class="mono muted inline-id">{{ row.shopId }}</span>
-        </template>
-      </el-table-column>
-      <el-table-column label="来源" prop="source" width="100" sortable="custom">
-        <template #default="{ row }">
-          <el-tag size="small" :type="row.source === '订单处理' ? 'success' : 'info'">{{
-            row.source
-          }}</el-tag>
+          <span>{{ row.shopName || '-' }}</span>
         </template>
       </el-table-column>
       <el-table-column
@@ -108,7 +89,9 @@
         show-overflow-tooltip
       >
         <template #default="{ row }">
-          <span class="nowrap">{{ row.orderPlatform }}</span>
+          <el-tag size="small" effect="plain" type="info" class="nowrap">{{
+            row.orderPlatform
+          }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column label="国家" prop="countryCode" width="72" align="center" sortable="custom">
@@ -160,7 +143,7 @@
 
     <el-dialog
       v-model="dialogVisible"
-      :title="detail ? `订单详情 · ${detail.packageSn || detail.amazonOrderId}` : '加载中...'"
+      :title="detail ? `订单详情 · ${detail.amazonOrderId}` : '加载中...'"
       width="800px"
     >
       <div v-if="detail" class="detail-body">
@@ -168,21 +151,11 @@
           <div class="section-title">基本信息</div>
           <div class="kv-grid">
             <div>
-              <span class="label">包裹号</span
-              ><span class="mono">{{ detail.packageSn || '-' }}</span>
-            </div>
-            <div>
               <span class="label">包裹状态</span
               ><span>{{ statusLabel(detail.packageStatus || detail.orderStatus) }}</span>
             </div>
             <div>
-              <span class="label">店铺</span><span>{{ detail.shopName || detail.shopId }}</span>
-            </div>
-            <div>
-              <span class="label">店铺 ID</span><span class="mono">{{ detail.shopId }}</span>
-            </div>
-            <div>
-              <span class="label">来源</span><span>{{ detail.source }}</span>
+              <span class="label">店铺</span><span>{{ detail.shopName || '-' }}</span>
             </div>
             <div>
               <span class="label">平台</span><span>{{ detail.orderPlatform }}</span>
@@ -228,13 +201,6 @@
               label="商品 SKU"
               prop="commoditySku"
               min-width="160"
-              sortable
-              show-overflow-tooltip
-            />
-            <el-table-column
-              label="卖家 SKU"
-              prop="sellerSku"
-              width="140"
               sortable
               show-overflow-tooltip
             />
@@ -292,7 +258,7 @@ const rows = ref<DataOrderSummary[]>([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(50)
-const shopOptions = ref<string[]>([])
+const shopOptions = ref<Array<{ id: string; name: string }>>([])
 const countryOptions = ref<CountryOption[]>(
   COUNTRY_OPTIONS.map((option) => ({
     ...option,
@@ -358,7 +324,9 @@ async function reload(): Promise<void> {
 async function loadShopOptions(): Promise<void> {
   try {
     const resp = await listDataShops()
-    shopOptions.value = [...new Set(resp.items.map((item) => item.id))].sort()
+    shopOptions.value = resp.items
+      .map((item) => ({ id: item.id, name: item.name || item.id }))
+      .sort((a, b) => a.name.localeCompare(b.name))
   } catch (err) {
     ElMessage.error(getActionErrorMessage(err, '加载店铺列表失败'))
   }
@@ -393,7 +361,7 @@ async function openDetail(row: DataOrderSummary): Promise<void> {
   dialogVisible.value = true
   detail.value = null
   try {
-    const data = await getOrderDetail(row.shopId, row.amazonOrderId, row.source, row.packageSn)
+    const data = await getOrderDetail(row.shopId, row.amazonOrderId, row.packageSn)
     if (myReqId === detailReqId && dialogVisible.value) {
       detail.value = data
     }
@@ -495,11 +463,6 @@ onBeforeUnmount(() => {
 
 .nowrap {
   white-space: nowrap;
-}
-
-.inline-id {
-  display: block;
-  margin-top: 2px;
 }
 
 .detail-body {

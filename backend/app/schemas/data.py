@@ -46,7 +46,6 @@ class DataOrderItem(SaihuLikeModel):
 class DataOrderSummary(SaihuLikeModel):
     shop_id: str
     amazon_order_id: str
-    source: str
     order_platform: str
     package_sn: str
     package_status: str | None = None
@@ -80,7 +79,6 @@ class DataOrderDetail(SaihuLikeModel):
 
     shop_id: str
     amazon_order_id: str
-    source: str
     order_platform: str
     package_sn: str
     package_status: str | None = None
