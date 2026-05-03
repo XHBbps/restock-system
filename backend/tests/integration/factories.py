@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.global_config import GlobalConfig
 from app.models.inventory import InventorySnapshotLatest
-from app.models.order import OrderDetail, OrderHeader, OrderItem
+from app.models.order import ORDER_SOURCE_PACKAGE, OrderDetail, OrderHeader, OrderItem
 from app.models.product_listing import ProductListing
 from app.models.role import Role
 from app.models.sku import SkuConfig
@@ -163,6 +163,11 @@ async def seed_order(
     header = OrderHeader(
         shop_id=shop_id,
         amazon_order_id=order_id,
+        source=ORDER_SOURCE_PACKAGE,
+        order_platform="Amazon",
+        package_sn=f"PKG-{order_id}",
+        package_status="has_shipped",
+        postal_code=postal_code,
         marketplace_id="US" if country == "US" else "UNKNOWN",
         country_code=country,
         order_status="Shipped",
@@ -186,6 +191,7 @@ async def seed_order(
     detail = OrderDetail(
         shop_id=shop_id,
         amazon_order_id=order_id,
+        source=ORDER_SOURCE_PACKAGE,
         postal_code=postal_code,
         country_code=country,
         fetched_at=now,
