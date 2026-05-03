@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-05-03（旧订单详情抓取 job 与旧赛狐订单 endpoint 封装已删除，历史表保留。）
+> 最近更新：2026-05-03（补齐 AT、CH、CY、DK、EE、FI、LT、LV、MT、SI 国家中文名与时区；确认本次 ZZ 来自赛狐包裹列表缺失国家字段。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -104,6 +104,12 @@
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.93 新观测国家展示补齐与 ZZ 原因确认（2026-05-03）
+- **国家展示**：`backend/app/core/countries.py` 与 `frontend/src/utils/countries.ts` 补齐 `AT - 奥地利`、`CH - 瑞士`、`CY - 塞浦路斯`、`DK - 丹麦`、`EE - 爱沙尼亚`、`FI - 芬兰`、`LT - 立陶宛`、`LV - 拉脱维亚`、`MT - 马耳他`、`SI - 斯洛文尼亚`。动态国家选项和前端本地 `getCountryLabel()` 均会按“国家码 - 中文名”展示，不再仅显示原始代码。
+- **时区约束**：`backend/app/core/timezone.py` 为上述内置国家补齐 IANA 时区，保持“内置国家必须有时区映射”的单测约束。
+- **ZZ 原因**：生产订单重新同步后，`ZZ` 主要集中在 Temu 半托管、Walmart、TikTok、Wayfair 等非 Amazon 平台；worker 结构化日志显示 `package_ship_order_country_unrecognized` 的 `raw_country=null`，即赛狐包裹列表响应的 `address.countryCode/address.country` 均为空。当前同步层只在国家字段缺失或不是有效两位国家码时写入 `ZZ`，不会按店铺名或平台名猜测国家。
+- **验证**：`pytest -p no:cacheprovider tests/unit/test_country_mapping.py tests/unit/test_timezone.py -q` 通过；`cmd /c npx vitest run src/utils/countries.test.ts` 通过。
 
 ### 3.91 订单同步切换为订单处理列表接口（2026-05-03）
 - **赛狐接口**：`backend/app/saihu/endpoints/package_ship.py` 新增 `POST /api/packageShip/v1/getPackagePage.json` 封装；`sync_order_list` 改为只按 `purchaseDateStart/purchaseDateEnd` 同步滚动 12 个月订单处理列表，`pageSize=200`，继续支持 `shopIdList` 店铺过滤。

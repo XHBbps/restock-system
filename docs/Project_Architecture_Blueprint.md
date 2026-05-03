@@ -150,7 +150,7 @@ async def sync_inventory_job(ctx: JobContext) -> None:
 
 **EU 国家归一化与新国家发现**：同步层写入订单、商品、库存、出库在途数据时，会按 `global_config.eu_countries` 将成员国映射为字面值 `EU`，并在对应 `original_*` 字段保留原国家码。进入国家选项、成员国配置和补货区域配置的国家码先执行 `trim + uppercase + 两位字母校验 + 别名标准化`，当前 `UK` 统一标准化为 ISO 代码 `GB`。订单处理列表优先读取 `address.countryCode`，缺失时再尝试 `address.country`，仍无法识别才写 `ZZ` 并记录结构化日志；有效国家码若属于 `eu_countries` 则归并为 `EU` 并在 `original_country_code` 保存原码。全局配置接口保存 `eu_countries` 且实际变化时，会在同一事务内调用 `backfill_eu_country_mapping()` 回填本地历史 `order_header`、`inventory_snapshot_latest`、`in_transit_record`：源国家优先取各表 `original_*` 字段，否则取当前国家字段，并先按同一别名表标准化；源国家属于当前 EU 集合时写映射后国家为 `EU` 且 `original_* = 标准化源国家`，否则恢复为标准化源国家并清空 `original_*`。该回填只改本地库，不调用赛狐 API。
 
-**动态国家选项**：`GET /api/config/country-options` 汇总内置常见国家与数据库已观测国家，观测来源包括订单 `country_code/original_country_code`、仓库 `country`、库存 `country/original_country`、出库 `target_country/original_target_country`。观测值会先走统一标准化，因此历史 `UK` 只会以 `GB` 输出；接口返回 `builtin`、`observed`、`can_be_eu_member` 与 `unknown_country_codes`，前端订单、库存、出库、仓库、邮编规则、补货区域和 EU 成员国配置均消费该接口；EU 成员国配置不允许 `EU` 与 `ZZ`。内置国家名包含 `GB - 英国`、`CZ - 捷克`、`RO - 罗马尼亚`。
+**动态国家选项**：`GET /api/config/country-options` 汇总内置常见国家与数据库已观测国家，观测来源包括订单 `country_code/original_country_code`、仓库 `country`、库存 `country/original_country`、出库 `target_country/original_target_country`。观测值会先走统一标准化，因此历史 `UK` 只会以 `GB` 输出；接口返回 `builtin`、`observed`、`can_be_eu_member` 与 `unknown_country_codes`，前端订单、库存、出库、仓库、邮编规则、补货区域和 EU 成员国配置均消费该接口；EU 成员国配置不允许 `EU` 与 `ZZ`。内置国家名包含 `GB - 英国`、`CZ - 捷克`、`RO - 罗马尼亚`，以及订单处理列表新观测到的 `AT - 奥地利`、`CH - 瑞士`、`CY - 塞浦路斯`、`DK - 丹麦`、`EE - 爱沙尼亚`、`FI - 芬兰`、`LT - 立陶宛`、`LV - 拉脱维亚`、`MT - 马耳他`、`SI - 斯洛文尼亚`。
 
 **国家时区约束**：`backend/app/core/timezone.py` 的 `country_to_tz()` 会先执行同一国家码别名标准化，因此 `UK` 使用 `GB` 的 `Europe/London`。除 `EU`、`ZZ` 这类非真实国家外，`BUILTIN_COUNTRY_NAMES` 的所有内置国家必须在 `COUNTRY_TO_TIMEZONE` 中配置 IANA 时区；对应单元测试作为防漏 tripwire。仍只是观测到但未内置的未知二字码会回退北京时间，并记录结构化 warning。
 
@@ -951,6 +951,7 @@ VITE_API_PROXY_TARGET=http://localhost:8000
 | 日期 | 变更 | 相关 PROGRESS 章节 |
 |---|---|---|
 | 2026-05-03 | 订单同步切换为订单处理列表 `/api/packageShip/v1/getPackagePage.json`；`order_header` 新增包裹字段并调整唯一键；Step 1 / Step 5 只消费非已作废包裹；旧订单详情 job 与旧订单 endpoint 封装删除，历史表保留 | PROGRESS.md §3.91 / §3.92 |
+| 2026-05-03 | 补齐订单处理列表新观测国家 `AT/CH/CY/DK/EE/FI/LT/LV/MT/SI` 的中文 label 与 IANA 时区；确认 `ZZ` 仅在赛狐包裹列表缺失 `address.countryCode/address.country` 时写入，不按店铺名或平台名猜测国家 | PROGRESS.md §3.93 |
 | 2026-05-03 | SKU 映射组件允许跨商品规则共享，`sku_mapping_component` 唯一约束从 `inventory_sku` 收窄为 `rule_id + inventory_sku`；Step 2 按仓库国家 velocity 分配共享组件库存，Step 4 按全国家 velocity 合计分配，本规则内重复组件仍被拒绝 | PROGRESS.md §3.90 |
 | 2026-05-03 | 商品同步接入赛狐 SKU 主数据 `/api/commodity/pageList.json`，新增 `commodity_master` 表；`sync_product_listing` 先同步主数据再同步 listing，新发现 SKU 默认 `enabled=false`；商品页和库存匹配改用主数据口径 | PROGRESS.md §3.89 |
 | 2026-05-02 | SKU 映射规则支持替代组合：`sku_mapping_component.group_no` 同组 AND、跨组 OR，Step 2/Step 4 按仓库内各组合可组装数求和，导入导出模板新增“组合编号”并兼容旧模板 | PROGRESS.md §3.88 |

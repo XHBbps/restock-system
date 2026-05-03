@@ -7,6 +7,9 @@ from app.core.timezone import BEIJING, COUNTRY_TO_TIMEZONE, country_to_tz
 def test_country_to_tz_supports_builtin_country_timezones() -> None:
     assert country_to_tz("CZ") == ZoneInfo("Europe/Prague")
     assert country_to_tz("RO") == ZoneInfo("Europe/Bucharest")
+    assert country_to_tz("AT") == ZoneInfo("Europe/Vienna")
+    assert country_to_tz("CH") == ZoneInfo("Europe/Zurich")
+    assert country_to_tz("CY") == ZoneInfo("Asia/Nicosia")
     assert country_to_tz("UK") == ZoneInfo("Europe/London")
 
 

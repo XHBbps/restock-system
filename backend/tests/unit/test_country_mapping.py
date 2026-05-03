@@ -62,3 +62,6 @@ def test_country_label_uses_code_and_chinese_name() -> None:
     assert country_label("GB") == "GB - 英国"
     assert country_label("CZ") == "CZ - 捷克"
     assert country_label("RO") == "RO - 罗马尼亚"
+    assert country_label("AT") == "AT - 奥地利"
+    assert country_label("CH") == "CH - 瑞士"
+    assert country_label("SI") == "SI - 斯洛文尼亚"
