@@ -26,6 +26,9 @@ export interface RecentCall {
   saihu_msg: string | null
   error_type: string | null
   retry_status: string | null
+  retry_display_status: string
+  retry_display_text: string
+  retry_attempt_text: string
   auto_retry_attempts: number
   next_retry_at: string | null
   resolved_at: string | null

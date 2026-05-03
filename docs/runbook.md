@@ -377,7 +377,34 @@ docker compose -f deploy/docker-compose.yml restart backend
    - `resolved`：已通过精确重放成功解决，默认不再出现在失败列表
    - `permanent`：非 `40019` 重试结果、其他异常，或第 5 次仍为 `40019`；需要人工排查赛狐限流、参数和业务状态
    - `unsupported`：历史日志没有 `request_payload`，无法按原始请求精确重放
-4. **检查是否被活跃任务跳过**：
+   - `retry_status IS NULL`：未进入后台自动队列，页面展示为“未入自动队列”或“即时重试日志”，重试次数显示 `-`；不要解读为后台重试 `0/5`
+4. **只读诊断 SQL**：
+   ```sql
+   -- 确认自动队列与终态分布，NULL 状态不属于后台自动队列
+   SELECT
+       COALESCE(retry_status, '<null>') AS retry_status,
+       auto_retry_attempts,
+       COUNT(*) AS count,
+       MIN(called_at) AS first_called_at,
+       MAX(called_at) AS last_called_at,
+       COUNT(*) FILTER (WHERE next_retry_at IS NOT NULL) AS has_next_retry,
+       COUNT(*) FILTER (WHERE last_retry_error IS NOT NULL) AS has_last_retry_error
+   FROM api_call_log
+   WHERE saihu_code = 40019
+   GROUP BY retry_status, auto_retry_attempts
+   ORDER BY retry_status NULLS FIRST, auto_retry_attempts;
+
+   -- 确认 scheduler 是否每 5 分钟入队，以及 worker 是否消费
+   SELECT
+       id, job_name, status, trigger_source, created_at, started_at, finished_at,
+       current_step, step_detail, error_msg
+   FROM task_run
+   WHERE job_name = 'retry_failed_api_calls'
+   ORDER BY created_at DESC
+   LIMIT 20;
+   ```
+   判定口径：存在 `queued` 且 `task_run` 持续出现 `retry_failed_api_calls`，说明调度入队正常；`auto_retry_attempts > 0`、`resolved` 或 `permanent` 说明 worker 已消费过自动队列；若任务进度显示跳过忙碌，继续检查相关同步任务是否处于 `pending/running`。
+5. **检查是否被活跃任务跳过**：
    ```sql
    SELECT id, job_name, status, created_at
    FROM task_run
@@ -388,8 +415,8 @@ docker compose -f deploy/docker-compose.yml restart backend
    ORDER BY created_at DESC;
    ```
    自动重试会在相关同步任务活跃时跳过本轮；`sync_all` 视为所有赛狐 endpoint 忙碌，订单处理列表接口会检查 `sync_order_list`。旧订单列表、旧多平台订单和旧订单详情 endpoint 只可能出现在历史日志中，不参与自动重放。
-5. **QPS 间隔口径**：自动重放在客户端 limiter 之外再保守等待；默认 1 QPS endpoint 间隔 1.5 秒。旧 `/api/order/detailByOrderId.json` 不再有特殊 QPS 覆盖。
-6. **强制刷新 token**：重启 backend / worker 服务即可清空内存 token 缓存。
+6. **QPS 间隔口径**：自动重放在客户端 limiter 之外再保守等待；默认 1 QPS endpoint 间隔 1.5 秒。旧 `/api/order/detailByOrderId.json` 不再有特殊 QPS 覆盖。
+7. **强制刷新 token**：重启 backend / worker 服务即可清空内存 token 缓存。
 
 ### 3.6 后端启动失败
 

@@ -16,15 +16,23 @@
     <el-table-column label="错误信息" min-width="260">
       <template #default="{ row }">{{ row.saihu_msg || row.error_type || '-' }}</template>
     </el-table-column>
-    <el-table-column label="重试状态" width="130" align="center">
-      <template #default="{ row }">{{ retryStatusLabel(row.retry_status) }}</template>
+    <el-table-column label="重试状态" width="150" align="center">
+      <template #default="{ row }">
+        <el-tooltip :disabled="!hasRetryTooltip(row)" placement="top" effect="dark">
+          <template #content>
+            <div v-if="row.next_retry_at">下次重试：{{ formatDetailTime(row.next_retry_at) }}</div>
+            <div v-if="row.last_retry_error">最近错误：{{ row.last_retry_error }}</div>
+          </template>
+          <span>{{ row.retry_display_text }}</span>
+        </el-tooltip>
+      </template>
     </el-table-column>
     <el-table-column label="重试次数" width="100" align="right">
-      <template #default="{ row }">{{ row.auto_retry_attempts ?? 0 }}/5</template>
+      <template #default="{ row }">{{ row.retry_attempt_text }}</template>
     </el-table-column>
     <el-table-column label="操作" width="90" align="center">
       <template #default="{ row }">
-        <el-button v-if="row.can_retry" link type="primary" @click="$emit('retry', row.id)">
+        <el-button v-if="row.can_retry && auth.hasPermission('sync:operate')" link type="primary" @click="$emit('retry', row.id)">
           重试
         </el-button>
       </template>
@@ -35,6 +43,10 @@
 <script setup lang="ts">
 import dayjs from 'dayjs'
 import { formatMonitorEndpoint } from '@/utils/monitoring'
+import { formatDetailTime } from '@/utils/format'
+import { useAuthStore } from '@/stores/auth'
+
+const auth = useAuthStore()
 
 defineProps<{
   rows: Array<{
@@ -47,7 +59,12 @@ defineProps<{
     saihu_msg: string | null
     error_type: string | null
     retry_status: string | null
+    retry_display_status: string
+    retry_display_text: string
+    retry_attempt_text: string
     auto_retry_attempts: number
+    next_retry_at: string | null
+    last_retry_error: string | null
     can_retry: boolean
   }>
 }>()
@@ -64,18 +81,7 @@ function getEndpointDisplay(endpoint: string) {
   return formatMonitorEndpoint(endpoint)
 }
 
-function retryStatusLabel(status: string | null): string {
-  switch (status) {
-    case 'queued':
-      return '待重试'
-    case 'resolved':
-      return '已解决'
-    case 'permanent':
-      return '永久失败'
-    case 'unsupported':
-      return '不支持'
-    default:
-      return '-'
-  }
+function hasRetryTooltip(row: { next_retry_at: string | null; last_retry_error: string | null }): boolean {
+  return Boolean(row.next_retry_at || row.last_retry_error)
 }
 </script>

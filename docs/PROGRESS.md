@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-05-03（订单处理列表国家改为读取顶层 `marketplace`；订单页移除来源/包裹号展示与搜索；补齐 AT、CH、CY、DK、EE、FI、LT、LV、MT、SI 国家中文名与时区。）
+> 最近更新：2026-05-03（接口监控补齐 40019 自动重试展示口径，`retry_status IS NULL` 不再显示为 `0/5`；订单处理列表国家改为读取顶层 `marketplace`；订单页移除来源/包裹号展示与搜索；补齐 AT、CH、CY、DK、EE、FI、LT、LV、MT、SI 国家中文名与时区。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -248,6 +248,7 @@
 - **冲突与限速**：重试前按 endpoint 检查相关 `pending/running` TaskRun；`sync_all` 视为所有 endpoint 忙碌，当前订单处理列表接口检查 `sync_order_list`。重放间隔按 QPS 保守计算，当前默认 1 QPS endpoint 为 1.5 秒。
 - **终态**：重试成功时原失败日志标记 `resolved` 并从失败列表隐藏；再次 `40019` 未满 5 次继续 `queued`，第 5 次标记 `permanent`；非 `40019` 失败或其他异常直接标记 `permanent`。
 - **前端与 API**：`GET /api/monitor/api-calls/recent` 返回重试状态、尝试次数和 `can_retry`；`only_failed=true` 默认排除 `resolved` 和自动重试子日志。`POST /api/monitor/api-calls/{id}/retry` 改为单条精确重试入口，仅允许可还原的 `40019` 日志入队。
+- **展示口径**：`GET /api/monitor/api-calls/recent` 额外返回 `retry_display_status`、`retry_display_text`、`retry_attempt_text`。`0/5` 表示后台 `retry_failed_api_calls` 的自动重放次数，不代表 `SaihuClient` 的即时 tenacity 重试次数；`retry_status IS NULL` 的 40019 原始日志展示为“未入自动队列”，自动重试子日志展示为“即时重试日志”，次数显示 `-`。
 
 ### 3.74 库存明细未匹配标识与筛选（2026-04-27）
 - **判定口径**：库存 SKU 若在 `product_listing.commodity_sku` 中不存在，则 `backend/app/api/data.py` 返回 `is_package=true`；存在则返回 `false`。该口径不新增数据库字段，不依赖商品名或图片是否为空。

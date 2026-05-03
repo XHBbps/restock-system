@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy.dialects import postgresql
 
+from app.api.monitor import _can_retry
 from app.core.exceptions import SaihuAPIError, ValidationFailed
 from app.saihu.client import SaihuClient
 from app.tasks.jobs.api_call_retry import (
@@ -54,6 +55,29 @@ def test_retryable_row_requires_40019_payload_and_non_terminal_status() -> None:
     row.retry_status = "queued"
     row.request_payload = None
     assert _is_retryable_row(row) is False
+
+
+def test_can_retry_requires_precise_original_40019_call() -> None:
+    row = SimpleNamespace(
+        saihu_code=40019,
+        request_payload={"pageNo": "1"},
+        retry_source_log_id=None,
+        retry_status="queued",
+        auto_retry_attempts=0,
+    )
+    assert _can_retry(row) is True
+
+    row.retry_source_log_id = 10
+    assert _can_retry(row) is False
+    row.retry_source_log_id = None
+    row.request_payload = None
+    assert _can_retry(row) is False
+    row.request_payload = {"pageNo": "1"}
+    row.retry_status = "resolved"
+    assert _can_retry(row) is False
+    row.retry_status = "queued"
+    row.saihu_code = 40001
+    assert _can_retry(row) is False
 
 
 def test_format_retry_error_includes_code_and_request_id() -> None:

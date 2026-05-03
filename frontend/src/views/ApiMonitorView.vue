@@ -75,43 +75,7 @@
       </DataTableCard>
 
       <DataTableCard :title="onlyFailed ? '失败调用明细' : '最近调用明细'" description="支持从失败记录直接发起重试。">
-        <el-table v-loading="loadingRecent" :data="pagedRecentCalls" table-layout="fixed" empty-text="暂无调用明细">
-          <el-table-column label="调用时间" min-width="160" show-overflow-tooltip>
-            <template #default="{ row }">{{ formatDetailTime(row.called_at) }}</template>
-          </el-table-column>
-          <el-table-column label="接口名称" min-width="220" show-overflow-tooltip>
-            <template #default="{ row }">
-              <span class="endpoint-name" :title="getEndpointDisplay(row.endpoint).raw">
-                {{ getEndpointDisplay(row.endpoint).label }}
-              </span>
-            </template>
-          </el-table-column>
-          <el-table-column label="耗时(ms)" width="100" align="right">
-            <template #default="{ row }">{{ formatDuration(row.duration_ms) }}</template>
-          </el-table-column>
-          <el-table-column label="HTTP 状态" width="100" align="center">
-            <template #default="{ row }">{{ row.http_status ?? '-' }}</template>
-          </el-table-column>
-          <el-table-column label="外部返回码" width="120" align="center">
-            <template #default="{ row }">{{ row.saihu_code ?? '-' }}</template>
-          </el-table-column>
-          <el-table-column label="错误信息" min-width="260" show-overflow-tooltip>
-            <template #default="{ row }">{{ row.saihu_msg || row.error_type || '-' }}</template>
-          </el-table-column>
-          <el-table-column label="重试状态" width="130" align="center">
-            <template #default="{ row }">{{ retryStatusLabel(row.retry_status) }}</template>
-          </el-table-column>
-          <el-table-column label="重试次数" width="100" align="right">
-            <template #default="{ row }">{{ row.auto_retry_attempts ?? 0 }}/5</template>
-          </el-table-column>
-          <el-table-column label="操作" width="100" align="center">
-            <template #default="{ row }">
-              <el-button v-if="row.can_retry && auth.hasPermission('sync:operate')" link type="primary" @click="retry(row.id)">
-                重试
-              </el-button>
-            </template>
-          </el-table-column>
-        </el-table>
+        <FailedApiCallTable v-loading="loadingRecent" :rows="pagedRecentCalls" @retry="retry" />
 
         <template #pagination>
           <TablePaginationBar v-model:current-page="page" v-model:page-size="pageSize" :total="recentCalls.length" />
@@ -135,6 +99,7 @@ import DashboardChartCard from '@/components/dashboard/DashboardChartCard.vue'
 import DashboardPageHeader from '@/components/dashboard/DashboardPageHeader.vue'
 import DashboardStatCard from '@/components/dashboard/DashboardStatCard.vue'
 import DataTableCard from '@/components/dashboard/DataTableCard.vue'
+import FailedApiCallTable from '@/components/sync/FailedApiCallTable.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
 import TaskProgress from '@/components/TaskProgress.vue'
 import type { TaskRun } from '@/api/task'
@@ -149,12 +114,9 @@ import {
   type SortState,
 } from '@/utils/tableSort'
 import type { EChartsCoreOption } from 'echarts/core'
-import { useAuthStore } from '@/stores/auth'
 import { getActionErrorMessage } from '@/utils/apiError'
 import { ElMessage } from 'element-plus'
 import { computed, onMounted, ref, watch } from 'vue'
-
-const auth = useAuthStore()
 
 const endpointRows = ref<EndpointStats[]>([])
 const recentCalls = ref<RecentCall[]>([])
@@ -316,27 +278,8 @@ const failedCountChartOption = computed<EChartsCoreOption>(() => ({
   ],
 }))
 
-function formatDuration(value?: number | null): string {
-  return typeof value === 'number' ? value.toFixed(0) : '-'
-}
-
 function getEndpointDisplay(endpoint: string) {
   return formatMonitorEndpoint(endpoint)
-}
-
-function retryStatusLabel(status: string | null): string {
-  switch (status) {
-    case 'queued':
-      return '待重试'
-    case 'resolved':
-      return '已解决'
-    case 'permanent':
-      return '永久失败'
-    case 'unsupported':
-      return '不支持'
-    default:
-      return '-'
-  }
 }
 
 async function loadOverview(): Promise<void> {

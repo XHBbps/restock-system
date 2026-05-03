@@ -132,6 +132,9 @@ class RecentCallOut(BaseModel):
     saihu_msg: str | None = None
     error_type: str | None = None
     retry_status: str | None = None
+    retry_display_status: str = "not_queued"
+    retry_display_text: str = "未入自动队列"
+    retry_attempt_text: str = "-"
     auto_retry_attempts: int = 0
     next_retry_at: datetime | None = None
     resolved_at: datetime | None = None
@@ -176,6 +179,9 @@ def _recent_call_out(row: ApiCallLog) -> RecentCallOut:
         saihu_msg=row.saihu_msg,
         error_type=row.error_type,
         retry_status=row.retry_status,
+        retry_display_status=_retry_display_status(row),
+        retry_display_text=_retry_display_text(row),
+        retry_attempt_text=_retry_attempt_text(row),
         auto_retry_attempts=row.auto_retry_attempts,
         next_retry_at=row.next_retry_at,
         resolved_at=row.resolved_at,
@@ -184,6 +190,36 @@ def _recent_call_out(row: ApiCallLog) -> RecentCallOut:
         has_request_payload=row.request_payload is not None,
         can_retry=_can_retry(row),
     )
+
+
+def _retry_display_status(row: ApiCallLog) -> str:
+    if row.retry_status:
+        return row.retry_status
+    if row.retry_source_log_id is not None:
+        return "retry_log"
+    return "not_queued"
+
+
+def _retry_display_text(row: ApiCallLog) -> str:
+    match row.retry_status:
+        case "queued":
+            return "待自动重试"
+        case "resolved":
+            return "已解决"
+        case "permanent":
+            return "永久失败"
+        case "unsupported":
+            return "不支持自动重试"
+        case _:
+            if row.retry_source_log_id is not None:
+                return "即时重试日志"
+            return "未入自动队列"
+
+
+def _retry_attempt_text(row: ApiCallLog) -> str:
+    if row.retry_status is None:
+        return "-"
+    return f"{row.auto_retry_attempts}/{MAX_AUTO_RETRY_ATTEMPTS}"
 
 
 def _can_retry(row: ApiCallLog) -> bool:
