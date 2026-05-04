@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-05-04（订单处理列表自动同步改用独立间隔 `order_sync_interval_minutes`，默认 120 分钟；商品、库存、出库仍使用常规 `sync_interval_minutes`。）
+> 最近更新：2026-05-04（后端生产镜像构建移除 Debian `apt` 构建依赖；订单处理列表自动同步改用独立间隔 `order_sync_interval_minutes`，默认 120 分钟。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -107,6 +107,10 @@
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.102 后端镜像构建移除 apt 依赖（2026-05-04）
+- **部署修复**：`backend/Dockerfile` 移除 builder 阶段的 `build-essential/libpq-dev` 和 runtime 阶段的 `libpq5/tzdata` apt 安装；当前后端使用 `asyncpg` 且 `requirements.lock` 已包含 Python `tzdata` wheel，不依赖系统 `libpq` 或系统时区包。
+- **发布影响**：当 GHCR 镜像拉取失败并回退到服务器本地构建时，后端镜像不再访问 Debian apt 源，降低生产网络慢导致 deploy SSH 超时的风险。
 
 ### 3.101 订单同步独立调度间隔（2026-05-04）
 - **配置字段**：`global_config` 新增 `order_sync_interval_minutes`，取值范围 5–1440 分钟，默认值和迁移后的现有配置均为 120 分钟。

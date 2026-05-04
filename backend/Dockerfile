@@ -8,11 +8,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /build
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential \
-        libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
-
 ARG PIP_INDEX_URL=https://pypi.org/simple
 ARG PIP_TRUSTED_HOST=
 
@@ -29,14 +24,9 @@ FROM python:3.11-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    TZ=Asia/Shanghai \
     PATH=/install/bin:$PATH \
     PYTHONPATH=/app:/install/lib/python3.11/site-packages
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        libpq5 \
-        tzdata \
-    && rm -rf /var/lib/apt/lists/* \
-    && ln -snf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
 
 RUN groupadd -r app && useradd -r -g app app
 
