@@ -70,8 +70,8 @@ describe('SyncStateTable', () => {
         rows: [
           {
             job_name: 'daily_archive',
-            last_run_at: '2026-05-04T02:00:00+08:00',
-            last_success_at: '2026-05-04T02:03:00+08:00',
+            last_run_at: '2026-05-04T02:00:00',
+            last_success_at: '2026-05-04T02:03:00',
             last_status: 'success',
             last_error: null
           }
