@@ -84,14 +84,9 @@ async def run_engine(
             )
         ).all()
         resolver = await load_physical_sku_resolver(db)
-        enabled_source_skus = [row[0] for row in enabled_skus]
-        sku_list = resolver.resolve_many(enabled_source_skus)
-        source_sku_list = resolver.source_skus_for(enabled_source_skus)
-        sku_lead_time: dict[str, int | None] = {}
-        for raw_sku, lead_time_days in enabled_skus:
-            primary_sku = resolver.resolve(raw_sku)
-            if primary_sku not in sku_lead_time or raw_sku == primary_sku:
-                sku_lead_time[primary_sku] = lead_time_days
+        sku_list = sorted({row[0] for row in enabled_skus})
+        source_sku_list = sku_list
+        sku_lead_time: dict[str, int | None] = dict(enabled_skus)
 
         if not sku_list:
             logger.warning("engine_no_enabled_sku", triggered_by=triggered_by)
@@ -105,7 +100,6 @@ async def run_engine(
             db,
             source_sku_list,
             today,
-            sku_alias_map=resolver.alias_to_primary,
         )
 
         await ctx.progress(current_step="Step 2: 计算 sale_days")
@@ -113,8 +107,8 @@ async def run_engine(
             db,
             velocity,
             source_sku_list,
-            sku_alias_map=resolver.alias_to_primary,
-            component_source_skus=resolver.aliases_by_primary,
+            sku_to_group_key=resolver.sku_to_group_key,
+            members_by_group_key=resolver.members_by_group_key,
         )
 
         await ctx.progress(current_step="Step 3: 计算各国补货量")
@@ -132,8 +126,8 @@ async def run_engine(
             db,
             source_sku_list,
             velocity,
-            sku_alias_map=resolver.alias_to_primary,
-            component_source_skus=resolver.aliases_by_primary,
+            sku_to_group_key=resolver.sku_to_group_key,
+            members_by_group_key=resolver.members_by_group_key,
         )
 
         await ctx.progress(current_step="Step 5: 计算分仓")
@@ -144,7 +138,6 @@ async def run_engine(
             source_sku_list,
             today,
             allowed_countries=allowed_countries,
-            sku_alias_map=resolver.alias_to_primary,
         )
 
         items_to_insert: list[dict[str, Any]] = []
@@ -194,21 +187,13 @@ async def run_engine(
                 today=today,
             )
 
-            physical_aliases = resolver.aliases_for(sku)
-            item_allocation_snapshot: dict[str, Any] = allocation_snapshot
-            if len(physical_aliases) > 1:
-                item_allocation_snapshot = {
-                    **allocation_snapshot,
-                    "_physical_item_aliases": physical_aliases,
-                }
-
             items_to_insert.append(
                 {
                     "commodity_sku": sku,
                     "total_qty": restock_total,
                     "country_breakdown": sku_country_qty,
                     "warehouse_breakdown": warehouse_breakdown,
-                    "allocation_snapshot": item_allocation_snapshot,
+                    "allocation_snapshot": allocation_snapshot,
                     "velocity_snapshot": velocity.get(sku, {}),
                     "sale_days_snapshot": sale_days.get(sku, {}),
                     "urgent": timing.urgent,

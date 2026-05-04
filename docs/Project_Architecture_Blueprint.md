@@ -107,7 +107,7 @@
 | Step | 文件 | 输入 | 输出 | 规则 |
 |---|---|---|---|---|
 | 1 | `step1_velocity.py` | 近 30 天订单处理列表订单 | `velocity[sku][country]` | 加权日均销量：7日×0.5 + 14日×0.3 + 30日×0.2；仅消费 `source='订单处理'` 且 `package_status!='has_canceled'` 的包裹订单；若 `global_config.restock_regions` 非空，仅这些国家参与补货国家维度计算 |
-| 2 | `step2_sale_days.py` | 库存 + 在途 + velocity + SKU 映射规则 | `sale_days[sku][country]` | `(available + reserved + in_transit) / velocity`；启用映射规则会先在同仓库、同组件 SKU 维度按该国家 velocity 分配共享库存，再按组合短板换算商品 SKU 视角库存，跨组合替代方案求和；velocity≤0 跳过 |
+| 2 | `step2_sale_days.py` | 库存 + 在途 + velocity + SKU 映射规则 | `sale_days[sku][country]` | `(available + reserved + in_transit) / velocity`；启用映射规则会先将库存组件 SKU 解析到共享组身份，再在同仓库、同组件维度按该国家 velocity 分配共享库存，最后按组合短板换算商品 SKU 视角库存，跨组合替代方案求和；velocity≤0 跳过 |
 | 3 | `step3_country_qty.py` | velocity + 库存 + 有效目标库存天数 | `country_qty[sku][country]` | `effective_target_days = target_days + max(demand_date - today, 0)`；`max(0, ceil(effective_target_days × velocity - (available + reserved + in_transit)))` |
 | 4 | `step4_total.py` | country_qty + velocity + 国内库存 + safety_stock_days | `purchase_qty[sku]` | `max(0, Σcountry_qty − (local.available + local.reserved) + ceil(Σvelocity × safety_stock_days))`；`Σcountry_qty` 使用 Step 3 的补货日期口径，`Σvelocity` 覆盖所有国家，不受 `restock_regions` 限制；`buffer_days` 不参与采购量 |
 | 5 | `step5_warehouse_split.py` | country_qty + 有效包裹订单 + 订单头邮编 + 邮编规则 + 国家规则仓映射 | `warehouse_breakdown[country][wh_id]` | 样本来自 `source='订单处理'` 且 `package_status!='has_canceled'` 的包裹订单，样本数量为 `max(quantity_shipped - refund_num, 0)`；邮编优先读取 `order_header.postal_code`；按邮编规则分配到具体仓库，已知部分按命中比例分配，未知部分按该国家已配置邮编规则的仓均分；仅规则仓参与分仓与均分兜底；若无规则仓则该国家不分仓；若配置 `restock_regions`，仅消费这些国家的订单作为分仓依据；同优先级 tied 均分；整数分配使用 floor + 最大余数法，保证仓内合计等于国家补货量 |
@@ -115,9 +115,9 @@
 
 **运行上下文**：`EngineContext` 包含 `target_days`、`buffer_days`、`lead_time_days`、`safety_stock_days`、`restock_regions`、`eu_countries` 和本次请求的补货日期 `demand_date`。runner 会计算 `demand_days=max(demand_date - today, 0)` 并传给 Step 3 形成有效目标库存天数；`buffer_days` 作为全局配置快照保留，但当前仅用于追溯，不参与 `purchase_qty` 或 `restock_dates` 计算；`restock_regions` 保存前会走统一国家码标准化，`UK` 等别名按 ISO 代码去重为 `GB`；`global_config.eu_countries` 由同步层消费，保存该配置且实际变化时会同步回填历史订单、库存与在途国家码，`global_config_snapshot` 会冻结这些全局参数与 `demand_date` 以便追溯。
 
-**SKU 映射转换层**：`backend/app/engine/sku_mapping.py` 只在计算读取阶段消费 `sku_mapping_rule` / `sku_mapping_component`，不会改写同步落库的 `inventory_snapshot_latest`、`in_transit_record` 或库存明细展示。`sku_mapping_component.group_no` 表示替代组合编号：同一 `commodity_sku` 下相同 `group_no` 的组件是 AND，不同 `group_no` 是 OR。`A=2*B` 按同仓库 `floor(B/2)` 计算，`A=1*B+2*C` 按同仓库 `min(floor(B/1), floor(C/2))` 计算，`A=B 或 C 或 D` 按同仓库各单组件组合可组装数求和，`A=B+C+D 或 E+F+G` 则两个组合分别取最小组件数后求和；组件不能跨仓库、跨国家组合。不同商品规则可以共享同一个库存 SKU，计算时先在每个仓库、每个共享组件 SKU 内按启用商品规则分配组件库存，避免重复计入；Step 2 使用仓库所在国家的 `velocity[sku][country]` 作为分配权重，Step 4 使用 SKU 全国家 velocity 合计作为本地仓分配权重，若任一共享商品没有正销量信号则该组件在共享商品间均分。Step 2 会把海外仓库存和有目标仓库 ID 的组件在途合并后按上述规则计算可组装数量，再按国家汇总到商品 SKU；Step 4 会按国内仓同仓库组件库存按上述规则计算可组装数量，再汇总为本地商品 SKU 库存。停用规则保留但不参与计算；未映射且不等于商品 SKU 的库存 SKU 不进入补货计算。
+**SKU 映射转换层**：`backend/app/engine/sku_mapping.py` 只在计算读取阶段消费 `sku_mapping_rule` / `sku_mapping_component`，不会改写同步落库的 `inventory_snapshot_latest`、`in_transit_record` 或库存明细展示。`sku_mapping_component.group_no` 表示替代组合编号：同一 `commodity_sku` 下相同 `group_no` 的组件是 AND，不同 `group_no` 是 OR。`A=2*B` 按同仓库 `floor(B/2)` 计算，`A=1*B+2*C` 按同仓库 `min(floor(B/1), floor(C/2))` 计算，`A=B 或 C 或 D` 按同仓库各单组件组合可组装数求和，`A=B+C+D 或 E+F+G` 则两个组合分别取最小组件数后求和；组件不能跨仓库、跨国家组合。不同商品规则可以共享同一个库存 SKU，计算时先把库存组件 SKU 解析到共享组身份，再在每个仓库、每个共享组件 SKU 内按启用商品规则分配组件库存，避免重复计入；同一商品下 `A=B+C+D` 与 `A=E+F+D` 若经共享组解析后组件集合完全等价，会折叠为一个替代方案，避免重复计算同一批库存。Step 2 使用仓库所在国家的 `velocity[sku][country]` 作为分配权重，Step 4 使用 SKU 全国家 velocity 合计作为本地仓分配权重，若任一共享商品没有正销量信号则该组件在共享商品间均分。Step 2 会把海外仓库存和有目标仓库 ID 的组件在途合并后按上述规则计算可组装数量，再按国家汇总到商品 SKU；Step 4 会按国内仓同仓库组件库存按上述规则计算可组装数量，再汇总为本地商品 SKU 库存。停用规则保留但不参与计算；未映射且不等于商品 SKU 的库存 SKU 不进入补货计算。
 
-**同物共享组**：`backend/app/services/physical_item.py` 在引擎与映射规则加载前，把启用共享组里的 SKU 统一解析为主 SKU；未配置共享组的 SKU 原样返回。`physical_item_group` 代表一个真实物品，`physical_item_sku_alias` 记录商品 SKU、库存 SKU 等别名成员，主 SKU 必须属于组内成员，且别名 SKU 全局唯一。runner 先将启用 SKU 归一为主 SKU，再把源 SKU 集合扩展到别名成员后喂给 Step 1 / Step 2 / Step 4 / Step 5；因此补货建议与 SKU 映射都共享同一物理身份层。
+**库存 SKU 共享组**：`backend/app/services/physical_item.py` 提供 `sku_to_group_key` / `members_by_group_key`，只在库存组件侧解析共享组身份；`physical_item_group` 代表一组完全等价的库存组件 SKU，组表不再保存主 SKU。runner 保持商品 SKU 原样进入 Step 1 / Step 5 与建议展示，只把共享组解析应用于 Step 2 / Step 4 的组件库存汇总，避免共享组件重复计入；商品 SKU 不参与共享组归一。
 
 **持久化**：一次完整计算在事务内执行，受 `pg_advisory_xact_lock(7429001)` 保护；runner 不再按 `restock_dates[country] <= demand_date` 过滤补货国家，补货国家是否进入本次建议只由 Step 3 的正补货量与 `restock_regions` 白名单决定。若 `purchase_qty <= 0` 且国家补货合计为 0，则跳过该 SKU；若仅安全库存触发采购但无国家补货量，仍保留为采购-only 条目，并保持 `country_breakdown` / `warehouse_breakdown` / `allocation_snapshot` / `restock_dates` 为空、`total_qty=0`、`urgent=false`；若无条目则返回 `None`，不归档旧 `draft`、不关闭生成开关、不生成空建议单；成功生成非空建议单后才归档旧 `draft`，写入 `suggestion` / `suggestion_item`，统计 `procurement_item_count`、`restock_item_count`，并由 `calc_engine_job` 将 `global_config.suggestion_generation_enabled` 自动翻 OFF。
 
@@ -478,7 +478,7 @@ async function reload() {
 | `SuggestionListView` | 顶部 `PageSectionCard.actions` 展示生成开关只读状态 tag 与当前建议 `补货日期`；发起区使用默认空的补货日期选择器，提交前校验空值与早于北京时间今天；`loadToggle()` + `loadActiveEngineTask()` 在 `onMounted` / `onActivated` 双钩子刷新开关与活跃 `calc_engine` 任务，活跃任务存在时复用 `TaskProgress` 并禁用日期选择器与生成按钮。列表页已收敛为生成与导出视角，不再保留旧赛狐写入时代的选择列、批量动作和状态筛选死代码。 |
 | `SuggestionDetailView` | 勾选 `export_status='pending'` 的条目 → “导出 Excel”按钮走一步式 `POST /api/suggestions/{id}/snapshots` + `GET /api/snapshots/{id}/download` blob 流程（失败时仍在 `finally` 中 `await load()` 刷新快照历史，并区分”导出成功但下载失败”的独立错误文案）；右侧新增”历史快照区”`PageSectionCard`（6 列，按 `version` 降序，可重复下载）；导出前会先探测生成开关，探测失败时按 fail-close 禁用按钮；`SkuCard` 停止传入 `:blocker`（组件 prop 仍保留但所有调用点不再传值）；条目 `isEditable` 改为 `export_status !== 'exported'`（对应 snapshot 条目不可变的约束，见 §9.5 Don'ts）。 |
 | `GlobalConfigView` | 新增”生成开关卡片”：`el-switch` 即时保存，翻 ON 时弹 `ElMessageBox` 二次确认”将归档全部 draft”，`PATCH` 失败时回滚开关状态并提示；无 `config:edit` 时控件只读并提示”无权限操作此开关”。 |
-| `SkuMappingRuleView` | 位于“设置 > 基础配置 > 映射规则”，通过 `GET /api/config/sku-mapping-rules` 服务端分页、搜索商品 SKU / 库存 SKU、按启用状态筛选；支持新增、编辑、启停、删除、Excel/CSV 导入与 Excel 导出；编辑器按 `group_no` 展示“方案”，公式预览用 `或` 连接替代组合。 |
+| `SkuMappingRuleView` | 位于“设置 > 基础配置 > 映射规则”，通过 `GET /api/config/sku-mapping-rules` 服务端分页、搜索商品 SKU / 库存 SKU、按启用状态筛选；支持新增、编辑、启停、删除、Excel/CSV 导入与 Excel 导出；编辑器按 `group_no` 展示“方案”，公式预览用 `或` 连接替代组合；同页维护“库存 SKU 共享组”，仅配置组名、成员 SKU、启用状态与备注，并在映射规则列表提示组件所属共享组。 |
 | `HistoryView` | 参见 §4.5 — 状态筛选 3 项，快照数 + 导出状态列，`canDelete` 基于 `snapshot_count === 0`。 |
 
 ---
@@ -565,7 +565,7 @@ UPDATE global_config SET suggestion_generation_enabled=true, generation_toggle_u
 | `sku_config` | SKU 启用 / 禁用与业务参数 | `commodity_sku` 唯一；`20260504_1000` 已将历史配置一次性启用；商品同步和商品页补齐只为新 SKU 插入 `enabled=true`，不覆盖已有人工禁用 |
 | `sku_mapping_rule` | 商品 SKU 到库存包裹 SKU 的映射规则 | `commodity_sku` 唯一；`enabled=false` 时规则保留但不参与引擎 |
 | `sku_mapping_component` | 映射规则组件行 | `rule_id + inventory_sku` 唯一；允许不同商品规则共享同一 `inventory_sku`；`group_no > 0`；`quantity > 0`；同一 `group_no` 内多行表示 AND 组合，不同 `group_no` 表示 OR 替代方案 |
-| `physical_item_group` / `physical_item_sku_alias` | 同物共享组与 SKU 别名 | 组内由 `primary_sku` 作为主 SKU；别名 SKU 全局唯一；`enabled=false` 时解析层原样回退 |
+| `physical_item_group` / `physical_item_sku_alias` | 库存 SKU 共享组与成员表 | 组表已移除 `primary_sku`；成员 SKU 全局唯一；`enabled=false` 时共享组解析层不参与库存合并 |
 | `warehouse` | 海外仓/国内仓基础资料 | `country` 可为空；变更仓库国家会级联更新库存最新快照口径 |
 | `order_header` / `order_item` | 订单头与订单明细 | `order_header.source='订单处理'` 为当前订单来源，`order_platform` 保存平台名，`package_sn/package_status/shop_name/postal_code` 保存订单处理列表包裹字段；`UNIQUE(shop_id, amazon_order_id, source, package_sn)` 支持同订单拆包；`country_code` 保存映射后国家，`original_country_code` 保存 EU 合并前国家；按 `shop_id + purchase_date`、`order_status + purchase_date`、`package_status + purchase_date` 建索引 |
 | `order_detail` / `order_detail_fetch_log` | 历史订单详情与拉取日志 | 作为切换前亚马逊订单详情历史表保留；当前订单处理列表同步不再写入或依赖该表 |
@@ -955,7 +955,7 @@ VITE_API_PROXY_TARGET=http://localhost:8000
 
 | 日期 | 变更 | 相关 PROGRESS 章节 |
 |---|---|---|
-| 2026-05-04 | 新增同物共享组身份层：`physical_item_group` / `physical_item_sku_alias`、`physical_item` 解析服务、补货引擎 Step 1/2/4/5 与 `sku_mapping_rule` 加载前统一归一到主 SKU | PROGRESS.md §3.97 |
+| 2026-05-04 | 库存 SKU 共享组改为平权成员模型：`physical_item_group` 去掉 `primary_sku`，`physical_item` 解析服务仅用于库存组件共享组身份，商品 SKU 不再归一 | PROGRESS.md §3.98 |
 | 2026-05-04 | 历史 `sku_config` 一次性启用；商品同步和商品页补齐新 SKU 默认 `enabled=true`，且只插入缺失配置，不覆盖已有人工禁用 | PROGRESS.md §3.96 |
 | 2026-05-03 | 订单同步切换为订单处理列表 `/api/packageShip/v1/getPackagePage.json`；`order_header` 新增包裹字段并调整唯一键；Step 1 / Step 5 只消费非已作废包裹；旧订单详情 job 与旧订单 endpoint 封装删除，历史表保留 | PROGRESS.md §3.91 / §3.92 |
 | 2026-05-03 | 订单处理列表国家改为读取顶层 `marketplace`，空值或非法值写 `ZZ`；订单页移除来源和包裹号展示/搜索，平台改为标签，店铺仅显示名称 | PROGRESS.md §3.94 |

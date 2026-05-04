@@ -38,10 +38,7 @@
     <el-table v-loading="loading" :data="rows" row-key="id" empty-text="暂无映射规则">
       <el-table-column label="商品 SKU" prop="commodity_sku" min-width="180" show-overflow-tooltip />
       <el-table-column label="公式预览" prop="formula_preview" min-width="260" show-overflow-tooltip />
-      <el-table-column label="同物组" min-width="160" show-overflow-tooltip>
-        <template #default="{ row }">{{ physicalGroupLabel(row.commodity_sku) }}</template>
-      </el-table-column>
-      <el-table-column label="组件同物组" min-width="180" show-overflow-tooltip>
+      <el-table-column label="组件共享组" min-width="180" show-overflow-tooltip>
         <template #default="{ row }">{{ componentPhysicalGroupLabels(row) }}</template>
       </el-table-column>
       <el-table-column label="组件数量" prop="component_count" width="100" align="center" />
@@ -163,8 +160,8 @@
   </PageSectionCard>
 
   <PageSectionCard
-    title="同物共享组"
-    description="维护完全等价的商品 SKU / 库存 SKU，共享组内 SKU 在补货计算前统一归一到主 SKU。"
+    title="库存 SKU 共享组"
+    description="维护完全等价的库存组件 SKU，补货计算会在映射组件库存侧合并。"
     class="physical-section"
   >
     <template #actions>
@@ -187,21 +184,20 @@
         <el-option label="停用" :value="false" />
       </el-select>
       <el-button @click="reloadPhysicalFromFirstPage">搜索</el-button>
-      <el-button v-if="canEdit" type="primary" @click="openPhysicalCreate">新增共享组</el-button>
+      <el-button v-if="canEdit" type="primary" @click="openPhysicalCreate">新增库存共享组</el-button>
     </template>
 
     <el-table
       v-loading="physicalLoading"
       :data="physicalGroups"
       row-key="id"
-      empty-text="暂无同物共享组"
+      empty-text="暂无库存 SKU 共享组"
     >
       <el-table-column label="组名" prop="name" min-width="160" show-overflow-tooltip />
-      <el-table-column label="主 SKU" prop="primary_sku" min-width="160" show-overflow-tooltip />
-      <el-table-column label="别名 SKU" min-width="260" show-overflow-tooltip>
-        <template #default="{ row }">{{ aliasText(row) }}</template>
+      <el-table-column label="成员 SKU" min-width="320" show-overflow-tooltip>
+        <template #default="{ row }">{{ memberText(row) }}</template>
       </el-table-column>
-      <el-table-column label="成员数" prop="alias_count" width="90" align="center" />
+      <el-table-column label="成员数" prop="member_count" width="90" align="center" />
       <el-table-column label="状态" width="90" align="center">
         <template #default="{ row }">
           <el-tag :type="row.enabled ? 'success' : 'info'">
@@ -233,35 +229,32 @@
 
     <el-dialog
       v-model="physicalDialogVisible"
-      :title="editingPhysicalId ? '编辑同物共享组' : '新增同物共享组'"
+      :title="editingPhysicalId ? '编辑库存 SKU 共享组' : '新增库存 SKU 共享组'"
       width="640px"
       destroy-on-close
       @closed="resetPhysicalDialog"
     >
       <el-form label-width="108px" class="mapping-form">
         <el-form-item label="组名">
-          <el-input v-model="physicalForm.name" placeholder="例如 A 款同物" class="form-field" />
-        </el-form-item>
-        <el-form-item label="主 SKU">
-          <el-input v-model="physicalForm.primary_sku" placeholder="用于建议单与导出的 SKU" class="form-field" />
+          <el-input v-model="physicalForm.name" placeholder="例如 B/E 库存共享" class="form-field" />
         </el-form-item>
         <el-form-item label="启用">
           <el-switch v-model="physicalForm.enabled" />
         </el-form-item>
-        <el-form-item label="别名 SKU">
+        <el-form-item label="成员 SKU">
           <div class="alias-editor">
-            <div v-for="(_, index) in physicalForm.aliases" :key="index" class="alias-row">
-              <el-input v-model="physicalForm.aliases[index]" placeholder="商品 SKU 或库存 SKU" />
+            <div v-for="(_, index) in physicalForm.members" :key="index" class="alias-row">
+              <el-input v-model="physicalForm.members[index]" placeholder="库存组件 SKU" />
               <el-button
                 link
                 type="danger"
-                :disabled="physicalForm.aliases.length === 1"
+                :disabled="physicalForm.members.length === 1"
                 @click="removeAlias(index)"
               >
                 删除
               </el-button>
             </div>
-            <el-button class="component-add-button" @click="addAlias">添加别名</el-button>
+            <el-button class="component-add-button" @click="addAlias">添加成员</el-button>
           </div>
         </el-form-item>
         <el-form-item label="备注">
@@ -344,10 +337,9 @@ const form = reactive<SkuMappingRuleInput>({
 
 const physicalForm = reactive<PhysicalItemGroupInput>({
   name: '',
-  primary_sku: '',
   enabled: true,
   remark: '',
-  aliases: [''],
+  members: [''],
 })
 
 const formGroups = computed(() => {
@@ -380,16 +372,10 @@ const formulaPreview = computed(() => {
 const physicalSkuIndex = computed(() => {
   const index = new Map<string, PhysicalItemGroup>()
   physicalGroups.value.forEach((group) => {
-    group.aliases.forEach((alias) => index.set(alias.sku, group))
+    group.members.forEach((member) => index.set(member.sku, group))
   })
   return index
 })
-
-function physicalGroupLabel(sku: string): string {
-  const group = physicalSkuIndex.value.get(sku)
-  if (!group) return '-'
-  return `${group.name}（主 ${group.primary_sku}）`
-}
 
 function componentPhysicalGroupLabels(row: SkuMappingRule): string {
   const labels = row.components
@@ -398,8 +384,8 @@ function componentPhysicalGroupLabels(row: SkuMappingRule): string {
   return Array.from(new Set(labels)).join('、') || '-'
 }
 
-function aliasText(row: PhysicalItemGroup): string {
-  return row.aliases.map((alias) => alias.sku).join('、')
+function memberText(row: PhysicalItemGroup): string {
+  return row.members.map((member) => member.sku).join('、')
 }
 
 async function reload(): Promise<void> {
@@ -432,7 +418,7 @@ async function reloadPhysical(): Promise<void> {
     physicalGroups.value = result.items
     physicalTotal.value = result.total
   } catch (error) {
-    ElMessage.error(getActionErrorMessage(error, '加载同物共享组失败'))
+    ElMessage.error(getActionErrorMessage(error, '加载库存 SKU 共享组失败'))
   } finally {
     physicalLoading.value = false
   }
@@ -460,10 +446,9 @@ function resetForm(): void {
 function resetPhysicalForm(): void {
   Object.assign(physicalForm, {
     name: '',
-    primary_sku: '',
     enabled: true,
     remark: '',
-    aliases: [''],
+    members: [''],
   })
 }
 
@@ -498,10 +483,9 @@ function openPhysicalEdit(row: PhysicalItemGroup): void {
   editingPhysicalId.value = row.id
   Object.assign(physicalForm, {
     name: row.name,
-    primary_sku: row.primary_sku,
     enabled: row.enabled,
     remark: row.remark || '',
-    aliases: row.aliases.map((alias) => alias.sku),
+    members: row.members.map((member) => member.sku),
   })
   physicalDialogVisible.value = true
 }
@@ -531,12 +515,12 @@ function removeComponent(index: number): void {
 }
 
 function addAlias(): void {
-  physicalForm.aliases.push('')
+  physicalForm.members.push('')
 }
 
 function removeAlias(index: number): void {
-  if (physicalForm.aliases.length <= 1) return
-  physicalForm.aliases.splice(index, 1)
+  if (physicalForm.members.length <= 1) return
+  physicalForm.members.splice(index, 1)
 }
 
 function buildPayload(): SkuMappingRuleInput | null {
@@ -577,34 +561,24 @@ function buildPayload(): SkuMappingRuleInput | null {
 
 function buildPhysicalPayload(): PhysicalItemGroupInput | null {
   const name = physicalForm.name.trim()
-  const primarySku = physicalForm.primary_sku.trim()
-  const aliases = physicalForm.aliases.map((sku) => sku.trim()).filter(Boolean)
+  const members = physicalForm.members.map((sku) => sku.trim()).filter(Boolean)
   if (!name) {
     ElMessage.warning('请输入共享组名称')
     return null
   }
-  if (!primarySku) {
-    ElMessage.warning('请输入主 SKU')
+  if (!members.length) {
+    ElMessage.warning('请至少输入一个成员 SKU')
     return null
   }
-  if (!aliases.length) {
-    ElMessage.warning('请至少输入一个别名 SKU')
-    return null
-  }
-  if (!aliases.includes(primarySku)) {
-    ElMessage.warning('主 SKU 必须属于别名成员')
-    return null
-  }
-  if (new Set(aliases).size !== aliases.length) {
-    ElMessage.warning('别名 SKU 不能重复')
+  if (new Set(members).size !== members.length) {
+    ElMessage.warning('成员 SKU 不能重复')
     return null
   }
   return {
     name,
-    primary_sku: primarySku,
     enabled: physicalForm.enabled,
     remark: physicalForm.remark?.trim() || null,
-    aliases,
+    members,
   }
 }
 
@@ -644,7 +618,7 @@ async function savePhysical(): Promise<void> {
     ElMessage.success('已保存')
     await reloadPhysical()
   } catch (error) {
-    ElMessage.error(getActionErrorMessage(error, '保存同物共享组失败'))
+    ElMessage.error(getActionErrorMessage(error, '保存库存 SKU 共享组失败'))
   } finally {
     physicalSaving.value = false
   }
@@ -666,7 +640,7 @@ async function togglePhysicalEnabled(row: PhysicalItemGroup): Promise<void> {
     ElMessage.success(row.enabled ? '已停用' : '已启用')
     await reloadPhysical()
   } catch (error) {
-    ElMessage.error(getActionErrorMessage(error, '更新同物共享组状态失败'))
+    ElMessage.error(getActionErrorMessage(error, '更新库存 SKU 共享组状态失败'))
   }
 }
 
@@ -689,7 +663,7 @@ async function remove(row: SkuMappingRule): Promise<void> {
 
 async function removePhysical(row: PhysicalItemGroup): Promise<void> {
   try {
-    await ElMessageBox.confirm(`确认删除同物共享组 ${row.name} 吗？`, '删除共享组', {
+    await ElMessageBox.confirm(`确认删除库存 SKU 共享组 ${row.name} 吗？`, '删除共享组', {
       type: 'warning',
     })
   } catch {
@@ -700,7 +674,7 @@ async function removePhysical(row: PhysicalItemGroup): Promise<void> {
     ElMessage.success('已删除')
     await reloadPhysical()
   } catch (error) {
-    ElMessage.error(getActionErrorMessage(error, '删除同物共享组失败'))
+    ElMessage.error(getActionErrorMessage(error, '删除库存 SKU 共享组失败'))
   }
 }
 

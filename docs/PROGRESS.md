@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-05-04（新增同物共享组：物理物品分组、SKU 归一解析、补货计算与 SKU 映射统一接入，前端已补配置管理区。）
+> 最近更新：2026-05-04（同物共享组改为库存 SKU 共享组：取消主 SKU 语义，成员平权；引擎仅在组件库存侧按共享组身份合并，前端配置区已同步改版。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -121,12 +121,12 @@
 - **历史迁移**：新增 `backend/alembic/versions/20260504_1000_enable_existing_sku_configs.py`，一次性执行 `UPDATE sku_config SET enabled = true WHERE enabled = false`；downgrade 不反向关闭历史 SKU。
 - **测试**：更新 `backend/tests/unit/test_sync_product_listing_job.py` 与 `backend/tests/unit/test_sku_init.py`，覆盖同步补齐和商品页补齐的新 SKU 默认启用口径。
 
-### 3.97 同物共享组与 SKU 归一（2026-05-04）
-- **数据库表**：新增 `physical_item_group` 与 `physical_item_sku_alias`，一个共享组代表一个真实物品；组内必须包含主 SKU，且别名 SKU 全局唯一。
-- **后端服务**：新增 `backend/app/services/physical_item.py`，在进入引擎和映射逻辑前将启用 SKU 解析到主 SKU；未配置共享组的 SKU 保持原样。
-- **引擎接入**：`backend/app/engine/runner.py` 先把启用 SKU 归一为主 SKU，再把原始 SKU 列表扩展为源 SKU 集合，Step 1 / Step 2 / Step 4 / Step 5 按主 SKU 聚合；`backend/app/engine/sku_mapping.py` 也在加载映射规则和组件库存时先做归一。
-- **配置接口**：`GET/POST/PATCH/DELETE /api/config/physical-item-groups` 已接入；`frontend/src/views/SkuMappingRuleView.vue` 复用同页新增“同物共享组”管理区，可创建组、维护主 SKU 和别名 SKU，并提示已归属共享组。
-- **测试**：补充 `backend/tests/unit/test_physical_item.py`、`backend/tests/unit/test_metrics_dashboard.py` 与前端 `SkuMappingRuleView` 测试，覆盖主 SKU 校验、别名归一和仪表盘兼容。
+### 3.98 库存 SKU 共享组与组件归一（2026-05-04）
+- **数据库表**：`physical_item_group` 与 `physical_item_sku_alias` 继续作为共享组载体，但组表已移除 `primary_sku`；组内成员现在平权，唯一约束只保留组名唯一与成员 SKU 全局唯一。
+- **后端服务**：`backend/app/services/physical_item.py` 改为提供 `sku_to_group_key` / `members_by_group_key`，仅用于库存组件 SKU 的共享组解析；商品 SKU 不再归一到共享组。
+- **引擎接入**：`backend/app/engine/runner.py` 保持商品 SKU 原样进入 Step 1 / Step 5 与建议展示；`backend/app/engine/sku_mapping.py` 在加载规则与汇总组件库存时先将库存组件 SKU 解析到共享组身份，再做库存合并和扣减，并会折叠同一商品下重复的等价替代组。
+- **配置接口**：`GET/POST/PATCH/DELETE /api/config/physical-item-groups` 保留；`frontend/src/views/SkuMappingRuleView.vue` 改为“库存 SKU 共享组”管理区，仅维护组名、成员 SKU、启用状态与备注，并在映射规则表中展示组件所属共享组。
+- **测试**：补充 `backend/tests/unit/test_physical_item.py`、`backend/tests/unit/test_engine_sku_mapping.py` 与前端 `SkuMappingRuleView` 测试，覆盖成员校验、库存共享组解析和重复替代组折叠。
 
 ### 3.95 订单邮编空值不覆盖修复（2026-05-04）
 - **同步保护**：`backend/app/sync/order_list.py` 保持从 `raw.address.postalCode` 解析邮编；插入新订单时仍允许 `postal_code=NULL`，但订单头唯一键冲突更新时，若本次赛狐响应邮编为空字符串、`null` 或 `address` 缺失，会从 `ON CONFLICT DO UPDATE SET` 中移除 `postal_code`，避免把已有有效邮编覆盖为空。

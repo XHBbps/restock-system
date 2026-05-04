@@ -46,7 +46,6 @@ def is_in_window(order_date: date, today: date, days_ago: int) -> bool:
 def aggregate_velocity_from_items(
     items: list[tuple[str, str, date, int, int]],
     today: date,
-    sku_alias_map: dict[str, str] | None = None,
 ) -> VelocityMap:
     """从订单明细聚合 velocity(暴露为纯函数便于单测)。
 
@@ -57,12 +56,11 @@ def aggregate_velocity_from_items(
     daily: defaultdict[tuple[str, str], defaultdict[date, int]] = defaultdict(
         lambda: defaultdict(int)
     )
-    aliases = sku_alias_map or {}
     for sku, country, d, shipped, refund in items:
         eff = max(int(shipped or 0) - int(refund or 0), 0)
         if eff <= 0:
             continue
-        daily[(aliases.get(sku, sku), country)][d] += eff
+        daily[(sku, country)][d] += eff
 
     result: defaultdict[str, dict[str, float]] = defaultdict(dict)
     for (sku, country), date_map in daily.items():
@@ -116,7 +114,6 @@ async def run_step1(
     commodity_skus: list[str] | None,
     today: date,
     allowed_countries: set[str] | None = None,
-    sku_alias_map: dict[str, str] | None = None,
 ) -> VelocityMap:
     items = await load_velocity_inputs(
         db,
@@ -124,4 +121,4 @@ async def run_step1(
         today=today,
         allowed_countries=allowed_countries,
     )
-    return aggregate_velocity_from_items(items, today, sku_alias_map=sku_alias_map)
+    return aggregate_velocity_from_items(items, today)

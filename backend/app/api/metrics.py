@@ -271,9 +271,8 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
         .all()
     )
     resolver = await load_physical_sku_resolver(db)
-    source_skus = resolver.source_skus_for(enabled_skus)
-    canonical_skus = resolver.resolve_many(enabled_skus)
-    enabled_sku_count = len(canonical_skus)
+    source_skus = enabled_skus
+    enabled_sku_count = len(enabled_skus)
 
     config = (
         await db.execute(select(GlobalConfig).where(GlobalConfig.id == 1))
@@ -312,7 +311,6 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
             db,
             source_skus,
             now_beijing().date(),
-            sku_alias_map=resolver.alias_to_primary,
         )
         if enabled_skus
         else {}
@@ -322,8 +320,8 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
             db,
             velocity,
             source_skus,
-            sku_alias_map=resolver.alias_to_primary,
-            component_source_skus=resolver.aliases_by_primary,
+            sku_to_group_key=resolver.sku_to_group_key,
+            members_by_group_key=resolver.members_by_group_key,
         )
         if enabled_skus
         else ({}, {})
@@ -344,14 +342,14 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
             db,
             source_skus,
             velocity,
-            sku_alias_map=resolver.alias_to_primary,
-            component_source_skus=resolver.aliases_by_primary,
+            sku_to_group_key=resolver.sku_to_group_key,
+            members_by_group_key=resolver.members_by_group_key,
         )
         if enabled_skus
         else {}
     )
     restock_sku_count = 0
-    for sku in canonical_skus:
+    for sku in enabled_skus:
         sku_country_qty = live_country_qty.get(sku, {})
         if not sku_country_qty:
             continue

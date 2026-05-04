@@ -554,15 +554,13 @@ async def _validate_mapping_unique(
     commodity_sku: str,
     current_rule_id: int | None = None,
 ) -> None:
-    resolver = await load_physical_sku_resolver(db)
-    equivalent_skus = resolver.source_skus_for([commodity_sku])
     existing_rule = (
         await db.execute(
-            select(SkuMappingRule).where(SkuMappingRule.commodity_sku.in_(equivalent_skus))
+            select(SkuMappingRule).where(SkuMappingRule.commodity_sku == commodity_sku)
         )
     ).scalar_one_or_none()
     if existing_rule is not None and existing_rule.id != current_rule_id:
-        raise ConflictError(f"商品SKU {commodity_sku} 或同物别名已存在映射规则")
+        raise ConflictError(f"商品SKU {commodity_sku} 已存在映射规则")
 
 
 async def _replace_mapping_components(
@@ -573,11 +571,11 @@ async def _replace_mapping_components(
     resolver = await load_physical_sku_resolver(db)
     seen_by_group: dict[int, set[str]] = {}
     for component in components:
-        normalized_sku = resolver.resolve(component.inventory_sku)
+        normalized_sku = resolver.resolve_inventory_sku(component.inventory_sku)
         group_seen = seen_by_group.setdefault(component.group_no, set())
         if normalized_sku in group_seen:
             raise ValidationFailed(
-                f"同一方案内库存SKU {component.inventory_sku} 与其他组件归属同一同物共享组"
+                f"同一方案内库存SKU {component.inventory_sku} 与其他组件归属同一库存共享组"
             )
         group_seen.add(normalized_sku)
     await db.execute(delete(SkuMappingComponent).where(SkuMappingComponent.rule_id == rule.id))
@@ -947,11 +945,10 @@ def _physical_group_out(group: PhysicalItemGroup) -> PhysicalItemGroupOut:
     return PhysicalItemGroupOut(
         id=group.id,
         name=group.name,
-        primary_sku=group.primary_sku,
         enabled=group.enabled,
         remark=group.remark,
-        aliases=group.aliases,
-        alias_count=len(group.aliases),
+        members=group.aliases,
+        member_count=len(group.aliases),
         created_at=group.created_at,
         updated_at=group.updated_at,
     )
@@ -961,31 +958,31 @@ async def _validate_physical_group_unique(
     db: AsyncSession,
     *,
     name: str,
-    aliases: list[str],
+    members: list[str],
     current_group_id: int | None = None,
 ) -> None:
     name_row = (
         await db.execute(select(PhysicalItemGroup).where(PhysicalItemGroup.name == name))
     ).scalar_one_or_none()
     if name_row is not None and name_row.id != current_group_id:
-        raise ConflictError(f"同物共享组名称 {name} 已存在")
+        raise ConflictError(f"库存SKU共享组名称 {name} 已存在")
 
-    alias_stmt = select(PhysicalItemSkuAlias).where(PhysicalItemSkuAlias.sku.in_(aliases))
+    alias_stmt = select(PhysicalItemSkuAlias).where(PhysicalItemSkuAlias.sku.in_(members))
     if current_group_id is not None:
         alias_stmt = alias_stmt.where(PhysicalItemSkuAlias.group_id != current_group_id)
     alias_rows = (await db.execute(alias_stmt)).scalars().all()
     if alias_rows:
         conflict_skus = ", ".join(sorted({row.sku for row in alias_rows}))
-        raise ConflictError(f"SKU 已归属其他同物共享组：{conflict_skus}")
+        raise ConflictError(f"库存SKU 已归属其他共享组：{conflict_skus}")
 
 
-async def _replace_physical_aliases(
+async def _replace_physical_members(
     db: AsyncSession,
     group: PhysicalItemGroup,
-    aliases: list[str],
+    members: list[str],
 ) -> None:
     await db.execute(delete(PhysicalItemSkuAlias).where(PhysicalItemSkuAlias.group_id == group.id))
-    for sku in aliases:
+    for sku in members:
         db.add(PhysicalItemSkuAlias(group_id=group.id, sku=sku))
 
 
@@ -1008,14 +1005,12 @@ async def list_physical_item_groups(
         base = base.outerjoin(PhysicalItemSkuAlias).where(
             or_(
                 PhysicalItemGroup.name.ilike(like, escape="\\"),
-                PhysicalItemGroup.primary_sku.ilike(like, escape="\\"),
                 PhysicalItemSkuAlias.sku.ilike(like, escape="\\"),
             )
         )
         count_stmt = count_stmt.outerjoin(PhysicalItemSkuAlias).where(
             or_(
                 PhysicalItemGroup.name.ilike(like, escape="\\"),
-                PhysicalItemGroup.primary_sku.ilike(like, escape="\\"),
                 PhysicalItemSkuAlias.sku.ilike(like, escape="\\"),
             )
         )
@@ -1045,16 +1040,15 @@ async def create_physical_item_group(
     db: AsyncSession = Depends(db_session),
     _: None = Depends(require_permission(CONFIG_EDIT)),
 ) -> PhysicalItemGroupOut:
-    await _validate_physical_group_unique(db, name=body.name, aliases=body.aliases)
+    await _validate_physical_group_unique(db, name=body.name, members=body.members)
     group = PhysicalItemGroup(
         name=body.name,
-        primary_sku=body.primary_sku,
         enabled=body.enabled,
         remark=body.remark,
     )
     db.add(group)
     await db.flush()
-    await _replace_physical_aliases(db, group, body.aliases)
+    await _replace_physical_members(db, group, body.members)
     await db.commit()
     group = (
         await db.execute(
@@ -1081,32 +1075,27 @@ async def patch_physical_item_group(
         )
     ).scalar_one_or_none()
     if group is None:
-        raise NotFound(f"同物共享组 {group_id} 不存在")
+        raise NotFound(f"库存SKU共享组 {group_id} 不存在")
 
     new_name = patch.name if patch.name is not None else group.name
-    new_primary_sku = patch.primary_sku if patch.primary_sku is not None else group.primary_sku
-    new_aliases = (
-        patch.aliases if patch.aliases is not None else [alias.sku for alias in group.aliases]
+    new_members = (
+        patch.members if patch.members is not None else [alias.sku for alias in group.aliases]
     )
-    if new_primary_sku not in set(new_aliases):
-        raise ValidationFailed("主 SKU 必须属于别名成员")
     await _validate_physical_group_unique(
         db,
         name=new_name,
-        aliases=new_aliases,
+        members=new_members,
         current_group_id=group.id,
     )
 
     if patch.name is not None:
         group.name = patch.name
-    if patch.primary_sku is not None:
-        group.primary_sku = patch.primary_sku
     if patch.enabled is not None:
         group.enabled = patch.enabled
     if "remark" in patch.model_fields_set:
         group.remark = patch.remark
-    if patch.aliases is not None:
-        await _replace_physical_aliases(db, group, patch.aliases)
+    if patch.members is not None:
+        await _replace_physical_members(db, group, patch.members)
     await db.commit()
     group = (
         await db.execute(
@@ -1126,7 +1115,7 @@ async def delete_physical_item_group(
 ) -> None:
     result = await db.execute(delete(PhysicalItemGroup).where(PhysicalItemGroup.id == group_id))
     if result.rowcount == 0:  # type: ignore[attr-defined]
-        raise NotFound(f"同物共享组 {group_id} 不存在")
+        raise NotFound(f"库存SKU共享组 {group_id} 不存在")
     await db.commit()
     return None
 

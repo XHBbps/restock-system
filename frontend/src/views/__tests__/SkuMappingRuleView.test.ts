@@ -149,4 +149,28 @@ describe('SkuMappingRuleView', () => {
     expect(vm.buildPayload()).toBeNull()
     expect(messageWarning).toHaveBeenCalledWith('组合编号必须为正整数')
   })
+
+  it('builds physical group payload with members only', async () => {
+    const { default: View } = await import('../SkuMappingRuleView.vue')
+    const wrapper = shallowMount(View, { global: { stubs: STUBS } })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      physicalForm: {
+        name: string
+        members: string[]
+      }
+      buildPhysicalPayload: () => unknown
+    }
+
+    vm.physicalForm.name = 'B/E'
+    vm.physicalForm.members = [' B ', 'E']
+
+    expect(vm.buildPhysicalPayload()).toEqual({
+      name: 'B/E',
+      enabled: true,
+      remark: null,
+      members: ['B', 'E'],
+    })
+  })
 })

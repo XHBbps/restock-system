@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,57 +33,57 @@ def normalize_sku_list(values: Iterable[str]) -> list[str]:
 
 @dataclass(frozen=True, slots=True)
 class PhysicalSkuResolver:
-    """Resolve raw SKUs to their enabled physical-item primary SKU."""
+    """Resolve inventory SKUs to their enabled shared component group."""
 
-    alias_to_primary: dict[str, str]
-    aliases_by_primary: dict[str, list[str]]
+    sku_to_group_key: dict[str, str]
+    members_by_group_key: dict[str, list[str]]
 
-    def resolve(self, sku: str) -> str:
-        return self.alias_to_primary.get(sku, sku)
+    def resolve_inventory_sku(self, sku: str) -> str:
+        return self.sku_to_group_key.get(sku, sku)
 
-    def resolve_many(self, skus: Iterable[str]) -> list[str]:
-        return sorted({self.resolve(sku) for sku in skus})
-
-    def source_skus_for(self, skus: Iterable[str]) -> list[str]:
+    def expand_inventory_skus(self, skus: Iterable[str]) -> list[str]:
         result: set[str] = set()
         for sku in skus:
-            primary = self.resolve(sku)
-            aliases = self.aliases_by_primary.get(primary)
-            if aliases:
-                result.update(aliases)
+            group_key = self.resolve_inventory_sku(sku)
+            members = self.members_by_group_key.get(group_key)
+            if members:
+                result.update(members)
             else:
                 result.add(sku)
         return sorted(result)
 
-    def aliases_for(self, primary_sku: str) -> list[str]:
-        return self.aliases_by_primary.get(primary_sku, [primary_sku])
+    def members_for_group_key(self, group_key: str) -> list[str]:
+        return self.members_by_group_key.get(group_key, [group_key])
 
 
 async def load_physical_sku_resolver(db: AsyncSession) -> PhysicalSkuResolver:
     rows = (
         await db.execute(
-            select(PhysicalItemSkuAlias.sku, PhysicalItemGroup.primary_sku)
+            select(
+                PhysicalItemSkuAlias.sku,
+                PhysicalItemGroup.id,
+            )
             .join(PhysicalItemGroup, PhysicalItemGroup.id == PhysicalItemSkuAlias.group_id)
             .where(PhysicalItemGroup.enabled.is_(True))
-            .order_by(PhysicalItemGroup.primary_sku, PhysicalItemSkuAlias.sku)
+            .order_by(PhysicalItemGroup.id, PhysicalItemSkuAlias.sku)
         )
     ).all()
-    alias_to_primary: dict[str, str] = {}
-    aliases_by_primary: defaultdict[str, set[str]] = defaultdict(set)
-    for sku, primary_sku in rows:
-        if not isinstance(sku, str) or not isinstance(primary_sku, str):
+    sku_to_group_key: dict[str, str] = {}
+    members_by_group_key: defaultdict[str, set[str]] = defaultdict(set)
+    for sku, group_id in rows:
+        if not isinstance(sku, str) or group_id is None:
             continue
-        alias_to_primary[sku] = primary_sku
-        aliases_by_primary[primary_sku].add(sku)
-        aliases_by_primary[primary_sku].add(primary_sku)
+        group_key = f"physical-group:{group_id}"
+        sku_to_group_key[sku] = group_key
+        members_by_group_key[group_key].add(sku)
     return PhysicalSkuResolver(
-        alias_to_primary=alias_to_primary,
-        aliases_by_primary={
-            primary_sku: sorted(aliases) for primary_sku, aliases in aliases_by_primary.items()
+        sku_to_group_key=sku_to_group_key,
+        members_by_group_key={
+            group_key: sorted(members) for group_key, members in members_by_group_key.items()
         },
     )
 
 
 async def resolve_physical_skus(db: AsyncSession, skus: Iterable[str]) -> dict[str, str]:
     resolver = await load_physical_sku_resolver(db)
-    return {sku: resolver.resolve(sku) for sku in skus}
+    return {sku: resolver.resolve_inventory_sku(sku) for sku in skus}

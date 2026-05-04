@@ -12,7 +12,7 @@ from app.db.base import Base
 
 
 class PhysicalItemGroup(Base):
-    """A real physical item shared by multiple commodity or inventory SKUs."""
+    """Equivalent inventory SKUs that represent the same stock component."""
 
     __tablename__ = "physical_item_group"
     __table_args__ = (
@@ -22,7 +22,6 @@ class PhysicalItemGroup(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
-    primary_sku: Mapped[str] = mapped_column(String(100), nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     remark: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(

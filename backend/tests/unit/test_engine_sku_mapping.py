@@ -1,9 +1,32 @@
+import pytest
+
 from app.engine.sku_mapping import (
     MappingComponent,
     WarehouseStock,
     compute_mapped_stock_by_country,
     compute_mapped_stock_total_by_sku,
+    load_active_mapping_rules,
 )
+from app.models.sku_mapping import SkuMappingComponent, SkuMappingRule
+
+
+class _ScalarsResult:
+    def __init__(self, values):
+        self._values = values
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return self._values
+
+
+class _FakeDb:
+    def __init__(self, rows):
+        self.rows = rows
+
+    async def execute(self, stmt):
+        return _ScalarsResult(self.rows)
 
 
 def test_single_component_mapping_uses_floor_per_warehouse() -> None:
@@ -190,6 +213,35 @@ def test_alternative_multi_component_groups_sum_each_group_min() -> None:
             ("E", "WH-US-1"): WarehouseStock(country="US", total=9),
             ("F", "WH-US-1"): WarehouseStock(country="US", total=4),
             ("G", "WH-US-1"): WarehouseStock(country="US", total=10),
+        },
+    )
+
+    assert result == {("A", "US"): 6}
+
+
+@pytest.mark.asyncio
+async def test_load_active_mapping_rules_collapses_equivalent_alternative_formulas() -> None:
+    rule = SkuMappingRule(commodity_sku="A", enabled=True)
+    rule.components = [
+        SkuMappingComponent(group_no=1, inventory_sku="B", quantity=1),
+        SkuMappingComponent(group_no=1, inventory_sku="C", quantity=1),
+        SkuMappingComponent(group_no=1, inventory_sku="D", quantity=1),
+        SkuMappingComponent(group_no=2, inventory_sku="E", quantity=1),
+        SkuMappingComponent(group_no=2, inventory_sku="F", quantity=1),
+        SkuMappingComponent(group_no=2, inventory_sku="D", quantity=1),
+    ]
+
+    rules = await load_active_mapping_rules(
+        _FakeDb([rule]),  # type: ignore[arg-type]
+        ["A"],
+        sku_to_group_key={"B": "GROUP-BE", "E": "GROUP-BE", "C": "GROUP-CF", "F": "GROUP-CF"},
+    )
+    result = compute_mapped_stock_by_country(
+        rules,
+        {
+            ("GROUP-BE", "WH-US-1"): WarehouseStock(country="US", total=10),
+            ("GROUP-CF", "WH-US-1"): WarehouseStock(country="US", total=8),
+            ("D", "WH-US-1"): WarehouseStock(country="US", total=6),
         },
     )
 

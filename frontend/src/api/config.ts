@@ -165,21 +165,19 @@ export interface PhysicalItemAlias {
 export interface PhysicalItemGroup {
   id: number
   name: string
-  primary_sku: string
   enabled: boolean
   remark: string | null
-  aliases: PhysicalItemAlias[]
-  alias_count: number
+  members: PhysicalItemAlias[]
+  member_count: number
   created_at: string
   updated_at: string
 }
 
 export interface PhysicalItemGroupInput {
   name: string
-  primary_sku: string
   enabled: boolean
   remark?: string | null
-  aliases: string[]
+  members: string[]
 }
 
 export async function listPhysicalItemGroups(params: {

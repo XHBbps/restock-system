@@ -208,12 +208,11 @@ class SkuMappingImportOut(BaseModel):
 # ==================== Physical Item Groups ====================
 class PhysicalItemGroupIn(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
-    primary_sku: str = Field(..., min_length=1, max_length=100)
-    aliases: list[str] = Field(..., min_length=1)
+    members: list[str] = Field(..., min_length=1)
     enabled: bool = True
     remark: str | None = Field(default=None, max_length=1000)
 
-    @field_validator("name", "primary_sku")
+    @field_validator("name")
     @classmethod
     def normalize_required_text(cls, value: str) -> str:
         text = value.strip()
@@ -221,20 +220,20 @@ class PhysicalItemGroupIn(BaseModel):
             raise ValueError("字段不能为空")
         return text
 
-    @field_validator("aliases")
+    @field_validator("members")
     @classmethod
-    def normalize_aliases(cls, values: list[str]) -> list[str]:
-        aliases: list[str] = []
+    def normalize_members(cls, values: list[str]) -> list[str]:
+        members: list[str] = []
         seen: set[str] = set()
         for value in values:
             sku = value.strip()
             if not sku:
-                raise ValueError("别名 SKU 不能为空")
+                raise ValueError("成员 SKU 不能为空")
             if sku in seen:
-                raise ValueError(f"别名 SKU 重复：{sku}")
+                raise ValueError(f"成员 SKU 重复：{sku}")
             seen.add(sku)
-            aliases.append(sku)
-        return aliases
+            members.append(sku)
+        return members
 
     @field_validator("remark")
     @classmethod
@@ -244,21 +243,14 @@ class PhysicalItemGroupIn(BaseModel):
         remark = value.strip()
         return remark or None
 
-    @model_validator(mode="after")
-    def validate_primary_in_aliases(self) -> "PhysicalItemGroupIn":
-        if self.primary_sku not in set(self.aliases):
-            raise ValueError("主 SKU 必须属于别名成员")
-        return self
-
 
 class PhysicalItemGroupPatch(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=100)
-    primary_sku: str | None = Field(default=None, min_length=1, max_length=100)
-    aliases: list[str] | None = Field(default=None, min_length=1)
+    members: list[str] | None = Field(default=None, min_length=1)
     enabled: bool | None = None
     remark: str | None = Field(default=None, max_length=1000)
 
-    @field_validator("name", "primary_sku")
+    @field_validator("name")
     @classmethod
     def normalize_optional_text(cls, value: str | None) -> str | None:
         if value is None:
@@ -268,12 +260,12 @@ class PhysicalItemGroupPatch(BaseModel):
             raise ValueError("字段不能为空")
         return text
 
-    @field_validator("aliases")
+    @field_validator("members")
     @classmethod
-    def normalize_optional_aliases(cls, values: list[str] | None) -> list[str] | None:
+    def normalize_optional_members(cls, values: list[str] | None) -> list[str] | None:
         if values is None:
             return None
-        return PhysicalItemGroupIn.normalize_aliases(values)
+        return PhysicalItemGroupIn.normalize_members(values)
 
     @field_validator("remark")
     @classmethod
@@ -294,11 +286,10 @@ class PhysicalItemAliasOut(BaseModel):
 class PhysicalItemGroupOut(BaseModel):
     id: int
     name: str
-    primary_sku: str
     enabled: bool
     remark: str | None = None
-    aliases: list[PhysicalItemAliasOut]
-    alias_count: int
+    members: list[PhysicalItemAliasOut]
+    member_count: int
     created_at: datetime
     updated_at: datetime
 
