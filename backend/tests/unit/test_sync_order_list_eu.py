@@ -80,7 +80,7 @@ async def test_upsert_package_order_maps_fields_and_items() -> None:
     assert (orders, items) == (1, 1)
     header_values = _compiled_params(db.statements[0])
     assert header_values["amazon_order_id"] == "AMZ-1"
-    assert header_values["source"] == "????"
+    assert header_values["source"] == "订单处理"
     assert header_values["order_platform"] == "Amazon"
     assert header_values["package_sn"] == "PKG-1"
     assert header_values["package_status"] == "has_shipped"
