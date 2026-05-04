@@ -255,6 +255,8 @@ async def _upsert_package_ship_order(
             for k, v in header_values.items()
             if k not in ("shop_id", "amazon_order_id", "source", "package_sn")
         }
+        if postal_code is None:
+            update_set.pop("postal_code", None)
         header_stmt = header_stmt.on_conflict_do_update(  # type: ignore[attr-defined]
             constraint="uq_order_header_key",
             set_=update_set,

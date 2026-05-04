@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from sqlalchemy.dialects import postgresql
 
 
 class _FakeResult:
@@ -26,6 +27,10 @@ class _FakeDb:
 
 def _compiled_params(stmt: Any) -> dict[str, Any]:
     return dict(stmt.compile().params)
+
+
+def _compiled_postgres_sql(stmt: Any) -> str:
+    return str(stmt.compile(dialect=postgresql.dialect()))
 
 
 def _package_payload(**overrides: Any) -> dict[str, Any]:
@@ -91,6 +96,43 @@ async def test_upsert_package_order_maps_fields_and_items() -> None:
     assert item_values["quantity_ordered_m0"] == 2
     assert item_values["quantity_shipped_m0"] == 2
     assert item_values["refund_num_m0"] == 0
+
+
+@pytest.mark.asyncio
+async def test_upsert_package_order_updates_postal_code_when_present() -> None:
+    from app.sync.order_list import _upsert_package_ship_order
+
+    db = _FakeDb()
+    await _upsert_package_ship_order(
+        db,  # type: ignore[arg-type]
+        _package_payload(address={"postalCode": "10115"}),
+        set(),
+    )
+
+    header_values = _compiled_params(db.statements[0])
+    header_sql = _compiled_postgres_sql(db.statements[0])
+    assert header_values["postal_code"] == "10115"
+    assert "postal_code =" in header_sql
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("address", [{}, {"postalCode": ""}, None])
+async def test_upsert_package_order_does_not_clear_postal_code_when_missing(
+    address: dict[str, Any] | None,
+) -> None:
+    from app.sync.order_list import _upsert_package_ship_order
+
+    db = _FakeDb()
+    await _upsert_package_ship_order(
+        db,  # type: ignore[arg-type]
+        _package_payload(address=address),
+        set(),
+    )
+
+    header_values = _compiled_params(db.statements[0])
+    header_sql = _compiled_postgres_sql(db.statements[0])
+    assert header_values["postal_code"] is None
+    assert "postal_code =" not in header_sql
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-05-03（接口监控补齐 40019 自动重试展示口径，`retry_status IS NULL` 不再显示为 `0/5`；订单处理列表国家改为读取顶层 `marketplace`；订单页移除来源/包裹号展示与搜索；补齐 AT、CH、CY、DK、EE、FI、LT、LV、MT、SI 国家中文名与时区。）
+> 最近更新：2026-05-04（订单处理列表同步修复邮编空值 upsert 口径：赛狐本次返回空邮编或缺失地址时，不再覆盖已有 `order_header.postal_code`。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -38,7 +38,7 @@
 ### 2.2 同步与调度
 - **EU 合并同步口径**：订单、商品、出库、库存同步均按全局 eu_countries 将 EU 成员国合并到 EU，并在 original_* 字段保存原国家码；calc_engine 已移出 APScheduler 定时注册，仅保留手动生成入口。
 - **新国家发现口径**：多平台订单同步遇到有效 2 位国家码时直接落入 `order_header.country_code` 并参与计算；若该国家已配置到 `eu_countries`，则归并为 `EU` 并在 `original_country_code` 保留原码；空值或非法国家码才写为 `ZZ` 并记录结构化日志。
-- **订单处理列表同步来源**：`sync_order_list` 当前只调用赛狐订单处理列表 `/api/packageShip/v1/getPackagePage.json`，按 `purchaseDateStart/purchaseDateEnd` 拉取滚动 12 个月窗口，`pageSize=200`，继续复用全局店铺过滤；订单国家现在统一读取响应顶层 `marketplace` 字段，空值或非法值回落 `ZZ`，`address.countryCode/address.country` 不再作为国家来源。包裹数据统一写入 `source='订单处理'`，并保存 `package_sn/package_status/shop_name/postal_code/order_platform`。同步开始前会清理旧 `source in ('亚马逊','多平台')` 的订单头、明细、详情和详情抓取日志，避免切换后重复计算。
+- **订单处理列表同步来源**：`sync_order_list` 当前只调用赛狐订单处理列表 `/api/packageShip/v1/getPackagePage.json`，按 `purchaseDateStart/purchaseDateEnd` 拉取滚动 12 个月窗口，`pageSize=200`，继续复用全局店铺过滤；订单国家现在统一读取响应顶层 `marketplace` 字段，空值或非法值回落 `ZZ`，`address.countryCode/address.country` 不再作为国家来源。包裹数据统一写入 `source='订单处理'`，并保存 `package_sn/package_status/shop_name/postal_code/order_platform`；冲突更新时若本次接口邮编为空或地址缺失，不覆盖已有 `order_header.postal_code`。同步开始前会清理旧 `source in ('亚马逊','多平台')` 的订单头、明细、详情和详情抓取日志，避免切换后重复计算。
 - **商品主数据同步来源**：`sync_product_listing` 先调用赛狐 SKU 主数据接口 `/api/commodity/pageList.json` 写入 `commodity_master`，再调用在线产品 listing 接口 `/api/order/api/product/pageList.json` 补充店铺、站点、sellerSku 与近 7/14/30 天销量。同步新发现的 SKU 只补建 `sku_config(enabled=false)`，不自动扩大补货计算 SKU 集合。
 
 - **调度器开关**：`GET/POST /api/sync/scheduler`，开关状态持久化到 `global_config.scheduler_enabled`
@@ -104,6 +104,11 @@
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.95 订单邮编空值不覆盖修复（2026-05-04）
+- **同步保护**：`backend/app/sync/order_list.py` 保持从 `raw.address.postalCode` 解析邮编；插入新订单时仍允许 `postal_code=NULL`，但订单头唯一键冲突更新时，若本次赛狐响应邮编为空字符串、`null` 或 `address` 缺失，会从 `ON CONFLICT DO UPDATE SET` 中移除 `postal_code`，避免把已有有效邮编覆盖为空。
+- **有效更新**：当本次响应包含非空 `address.postalCode` 时，`postal_code` 仍正常参与 upsert 更新，用于修正赛狐侧最新邮编。
+- **测试**：补充 `backend/tests/unit/test_sync_order_list_eu.py`，覆盖非空邮编参与更新、空字符串或缺失地址不参与冲突更新。
 
 ### 3.93 新观测国家展示补齐与 ZZ 原因确认（2026-05-03）
 - **国家展示**：`backend/app/core/countries.py` 与 `frontend/src/utils/countries.ts` 补齐 `AT - 奥地利`、`CH - 瑞士`、`CY - 塞浦路斯`、`DK - 丹麦`、`EE - 爱沙尼亚`、`FI - 芬兰`、`LT - 立陶宛`、`LV - 拉脱维亚`、`MT - 马耳他`、`SI - 斯洛文尼亚`。动态国家选项和前端本地 `getCountryLabel()` 均会按“国家码 - 中文名”展示，不再仅显示原始代码。
