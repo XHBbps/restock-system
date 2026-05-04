@@ -166,7 +166,7 @@ docker compose -f deploy/docker-compose.yml exec db psql -U postgres -d replenis
 
 ### 3.3 Scheduler 异常
 
-**症状**：定时任务不触发；`sync_state` 表的 `last_run_at` 长时间未更新。
+**症状**：定时任务不触发；同步任务在 `sync_state` 表的 `last_run_at` 长时间未更新，或后台任务在 `task_run` 表没有近期记录。
 
 **排查**：
 
@@ -192,13 +192,20 @@ docker compose -f deploy/docker-compose.yml exec db psql -U postgres -d replenis
    ```
    （`calc_enabled` 已在 Plan A 删除，由 `suggestion_generation_enabled` 负责控制是否产出建议）
 
-4. **cron 表达式**：如果 `calc_cron` 是自定义，验证格式
-   - 支持 5 字段（分 时 日 月 周）和 APScheduler 扩展语法
-   - 保存时已做校验，非法表达式会被拦截
+4. **调度参数**：确认 `scheduler_enabled=true`，并检查 `sync_interval_minutes` / `order_sync_interval_minutes` 是否符合预期。
 
 5. **时区**：定时任务使用 `Asia/Shanghai`
    - 03:00 `sync_shop`、03:30 `sync_warehouse`、02:00 `daily_archive`
-   - 默认 08:00 `calc_engine`
+   - `calc_engine` 不再由 APScheduler 定时触发，只通过补货建议页手动入队。
+
+6. **后台任务状态来源**
+   ```sql
+   SELECT id, job_name, status, error_msg, created_at, started_at, finished_at
+   FROM task_run
+   WHERE job_name IN ('daily_archive', 'retry_failed_api_calls')
+   ORDER BY created_at DESC
+   LIMIT 20;
+   ```
 
 ### 3.3.1 SKU 映射规则与计算结果异常
 

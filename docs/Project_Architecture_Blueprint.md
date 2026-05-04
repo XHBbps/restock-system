@@ -146,7 +146,7 @@ async def sync_inventory_job(ctx: JobContext) -> None:
 
 **批量 UPSERT**：使用 `pg_insert(...).on_conflict_do_update(...)` 模式，避免先 SELECT 后 INSERT/UPDATE 的竞态。
 
-**状态追踪**：每个 job 在 `sync_state` 表中维护最后运行时间、状态、错误信息。
+**状态追踪**：店铺、仓库、商品、库存、订单、出库等同步 job 在 `sync_state` 表中维护最后运行时间、状态、错误信息；该表同时作为增量同步水位来源。`daily_archive`、`retry_failed_api_calls` 等不参与增量水位的系统后台任务不写 `sync_state`，其运行状态以 `task_run` 为准。
 
 **商品主数据同步**：`sync_product_listing` 是商品同步统一 job。它先通过 `backend/app/saihu/endpoints/commodity.py` 调用赛狐 SKU 主数据接口 `/api/commodity/pageList.json`，不传 `state` 或 `isGroup` 过滤，按 `sku` UPSERT 到 `commodity_master`；随后继续调用在线产品 listing 接口 `/api/order/api/product/pageList.json` 写入 `product_listing`，保留店铺、站点、sellerSku 与近 7/14/30 天销量用于商品页展开明细。同步过程中只为新发现 SKU 补建 `sku_config(enabled=true)`，不覆盖已有 `enabled`、`lead_time_days`，因此后续人工禁用不会被商品同步重新打开；商品状态 `state` 仅作展示/筛选信息，不自动影响补货计算。`run_engine` 仍只消费 `sku_config.enabled=true` 的 SKU。
 
@@ -226,6 +226,7 @@ CREATE INDEX ix_task_run_lease
 **自动调度规则**：`sync_shop` 每日 03:00 入队，`sync_warehouse` 每日 03:30 入队，`daily_archive` 每日 02:00 入队，`retention_purge` 每日 04:00 入队，`retry_failed_api_calls` 每 5 分钟入队；`sync_product_listing`、`sync_inventory`、`sync_out_records` 按 `global_config.sync_interval_minutes` 间隔入队，`sync_order_list` 按 `global_config.order_sync_interval_minutes` 间隔入队，默认 120 分钟。`GET /api/sync/scheduler` 由 API 进程提供状态，即使 API 进程本身不启动 APScheduler，也会基于 job trigger 推导下次执行时间；真正入队仍只发生在 `PROCESS_ENABLE_SCHEDULER=true` 的 scheduler 进程。
 
 **进度追踪**：`TaskRun.current_step / step_detail / total_steps / result_summary` 由 worker 在执行中写入，前端 `TaskProgress` 组件轮询 `/api/tasks/{id}`。`calc_engine` 在生成成功或无需求时写结构化 JSON 摘要（`generated`、`suggestion_id`、`demand_date`、可选 `reason`）；店铺、仓库、商品、库存、订单、出库等分页同步任务复用赛狐分页响应里的 `totalPage` 输出“第 P / N 页”进度，不额外发起预扫描请求。自 2026-04-20 起，worker 的 heartbeat、进度更新和 success/failed 终态回写都带 `status='running' + worker_id` 条件；若租约已被 reaper 回收，则抛 `TaskLeaseLostError` 并停止继续覆盖状态。
+**同步日志聚合**：`GET /api/data/sync-state` 返回两类来源：同步任务读取 `sync_state`；系统后台任务 `daily_archive` / `retry_failed_api_calls` 从 `task_run` 聚合最近一条任务、最近成功任务和最近失败错误。`calc_engine` 是补货建议页手动生成入口，不进入同步日志或同步状态统计。
 **信息总览快照任务**：`refresh_dashboard_snapshot` 也是标准 TaskRun 任务，复用现有去重、轮询和失败回写机制；它在后台调用 `build_dashboard_payload()` 生成 `dashboard_snapshot` 单例缓存，页面刷新时优先消费该缓存而不是重复现算。
 **失败调用重试任务**：`retry_failed_api_calls` 是标准 TaskRun job，由 APScheduler 每 5 分钟入队，使用默认 `dedupe_key=job_name` 避免并发；它只消费 `api_call_log` 中可精确还原的赛狐 `40019` 失败日志，重试前检查相关同步任务是否活跃，活跃则跳过等待下一轮。
 **任务权限注册表**：`app/tasks/access.py` 统一维护 TaskRun 作业清单，以及查看/操作权限映射；通用 `POST /api/tasks` 只允许创建显式白名单里的任务。旧赛狐写入作业已随 §3.6 的导出快照子系统一同删除。

@@ -98,6 +98,6 @@ export const autoSyncDefinitions: AutoSyncDefinition[] = [
 export const syncJobLabelMap = Object.fromEntries([
   ...manualSyncActions.map((item) => [item.jobName, item.label]),
   ...autoSyncDefinitions.map((item) => [item.jobName, item.label]),
-  ['calc_engine', replenishmentAction.label],
-  ['daily_archive', '每日归档']
+  ['daily_archive', '每日归档'],
+  ['retry_failed_api_calls', '失败调用重试']
 ] as const)

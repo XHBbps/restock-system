@@ -63,6 +63,16 @@ from app.schemas.data import (
 
 router = APIRouter(prefix="/api/data", tags=["data"])
 
+SYNC_STATE_JOBS = (
+    "sync_shop",
+    "sync_warehouse",
+    "sync_product_listing",
+    "sync_inventory",
+    "sync_order_list",
+    "sync_out_records",
+)
+TASK_RUN_SYNC_STATE_JOBS = ("daily_archive", "retry_failed_api_calls")
+
 
 def _disabled_order_detail_fields(detail: OrderDetail | None) -> dict[str, object | None]:
     return {
@@ -1178,9 +1188,20 @@ async def list_sync_state(
     _: None = Depends(require_permission(SYNC_VIEW)),
 ) -> list[DataSyncStateRow]:
     from app.models.sync_state import SyncState
+    from app.models.task_run import TaskRun
 
-    rows = (await db.execute(select(SyncState).order_by(SyncState.job_name))).scalars().all()
-    return [
+    rows = (
+        (
+            await db.execute(
+                select(SyncState)
+                .where(SyncState.job_name.in_(SYNC_STATE_JOBS))
+                .order_by(SyncState.job_name)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    sync_rows = [
         DataSyncStateRow(
             job_name=r.job_name,
             last_run_at=r.last_run_at,
@@ -1189,4 +1210,35 @@ async def list_sync_state(
             last_error=r.last_error,
         )
         for r in rows
+        if r.job_name in SYNC_STATE_JOBS
     ]
+
+    task_rows: list[DataSyncStateRow] = []
+    for job_name in TASK_RUN_SYNC_STATE_JOBS:
+        latest = (
+            await db.execute(
+                select(TaskRun)
+                .where(TaskRun.job_name == job_name)
+                .order_by(TaskRun.created_at.desc(), TaskRun.id.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        latest_success = (
+            await db.execute(
+                select(TaskRun)
+                .where(TaskRun.job_name == job_name, TaskRun.status == "success")
+                .order_by(TaskRun.finished_at.desc(), TaskRun.created_at.desc(), TaskRun.id.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        task_rows.append(
+            DataSyncStateRow(
+                job_name=job_name,
+                last_run_at=(latest.started_at or latest.created_at) if latest else None,
+                last_success_at=latest_success.finished_at if latest_success else None,
+                last_status=latest.status if latest else None,
+                last_error=latest.error_msg if latest and latest.status == "failed" else None,
+            )
+        )
+
+    return [*sync_rows, *task_rows]

@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-05-04（后端生产镜像构建移除 Debian `apt` 构建依赖；订单处理列表自动同步改用独立间隔 `order_sync_interval_minutes`，默认 120 分钟。）
+> 最近更新：2026-05-04（同步日志状态口径区分 `sync_state` 与 `task_run`；后端生产镜像构建移除 Debian `apt` 构建依赖；订单处理列表自动同步改用独立间隔 `order_sync_interval_minutes`，默认 120 分钟。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -53,7 +53,7 @@
   - 03:00 `sync_shop`
   - 03:30 `sync_warehouse`
   - 02:00 `daily_archive`
-  - 默认 08:00 `calc_engine`（可配置，`global_config.suggestion_generation_enabled` 控制是否实际产出建议）
+- **同步日志状态口径**：`GET /api/data/sync-state` 对同步类任务读取 `sync_state`，对系统后台任务 `daily_archive` / `retry_failed_api_calls` 从 `task_run` 汇总最近运行、最近成功与最近错误；`calc_engine` 属于补货建议页手动生成入口，不再作为同步日志项展示。
 - **信息总览快照刷新任务**：`refresh_dashboard_snapshot` 通过 TaskRun 入队执行；`GET /api/metrics/dashboard` 只读返回现有快照 / 活跃任务状态，手动“刷新快照”是默认触发入口
 - **旧订单详情抓取链路已删除**：订单处理列表已包含补货计算需要的订单、SKU、国家、邮编和包裹状态；自动 `sync_order_detail`、手动 `refetch_order_detail`、订单页“详情获取”入口、旧订单详情 job 模块和旧赛狐订单 endpoint 封装均已删除。`order_detail` / `order_detail_fetch_log` 作为历史表保留，订单详情弹窗只展示本地订单头与明细。
 
@@ -107,6 +107,11 @@
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.103 同步日志状态口径区分 sync_state 与 task_run（2026-05-04）
+- **接口口径**：`GET /api/data/sync-state` 仅把店铺、仓库、商品、库存、订单、出库同步任务作为 `sync_state` 来源；`daily_archive` 与 `retry_failed_api_calls` 改为从 `task_run` 聚合最近任务，避免未写 `sync_state` 被误判为未运行。
+- **展示口径**：前端同步日志保留同步任务与系统后台任务，移除 `calc_engine` 标签映射；生成补货建议继续在建议页通过 `task_run` 查询活跃任务和结果，不进入同步日志统计。
+- **测试**：新增 `backend/tests/unit/test_data_sync_state_api.py`、`frontend/src/components/sync/__tests__/SyncStateTable.test.ts` 与 `frontend/src/config/__tests__/sync.test.ts`，覆盖每日归档成功时间、最近失败错误和 `calc_engine` 排除口径。
 
 ### 3.102 后端镜像构建移除 apt 依赖（2026-05-04）
 - **部署修复**：`backend/Dockerfile` 移除 builder 阶段的 `build-essential/libpq-dev` 和 runtime 阶段的 `libpq5/tzdata` apt 安装；当前后端使用 `asyncpg` 且 `requirements.lock` 已包含 Python `tzdata` wheel，不依赖系统 `libpq` 或系统时区包。
