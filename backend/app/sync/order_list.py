@@ -42,7 +42,7 @@ CANCELED_PACKAGE_STATUS = "has_canceled"
 
 @register(JOB_NAME)
 async def sync_order_list_job(ctx: JobContext) -> None:
-    await ctx.progress(current_step="同步包裹订单列表", total_steps=1)
+    await ctx.progress(current_step="????????", total_steps=1)
     async with async_session_factory() as db:
         started = await mark_sync_running(db, JOB_NAME)
         date_start, date_end = _compute_window(started)
@@ -65,7 +65,7 @@ async def sync_order_list_job(ctx: JobContext) -> None:
             await mark_sync_success(db, JOB_NAME, started, success_at=date_end)
         logger.info("sync_order_list_skipped_no_enabled_shops", start=date_start, end=date_end)
         await ctx.progress(
-            current_step="完成", step_detail="未启用任何店铺，已清理旧订单并跳过同步 0 / 0"
+            current_step="??", step_detail="??????????????????? 0 / 0"
         )
         return
 
@@ -80,8 +80,8 @@ async def sync_order_list_job(ctx: JobContext) -> None:
             await ctx.progress(
                 total_steps=total_page,
                 step_detail=(
-                    f"第 {page_no} / {total_page} 页，当前页 {rows_count} 个包裹，"
-                    f"已处理 {order_count} 订单 / {item_count} 明细"
+                    f"? {page_no} / {total_page} ????? {rows_count} ????"
+                    f"??? {order_count} ?? / {item_count} ??"
                 ),
             )
 
@@ -110,8 +110,8 @@ async def sync_order_list_job(ctx: JobContext) -> None:
             items=item_count,
         )
         await ctx.progress(
-            current_step="完成",
-            step_detail=f"包裹 {package_count} / 订单 {order_count} / 明细 {item_count}",
+            current_step="??",
+            step_detail=f"?? {package_count} / ?? {order_count} / ?? {item_count}",
         )
     except Exception as exc:
         async with async_session_factory() as db:
@@ -268,7 +268,8 @@ async def _upsert_package_ship_order(
         seen_item_ids: list[str] = []
         item_values: list[dict[str, Any]] = []
         for index, raw_item in enumerate(order_items, start=1):
-            commodity_sku = _clean_text(raw_item.get("commoditySku"))
+            seller_sku = _clean_text(raw_item.get("sellerSku"))
+            commodity_sku = _clean_text(raw_item.get("commoditySku")) or seller_sku
             if not commodity_sku:
                 logger.warning(
                     "package_ship_item_skipped_missing_commodity_sku",
@@ -294,7 +295,7 @@ async def _upsert_package_ship_order(
                     "order_id": order_id,
                     "order_item_id": order_item_id,
                     "commodity_sku": commodity_sku,
-                    "seller_sku": _clean_text(raw_item.get("sellerSku")) or None,
+                    "seller_sku": seller_sku,
                     "quantity_ordered": quantity,
                     "quantity_shipped": quantity,
                     "quantity_unfulfillable": 0,

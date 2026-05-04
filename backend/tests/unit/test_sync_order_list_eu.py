@@ -80,7 +80,7 @@ async def test_upsert_package_order_maps_fields_and_items() -> None:
     assert (orders, items) == (1, 1)
     header_values = _compiled_params(db.statements[0])
     assert header_values["amazon_order_id"] == "AMZ-1"
-    assert header_values["source"] == "订单处理"
+    assert header_values["source"] == "????"
     assert header_values["order_platform"] == "Amazon"
     assert header_values["package_sn"] == "PKG-1"
     assert header_values["package_status"] == "has_shipped"
@@ -96,6 +96,35 @@ async def test_upsert_package_order_maps_fields_and_items() -> None:
     assert item_values["quantity_ordered_m0"] == 2
     assert item_values["quantity_shipped_m0"] == 2
     assert item_values["refund_num_m0"] == 0
+
+
+@pytest.mark.asyncio
+async def test_upsert_package_order_falls_back_to_seller_sku_when_commodity_sku_missing() -> None:
+    from app.sync.order_list import _upsert_package_ship_order
+
+    db = _FakeDb()
+    orders, items = await _upsert_package_ship_order(
+        db,  # type: ignore[arg-type]
+        _package_payload(
+            platformName="Wayfair",
+            items=[
+                {
+                    "amazonOrderId": "AMZ-1",
+                    "orderItemId": "ITEM-1",
+                    "commoditySku": None,
+                    "sellerSku": "LGJ",
+                    "quantityOrdered": "3",
+                }
+            ],
+        ),
+        set(),
+    )
+
+    assert (orders, items) == (1, 1)
+    item_values = _compiled_params(db.statements[1])
+    assert item_values["commodity_sku_m0"] == "LGJ"
+    assert item_values["seller_sku_m0"] == "LGJ"
+    assert item_values["quantity_ordered_m0"] == 3
 
 
 @pytest.mark.asyncio
