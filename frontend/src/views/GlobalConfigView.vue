@@ -351,4 +351,52 @@ async function save(): Promise<void> {
   max-width: 620px;
   margin-bottom: $space-4;
 }
+
+@media (max-width: 767px) {
+  .toggle-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: $space-3;
+  }
+
+  .toggle-meta {
+    width: 100%;
+  }
+
+  .config-sections {
+    gap: $space-4;
+  }
+
+  .section-label {
+    margin-bottom: $space-2;
+  }
+
+  :deep(.el-form-item) {
+    flex-direction: column;
+    align-items: flex-start;
+    margin-bottom: $space-3;
+  }
+
+  :deep(.el-form-item__label) {
+    width: 100% !important;
+    justify-content: flex-start;
+    height: auto;
+  }
+
+  :deep(.el-form-item__content) {
+    width: 100%;
+    margin-left: 0 !important;
+  }
+
+  :deep(.el-input-number),
+  :deep(.el-select),
+  :deep(.el-input),
+  .full-width-control {
+    width: 100%;
+  }
+
+  .country-discovery-alert {
+    max-width: 100%;
+  }
+}
 </style>

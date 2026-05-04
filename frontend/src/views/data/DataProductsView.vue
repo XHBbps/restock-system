@@ -28,7 +28,7 @@
       </el-button>
     </template>
 
-    <el-table v-loading="loading" :data="rows" row-key="commodity_sku">
+    <el-table v-if="!isMobile" v-loading="loading" :data="rows" row-key="commodity_sku">
       <el-table-column type="expand">
         <template #default="{ row }">
           <div class="expand-wrapper">
@@ -75,6 +75,61 @@
       <el-table-column label="30天总销量" prop="total_day30_sales" width="120" align="right" />
     </el-table>
 
+    <MobileRecordList
+      v-else
+      :items="rows"
+      :loading="loading"
+      row-key="commodity_sku"
+      empty-text="暂无商品"
+    >
+      <template #default="{ item: row }">
+        <div class="mobile-product-card">
+          <div class="mobile-product-card__main">
+            <SkuCard :sku="row.commodity_sku" :name="row.commodity_name" :image="row.main_image" />
+            <el-switch
+              v-model="row.enabled"
+              :disabled="!auth.hasPermission('data_base:edit')"
+              @change="(v: string | number | boolean) => updateEnabled(row, normalizeSwitchValue(v))"
+            />
+          </div>
+          <div class="mobile-kv-grid">
+            <div>
+              <span>状态</span>
+              <strong>{{ row.enabled ? '已启用' : '已禁用' }}</strong>
+            </div>
+            <div>
+              <span>listing 数</span>
+              <strong>{{ row.listing_count }}</strong>
+            </div>
+            <div>
+              <span>30 天销量</span>
+              <strong>{{ row.total_day30_sales }}</strong>
+            </div>
+          </div>
+          <el-collapse v-if="row.listings.length > 0" class="mobile-listing-collapse">
+            <el-collapse-item :title="`listing 明细（${row.listings.length}）`" name="listings">
+              <div class="mobile-listing-list">
+                <div v-for="listing in row.listings" :key="listing.id" class="mobile-listing-item">
+                  <div class="mobile-listing-item__head">
+                    <strong>{{ listing.marketplace_id }}</strong>
+                    <el-tag :type="getListingOnlineStatusMeta(listing.online_status).tagType" size="small">
+                      {{ getListingOnlineStatusMeta(listing.online_status).label }}
+                    </el-tag>
+                  </div>
+                  <div class="mobile-listing-item__sku">{{ listing.seller_sku || '-' }}</div>
+                  <div class="mobile-listing-item__sales">
+                    <span>7天 {{ listing.day7_sale_num ?? 0 }}</span>
+                    <span>14天 {{ listing.day14_sale_num ?? 0 }}</span>
+                    <span>30天 {{ listing.day30_sale_num ?? 0 }}</span>
+                  </div>
+                </div>
+              </div>
+            </el-collapse-item>
+          </el-collapse>
+        </div>
+      </template>
+    </MobileRecordList>
+
     <TablePaginationBar
       v-model:current-page="page"
       v-model:page-size="pageSize"
@@ -89,9 +144,11 @@
 <script setup lang="ts">
 import { listSkuOverview, type SkuOverviewItem } from '@/api/data'
 import { initSkuConfigs, patchSkuConfig } from '@/api/config'
+import MobileRecordList from '@/components/MobileRecordList.vue'
 import SkuCard from '@/components/SkuCard.vue'
 import PageSectionCard from '@/components/PageSectionCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
+import { useResponsive } from '@/composables/useResponsive'
 import { normalizeSwitchValue } from '@/utils/element'
 import { formatUpdateTime } from '@/utils/format'
 import { getListingOnlineStatusMeta } from '@/utils/status'
@@ -101,6 +158,7 @@ import { ElMessage } from 'element-plus'
 import { onMounted, reactive, ref } from 'vue'
 
 const auth = useAuthStore()
+const { isMobile } = useResponsive()
 const rows = ref<SkuOverviewItem[]>([])
 const total = ref(0)
 const page = ref(1)
@@ -188,5 +246,97 @@ function handlePageSizeChange(value: number): void {
 .mono {
   font-family: $font-family-mono;
   font-size: $font-size-xs;
+}
+
+@media (max-width: 767px) {
+  .mobile-product-card {
+    display: flex;
+    flex-direction: column;
+    gap: $space-3;
+  }
+
+  .mobile-product-card__main {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: $space-3;
+  }
+
+  .mobile-product-card__main :deep(.sku-card) {
+    min-width: 0;
+  }
+
+  .mobile-kv-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: $space-2;
+  }
+
+  .mobile-kv-grid > div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    padding: $space-2;
+    border-radius: $radius-md;
+    background: $color-bg-subtle;
+  }
+
+  .mobile-kv-grid span {
+    color: $color-text-secondary;
+    font-size: 11px;
+  }
+
+  .mobile-kv-grid strong {
+    overflow: hidden;
+    font-weight: $font-weight-semibold;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mobile-listing-collapse {
+    border: 0;
+  }
+
+  .mobile-listing-collapse :deep(.el-collapse-item__header) {
+    height: 36px;
+    border: 0;
+    font-size: $font-size-xs;
+  }
+
+  .mobile-listing-collapse :deep(.el-collapse-item__wrap) {
+    border: 0;
+  }
+
+  .mobile-listing-collapse :deep(.el-collapse-item__content) {
+    padding: 0;
+  }
+
+  .mobile-listing-list {
+    display: flex;
+    flex-direction: column;
+    gap: $space-2;
+  }
+
+  .mobile-listing-item {
+    padding: $space-2;
+    border: 1px solid $color-border-default;
+    border-radius: $radius-md;
+  }
+
+  .mobile-listing-item__head,
+  .mobile-listing-item__sales {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: $space-2;
+  }
+
+  .mobile-listing-item__sku,
+  .mobile-listing-item__sales {
+    margin-top: $space-1;
+    color: $color-text-secondary;
+    font-size: $font-size-xs;
+  }
 }
 </style>

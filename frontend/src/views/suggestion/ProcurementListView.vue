@@ -10,6 +10,15 @@
         <el-input v-model="skuFilter" placeholder="SKU 搜索" clearable style="width: 220px" />
       </div>
       <div class="table-toolbar__actions">
+        <el-checkbox
+          v-if="editable && isMobile"
+          :model-value="isAllSelected"
+          :indeterminate="isIndeterminate"
+          :disabled="allSelectableIds.length === 0"
+          @change="(checked: string | number | boolean) => toggleSelectAll(Boolean(checked))"
+        >
+          全选
+        </el-checkbox>
         <el-button
           v-if="editable"
           type="primary"
@@ -23,6 +32,7 @@
     </div>
 
     <el-table
+      v-if="!isMobile"
       v-loading="loading"
       :data="pagedItems"
       empty-text="本期无采购需求"
@@ -71,6 +81,48 @@
       </el-table-column>
     </el-table>
 
+    <MobileRecordList
+      v-else
+      :items="pagedItems"
+      :loading="loading"
+      row-key="id"
+      empty-text="本期无采购需求"
+    >
+      <template #default="{ item: row }">
+        <div class="mobile-suggestion-card">
+          <div class="mobile-suggestion-card__head">
+            <el-checkbox
+              v-if="editable"
+              :model-value="isRowSelected(row.id)"
+              @change="(checked: string | number | boolean) => toggleRow(row.id, Boolean(checked))"
+            />
+            <SkuCard :sku="row.commodity_sku" :name="row.commodity_name" :image="row.main_image" />
+          </div>
+          <div class="mobile-suggestion-card__body">
+            <div class="mobile-field">
+              <span>采购量</span>
+              <el-input-number
+                v-if="editable"
+                :model-value="draftValue(row.id, 'purchase_qty', row.purchase_qty)"
+                :min="0"
+                size="small"
+                @update:model-value="
+                  (value: number | undefined) => updateDraft(row.id, 'purchase_qty', Number(value ?? 0))
+                "
+              />
+              <strong v-else>{{ row.purchase_qty }}</strong>
+            </div>
+            <div class="mobile-field">
+              <span>状态</span>
+              <el-tag :type="row.procurement_export_status === 'exported' ? 'success' : 'warning'" size="small">
+                {{ row.procurement_export_status === 'exported' ? '已导出' : '未导出' }}
+              </el-tag>
+            </div>
+          </div>
+        </div>
+      </template>
+    </MobileRecordList>
+
     <TablePaginationBar
       v-model:current-page="page"
       v-model:page-size="pageSize"
@@ -89,8 +141,10 @@ import {
   type SuggestionItemPatch,
 } from '@/api/suggestion'
 import { createProcurementSnapshot, downloadSnapshotBlob } from '@/api/snapshot'
+import MobileRecordList from '@/components/MobileRecordList.vue'
 import SkuCard from '@/components/SkuCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
+import { useResponsive } from '@/composables/useResponsive'
 import { getActionErrorMessage } from '@/utils/apiError'
 import { triggerBlobDownload } from '@/utils/download'
 import { useCrossPageSelection } from '@/views/suggestion/useCrossPageSelection'
@@ -108,6 +162,7 @@ const emit = defineEmits<{
 }>()
 
 const skuFilter = ref('')
+const { isMobile } = useResponsive()
 const page = ref(1)
 const pageSize = ref(20)
 const exporting = ref(false)
@@ -251,5 +306,60 @@ async function handleExport(): Promise<void> {
   display: flex;
   gap: $space-2;
   align-items: center;
+}
+
+@media (max-width: 767px) {
+  .table-toolbar,
+  .table-toolbar__filters,
+  .table-toolbar__actions {
+    width: 100%;
+    align-items: stretch;
+  }
+
+  .table-toolbar {
+    flex-direction: column;
+  }
+
+  .table-toolbar__filters :deep(.el-input),
+  .table-toolbar__actions :deep(.el-button) {
+    width: 100% !important;
+  }
+
+  .mobile-suggestion-card {
+    display: flex;
+    flex-direction: column;
+    gap: $space-3;
+  }
+
+  .mobile-suggestion-card__head {
+    display: flex;
+    gap: $space-3;
+    align-items: center;
+  }
+
+  .mobile-suggestion-card__head :deep(.sku-card) {
+    min-width: 0;
+  }
+
+  .mobile-suggestion-card__body {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: $space-2;
+  }
+
+  .mobile-field {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: $space-3;
+    padding: $space-2;
+    border-radius: $radius-md;
+    background: $color-bg-subtle;
+  }
+
+  .mobile-field > span {
+    color: $color-text-secondary;
+    font-size: $font-size-xs;
+  }
 }
 </style>

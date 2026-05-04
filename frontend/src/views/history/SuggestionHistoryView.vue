@@ -5,7 +5,13 @@
       :suggestion-id="dialogSuggestionId"
       :type="type"
     />
-    <el-table v-loading="loading" :data="rows" :empty-text="emptyText" class="history-table">
+    <el-table
+      v-if="!isMobile"
+      v-loading="loading"
+      :data="rows"
+      :empty-text="emptyText"
+      class="history-table"
+    >
       <el-table-column :label="idLabel" min-width="150">
         <template #default="{ row }">
           <span class="order-id">{{ idPrefix }}-{{ row.id }}</span>
@@ -47,6 +53,52 @@
       </el-table-column>
     </el-table>
 
+    <MobileRecordList
+      v-else
+      :items="rows"
+      :loading="loading"
+      row-key="id"
+      :empty-text="emptyText"
+    >
+      <template #default="{ item: row }">
+        <div class="mobile-history-card">
+          <div class="mobile-history-card__head">
+            <span class="order-id">{{ idPrefix }}-{{ row.id }}</span>
+            <el-tag :type="statusTagType(row[displayStatusCodeField])" size="small">
+              {{ row[displayStatusField] }}
+            </el-tag>
+          </div>
+          <div class="mobile-history-card__meta">
+            <div>
+              <span>最新版本</span>
+              <strong v-if="row[snapshotCountField] > 0" class="version-label">
+                V{{ row[snapshotCountField] }}
+              </strong>
+              <strong v-else class="muted">-</strong>
+            </div>
+            <div>
+              <span>生成时间</span>
+              <strong>{{ formatDateTime(row.created_at) }}</strong>
+            </div>
+          </div>
+          <div class="mobile-history-card__actions">
+            <el-button link type="primary" class="history-action" @click="openDetail(row.id)">详情</el-button>
+            <el-button
+              link
+              type="danger"
+              class="history-action history-action--danger"
+              :disabled="!canDelete(row)"
+              :title="canDelete(row) ? '' : '已导出的建议单不可删除'"
+              :loading="deletingId === row.id"
+              @click="deleteOne(row)"
+            >
+              删除
+            </el-button>
+          </div>
+        </div>
+      </template>
+    </MobileRecordList>
+
     <TablePaginationBar
       v-model:current-page="page"
       v-model:page-size="pageSize"
@@ -60,7 +112,9 @@
 
 <script setup lang="ts">
 import SuggestionDetailDialog from '@/components/SuggestionDetailDialog.vue'
+import MobileRecordList from '@/components/MobileRecordList.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
+import { useResponsive } from '@/composables/useResponsive'
 import { deleteSuggestion, listSuggestions, type Suggestion } from '@/api/suggestion'
 import { statusTagType } from '@/views/history/displayStatusTag'
 import { getActionErrorMessage } from '@/utils/apiError'
@@ -71,6 +125,7 @@ import { computed, onMounted, ref } from 'vue'
 type HistoryType = 'procurement' | 'restock'
 
 const props = defineProps<{ type: HistoryType }>()
+const { isMobile } = useResponsive()
 
 const rows = ref<Suggestion[]>([])
 const total = ref(0)
@@ -228,6 +283,52 @@ onMounted(() => {
     color: $color-danger-dark !important;
     background: $color-danger-soft !important;
     box-shadow: 0 1px 2px rgba(220, 38, 38, 0.15);
+  }
+}
+
+@media (max-width: 767px) {
+  .mobile-history-card {
+    display: flex;
+    flex-direction: column;
+    gap: $space-3;
+  }
+
+  .mobile-history-card__head,
+  .mobile-history-card__actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: $space-2;
+  }
+
+  .mobile-history-card__meta {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: $space-2;
+  }
+
+  .mobile-history-card__meta > div {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: $space-3;
+    padding: $space-2;
+    border-radius: $radius-md;
+    background: $color-bg-subtle;
+  }
+
+  .mobile-history-card__meta span {
+    color: $color-text-secondary;
+    font-size: $font-size-xs;
+  }
+
+  .mobile-history-card__meta strong {
+    min-width: 0;
+    overflow: hidden;
+    font-size: $font-size-xs;
+    font-weight: $font-weight-medium;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 </style>

@@ -93,4 +93,41 @@ defineProps<{
     justify-content: flex-start;
   }
 }
+
+@media (max-width: 767px) {
+  .dashboard-page-header {
+    gap: $space-3;
+    padding: $space-4;
+    border-radius: $radius-lg;
+  }
+
+  .dashboard-page-header__title {
+    font-size: $font-size-2xl;
+    letter-spacing: 0;
+  }
+
+  .dashboard-page-header__description {
+    font-size: $font-size-sm;
+    line-height: $line-height-normal;
+  }
+
+  .dashboard-page-header__aside,
+  .dashboard-page-header__meta,
+  .dashboard-page-header__actions {
+    width: 100%;
+    align-items: stretch;
+  }
+
+  .dashboard-page-header__actions :deep(.el-button),
+  .dashboard-page-header__actions :deep(.el-input),
+  .dashboard-page-header__actions :deep(.el-select),
+  .dashboard-page-header__actions :deep(.el-date-editor) {
+    width: 100% !important;
+  }
+
+  .dashboard-page-header__actions :deep(.el-switch) {
+    width: auto !important;
+    align-self: flex-start;
+  }
+}
 </style>

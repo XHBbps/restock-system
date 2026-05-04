@@ -32,7 +32,7 @@
       <el-switch v-model="filters.only_nonzero" active-text="仅非零" @change="reloadFirstPage" />
     </template>
 
-    <el-table v-loading="loading" :data="warehouseGroups" row-key="warehouseId">
+    <el-table v-if="!isMobile" v-loading="loading" :data="warehouseGroups" row-key="warehouseId">
       <el-table-column type="expand">
         <template #default="{ row }">
           <div class="expand-wrapper">
@@ -93,6 +93,56 @@
       <el-table-column label="占用库存合计" prop="totalOccupy" width="140" align="right" />
     </el-table>
 
+    <MobileRecordList
+      v-else
+      :items="warehouseGroups"
+      :loading="loading"
+      row-key="warehouseId"
+      empty-text="暂无库存"
+    >
+      <template #default="{ item: row }">
+        <div class="mobile-inventory-card">
+          <div class="mobile-card-head">
+            <div class="meta-stack">
+              <strong>{{ row.warehouseName }}</strong>
+              <span class="meta-sub">{{ row.warehouseId }}</span>
+            </div>
+            <el-tag size="small" type="info">{{ warehouseTypeLabel(row.warehouseType) }}</el-tag>
+          </div>
+          <div class="mobile-kv-grid">
+            <div>
+              <span>SKU 数</span>
+              <strong>{{ row.skuCount }}</strong>
+            </div>
+            <div>
+              <span>可用库存</span>
+              <strong>{{ row.totalAvailable }}</strong>
+            </div>
+            <div>
+              <span>占用库存</span>
+              <strong>{{ row.totalOccupy }}</strong>
+            </div>
+          </div>
+          <el-collapse v-if="row.items.length > 0" class="mobile-detail-collapse">
+            <el-collapse-item :title="`库存明细（${row.items.length}）`" name="items">
+              <div class="mobile-inventory-items">
+                <div v-for="item in row.items" :key="`${item.warehouseId}-${item.commoditySku}`" class="mobile-inventory-item">
+                  <SkuCard :sku="item.commoditySku" :name="item.commodityName" :image="item.mainImage" />
+                  <div class="mobile-inventory-item__meta">
+                    <el-tag v-if="item.country" size="small">{{ item.country }}</el-tag>
+                    <span v-else class="muted">-</span>
+                    <span>{{ item.isPackage ? '未匹配' : '已匹配' }}</span>
+                    <span>可用 {{ item.stockAvailable }}</span>
+                    <span>占用 {{ item.stockOccupy }}</span>
+                  </div>
+                </div>
+              </div>
+            </el-collapse-item>
+          </el-collapse>
+        </div>
+      </template>
+    </MobileRecordList>
+
     <TablePaginationBar
       v-model:current-page="page"
       v-model:page-size="pageSize"
@@ -107,9 +157,11 @@
 <script setup lang="ts">
 import { listInventoryWarehouseGroups, type DataInventoryWarehouseGroup } from '@/api/data'
 import { getCountryOptions, type CountryOption } from '@/api/config'
+import MobileRecordList from '@/components/MobileRecordList.vue'
 import PageSectionCard from '@/components/PageSectionCard.vue'
 import SkuCard from '@/components/SkuCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
+import { useResponsive } from '@/composables/useResponsive'
 import { getActionErrorMessage } from '@/utils/apiError'
 import { COUNTRY_OPTIONS } from '@/utils/countries'
 import { formatUpdateTime } from '@/utils/format'
@@ -118,6 +170,7 @@ import { ElMessage } from 'element-plus'
 import { onMounted, reactive, ref } from 'vue'
 
 const warehouseGroups = ref<DataInventoryWarehouseGroup[]>([])
+const { isMobile } = useResponsive()
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
@@ -217,5 +270,86 @@ function handlePageSizeChange(value: number): void {
   display: inline-block;
   font-size: 2em;
   line-height: 1;
+}
+
+@media (max-width: 767px) {
+  .mobile-inventory-card {
+    display: flex;
+    flex-direction: column;
+    gap: $space-3;
+  }
+
+  .mobile-card-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: $space-3;
+  }
+
+  .mobile-kv-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: $space-2;
+  }
+
+  .mobile-kv-grid > div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    padding: $space-2;
+    border-radius: $radius-md;
+    background: $color-bg-subtle;
+  }
+
+  .mobile-kv-grid span,
+  .mobile-inventory-item__meta {
+    color: $color-text-secondary;
+    font-size: $font-size-xs;
+  }
+
+  .mobile-kv-grid strong {
+    font-weight: $font-weight-semibold;
+  }
+
+  .mobile-detail-collapse {
+    border: 0;
+  }
+
+  .mobile-detail-collapse :deep(.el-collapse-item__header),
+  .mobile-detail-collapse :deep(.el-collapse-item__wrap) {
+    border: 0;
+  }
+
+  .mobile-detail-collapse :deep(.el-collapse-item__header) {
+    height: 36px;
+    font-size: $font-size-xs;
+  }
+
+  .mobile-detail-collapse :deep(.el-collapse-item__content) {
+    padding: 0;
+  }
+
+  .mobile-inventory-items {
+    display: flex;
+    flex-direction: column;
+    gap: $space-2;
+  }
+
+  .mobile-inventory-item {
+    display: flex;
+    flex-direction: column;
+    gap: $space-2;
+    padding: $space-2;
+    border: 1px solid $color-border-default;
+    border-radius: $radius-md;
+  }
+
+  .mobile-inventory-item__meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: $space-2;
+  }
 }
 </style>

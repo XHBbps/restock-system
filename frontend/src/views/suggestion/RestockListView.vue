@@ -10,6 +10,15 @@
         <el-input v-model="skuFilter" placeholder="SKU 搜索" clearable style="width: 220px" />
       </div>
       <div class="table-toolbar__actions">
+        <el-checkbox
+          v-if="editable && isMobile"
+          :model-value="isAllSelected"
+          :indeterminate="isIndeterminate"
+          :disabled="allSelectableIds.length === 0"
+          @change="(checked: string | number | boolean) => toggleSelectAll(Boolean(checked))"
+        >
+          全选
+        </el-checkbox>
         <el-button
           v-if="editable"
           type="primary"
@@ -23,6 +32,7 @@
     </div>
 
     <el-table
+      v-if="!isMobile"
       v-loading="loading"
       :data="pagedItems"
       empty-text="本期无补货需求"
@@ -115,6 +125,71 @@
       </el-table-column>
     </el-table>
 
+    <MobileRecordList
+      v-else
+      :items="pagedItems"
+      :loading="loading"
+      row-key="id"
+      empty-text="本期无补货需求"
+    >
+      <template #default="{ item: row }">
+        <div class="mobile-suggestion-card">
+          <div class="mobile-suggestion-card__head">
+            <el-checkbox
+              v-if="editable"
+              :model-value="isRowSelected(row.id)"
+              @change="(checked: string | number | boolean) => toggleRow(row.id, Boolean(checked))"
+            />
+            <SkuCard :sku="row.commodity_sku" :name="row.commodity_name" :image="row.main_image" />
+          </div>
+          <div class="mobile-suggestion-card__stats">
+            <div class="mobile-field">
+              <span>补货量</span>
+              <strong>{{ restockTotal(row) }}</strong>
+            </div>
+            <div class="mobile-field">
+              <span>状态</span>
+              <el-tag :type="row.restock_export_status === 'exported' ? 'success' : 'warning'" size="small">
+                {{ row.restock_export_status === 'exported' ? '已导出' : '未导出' }}
+              </el-tag>
+            </div>
+          </div>
+          <div class="country-chips">
+            <el-tag v-for="country in countryRows(row)" :key="country.country" size="small">
+              {{ country.country }}: {{ country.qty }}
+            </el-tag>
+          </div>
+          <el-collapse v-if="countryRows(row).length > 0" class="mobile-detail-collapse">
+            <el-collapse-item title="仓库分配" name="breakdown">
+              <table class="breakdown-table mobile-breakdown-table">
+                <tbody>
+                  <tr v-for="country in countryRows(row)" :key="country.country" class="breakdown-row">
+                    <td class="breakdown-col-country">{{ getCountryLabel(country.country) }}</td>
+                    <td class="breakdown-col-qty">{{ country.qty }}</td>
+                    <td class="breakdown-col-warehouses">
+                      <template v-if="country.warehouses.length > 0">
+                        <el-tag
+                          v-for="warehouse in country.warehouses"
+                          :key="warehouse.id"
+                          size="small"
+                          class="breakdown-warehouse-chip"
+                        >
+                          {{ warehouseLabel(warehouse.id) }} · {{ warehouse.qty }}
+                        </el-tag>
+                      </template>
+                      <el-tag v-else type="warning" effect="plain" size="small">
+                        未拆仓（{{ country.qty }}）
+                      </el-tag>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </el-collapse-item>
+          </el-collapse>
+        </div>
+      </template>
+    </MobileRecordList>
+
     <TablePaginationBar
       v-model:current-page="page"
       v-model:page-size="pageSize"
@@ -129,8 +204,10 @@
 import { listWarehouses, type Warehouse } from '@/api/config'
 import type { SuggestionDetail, SuggestionItem } from '@/api/suggestion'
 import { createRestockSnapshot, downloadSnapshotBlob } from '@/api/snapshot'
+import MobileRecordList from '@/components/MobileRecordList.vue'
 import SkuCard from '@/components/SkuCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
+import { useResponsive } from '@/composables/useResponsive'
 import { getActionErrorMessage } from '@/utils/apiError'
 import { getCountryLabel } from '@/utils/countries'
 import { triggerBlobDownload } from '@/utils/download'
@@ -155,6 +232,7 @@ const emit = defineEmits<{
 }>()
 
 const skuFilter = ref('')
+const { isMobile } = useResponsive()
 const page = ref(1)
 const pageSize = ref(20)
 const exporting = ref(false)
@@ -344,5 +422,97 @@ async function handleExport(): Promise<void> {
 
 .breakdown-warehouse-chip {
   margin: 2px 4px 2px 0;
+}
+
+@media (max-width: 767px) {
+  .table-toolbar,
+  .table-toolbar__filters,
+  .table-toolbar__actions {
+    width: 100%;
+    align-items: stretch;
+  }
+
+  .table-toolbar {
+    flex-direction: column;
+  }
+
+  .table-toolbar__filters :deep(.el-input),
+  .table-toolbar__actions :deep(.el-button) {
+    width: 100% !important;
+  }
+
+  .mobile-suggestion-card {
+    display: flex;
+    flex-direction: column;
+    gap: $space-3;
+  }
+
+  .mobile-suggestion-card__head {
+    display: flex;
+    align-items: center;
+    gap: $space-3;
+  }
+
+  .mobile-suggestion-card__head :deep(.sku-card) {
+    min-width: 0;
+  }
+
+  .mobile-suggestion-card__stats {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: $space-2;
+  }
+
+  .mobile-field {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    padding: $space-2;
+    border-radius: $radius-md;
+    background: $color-bg-subtle;
+  }
+
+  .mobile-field > span {
+    color: $color-text-secondary;
+    font-size: $font-size-xs;
+  }
+
+  .mobile-field > strong {
+    font-weight: $font-weight-semibold;
+  }
+
+  .mobile-detail-collapse {
+    border: 0;
+  }
+
+  .mobile-detail-collapse :deep(.el-collapse-item__header),
+  .mobile-detail-collapse :deep(.el-collapse-item__wrap) {
+    border: 0;
+  }
+
+  .mobile-detail-collapse :deep(.el-collapse-item__header) {
+    height: 36px;
+    font-size: $font-size-xs;
+  }
+
+  .mobile-detail-collapse :deep(.el-collapse-item__content) {
+    padding: 0;
+  }
+
+  .mobile-breakdown-table {
+    display: block;
+    width: 100%;
+    margin: 0;
+    overflow-x: auto;
+  }
+
+  .breakdown-col-country {
+    width: 96px;
+  }
+
+  .breakdown-col-warehouses {
+    min-width: 220px;
+  }
 }
 </style>

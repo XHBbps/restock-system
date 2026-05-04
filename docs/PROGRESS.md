@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-05-04（商品 SKU 启用口径调整：历史 `sku_config` 一次性启用，新发现 SKU 默认启用；后续人工禁用不会被商品同步覆盖。）
+> 最近更新：2026-05-04（前端移动端增强：公共响应式基础设施、移动抽屉导航、紧凑分页、移动卡片列表与高频业务页卡片化已交付。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -11,7 +11,7 @@
 |---|---|
 | 主链路 | 打通 — 赛狐同步 → 补货计算 → 建议编辑 → Excel 导出 + Snapshot 版本化（Plan A 已替换旧赛狐写入链路） |
 | 工程化 | 运行时配置校验、健康检查、部署脚本、CI 骨架、测试覆盖已就绪 |
-| 前端 | 已统一到 `PageSectionCard`；订单、历史、商品、库存、出库记录等高增长页面已切换为后端分页模式，设计系统对齐 shadcn Zinc |
+| 前端 | 已统一到 `PageSectionCard`；订单、历史、商品、库存、出库记录等高增长页面已切换为后端分页模式并补齐移动端卡片视图，设计系统对齐 shadcn Zinc |
 | 后端 | 三服务进程分离（backend / worker / scheduler），TaskRun 队列稳定运行 |
 
 ---
@@ -85,6 +85,8 @@
 - **嵌套路由与 Tab 视图**：当前建议、建议详情、历史记录均拆为 procurement / restock 子路由，`SuggestionTabBar` 统一切换；采购页默认按 `commodity_sku` 稳定排序，仅展示商品信息、采购量与导出状态，补货页支持国家与仓库下钻。
 
 - **统一页面容器**：所有列表页使用 `PageSectionCard`（`#title` + `#actions` slot）
+- **移动端增强基础设施**：`AppLayout.vue` 在窄屏改用顶部菜单按钮 + `el-drawer` 导航；`PageSectionCard` 的 actions 区在小屏自动纵向排列；`TablePaginationBar` 基于 `useResponsive()` 在手机端切换为紧凑分页；`element-overrides.scss` 统一补齐移动端 dialog、表单与表格横向滚动兜底。
+- **移动端卡片列表**：新增 `frontend/src/components/MobileRecordList.vue` 与 `frontend/src/composables/useResponsive.ts`，桌面端保留原 `el-table`，移动端复用同一份接口响应展示卡片，不新增移动专用 API 或 store。
 - **共享工具模块**：
   - `frontend/src/utils/format.ts` — 时间格式化（`formatShortTime` / `formatDateTime` / `formatDetailTime`）和分页工具（`clampPage`）
   - `frontend/src/utils/warehouse.ts` — 仓库类型标签和标签类型
@@ -104,6 +106,14 @@
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.97 前端移动端增强版（2026-05-04）
+- **公共布局**：`frontend/src/components/AppLayout.vue` 在手机端隐藏固定侧栏，顶部栏显示菜单按钮，并通过 `el-drawer` 展示原导航；桌面端侧栏折叠与 hover 子菜单行为保持不变。
+- **共享组件**：新增 `frontend/src/composables/useResponsive.ts` 统一输出 `isMobile/isTablet`；新增 `frontend/src/components/MobileRecordList.vue` 作为移动端卡片列表外壳；`TablePaginationBar.vue` 手机端隐藏 total/page size 并使用紧凑 pager。
+- **高频数据页**：`DataOrdersView.vue`、`DataProductsView.vue`、`DataInventoryView.vue`、`DataOutRecordsView.vue` 在移动端切换为卡片列表，保留桌面端表格；订单详情弹窗手机端全屏，库存 / 出库 / 商品 listing 明细保留可展开区域。
+- **建议与历史页**：`ProcurementListView.vue`、`RestockListView.vue`、`SuggestionHistoryView.vue` 移动端使用卡片展示主要字段与操作，继续复用现有跨页选择、导出和删除逻辑；`SuggestionDetailDialog.vue` 手机端全屏，版本列表与明细区改为上下布局。
+- **低频页兜底**：`PageSectionCard.vue`、`DashboardPageHeader.vue`、`DashboardSection.vue`、`DataTableCard.vue`、`GlobalConfigView.vue` 和 `element-overrides.scss` 补齐小屏动作区换行、表单单列化、dialog 宽度和表格横向滚动规则，配置/监控页保持可用不遮挡。
+- **验证**：前端 `cmd /c npm run build` 通过；`cmd /c npm test` 在提权环境通过（31 个文件、136 条测试）。
 
 ### 3.96 商品 SKU 默认启用与历史启用迁移（2026-05-04）
 - **默认启用**：`backend/app/sync/product_listing.py` 的商品主数据补齐与 listing 补齐均改为只给缺失 SKU 新建 `sku_config(enabled=true)`；`backend/app/api/config.py` 的商品页“同步商品主数据”补齐入口同样默认启用新 SKU。

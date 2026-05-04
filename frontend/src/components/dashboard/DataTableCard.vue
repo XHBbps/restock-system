@@ -61,4 +61,26 @@ defineProps<{
     align-items: flex-start;
   }
 }
+
+@media (max-width: 767px) {
+  .data-table-card__header {
+    gap: $space-3;
+  }
+
+  .data-table-card__title {
+    font-size: $font-size-base;
+  }
+
+  .data-table-card__toolbar {
+    width: 100%;
+    align-items: stretch;
+  }
+
+  .data-table-card__toolbar :deep(.el-button),
+  .data-table-card__toolbar :deep(.el-input),
+  .data-table-card__toolbar :deep(.el-select),
+  .data-table-card__toolbar :deep(.el-switch) {
+    width: 100% !important;
+  }
+}
 </style>

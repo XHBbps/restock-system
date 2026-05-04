@@ -53,6 +53,7 @@
     </template>
 
     <el-table
+      v-if="!isMobile"
       v-loading="loading"
       :data="rows"
       row-key="saihuOutRecordId"
@@ -118,6 +119,61 @@
       </el-table-column>
     </el-table>
 
+    <MobileRecordList
+      v-else
+      :items="rows"
+      :loading="loading"
+      row-key="saihuOutRecordId"
+      empty-text="暂无出库记录"
+    >
+      <template #default="{ item: row }">
+        <div class="mobile-out-record-card">
+          <div class="mobile-card-head">
+            <div class="meta-stack">
+              <strong class="mono">{{ row.saihuOutRecordId }}</strong>
+              <span class="meta-sub">{{ row.warehouseId || '-' }}</span>
+            </div>
+            <el-tag :type="getOutRecordTransitStatusMeta(row.isInTransit).tagType" size="small">
+              {{ getOutRecordTransitStatusMeta(row.isInTransit).label }}
+            </el-tag>
+          </div>
+          <div class="mobile-card-meta">
+            <el-tag v-if="row.targetCountry" size="small">{{ row.targetCountry }}</el-tag>
+            <span v-else class="muted">目标国家 -</span>
+            <el-tag v-if="row.typeName" type="info" size="small">{{ row.typeName }}</el-tag>
+          </div>
+          <div class="mobile-kv-grid">
+            <div>
+              <span>明细数</span>
+              <strong>{{ row.items.length }}</strong>
+            </div>
+            <div>
+              <span>更新时间</span>
+              <strong class="mono">{{ formatUpdateTime(row.updateTime) }}</strong>
+            </div>
+            <div class="mobile-kv-grid__wide">
+              <span>同步时间</span>
+              <strong class="mono">{{ formatUpdateTime(row.lastSeenAt) }}</strong>
+            </div>
+          </div>
+          <el-collapse v-if="row.items.length > 0" class="mobile-detail-collapse">
+            <el-collapse-item :title="`出库明细（${row.items.length}）`" name="items">
+              <div class="mobile-out-items">
+                <div v-for="item in row.items" :key="`${row.saihuOutRecordId}-${item.commoditySku}-${item.commodityId}`" class="mobile-out-item">
+                  <div class="mobile-out-item__sku mono">{{ item.commoditySku }}</div>
+                  <div class="mobile-out-item__meta">
+                    <span>商品ID {{ item.commodityId || '-' }}</span>
+                    <span>可用 {{ item.goods }}</span>
+                    <span>采购单价 {{ item.perPurchase ?? '-' }}</span>
+                  </div>
+                </div>
+              </div>
+            </el-collapse-item>
+          </el-collapse>
+        </div>
+      </template>
+    </MobileRecordList>
+
     <TablePaginationBar
       v-model:current-page="page"
       v-model:page-size="pageSize"
@@ -132,8 +188,10 @@
 <script setup lang="ts">
 import { listOutRecords, listOutRecordTypes, type DataOutRecord } from '@/api/data'
 import { getCountryOptions, type CountryOption } from '@/api/config'
+import MobileRecordList from '@/components/MobileRecordList.vue'
 import PageSectionCard from '@/components/PageSectionCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
+import { useResponsive } from '@/composables/useResponsive'
 import { getActionErrorMessage } from '@/utils/apiError'
 import { COUNTRY_OPTIONS } from '@/utils/countries'
 import { formatShortTime, formatUpdateTime } from '@/utils/format'
@@ -143,6 +201,7 @@ import { ElMessage } from 'element-plus'
 import { onMounted, reactive, ref } from 'vue'
 
 const rows = ref<DataOutRecord[]>([])
+const { isMobile } = useResponsive()
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(50)
@@ -289,5 +348,106 @@ function handlePageSizeChange(value: number): void {
 .mono {
   font-family: $font-family-mono;
   font-size: $font-size-xs;
+}
+
+@media (max-width: 767px) {
+  .mobile-out-record-card {
+    display: flex;
+    flex-direction: column;
+    gap: $space-3;
+  }
+
+  .mobile-card-head,
+  .mobile-card-meta {
+    display: flex;
+    align-items: center;
+    gap: $space-2;
+  }
+
+  .mobile-card-head {
+    justify-content: space-between;
+  }
+
+  .mobile-card-meta {
+    flex-wrap: wrap;
+  }
+
+  .mobile-kv-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: $space-2;
+  }
+
+  .mobile-kv-grid > div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    padding: $space-2;
+    border-radius: $radius-md;
+    background: $color-bg-subtle;
+  }
+
+  .mobile-kv-grid span,
+  .mobile-out-item__meta {
+    color: $color-text-secondary;
+    font-size: $font-size-xs;
+  }
+
+  .mobile-kv-grid strong {
+    min-width: 0;
+    overflow: hidden;
+    font-weight: $font-weight-medium;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mobile-kv-grid__wide {
+    grid-column: 1 / -1;
+  }
+
+  .mobile-detail-collapse {
+    border: 0;
+  }
+
+  .mobile-detail-collapse :deep(.el-collapse-item__header),
+  .mobile-detail-collapse :deep(.el-collapse-item__wrap) {
+    border: 0;
+  }
+
+  .mobile-detail-collapse :deep(.el-collapse-item__header) {
+    height: 36px;
+    font-size: $font-size-xs;
+  }
+
+  .mobile-detail-collapse :deep(.el-collapse-item__content) {
+    padding: 0;
+  }
+
+  .mobile-out-items {
+    display: flex;
+    flex-direction: column;
+    gap: $space-2;
+  }
+
+  .mobile-out-item {
+    padding: $space-2;
+    border: 1px solid $color-border-default;
+    border-radius: $radius-md;
+  }
+
+  .mobile-out-item__sku {
+    overflow: hidden;
+    font-weight: $font-weight-semibold;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mobile-out-item__meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: $space-2;
+    margin-top: $space-1;
+  }
 }
 </style>

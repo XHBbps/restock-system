@@ -330,7 +330,7 @@ src/
 │   ├── data/        # 6 个数据页
 │   └── SyncConsoleView / GlobalConfigView / ZipcodeRuleView / ApiMonitorView / PerformanceMonitorView
 ├── components/      # 可复用组件
-│   ├── AppLayout / PageSectionCard / SkuCard / StatusTag / TablePaginationBar / TaskProgress
+│   ├── AppLayout / PageSectionCard / MobileRecordList / SkuCard / StatusTag / TablePaginationBar / TaskProgress
 │   ├── charts/      # BaseChart (ECharts wrapper)
 │   ├── dashboard/   # Dashboard 专用卡片
 │   └── sync/        # 同步专用组件
@@ -343,7 +343,7 @@ src/
 └── main.ts
 ```
 
-`components/dashboard/` 中的 `DashboardChartCard` 当前除标准图表卡片外，还支持在图表下方渲染自定义 footer 区域，用于信息总览页这类“上图下图例”布局；图表撑满高度的样式仅在存在 footer 时启用，普通图表卡片保持原有自适应高度。
+`components/dashboard/` 中的 `DashboardChartCard` 当前除标准图表卡片外，还支持在图表下方渲染自定义 footer 区域，用于信息总览页这类“上图下图例”布局；图表撑满高度的样式仅在存在 footer 时启用，普通图表卡片保持原有自适应高度。`AppLayout`、`PageSectionCard`、`TablePaginationBar` 与 `element-overrides.scss` 已加入窄屏规则：侧边栏折叠为抽屉导航，筛选区纵向排列，分页改为紧凑版，dialog/表单补齐移动端宽度兜底。
 
 **导出链路前端文件关系**：`frontend/src/api/snapshot.ts` 对接后端 `app/api/snapshot.py`（创建 / 列表 / 详情 / 下载）；新增共享工具 `frontend/src/utils/download.ts`（`triggerBlobDownload`）被 `SuggestionDetailView` 的"导出 Excel"按钮与"历史快照区"下载流程共同引用。`api/snapshot.ts` 在 `downloadSnapshotBlob` 中解析 `Content-Disposition` 文件名并回传给 `triggerBlobDownload`，保持 blob 下载行为在全前端只有一份实现。
 
@@ -452,13 +452,15 @@ async function reload() {
 | 组件 | 用途 | 复用位置 |
 |---|---|---|
 | `PageSectionCard` | 统一页面卡片容器，`title` + `#actions` slot | 所有列表页 |
+| `MobileRecordList` | 移动端卡片列表外壳，负责空状态、loading 和条目包装 | 订单、商品、库存、出库、建议、历史等高频数据页 |
 | `SkuCard` | 商品展示（图片 + 名称 + SKU + blocker 标签） | 商品、库存、订单、建议单 |
 | `StatusTag` | 状态标签（基于 StatusMeta 对象） | 所有状态展示 |
-| `TablePaginationBar` | 分页条，v-model 绑定 currentPage 和 pageSize | 所有数据表格 |
+| `TablePaginationBar` | 分页条，v-model 绑定 currentPage 和 pageSize；手机端自动切换为紧凑版 | 所有数据表格 |
 | `TaskProgress` | 长任务进度展示，自动轮询 `/api/tasks/{id}`；可解析按条数和按页数/步骤的确定型进度；任务读取权限按 `job_name` 映射到对应业务权限过滤 | 引擎生成、同步 |
 
 **前端监控命名约定**：
 - `src/utils/monitoring.ts` 统一负责监控页的名称展示口径，包括赛狐接口 `endpoint`、性能监控 `request/resource` 名称中文化，以及 tooltip 中保留原始路径
+- `src/composables/useResponsive.ts` 统一提供 `isMobile` / `isTablet` 判断，优先用于页面响应式切换；新增移动端展示层时复用该 composable，不在每个页面重复写 resize 逻辑
 - `ApiMonitorView`、`PerformanceMonitorView`、`sync/FailedApiCallTable` 只消费该工具，不在页面内各自维护映射表，避免图表、表格、tooltip 口径漂移
 
 **信息总览页口径**：

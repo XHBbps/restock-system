@@ -60,5 +60,37 @@ defineProps<{
     flex-direction: column;
     align-items: flex-start;
   }
+
+  .section-actions {
+    width: 100%;
+    align-items: stretch;
+    gap: $space-2;
+
+    :deep(> *) {
+      max-width: 100%;
+    }
+
+    :deep(.el-input),
+    :deep(.el-select),
+    :deep(.el-date-editor),
+    :deep(.el-button) {
+      width: 100% !important;
+    }
+
+    :deep(.el-switch) {
+      width: auto !important;
+      align-self: flex-start;
+    }
+  }
+}
+
+@media (max-width: 767px) {
+  .section-title {
+    font-size: $font-size-lg;
+  }
+
+  .section-description {
+    font-size: $font-size-xs;
+  }
 }
 </style>

@@ -362,10 +362,12 @@ Conventional Commits：
 | 工具 | 用途 |
 |---|---|
 | `@/components/PageSectionCard` | 统一页面容器（`title` + `#actions` slot） |
+| `@/components/MobileRecordList` | 移动端卡片列表外壳，桌面表格与手机卡片共用同一份数据源 |
 | `@/components/TablePaginationBar` | 统一分页条 |
 | `@/components/SkuCard` | 商品展示 |
 | `@/components/StatusTag` | 状态标签 |
 | `@/components/TaskProgress` | 长任务进度展示 |
+| `@/composables/useResponsive` | 统一判断手机 / 平板视口，优先用于页面级响应式切换 |
 | `@/utils/format` | `formatShortTime` / `formatDateTime` / `formatUpdateTime` / `formatDetailTime` / `clampPage`；其中 `formatUpdateTime` 统一输出 `YYYY-MM-DD HH:mm`，用于数据页“同步时间”和出库记录“更新时间/同步时间” |
 | `@/utils/warehouse` | `warehouseTypeLabel` / `warehouseTypeTag` |
 | `@/utils/countries` | `COUNTRY_OPTIONS` 内置国家兜底与 `getCountryLabel()` 展示映射；新建国家下拉优先调用 `GET /api/config/country-options`，接口不可用时再降级到内置选项 |
@@ -405,6 +407,7 @@ async function reload() {
 - 订单、历史记录、商品、库存、出库记录等可能持续增长的页面必须使用服务端分页 / 筛选。
 - 库存页如需保留“按仓库展开”交互，优先复用 `/api/data/inventory/warehouse-groups` 的仓库分组分页接口。
 - 店铺、仓库等低增长基础数据页可以保留轻量分页，但不要再为大数据页新增 `page_size=5000` 的前端本地筛选模式。
+- 需要兼顾手机端时，优先保留桌面端 `el-table`，再用 `MobileRecordList` 叠加卡片视图；不要为同一接口再做一套移动专用 API。
 
 基础配置页面：
 

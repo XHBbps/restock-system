@@ -1,5 +1,70 @@
 <template>
   <div class="app-layout">
+    <el-drawer
+      v-model="mobileNavOpen"
+      direction="ltr"
+      size="280px"
+      class="mobile-nav-drawer"
+      :with-header="false"
+    >
+      <div class="mobile-nav-shell">
+        <div class="sidebar-brand mobile-nav-brand">
+          <div class="brand-mark">R</div>
+          <div class="brand-text">
+            <div class="brand-name">Restock System</div>
+            <div class="brand-meta">补货管理</div>
+          </div>
+        </div>
+
+        <nav class="nav mobile-nav">
+          <div v-for="(group, gi) in filteredGroups" :key="group.title" class="nav-group">
+            <div v-if="gi > 0" class="mobile-nav-divider" />
+            <div class="nav-group-title">{{ group.title }}</div>
+
+            <template v-for="child in group.children" :key="'items' in child ? child.label : child.to">
+              <template v-if="isSubCategory(child)">
+                <button
+                  class="nav-subcategory-toggle"
+                  @click="sidebar.toggleCategory(child.label)"
+                >
+                  <span>{{ child.label }}</span>
+                  <ChevronRight
+                    class="nav-subcategory-chevron"
+                    :class="{ 'nav-subcategory-chevron-open': sidebar.isCategoryExpanded(child.label) }"
+                    :size="12"
+                  />
+                </button>
+                <div v-if="sidebar.isCategoryExpanded(child.label)" class="nav-subcategory-items">
+                  <RouterLink
+                    v-for="item in child.items"
+                    :key="item.to"
+                    :to="item.to"
+                    class="nav-item"
+                    active-class="nav-item-active"
+                    @click="closeMobileNav"
+                  >
+                    <component :is="item.icon" class="nav-item-icon" :size="16" />
+                    <span class="nav-item-label">{{ item.label }}</span>
+                  </RouterLink>
+                </div>
+              </template>
+
+              <RouterLink
+                v-else
+                :to="child.to"
+                class="nav-item"
+                active-class="nav-item-active"
+                @click="closeMobileNav"
+              >
+                <component :is="child.icon" class="nav-item-icon" :size="16" />
+                <span class="nav-item-label">{{ child.label }}</span>
+              </RouterLink>
+            </template>
+          </div>
+        </nav>
+      </div>
+    </el-drawer>
+
     <aside class="sidebar" :class="{ 'sidebar-collapsed': sidebar.isCollapsed }">
       <div class="sidebar-brand">
         <div class="brand-mark">R</div>
@@ -115,6 +180,9 @@
     <main class="main">
       <header class="topbar">
         <div class="topbar-left">
+          <button class="mobile-menu-btn" title="打开导航" @click="mobileNavOpen = true">
+            <Menu :size="18" />
+          </button>
           <button class="collapse-btn" :title="sidebar.isCollapsed ? '展开侧栏' : '收起侧栏'" @click="sidebar.toggleCollapse()">
             <IndentIncrease v-if="sidebar.isCollapsed" :size="18" />
             <IndentDecrease v-else :size="18" />
@@ -174,7 +242,7 @@ import { isSubCategory, navigationGroups } from '@/config/navigation'
 import { useAuthStore } from '@/stores/auth'
 import { useSidebarStore } from '@/stores/sidebar'
 import { ElMessage } from 'element-plus'
-import { ChevronRight, IndentDecrease, IndentIncrease, LogOut, Pencil } from 'lucide-vue-next'
+import { ChevronRight, IndentDecrease, IndentIncrease, LogOut, Menu, Pencil } from 'lucide-vue-next'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 
@@ -267,6 +335,11 @@ async function handleLogout(): Promise<void> {
 const showPasswordDialog = ref(false)
 const pwdLoading = ref(false)
 const pwdForm = reactive({ oldPassword: '', newPassword: '', confirmPassword: '' })
+const mobileNavOpen = ref(false)
+
+function closeMobileNav(): void {
+  mobileNavOpen.value = false
+}
 
 async function handleChangePassword() {
   if (!pwdForm.oldPassword || !pwdForm.newPassword) {
@@ -551,6 +624,11 @@ async function handleChangePassword() {
   }
 }
 
+.mobile-menu-btn {
+  @extend .collapse-btn;
+  display: none;
+}
+
 .breadcrumb {
   display: flex;
   align-items: center;
@@ -673,6 +751,56 @@ async function handleChangePassword() {
     padding: $space-4;
   }
 }
+
+@media (max-width: 767px) {
+  .app-layout {
+    display: block;
+  }
+
+  .sidebar {
+    display: none;
+  }
+
+  .mobile-menu-btn {
+    display: flex;
+  }
+
+  .collapse-btn {
+    display: none;
+  }
+
+  .topbar {
+    height: 52px;
+    padding: 0 $space-3;
+  }
+
+  .topbar-left {
+    min-width: 0;
+    gap: $space-2;
+  }
+
+  .breadcrumb {
+    min-width: 0;
+    gap: $space-1;
+  }
+
+  .breadcrumb-root,
+  .breadcrumb-section,
+  .breadcrumb-sep {
+    display: none;
+  }
+
+  .breadcrumb-current {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .content {
+    padding: $space-3;
+  }
+}
 </style>
 
 <style lang="scss">
@@ -714,5 +842,33 @@ async function handleChangePassword() {
 .nav-popover-item-active {
   font-weight: $font-weight-semibold;
   background: $color-bg-subtle;
+}
+
+.mobile-nav-drawer {
+  .el-drawer__body {
+    padding: 0;
+  }
+}
+
+.mobile-nav-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: $color-bg-card;
+}
+
+.mobile-nav-brand {
+  flex-shrink: 0;
+}
+
+.mobile-nav {
+  padding-bottom: $space-4;
+}
+
+.mobile-nav-divider {
+  height: 1px;
+  margin: $space-2 $space-3 $space-3;
+  background: $color-border-default;
 }
 </style>

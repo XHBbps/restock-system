@@ -58,7 +58,13 @@
       </div>
     </template>
 
-    <el-table v-loading="loading" :data="rows" table-layout="auto" @sort-change="handleSortChange">
+    <el-table
+      v-if="!isMobile"
+      v-loading="loading"
+      :data="rows"
+      table-layout="auto"
+      @sort-change="handleSortChange"
+    >
       <el-table-column
         label="订单号"
         prop="amazonOrderId"
@@ -132,6 +138,47 @@
       </el-table-column>
     </el-table>
 
+    <MobileRecordList
+      v-else
+      :items="rows"
+      :loading="loading"
+      row-key="amazonOrderId"
+      empty-text="暂无订单"
+    >
+      <template #default="{ item: row }">
+        <div class="mobile-order-card">
+          <div class="mobile-card-head">
+            <div class="mobile-card-title mono">{{ row.amazonOrderId }}</div>
+            <el-tag :type="statusType(row.packageStatus || row.orderStatus)" size="small">
+              {{ statusLabel(row.packageStatus || row.orderStatus) }}
+            </el-tag>
+          </div>
+          <div class="mobile-card-meta">
+            <span>{{ row.shopName || '-' }}</span>
+            <el-tag size="small" effect="plain" type="info">{{ row.orderPlatform }}</el-tag>
+            <el-tag size="small">{{ row.countryCode }}</el-tag>
+          </div>
+          <div class="mobile-kv-grid">
+            <div>
+              <span>明细数</span>
+              <strong>{{ row.itemCount }}</strong>
+            </div>
+            <div>
+              <span>邮编</span>
+              <strong class="mono">{{ row.postalCode || '-' }}</strong>
+            </div>
+            <div class="mobile-kv-grid__wide">
+              <span>下单时间</span>
+              <strong class="mono">{{ formatDateTime(row.purchaseDate) }}</strong>
+            </div>
+          </div>
+          <div class="mobile-card-actions">
+            <el-button link type="primary" @click="openDetail(row)">详情</el-button>
+          </div>
+        </div>
+      </template>
+    </MobileRecordList>
+
     <TablePaginationBar
       v-model:current-page="page"
       v-model:page-size="pageSize"
@@ -145,6 +192,8 @@
       v-model="dialogVisible"
       :title="detail ? `订单详情 · ${detail.amazonOrderId}` : '加载中...'"
       width="800px"
+      :fullscreen="isMobile"
+      class="order-detail-dialog"
     >
       <div v-if="detail" class="detail-body">
         <div class="detail-section">
@@ -235,8 +284,10 @@ import {
   type DataOrderDetail,
   type DataOrderSummary
 } from '@/api/data'
+import MobileRecordList from '@/components/MobileRecordList.vue'
 import PageSectionCard from '@/components/PageSectionCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
+import { useResponsive } from '@/composables/useResponsive'
 import { getActionErrorMessage } from '@/utils/apiError'
 import { COUNTRY_OPTIONS } from '@/utils/countries'
 import type { TagType } from '@/utils/element'
@@ -255,6 +306,7 @@ const packageStatusOptions = [
 ]
 
 const rows = ref<DataOrderSummary[]>([])
+const { isMobile } = useResponsive()
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(50)
@@ -506,6 +558,103 @@ onBeforeUnmount(() => {
 @media (max-width: 900px) {
   .order-filters {
     width: 100%;
+  }
+}
+
+@media (max-width: 767px) {
+  .order-filters {
+    align-items: stretch;
+
+    :deep(.el-input),
+    :deep(.el-select),
+    :deep(.el-date-editor) {
+      width: 100% !important;
+    }
+  }
+
+  .mobile-order-card {
+    display: flex;
+    flex-direction: column;
+    gap: $space-3;
+  }
+
+  .mobile-card-head,
+  .mobile-card-meta,
+  .mobile-card-actions {
+    display: flex;
+    align-items: center;
+    gap: $space-2;
+  }
+
+  .mobile-card-head {
+    justify-content: space-between;
+  }
+
+  .mobile-card-title {
+    min-width: 0;
+    overflow: hidden;
+    color: $color-text-primary;
+    font-weight: $font-weight-semibold;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mobile-card-meta {
+    flex-wrap: wrap;
+    color: $color-text-secondary;
+    font-size: $font-size-xs;
+  }
+
+  .mobile-kv-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: $space-2;
+  }
+
+  .mobile-kv-grid > div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    padding: $space-2;
+    border-radius: $radius-md;
+    background: $color-bg-subtle;
+  }
+
+  .mobile-kv-grid span {
+    color: $color-text-secondary;
+    font-size: 11px;
+  }
+
+  .mobile-kv-grid strong {
+    min-width: 0;
+    overflow: hidden;
+    font-size: $font-size-xs;
+    font-weight: $font-weight-medium;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mobile-kv-grid__wide {
+    grid-column: 1 / -1;
+  }
+
+  .mobile-card-actions {
+    justify-content: flex-end;
+  }
+
+  .kv-grid {
+    grid-template-columns: 1fr;
+  }
+
+  :global(.order-detail-dialog.is-fullscreen) {
+    display: flex;
+    flex-direction: column;
+  }
+
+  :global(.order-detail-dialog.is-fullscreen .el-dialog__body) {
+    flex: 1;
+    max-height: none;
   }
 }
 </style>

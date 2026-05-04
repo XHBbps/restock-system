@@ -59,4 +59,22 @@ defineProps<{
     align-items: flex-start;
   }
 }
+
+@media (max-width: 767px) {
+  .dashboard-section__title {
+    font-size: $font-size-xl;
+    letter-spacing: 0;
+  }
+
+  .dashboard-section__actions {
+    width: 100%;
+    align-items: stretch;
+  }
+
+  .dashboard-section__actions :deep(.el-button),
+  .dashboard-section__actions :deep(.el-input),
+  .dashboard-section__actions :deep(.el-select) {
+    width: 100% !important;
+  }
+}
 </style>

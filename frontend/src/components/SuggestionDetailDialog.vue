@@ -5,6 +5,7 @@
     width="80%"
     :top="isEmptyState ? '' : '0'"
     :align-center="isEmptyState"
+    :fullscreen="isMobile"
     :class="[
       'suggestion-detail-dialog',
       { 'suggestion-detail-dialog--empty': isEmptyState },
@@ -207,6 +208,7 @@ import {
 } from '@/api/snapshot'
 import SkuCard from '@/components/SkuCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
+import { useResponsive } from '@/composables/useResponsive'
 import { getActionErrorMessage } from '@/utils/apiError'
 import { getCountryLabel } from '@/utils/countries'
 import { triggerBlobDownload } from '@/utils/download'
@@ -225,6 +227,7 @@ const emit = defineEmits<{
   (e: 'update:modelValue', value: boolean): void
 }>()
 
+const { isMobile } = useResponsive()
 const snapshots = ref<SnapshotOut[]>([])
 const currentSnapshot = ref<SnapshotDetailOut | null>(null)
 const currentSnapshotId = ref<number | null>(null)
@@ -726,16 +729,70 @@ watch(
   }
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767px) {
   :global(.suggestion-detail-dialog) {
-    width: calc(100vw - 16px);
-    max-width: calc(100vw - 16px);
-    max-height: calc(100vh - 16px);
-    margin: 8px auto !important;
+    width: 100vw !important;
+    max-width: 100vw;
+    height: 100vh;
+    max-height: 100vh;
+    margin: 0 !important;
+  }
+
+  :global(.suggestion-detail-dialog .el-dialog__header) {
+    padding: $space-3 $space-4;
+  }
+
+  :global(.suggestion-detail-dialog .el-dialog__body) {
+    flex: 1;
+    max-height: none;
+    padding: $space-3;
+    overflow: hidden;
+  }
+
+  .detail-dialog-header {
+    align-items: flex-start;
+
+    &__title {
+      min-width: 0;
+      font-size: $font-size-sm;
+      line-height: $line-height-snug;
+    }
+
+    &__actions {
+      gap: $space-2;
+    }
+  }
+
+  .detail-dialog-body {
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: $space-3;
+  }
+
+  .version-side {
+    max-height: 112px;
+    padding-bottom: $space-2;
+  }
+
+  .version-side__title {
+    font-size: $font-size-xs;
+  }
+
+  .version-item {
+    flex-basis: 156px;
+    min-width: 156px;
+    padding: $space-2;
+  }
+
+  .detail-main {
+    gap: $space-3;
   }
 
   .detail-meta__row {
     grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .detail-table-scroll {
+    min-height: 260px;
   }
 
   .breakdown-col-country {
