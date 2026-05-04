@@ -1,7 +1,7 @@
 """Step 1:动销速度(按 SKU x 国家二维矩阵)。
 
 公式(FR-028):
-    effective[order_item] = max(quantity_shipped - refund_num, 0)
+    effective[order_item] = max(quantity_ordered, 0)
     过滤 source='订单处理' 且 package_status != 'has_canceled'
     过滤 purchase_date ∈ [昨天-29, 昨天](不含今天)
     按 (commodity_sku, country, date) 聚合 SUM(effective)
@@ -44,20 +44,20 @@ def is_in_window(order_date: date, today: date, days_ago: int) -> bool:
 
 
 def aggregate_velocity_from_items(
-    items: list[tuple[str, str, date, int, int]],
+    items: list[tuple[str, str, date, int]],
     today: date,
 ) -> VelocityMap:
     """从订单明细聚合 velocity(暴露为纯函数便于单测)。
 
-    items: list of (commodity_sku, country, order_date, quantity_shipped, refund_num)
+    items: list of (commodity_sku, country, order_date, quantity_ordered)
     返回:velocity[commodity_sku][country] = float
     """
     # bucket: {(sku, country): {date: effective}}
     daily: defaultdict[tuple[str, str], defaultdict[date, int]] = defaultdict(
         lambda: defaultdict(int)
     )
-    for sku, country, d, shipped, refund in items:
-        eff = max(int(shipped or 0) - int(refund or 0), 0)
+    for sku, country, d, ordered in items:
+        eff = max(int(ordered or 0), 0)
         if eff <= 0:
             continue
         daily[(sku, country)][d] += eff
@@ -77,7 +77,7 @@ async def load_velocity_inputs(
     commodity_skus: list[str] | None,
     today: date,
     allowed_countries: set[str] | None = None,
-) -> list[tuple[str, str, date, int, int]]:
+) -> list[tuple[str, str, date, int]]:
     """从数据库加载 Step 1 计算所需的订单明细行。"""
     yesterday = today - timedelta(days=1)
     earliest = yesterday - timedelta(days=WINDOW_DAYS - 1)
@@ -91,8 +91,7 @@ async def load_velocity_inputs(
             func.date(func.timezone("Asia/Shanghai", OrderHeader.purchase_date)).label(
                 "order_date"
             ),
-            OrderItem.quantity_shipped,
-            OrderItem.refund_num,
+            OrderItem.quantity_ordered,
         )
         .join(OrderHeader, OrderHeader.id == OrderItem.order_id)
         .where(OrderHeader.source == ORDER_SOURCE_PACKAGE)
@@ -106,7 +105,7 @@ async def load_velocity_inputs(
         stmt = stmt.where(OrderHeader.country_code.in_(sorted(allowed_countries)))
 
     rows = (await db.execute(stmt)).all()
-    return [(r[0], r[1], r[2], r[3] or 0, r[4] or 0) for r in rows]
+    return [(r[0], r[1], r[2], r[3] or 0) for r in rows]
 
 
 async def run_step1(

@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-05-04（同步日志状态口径区分 `sync_state` 与 `task_run`；后端生产镜像构建移除 Debian `apt` 构建依赖；订单处理列表自动同步改用独立间隔 `order_sync_interval_minutes`，默认 120 分钟。）
+> 最近更新：2026-05-05（订单处理列表明细数量统一以 `items.quantityOrdered` 为唯一来源；Step 1 销量与 Step 5 分仓样本改用 `quantity_ordered` 口径。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -38,7 +38,7 @@
 ### 2.2 同步与调度
 - **EU 合并同步口径**：订单、商品、出库、库存同步均按全局 eu_countries 将 EU 成员国合并到 EU，并在 original_* 字段保存原国家码；calc_engine 已移出 APScheduler 定时注册，仅保留手动生成入口。
 - **新国家发现口径**：多平台订单同步遇到有效 2 位国家码时直接落入 `order_header.country_code` 并参与计算；若该国家已配置到 `eu_countries`，则归并为 `EU` 并在 `original_country_code` 保留原码；空值或非法国家码才写为 `ZZ` 并记录结构化日志。
-- **订单处理列表同步来源**：`sync_order_list` 当前只调用赛狐订单处理列表 `/api/packageShip/v1/getPackagePage.json`，按 `purchaseDateStart/purchaseDateEnd` 拉取滚动 12 个月窗口，`pageSize=200`，继续复用全局店铺过滤；订单国家现在统一读取响应顶层 `marketplace` 字段，空值或非法值回落 `ZZ`，`address.countryCode/address.country` 不再作为国家来源。包裹数据统一写入 `source='订单处理'`，并保存 `package_sn/package_status/shop_name/postal_code/order_platform`；冲突更新时若本次接口邮编为空或地址缺失，不覆盖已有 `order_header.postal_code`。同步开始前会清理旧 `source in ('亚马逊','多平台')` 的订单头、明细、详情和详情抓取日志，避免切换后重复计算。
+- **订单处理列表同步来源**：`sync_order_list` 当前只调用赛狐订单处理列表 `/api/packageShip/v1/getPackagePage.json`，按 `purchaseDateStart/purchaseDateEnd` 拉取滚动 12 个月窗口，`pageSize=200`，继续复用全局店铺过滤；订单国家现在统一读取响应顶层 `marketplace` 字段，空值或非法值回落 `ZZ`，`address.countryCode/address.country` 不再作为国家来源。包裹数据统一写入 `source='订单处理'`，并保存 `package_sn/package_status/shop_name/postal_code/order_platform`；明细数量只读取 `items.quantityOrdered`，同时写入 `quantity_ordered` 与兼容字段 `quantity_shipped`，`refund_num=0`；冲突更新时若本次接口邮编为空或地址缺失，不覆盖已有 `order_header.postal_code`。同步开始前会清理旧 `source in ('亚马逊','多平台')` 的订单头、明细、详情和详情抓取日志，避免切换后重复计算。
 - **商品主数据同步来源**：`sync_product_listing` 先调用赛狐 SKU 主数据接口 `/api/commodity/pageList.json` 写入 `commodity_master`，再调用在线产品 listing 接口 `/api/order/api/product/pageList.json` 补充店铺、站点、sellerSku 与近 7/14/30 天销量。同步新发现的 SKU 只补建 `sku_config(enabled=true)`，不覆盖已有 `enabled` 与 `lead_time_days`；后续人工禁用的 SKU 不会被商品同步重新打开。
 
 - **调度器开关**：`GET/POST /api/sync/scheduler`，开关状态持久化到 `global_config.scheduler_enabled`
@@ -65,7 +65,7 @@
   2. `step2_sale_days` — 可售天数 + 库存聚合（含在途）
   3. `step3_country_qty` — 各国补货量（`target_days + (demand_date - today)` 作为有效目标库存天数）
   4. `step4_total` — 总采购量（基于新的 Σcountry_qty − 本地库存 + ceil(Σvelocity × safety_stock_days)，clamp 到 0；`buffer_days` 不参与采购量）
-  5. `step5_warehouse_split` — 按邮编规则分配到具体仓库；订单样本来自 `source='订单处理'` 且 `package_status!='has_canceled'` 的包裹订单，以 `quantity_shipped - refund_num` 为样本数量，优先使用 `order_header.postal_code`，已知邮编命中部分按真实比例分配，未知部分按该国家已配置邮编规则的仓均分
+  5. `step5_warehouse_split` — 按邮编规则分配到具体仓库；订单样本来自 `source='订单处理'` 且 `package_status!='has_canceled'` 的包裹订单，以 `quantity_ordered` 为样本数量，优先使用 `order_header.postal_code`，已知邮编命中部分按真实比例分配，未知部分按该国家已配置邮编规则的仓均分
   6. `step6_timing` — 紧急标志与补货日期（任一正补货国家 `sale_days <= lead_time_days` 即为紧急；`restock_date[sku][country] = today + int(sale_days[sku][country]) − lead_time_days`）
 - **补货区域过滤**：全局参数 `restock_regions` 支持按国家多选；为空数组时表示全部国家参与计算，配置后仅这些国家的订单会参与 `step1_velocity` 销量统计和 `step5_warehouse_split` 的国家订单分仓
 - **并发保护**：`pg_advisory_xact_lock(7429001)` 事务级锁，阻止并发引擎覆盖彼此
@@ -107,6 +107,12 @@
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.104 订单处理列表数量口径统一为 quantityOrdered（2026-05-05）
+- **同步口径**：`backend/app/sync/order_list.py` 解析订单处理列表包裹明细时，数量只读取 `items.quantityOrdered`；不再从 `saleNum`、`quantity` 或 `qty` 等非该 OpenAPI 字段兜底。缺失或非法数量按 0 落库。
+- **计算口径**：`backend/app/engine/step1_velocity.py` 与 `backend/app/engine/step5_warehouse_split.py` 对 `source='订单处理'` 的明细统一使用 `max(order_item.quantity_ordered, 0)` 作为有效销量 / 分仓样本数量，继续排除 `package_status='has_canceled'`。
+- **兼容范围**：不新增字段、不做数据库迁移或历史回填；当前订单处理列表同步已将 `quantityOrdered` 同步写入 `quantity_ordered` 与 `quantity_shipped`，本次只收敛字段语义并移除不存在字段的 fallback。
+- **测试**：更新 `backend/tests/unit/test_sync_order_list_eu.py`、`backend/tests/unit/test_engine_step1.py` 与 `backend/tests/unit/test_engine_step5.py`，覆盖缺少 `quantityOrdered` 时数量为 0、Step 1 下单数聚合和 Step 5 SQL 使用 `quantity_ordered`。
 
 ### 3.103 同步日志状态口径区分 sync_state 与 task_run（2026-05-04）
 - **接口口径**：`GET /api/data/sync-state` 仅把店铺、仓库、商品、库存、订单、出库同步任务作为 `sync_state` 来源；`daily_archive` 与 `retry_failed_api_calls` 改为从 `task_run` 聚合最近任务，避免未写 `sync_state` 被误判为未运行。
@@ -213,10 +219,10 @@
 - **测试**：补充 `backend/tests/unit/test_engine_sku_mapping.py`、`backend/tests/unit/test_sku_mapping_import.py` 与 `frontend/src/views/__tests__/SkuMappingRuleView.test.ts`，覆盖替代单组件、替代多组件、不跨仓、本地仓无国家字段、旧/新模板导入、重复库存 SKU 和前端公式/payload。
 
 ### 3.87 Step 5 未知分仓样本均分修复（2026-04-30）
-- **分仓样本口径**：`backend/app/engine/step5_warehouse_split.py` 的 `load_all_sku_country_orders()` 从订单详情内连接改为左连接，同 SKU + 国家下已发货/部分发货订单即使无详情、无邮编也会进入分仓样本；样本数量改为 `max(quantity_shipped - refund_num, 0)`，与 Step 1 销量口径一致，零或负数净发货不参与分仓。
+- **分仓样本口径**：`backend/app/engine/step5_warehouse_split.py` 的 `load_all_sku_country_orders()` 从订单详情内连接改为左连接，同 SKU + 国家下有效订单即使无详情、无邮编也会进入分仓样本；当前订单处理列表数量口径已在 §3.104 统一为 `quantity_ordered`。
 - **未知需求分配**：Step 5 先把订单样本拆成已知仓需求与未知仓需求；已知部分继续按邮编规则命中的仓库比例分配，未知部分按该国家已配置邮编规则的仓库均分，最终合并为 `warehouse_breakdown`。若全部未知，保持规则仓均分；若国家无规则仓，仍保持不拆仓。
 - **解释快照**：`allocation_snapshot` 保留原字段，混合场景 `allocation_mode` 记录为 `mixed_known_unknown`，并继续记录 `matched_order_qty`、`unknown_order_qty` 与 `eligible_warehouses`。
-- **测试**：更新 `backend/tests/unit/test_engine_step5.py`，覆盖未知样本不跟随已知仓、纯已知 60/40、全未知均分、无规则仓不拆仓、净发货数扣减与订单详情左连接。
+- **测试**：更新 `backend/tests/unit/test_engine_step5.py`，覆盖未知样本不跟随已知仓、纯已知 60/40、全未知均分、无规则仓不拆仓、非正样本过滤与订单头邮编口径。
 
 ### 3.86 调度器下次执行时间与店铺自动同步修复（2026-04-30）
 - **状态接口修复**：`backend/app/tasks/scheduler.py` 的 `scheduler_status()` 在 API-only backend 进程中不再依赖本进程 APScheduler 已启动；当 `job.next_run_time` 为空时，会通过 job trigger 和北京时间推导下一次触发时间，避免 `/api/sync/scheduler` 返回全空计划导致前端“自动同步下次执行”图表无内容。

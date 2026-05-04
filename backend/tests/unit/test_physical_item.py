@@ -31,8 +31,8 @@ def test_physical_resolver_falls_back_to_raw_sku_when_group_missing_or_disabled(
 def test_step1_keeps_product_skus_separate_from_inventory_shared_groups() -> None:
     result = aggregate_velocity_from_items(
         [
-            ("SKU-A", "US", date(2026, 5, 3), 7, 0),
-            ("SKU-A-OLD", "US", date(2026, 5, 3), 7, 0),
+            ("SKU-A", "US", date(2026, 5, 3), 7),
+            ("SKU-A-OLD", "US", date(2026, 5, 3), 7),
         ],
         date(2026, 5, 4),
     )

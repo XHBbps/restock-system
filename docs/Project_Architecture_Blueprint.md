@@ -106,11 +106,11 @@
 
 | Step | 文件 | 输入 | 输出 | 规则 |
 |---|---|---|---|---|
-| 1 | `step1_velocity.py` | 近 30 天订单处理列表订单 | `velocity[sku][country]` | 加权日均销量：7日×0.5 + 14日×0.3 + 30日×0.2；仅消费 `source='订单处理'` 且 `package_status!='has_canceled'` 的包裹订单；若 `global_config.restock_regions` 非空，仅这些国家参与补货国家维度计算 |
+| 1 | `step1_velocity.py` | 近 30 天订单处理列表订单 | `velocity[sku][country]` | 加权日均销量：7日×0.5 + 14日×0.3 + 30日×0.2；仅消费 `source='订单处理'` 且 `package_status!='has_canceled'` 的包裹订单；有效数量为 `max(quantity_ordered, 0)`；若 `global_config.restock_regions` 非空，仅这些国家参与补货国家维度计算 |
 | 2 | `step2_sale_days.py` | 库存 + 在途 + velocity + SKU 映射规则 | `sale_days[sku][country]` | `(available + reserved + in_transit) / velocity`；启用映射规则会先将库存组件 SKU 解析到共享组身份，再在同仓库、同组件维度按该国家 velocity 分配共享库存，最后按组合短板换算商品 SKU 视角库存，跨组合替代方案求和；velocity≤0 跳过 |
 | 3 | `step3_country_qty.py` | velocity + 库存 + 有效目标库存天数 | `country_qty[sku][country]` | `effective_target_days = target_days + max(demand_date - today, 0)`；`max(0, ceil(effective_target_days × velocity - (available + reserved + in_transit)))` |
 | 4 | `step4_total.py` | country_qty + velocity + 国内库存 + safety_stock_days | `purchase_qty[sku]` | `max(0, Σcountry_qty − (local.available + local.reserved) + ceil(Σvelocity × safety_stock_days))`；`Σcountry_qty` 使用 Step 3 的补货日期口径，`Σvelocity` 覆盖所有国家，不受 `restock_regions` 限制；`buffer_days` 不参与采购量 |
-| 5 | `step5_warehouse_split.py` | country_qty + 有效包裹订单 + 订单头邮编 + 邮编规则 + 国家规则仓映射 | `warehouse_breakdown[country][wh_id]` | 样本来自 `source='订单处理'` 且 `package_status!='has_canceled'` 的包裹订单，样本数量为 `max(quantity_shipped - refund_num, 0)`；邮编优先读取 `order_header.postal_code`；按邮编规则分配到具体仓库，已知部分按命中比例分配，未知部分按该国家已配置邮编规则的仓均分；仅规则仓参与分仓与均分兜底；若无规则仓则该国家不分仓；若配置 `restock_regions`，仅消费这些国家的订单作为分仓依据；同优先级 tied 均分；整数分配使用 floor + 最大余数法，保证仓内合计等于国家补货量 |
+| 5 | `step5_warehouse_split.py` | country_qty + 有效包裹订单 + 订单头邮编 + 邮编规则 + 国家规则仓映射 | `warehouse_breakdown[country][wh_id]` | 样本来自 `source='订单处理'` 且 `package_status!='has_canceled'` 的包裹订单，样本数量为 `max(quantity_ordered, 0)`；邮编优先读取 `order_header.postal_code`；按邮编规则分配到具体仓库，已知部分按命中比例分配，未知部分按该国家已配置邮编规则的仓均分；仅规则仓参与分仓与均分兜底；若无规则仓则该国家不分仓；若配置 `restock_regions`，仅消费这些国家的订单作为分仓依据；同优先级 tied 均分；整数分配使用 floor + 最大余数法，保证仓内合计等于国家补货量 |
 | 6 | `step6_timing.py` | sale_days + lead_time + country_qty | `urgent` + `restock_dates` | `urgent` 仍按任一正补货国家 `sale_days <= lead_time_days`；`restock_date[sku][country] = today + int(sale_days[sku][country]) − lead_time_days`，仅对正补货国家输出，缺少 sale_days 时记为 `null` |
 
 **运行上下文**：`EngineContext` 包含 `target_days`、`buffer_days`、`lead_time_days`、`safety_stock_days`、`restock_regions`、`eu_countries` 和本次请求的补货日期 `demand_date`。runner 会计算 `demand_days=max(demand_date - today, 0)` 并传给 Step 3 形成有效目标库存天数；`buffer_days` 作为全局配置快照保留，但当前仅用于追溯，不参与 `purchase_qty` 或 `restock_dates` 计算；`restock_regions` 保存前会走统一国家码标准化，`UK` 等别名按 ISO 代码去重为 `GB`；`global_config.eu_countries` 由同步层消费，保存该配置且实际变化时会同步回填历史订单、库存与在途国家码，`global_config_snapshot` 会冻结这些全局参数与 `demand_date` 以便追溯。
@@ -156,7 +156,7 @@ async def sync_inventory_job(ctx: JobContext) -> None:
 
 **国家时区约束**：`backend/app/core/timezone.py` 的 `country_to_tz()` 会先执行同一国家码别名标准化，因此 `UK` 使用 `GB` 的 `Europe/London`。除 `EU`、`ZZ` 这类非真实国家外，`BUILTIN_COUNTRY_NAMES` 的所有内置国家必须在 `COUNTRY_TO_TIMEZONE` 中配置 IANA 时区；对应单元测试作为防漏 tripwire。仍只是观测到但未内置的未知二字码会回退北京时间，并记录结构化 warning。
 
-**订单处理列表同步**：`sync_order_list` 是订单同步唯一后台任务入口，只调用赛狐订单处理列表 `/api/packageShip/v1/getPackagePage.json`。请求使用 `purchaseDateStart/purchaseDateEnd`，窗口为任务开始时间向前回退 12 个日历月到当前开始时间，`pageSize=200`，并按全局店铺同步模式传 `shopIdList`。列表响应中的包裹统一落入 `order_header` / `order_item`，`source='订单处理'`，`order_platform=platformName`，`shop_name=shopName`，`package_sn/package_status/postal_code` 保存在订单头；`postal_code` 仍来自 `address.postalCode`，但冲突更新时若本次响应邮编为空或 `address` 缺失，不覆盖已有 `order_header.postal_code`；`country_code/original_country_code` 来自顶层 `marketplace`，空值或非法值写 `ZZ`。同一 `amazonOrderId` 拆成多个 `packageSn` 时以 `shop_id + amazon_order_id + source + package_sn` 唯一定位。包裹内 `orders` 生成订单头，`items` 按 `items.amazonOrderId` 归属订单，`order_item.commodity_sku` 优先取 `items.commoditySku`，为空时使用 `items.sellerSku` 兜底，只有两者都为空才跳过明细；`order_item.seller_sku` 仍保存原始 `sellerSku`；`items.quantityOrdered` 同时写入 `quantity_ordered` 与 `quantity_shipped`，`refund_num=0`。同步前会清理旧 `source in ('亚马逊','多平台')` 的订单头、明细、详情和详情抓取日志，避免新旧来源重复计算。
+**订单处理列表同步**：`sync_order_list` 是订单同步唯一后台任务入口，只调用赛狐订单处理列表 `/api/packageShip/v1/getPackagePage.json`。请求使用 `purchaseDateStart/purchaseDateEnd`，窗口为任务开始时间向前回退 12 个日历月到当前开始时间，`pageSize=200`，并按全局店铺同步模式传 `shopIdList`。列表响应中的包裹统一落入 `order_header` / `order_item`，`source='订单处理'`，`order_platform=platformName`，`shop_name=shopName`，`package_sn/package_status/postal_code` 保存在订单头；`postal_code` 仍来自 `address.postalCode`，但冲突更新时若本次响应邮编为空或 `address` 缺失，不覆盖已有 `order_header.postal_code`；`country_code/original_country_code` 来自顶层 `marketplace`，空值或非法值写 `ZZ`。同一 `amazonOrderId` 拆成多个 `packageSn` 时以 `shop_id + amazon_order_id + source + package_sn` 唯一定位。包裹内 `orders` 生成订单头，`items` 按 `items.amazonOrderId` 归属订单，`order_item.commodity_sku` 优先取 `items.commoditySku`，为空时使用 `items.sellerSku` 兜底，只有两者都为空才跳过明细；`order_item.seller_sku` 仍保存原始 `sellerSku`；明细数量只读取 `items.quantityOrdered`，同时写入 `quantity_ordered` 与兼容字段 `quantity_shipped`，`refund_num=0`，缺失或非法数量按 0 落库。同步前会清理旧 `source in ('亚马逊','多平台')` 的订单头、明细、详情和详情抓取日志，避免新旧来源重复计算。
 
 **出库记录同步**：`sync_out_records` 会把赛狐“其他出库”记录同步到 `in_transit_record` / `in_transit_item`，除在途状态观测所需字段外，还保留 `warehouseId`、`updateTime`、`type/typeName`、`commodityId`、`perPurchase`，用于数据页直接展示“出库”主表和明细表字段。`target_country` 改为从备注文本提取国家名（如 `20260410美国-赢捷-加州-散货-在途中` → `US`）；提取失败时保持空值，不再回退到 `targetFbaWarehouseId -> warehouse.country`。每次执行该同步任务后，还会顺带扫描历史 `target_country` 为空的旧记录并按同一备注规则回填，不覆盖已有值。
 
@@ -956,6 +956,7 @@ VITE_API_PROXY_TARGET=http://localhost:8000
 
 | 日期 | 变更 | 相关 PROGRESS 章节 |
 |---|---|---|
+| 2026-05-05 | 订单处理列表明细数量只读取 `items.quantityOrdered`；Step 1 销量与 Step 5 分仓样本统一使用 `quantity_ordered` | PROGRESS.md §3.104 |
 | 2026-05-04 | 订单处理列表自动同步改用独立 `order_sync_interval_minutes`，默认 120 分钟；商品、库存、出库仍使用 `sync_interval_minutes` | PROGRESS.md §3.101 |
 | 2026-05-04 | 订单处理列表明细 SKU 改为 `commoditySku || sellerSku`，保留 `seller_sku` 原值，只有两者都为空才跳过明细 | PROGRESS.md §3.100 |
 | 2026-05-04 | 订单列表新增平台筛选与 `GET /api/data/order-platforms` 动态选项接口；`order_header(order_platform, purchase_date)` 增加复合索引；映射规则页用户可见文案统一为“库存共用组” | PROGRESS.md §3.99 |
@@ -967,7 +968,7 @@ VITE_API_PROXY_TARGET=http://localhost:8000
 | 2026-05-03 | SKU 映射组件允许跨商品规则共享，`sku_mapping_component` 唯一约束从 `inventory_sku` 收窄为 `rule_id + inventory_sku`；Step 2 按仓库国家 velocity 分配共享组件库存，Step 4 按全国家 velocity 合计分配，本规则内重复组件仍被拒绝 | PROGRESS.md §3.90 |
 | 2026-05-03 | 商品同步接入赛狐 SKU 主数据 `/api/commodity/pageList.json`，新增 `commodity_master` 表；`sync_product_listing` 先同步主数据再同步 listing；商品页和库存匹配改用主数据口径 | PROGRESS.md §3.89 |
 | 2026-05-02 | SKU 映射规则支持替代组合：`sku_mapping_component.group_no` 同组 AND、跨组 OR，Step 2/Step 4 按仓库内各组合可组装数求和，导入导出模板新增“组合编号”并兼容旧模板 | PROGRESS.md §3.88 |
-| 2026-04-30 | Step 5 分仓样本改为订单详情左连接与净发货数口径；未知需求按国家规则仓均分后再与已知邮编分配结果合并 | PROGRESS.md §3.87 |
+| 2026-04-30 | Step 5 分仓样本改为订单头邮编口径；未知需求按国家规则仓均分后再与已知邮编分配结果合并 | PROGRESS.md §3.87 |
 | 2026-04-29 | 角色权限保存新增操作权限隐含查看权限补齐；无实际权限变化时不重写关联表、不 bump `perm_version`；超管权限读取返回全部 active 权限码 | PROGRESS.md §3.85 |
 | 2026-04-29 | Step 5 matched 分仓取整改为 floor + 最大余数法，订单列表同步在本次无有效明细时保留旧 item；赛狐示例凭据统一改为占位符 / 环境变量 | PROGRESS.md §3.84 |
 | 2026-04-29 | 国家代码进入动态国家选项、EU 成员国配置、补货区域配置和多平台订单国家字段前统一标准化；历史别名 `UK` 输出与保存为 ISO 代码 `GB`；EU 配置变化会回填订单、库存与在途本地数据；内置国家必须配置时区 | PROGRESS.md §3.83 |

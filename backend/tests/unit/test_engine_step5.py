@@ -495,7 +495,7 @@ async def test_load_all_sku_country_orders_applies_allowed_country_filter() -> N
 
 
 @pytest.mark.asyncio
-async def test_load_all_sku_country_orders_uses_left_join_and_effective_shipped_qty() -> None:
+async def test_load_all_sku_country_orders_uses_quantity_ordered() -> None:
     db = _FakeDb(
         rows=[
             ("sku-A", "US", None, 3),
@@ -513,7 +513,8 @@ async def test_load_all_sku_country_orders_uses_left_join_and_effective_shipped_
     compiled_sql = str(db.executed[0])
     assert "LEFT OUTER JOIN order_detail" not in compiled_sql
     assert "order_header.postal_code" in compiled_sql
-    assert "order_item.quantity_shipped - order_item.refund_num" in compiled_sql
+    assert "order_item.quantity_ordered" in compiled_sql
+    assert "order_item.quantity_shipped - order_item.refund_num" not in compiled_sql
     assert "order_header.source =" in compiled_sql
     assert "order_header.package_status" in compiled_sql
     assert result == {("sku-A", "US"): [(None, 3)]}

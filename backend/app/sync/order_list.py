@@ -284,12 +284,7 @@ async def _upsert_package_ship_order(
                 or f"{package_sn}:{amazon_order_id}:{index}"
             )
             seen_item_ids.append(order_item_id)
-            quantity = _to_int(
-                raw_item.get("quantityOrdered")
-                or raw_item.get("saleNum")
-                or raw_item.get("quantity")
-                or raw_item.get("qty")
-            )
+            quantity = _to_int(raw_item.get("quantityOrdered"))
             item_values.append(
                 {
                     "order_id": order_id,

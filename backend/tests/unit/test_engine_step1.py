@@ -1,4 +1,4 @@
-"""Step 1 velocity 单元测试:日期分桶 + effective 公式 + 边界。"""
+"""Step 1 velocity 单元测试:日期分桶 + 下单数口径 + 边界。"""
 
 from datetime import date, timedelta
 from types import SimpleNamespace
@@ -43,7 +43,7 @@ def test_aggregate_basic() -> None:
     today = date(2026, 4, 8)
     # 7 日窗口内每天 10 件 -> d7=70 d14=70 d30=70
     items = [
-        ("sku-A", "JP", today - timedelta(days=i), 10, 0)
+        ("sku-A", "JP", today - timedelta(days=i), 10)
         for i in range(1, 8)  # i=1..7 -> 4-1..4-7
     ]
     result = aggregate_velocity_from_items(items, today)
@@ -53,26 +53,26 @@ def test_aggregate_basic() -> None:
     assert abs(v - expected) < 1e-9
 
 
-def test_aggregate_refund_subtracted() -> None:
+def test_aggregate_uses_quantity_ordered_and_ignores_non_positive() -> None:
     today = date(2026, 4, 8)
     items = [
-        ("sku-A", "JP", today - timedelta(days=1), 10, 3),  # effective = 7
-        ("sku-A", "JP", today - timedelta(days=2), 5, 5),  # effective = 0
-        ("sku-A", "JP", today - timedelta(days=3), 8, 10),  # effective = max(8-10,0)=0
+        ("sku-A", "JP", today - timedelta(days=1), 10),
+        ("sku-A", "JP", today - timedelta(days=2), 0),
+        ("sku-A", "JP", today - timedelta(days=3), -8),
     ]
     result = aggregate_velocity_from_items(items, today)
-    # 7 日窗口共 7 件
+    # 7 日窗口共 10 件
     v = result["sku-A"]["JP"]
-    expected = (7 / 7) * 0.5 + (7 / 14) * 0.3 + (7 / 30) * 0.2
+    expected = (10 / 7) * 0.5 + (10 / 14) * 0.3 + (10 / 30) * 0.2
     assert abs(v - expected) < 1e-9
 
 
 def test_aggregate_outside_window_excluded() -> None:
     today = date(2026, 4, 8)
     items = [
-        ("sku-A", "JP", today - timedelta(days=1), 10, 0),  # in
-        ("sku-A", "JP", today - timedelta(days=40), 100, 0),  # 40 天前,不在窗口
-        ("sku-A", "JP", today, 50, 0),  # 今天,不在窗口
+        ("sku-A", "JP", today - timedelta(days=1), 10),  # in
+        ("sku-A", "JP", today - timedelta(days=40), 100),  # 40 天前,不在窗口
+        ("sku-A", "JP", today, 50),  # 今天,不在窗口
     ]
     result = aggregate_velocity_from_items(items, today)
     v = result["sku-A"]["JP"]
@@ -84,8 +84,8 @@ def test_aggregate_outside_window_excluded() -> None:
 def test_aggregate_multi_country() -> None:
     today = date(2026, 4, 8)
     items = [
-        ("sku-A", "JP", today - timedelta(days=1), 10, 0),
-        ("sku-A", "US", today - timedelta(days=1), 20, 0),
+        ("sku-A", "JP", today - timedelta(days=1), 10),
+        ("sku-A", "US", today - timedelta(days=1), 20),
     ]
     result = aggregate_velocity_from_items(items, today)
     assert set(result["sku-A"].keys()) == {"JP", "US"}
@@ -118,3 +118,5 @@ async def test_load_velocity_inputs_applies_allowed_country_filter() -> None:
 
     compiled_sql = str(db.executed[0])
     assert "order_header.country_code IN" in compiled_sql
+    assert "order_item.quantity_ordered" in compiled_sql
+    assert "order_item.quantity_shipped - order_item.refund_num" not in compiled_sql

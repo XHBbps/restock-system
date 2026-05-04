@@ -101,12 +101,12 @@ async def load_all_sku_country_orders(
     end_dt = datetime.combine(today, datetime.min.time(), tzinfo=BEIJING)
 
     stmt = (
-        # Step 5 uses the same effective quantity and package status scope as Step 1.
+        # Step 5 uses the same ordered quantity and package status scope as Step 1.
         select(
             OrderItem.commodity_sku,
             OrderHeader.country_code,
             OrderHeader.postal_code,
-            (OrderItem.quantity_shipped - OrderItem.refund_num).label("effective_qty"),
+            OrderItem.quantity_ordered.label("effective_qty"),
         )
         .join(OrderHeader, OrderHeader.id == OrderItem.order_id)
         .where(OrderItem.commodity_sku.in_(commodity_skus))
@@ -202,7 +202,7 @@ def explain_country_qty_split(
 ) -> CountryAllocationResult:
     """把 country_qty 分配到该国的各个仓。
 
-    orders: [(postal_code, qty_shipped), ...]
+    orders: [(postal_code, quantity_ordered), ...]
     返回结构化结果,同时携带解释快照。
     """
     del sku  # 当前仅用于签名对齐 runner/测试调用
