@@ -44,6 +44,7 @@ from app.models.global_config import GlobalConfig
 from app.models.in_transit import InTransitRecord
 from app.models.inventory import InventorySnapshotLatest
 from app.models.order import OrderHeader
+from app.models.physical_item import PhysicalItemGroup, PhysicalItemSkuAlias
 from app.models.product_listing import ProductListing
 from app.models.shop import Shop
 from app.models.sku import SkuConfig
@@ -60,6 +61,10 @@ from app.schemas.config import (
     GenerationTogglePatch,
     GlobalConfigOut,
     GlobalConfigPatch,
+    PhysicalItemGroupIn,
+    PhysicalItemGroupListOut,
+    PhysicalItemGroupOut,
+    PhysicalItemGroupPatch,
     ShopOut,
     ShopPatch,
     SkuConfigListOut,
@@ -76,6 +81,7 @@ from app.schemas.config import (
     ZipcodeRuleIn,
     ZipcodeRuleOut,
 )
+from app.services.physical_item import load_physical_sku_resolver
 from app.tasks.queue import enqueue_task
 from app.tasks.scheduler import reload_scheduler
 
@@ -548,13 +554,15 @@ async def _validate_mapping_unique(
     commodity_sku: str,
     current_rule_id: int | None = None,
 ) -> None:
+    resolver = await load_physical_sku_resolver(db)
+    equivalent_skus = resolver.source_skus_for([commodity_sku])
     existing_rule = (
         await db.execute(
-            select(SkuMappingRule).where(SkuMappingRule.commodity_sku == commodity_sku)
+            select(SkuMappingRule).where(SkuMappingRule.commodity_sku.in_(equivalent_skus))
         )
     ).scalar_one_or_none()
     if existing_rule is not None and existing_rule.id != current_rule_id:
-        raise ConflictError(f"商品SKU {commodity_sku} 已存在映射规则")
+        raise ConflictError(f"商品SKU {commodity_sku} 或同物别名已存在映射规则")
 
 
 async def _replace_mapping_components(
@@ -562,6 +570,16 @@ async def _replace_mapping_components(
     rule: SkuMappingRule,
     components: list[SkuMappingComponentIn],
 ) -> None:
+    resolver = await load_physical_sku_resolver(db)
+    seen_by_group: dict[int, set[str]] = {}
+    for component in components:
+        normalized_sku = resolver.resolve(component.inventory_sku)
+        group_seen = seen_by_group.setdefault(component.group_no, set())
+        if normalized_sku in group_seen:
+            raise ValidationFailed(
+                f"同一方案内库存SKU {component.inventory_sku} 与其他组件归属同一同物共享组"
+            )
+        group_seen.add(normalized_sku)
     await db.execute(delete(SkuMappingComponent).where(SkuMappingComponent.rule_id == rule.id))
     for component in components:
         db.add(
@@ -918,6 +936,197 @@ async def delete_sku_mapping_rule(
     result = await db.execute(delete(SkuMappingRule).where(SkuMappingRule.id == rule_id))
     if result.rowcount == 0:  # type: ignore[attr-defined]
         raise NotFound(f"映射规则 {rule_id} 不存在")
+    await db.commit()
+    return None
+
+
+# ============================================================
+# Physical Item Groups
+# ============================================================
+def _physical_group_out(group: PhysicalItemGroup) -> PhysicalItemGroupOut:
+    return PhysicalItemGroupOut(
+        id=group.id,
+        name=group.name,
+        primary_sku=group.primary_sku,
+        enabled=group.enabled,
+        remark=group.remark,
+        aliases=group.aliases,
+        alias_count=len(group.aliases),
+        created_at=group.created_at,
+        updated_at=group.updated_at,
+    )
+
+
+async def _validate_physical_group_unique(
+    db: AsyncSession,
+    *,
+    name: str,
+    aliases: list[str],
+    current_group_id: int | None = None,
+) -> None:
+    name_row = (
+        await db.execute(select(PhysicalItemGroup).where(PhysicalItemGroup.name == name))
+    ).scalar_one_or_none()
+    if name_row is not None and name_row.id != current_group_id:
+        raise ConflictError(f"同物共享组名称 {name} 已存在")
+
+    alias_stmt = select(PhysicalItemSkuAlias).where(PhysicalItemSkuAlias.sku.in_(aliases))
+    if current_group_id is not None:
+        alias_stmt = alias_stmt.where(PhysicalItemSkuAlias.group_id != current_group_id)
+    alias_rows = (await db.execute(alias_stmt)).scalars().all()
+    if alias_rows:
+        conflict_skus = ", ".join(sorted({row.sku for row in alias_rows}))
+        raise ConflictError(f"SKU 已归属其他同物共享组：{conflict_skus}")
+
+
+async def _replace_physical_aliases(
+    db: AsyncSession,
+    group: PhysicalItemGroup,
+    aliases: list[str],
+) -> None:
+    await db.execute(delete(PhysicalItemSkuAlias).where(PhysicalItemSkuAlias.group_id == group.id))
+    for sku in aliases:
+        db.add(PhysicalItemSkuAlias(group_id=group.id, sku=sku))
+
+
+@router.get("/physical-item-groups", response_model=PhysicalItemGroupListOut)
+async def list_physical_item_groups(
+    enabled: bool | None = Query(default=None),
+    keyword: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+    db: AsyncSession = Depends(db_session_readonly),
+    _: None = Depends(require_permission(CONFIG_VIEW)),
+) -> PhysicalItemGroupListOut:
+    base = select(PhysicalItemGroup).options(selectinload(PhysicalItemGroup.aliases))
+    count_stmt = select(func.count(distinct(PhysicalItemGroup.id))).select_from(PhysicalItemGroup)
+    if enabled is not None:
+        base = base.where(PhysicalItemGroup.enabled.is_(enabled))
+        count_stmt = count_stmt.where(PhysicalItemGroup.enabled.is_(enabled))
+    if keyword:
+        like = f"%{escape_like(keyword)}%"
+        base = base.outerjoin(PhysicalItemSkuAlias).where(
+            or_(
+                PhysicalItemGroup.name.ilike(like, escape="\\"),
+                PhysicalItemGroup.primary_sku.ilike(like, escape="\\"),
+                PhysicalItemSkuAlias.sku.ilike(like, escape="\\"),
+            )
+        )
+        count_stmt = count_stmt.outerjoin(PhysicalItemSkuAlias).where(
+            or_(
+                PhysicalItemGroup.name.ilike(like, escape="\\"),
+                PhysicalItemGroup.primary_sku.ilike(like, escape="\\"),
+                PhysicalItemSkuAlias.sku.ilike(like, escape="\\"),
+            )
+        )
+
+    total = (await db.execute(count_stmt)).scalar_one()
+    rows = (
+        (
+            await db.execute(
+                base.order_by(PhysicalItemGroup.name)
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
+        )
+        .scalars()
+        .unique()
+        .all()
+    )
+    return PhysicalItemGroupListOut(
+        items=[_physical_group_out(row) for row in rows],
+        total=int(total or 0),
+    )
+
+
+@router.post("/physical-item-groups", response_model=PhysicalItemGroupOut, status_code=201)
+async def create_physical_item_group(
+    body: PhysicalItemGroupIn,
+    db: AsyncSession = Depends(db_session),
+    _: None = Depends(require_permission(CONFIG_EDIT)),
+) -> PhysicalItemGroupOut:
+    await _validate_physical_group_unique(db, name=body.name, aliases=body.aliases)
+    group = PhysicalItemGroup(
+        name=body.name,
+        primary_sku=body.primary_sku,
+        enabled=body.enabled,
+        remark=body.remark,
+    )
+    db.add(group)
+    await db.flush()
+    await _replace_physical_aliases(db, group, body.aliases)
+    await db.commit()
+    group = (
+        await db.execute(
+            select(PhysicalItemGroup)
+            .options(selectinload(PhysicalItemGroup.aliases))
+            .where(PhysicalItemGroup.id == group.id)
+        )
+    ).scalar_one()
+    return _physical_group_out(group)
+
+
+@router.patch("/physical-item-groups/{group_id}", response_model=PhysicalItemGroupOut)
+async def patch_physical_item_group(
+    patch: PhysicalItemGroupPatch,
+    group_id: int = Path(..., ge=1),
+    db: AsyncSession = Depends(db_session),
+    _: None = Depends(require_permission(CONFIG_EDIT)),
+) -> PhysicalItemGroupOut:
+    group = (
+        await db.execute(
+            select(PhysicalItemGroup)
+            .options(selectinload(PhysicalItemGroup.aliases))
+            .where(PhysicalItemGroup.id == group_id)
+        )
+    ).scalar_one_or_none()
+    if group is None:
+        raise NotFound(f"同物共享组 {group_id} 不存在")
+
+    new_name = patch.name if patch.name is not None else group.name
+    new_primary_sku = patch.primary_sku if patch.primary_sku is not None else group.primary_sku
+    new_aliases = (
+        patch.aliases if patch.aliases is not None else [alias.sku for alias in group.aliases]
+    )
+    if new_primary_sku not in set(new_aliases):
+        raise ValidationFailed("主 SKU 必须属于别名成员")
+    await _validate_physical_group_unique(
+        db,
+        name=new_name,
+        aliases=new_aliases,
+        current_group_id=group.id,
+    )
+
+    if patch.name is not None:
+        group.name = patch.name
+    if patch.primary_sku is not None:
+        group.primary_sku = patch.primary_sku
+    if patch.enabled is not None:
+        group.enabled = patch.enabled
+    if "remark" in patch.model_fields_set:
+        group.remark = patch.remark
+    if patch.aliases is not None:
+        await _replace_physical_aliases(db, group, patch.aliases)
+    await db.commit()
+    group = (
+        await db.execute(
+            select(PhysicalItemGroup)
+            .options(selectinload(PhysicalItemGroup.aliases))
+            .where(PhysicalItemGroup.id == group_id)
+        )
+    ).scalar_one()
+    return _physical_group_out(group)
+
+
+@router.delete("/physical-item-groups/{group_id}", status_code=204)
+async def delete_physical_item_group(
+    group_id: int = Path(..., ge=1),
+    db: AsyncSession = Depends(db_session),
+    _: None = Depends(require_permission(CONFIG_EDIT)),
+) -> None:
+    result = await db.execute(delete(PhysicalItemGroup).where(PhysicalItemGroup.id == group_id))
+    if result.rowcount == 0:  # type: ignore[attr-defined]
+        raise NotFound(f"同物共享组 {group_id} 不存在")
     await db.commit()
     return None
 

@@ -55,6 +55,7 @@ async def test_dashboard_returns_empty_risk_distribution_without_active_suggesti
     db = _FakeDb(
         [
             _ScalarsResult(["SKU-1", "SKU-2", "SKU-3"]),
+            _RowsResult([]),
             _ScalarOneOrNoneResult(
                 SimpleNamespace(target_days=60, lead_time_days=50, restock_regions=[])
             ),
@@ -139,6 +140,7 @@ async def test_dashboard_risk_distribution_uses_restock_regions_filter() -> None
     db = _FakeDb(
         [
             _ScalarsResult(["SKU-1", "SKU-2"]),
+            _RowsResult([]),
             _ScalarOneOrNoneResult(
                 SimpleNamespace(target_days=60, lead_time_days=50, restock_regions=["EU"])
             ),
@@ -202,6 +204,7 @@ async def test_dashboard_restock_sku_count_uses_draft_demand_date() -> None:
     db = _FakeDb(
         [
             _ScalarsResult(["SKU-1"]),
+            _RowsResult([]),
             _ScalarOneOrNoneResult(
                 SimpleNamespace(target_days=60, lead_time_days=50, restock_regions=[])
             ),
@@ -313,6 +316,7 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
     db = _FakeDb(
         [
             _ScalarsResult(["SKU-1", "SKU-2", "SKU-3", "SKU-7"]),
+            _RowsResult([]),
             _ScalarOneOrNoneResult(
                 SimpleNamespace(target_days=60, lead_time_days=20, restock_regions=[])
             ),

@@ -30,6 +30,7 @@ from app.models.warehouse import Warehouse
 async def load_oversea_inventory(
     db: AsyncSession,
     commodity_skus: list[str] | None,
+    sku_alias_map: dict[str, str] | None = None,
 ) -> dict[tuple[str, str], dict[str, int]]:
     """Load overseas inventory aggregated by ``(sku, country)``."""
     stmt = (
@@ -48,17 +49,19 @@ async def load_oversea_inventory(
         stmt = stmt.where(InventorySnapshotLatest.commodity_sku.in_(commodity_skus))
     rows = (await db.execute(stmt)).all()
     result: dict[tuple[str, str], dict[str, int]] = {}
+    aliases = sku_alias_map or {}
     for sku, country, avail, reserv in rows:
-        result[(sku, country)] = {
-            "available": int(avail or 0),
-            "reserved": int(reserv or 0),
-        }
+        key = (aliases.get(sku, sku), country)
+        current = result.setdefault(key, {"available": 0, "reserved": 0})
+        current["available"] += int(avail or 0)
+        current["reserved"] += int(reserv or 0)
     return result
 
 
 async def load_in_transit(
     db: AsyncSession,
     commodity_skus: list[str] | None,
+    sku_alias_map: dict[str, str] | None = None,
 ) -> dict[tuple[str, str], int]:
     """Load in-transit quantities from synced active out-record tables."""
     stmt = (
@@ -80,7 +83,11 @@ async def load_in_transit(
 
     rows = (await db.execute(stmt)).all()
 
-    return {(sku, country): int(goods_total or 0) for sku, country, goods_total in rows}
+    aliases = sku_alias_map or {}
+    result: defaultdict[tuple[str, str], int] = defaultdict(int)
+    for sku, country, goods_total in rows:
+        result[(aliases.get(sku, sku), country)] += int(goods_total or 0)
+    return dict(result)
 
 
 def merge_inventory(
@@ -123,21 +130,36 @@ async def run_step2(
     db: AsyncSession,
     velocity: VelocityMap,
     commodity_skus: list[str] | None,
+    sku_alias_map: dict[str, str] | None = None,
+    component_source_skus: dict[str, list[str]] | None = None,
 ) -> tuple[SaleDaysMap, InventoryMap]:
-    oversea = await load_oversea_inventory(db, commodity_skus)
-    in_transit = await load_in_transit(db, commodity_skus)
-    rules = await load_active_mapping_rules(db, commodity_skus)
+    oversea = await load_oversea_inventory(db, commodity_skus, sku_alias_map=sku_alias_map)
+    in_transit = await load_in_transit(db, commodity_skus, sku_alias_map=sku_alias_map)
+    rules = await load_active_mapping_rules(db, commodity_skus, sku_alias_map=sku_alias_map)
     component_skus = component_skus_for_rules(rules)
     if component_skus:
+        component_query_skus = sorted(
+            {
+                source_sku
+                for component_sku in component_skus
+                for source_sku in (
+                    component_source_skus.get(component_sku, [component_sku])
+                    if component_source_skus is not None
+                    else [component_sku]
+                )
+            }
+        )
         component_inventory = await load_inventory_totals_by_warehouse(
             db,
-            component_skus,
+            component_query_skus,
             exclude_warehouse_type=1,
+            sku_alias_map=sku_alias_map,
         )
         component_transit = await load_in_transit_totals_by_warehouse(
             db,
-            component_skus,
+            component_query_skus,
             exclude_warehouse_type=1,
+            sku_alias_map=sku_alias_map,
         )
         mapped = compute_mapped_stock_by_country(
             rules,

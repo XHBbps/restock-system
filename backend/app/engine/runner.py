@@ -27,6 +27,7 @@ from app.engine.step6_timing import compute_urgency_for_sku
 from app.models.global_config import GlobalConfig
 from app.models.sku import SkuConfig
 from app.models.suggestion import Suggestion, SuggestionItem
+from app.services.physical_item import load_physical_sku_resolver
 from app.tasks.jobs import JobContext
 
 logger = get_logger(__name__)
@@ -82,8 +83,15 @@ async def run_engine(
                 )
             )
         ).all()
-        sku_list = [row[0] for row in enabled_skus]
-        sku_lead_time: dict[str, int | None] = {row[0]: row[1] for row in enabled_skus}
+        resolver = await load_physical_sku_resolver(db)
+        enabled_source_skus = [row[0] for row in enabled_skus]
+        sku_list = resolver.resolve_many(enabled_source_skus)
+        source_sku_list = resolver.source_skus_for(enabled_source_skus)
+        sku_lead_time: dict[str, int | None] = {}
+        for raw_sku, lead_time_days in enabled_skus:
+            primary_sku = resolver.resolve(raw_sku)
+            if primary_sku not in sku_lead_time or raw_sku == primary_sku:
+                sku_lead_time[primary_sku] = lead_time_days
 
         if not sku_list:
             logger.warning("engine_no_enabled_sku", triggered_by=triggered_by)
@@ -93,10 +101,21 @@ async def run_engine(
         await ctx.progress(current_step="Step 1: 计算 velocity", total_steps=7)
         # Σvelocity 参与采购量（step4）计算时须覆盖所有国家（含白名单外的动销），
         # 因此这里不按 restock_regions 过滤。白名单只作用于后续的 country_qty。
-        velocity = await run_step1(db, sku_list, today)
+        velocity = await run_step1(
+            db,
+            source_sku_list,
+            today,
+            sku_alias_map=resolver.alias_to_primary,
+        )
 
         await ctx.progress(current_step="Step 2: 计算 sale_days")
-        sale_days, inventory = await run_step2(db, velocity, sku_list)
+        sale_days, inventory = await run_step2(
+            db,
+            velocity,
+            source_sku_list,
+            sku_alias_map=resolver.alias_to_primary,
+            component_source_skus=resolver.aliases_by_primary,
+        )
 
         await ctx.progress(current_step="Step 3: 计算各国补货量")
         country_qty_all = compute_country_qty(velocity, inventory, effective_target_days)
@@ -109,16 +128,23 @@ async def run_engine(
             country_qty = country_qty_all
 
         await ctx.progress(current_step="Step 4: 计算采购量")
-        local_stock = await load_local_inventory(db, sku_list, velocity)
+        local_stock = await load_local_inventory(
+            db,
+            source_sku_list,
+            velocity,
+            sku_alias_map=resolver.alias_to_primary,
+            component_source_skus=resolver.aliases_by_primary,
+        )
 
         await ctx.progress(current_step="Step 5: 计算分仓")
         country_warehouses = await load_country_warehouses(db)
         zipcode_rules = await load_zipcode_rules(db)
         all_orders = await load_all_sku_country_orders(
             db,
-            sku_list,
+            source_sku_list,
             today,
             allowed_countries=allowed_countries,
+            sku_alias_map=resolver.alias_to_primary,
         )
 
         items_to_insert: list[dict[str, Any]] = []
@@ -168,13 +194,21 @@ async def run_engine(
                 today=today,
             )
 
+            physical_aliases = resolver.aliases_for(sku)
+            item_allocation_snapshot: dict[str, Any] = allocation_snapshot
+            if len(physical_aliases) > 1:
+                item_allocation_snapshot = {
+                    **allocation_snapshot,
+                    "_physical_item_aliases": physical_aliases,
+                }
+
             items_to_insert.append(
                 {
                     "commodity_sku": sku,
                     "total_qty": restock_total,
                     "country_breakdown": sku_country_qty,
                     "warehouse_breakdown": warehouse_breakdown,
-                    "allocation_snapshot": allocation_snapshot,
+                    "allocation_snapshot": item_allocation_snapshot,
                     "velocity_snapshot": velocity.get(sku, {}),
                     "sale_days_snapshot": sale_days.get(sku, {}),
                     "urgent": timing.urgent,

@@ -13,6 +13,7 @@ from app.models.in_transit import InTransitItem, InTransitRecord
 from app.models.inventory import InventorySnapshotHistory, InventorySnapshotLatest
 from app.models.login_attempt import LoginAttempt
 from app.models.order import OrderDetail, OrderDetailFetchLog, OrderHeader, OrderItem
+from app.models.physical_item import PhysicalItemGroup, PhysicalItemSkuAlias
 from app.models.permission import Permission
 from app.models.product_listing import ProductListing
 from app.models.role import Role
@@ -44,6 +45,8 @@ __all__ = [
     "OrderDetailFetchLog",
     "OrderHeader",
     "OrderItem",
+    "PhysicalItemGroup",
+    "PhysicalItemSkuAlias",
     "Permission",
     "ProductListing",
     "Role",

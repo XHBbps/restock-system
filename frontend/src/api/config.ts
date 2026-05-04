@@ -156,6 +156,64 @@ export async function importSkuMappingRules(file: File): Promise<{
   return data
 }
 
+// ========== Physical Item Groups ==========
+export interface PhysicalItemAlias {
+  id: number
+  sku: string
+}
+
+export interface PhysicalItemGroup {
+  id: number
+  name: string
+  primary_sku: string
+  enabled: boolean
+  remark: string | null
+  aliases: PhysicalItemAlias[]
+  alias_count: number
+  created_at: string
+  updated_at: string
+}
+
+export interface PhysicalItemGroupInput {
+  name: string
+  primary_sku: string
+  enabled: boolean
+  remark?: string | null
+  aliases: string[]
+}
+
+export async function listPhysicalItemGroups(params: {
+  enabled?: boolean
+  keyword?: string
+  page?: number
+  page_size?: number
+}): Promise<{ items: PhysicalItemGroup[]; total: number }> {
+  const { data } = await client.get('/api/config/physical-item-groups', { params })
+  return data
+}
+
+export async function createPhysicalItemGroup(
+  group: PhysicalItemGroupInput,
+): Promise<PhysicalItemGroup> {
+  const { data } = await client.post<PhysicalItemGroup>('/api/config/physical-item-groups', group)
+  return data
+}
+
+export async function updatePhysicalItemGroup(
+  id: number,
+  group: Partial<PhysicalItemGroupInput>,
+): Promise<PhysicalItemGroup> {
+  const { data } = await client.patch<PhysicalItemGroup>(
+    `/api/config/physical-item-groups/${id}`,
+    group,
+  )
+  return data
+}
+
+export async function deletePhysicalItemGroup(id: number): Promise<void> {
+  await client.delete(`/api/config/physical-item-groups/${id}`)
+}
+
 // ========== Warehouse ==========
 export interface Warehouse {
   id: string

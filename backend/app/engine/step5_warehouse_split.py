@@ -86,6 +86,7 @@ async def load_all_sku_country_orders(
     commodity_skus: list[str],
     today: date,
     allowed_countries: set[str] | None = None,
+    sku_alias_map: dict[str, str] | None = None,
 ) -> dict[tuple[str, str], list[tuple[str | None, int]]]:
     """批量加载所有指定 SKU 近 30 天订单,按 (sku, country) 分组返回。
 
@@ -120,11 +121,12 @@ async def load_all_sku_country_orders(
     rows = (await db.execute(stmt)).all()
 
     grouped: dict[tuple[str, str], list[tuple[str | None, int]]] = {}
+    aliases = sku_alias_map or {}
     for sku, country, postal, qty in rows:
         effective_qty = max(int(qty or 0), 0)
         if effective_qty <= 0:
             continue
-        key = (sku, country)
+        key = (aliases.get(sku, sku), country)
         grouped.setdefault(key, []).append((postal, effective_qty))
     return grouped
 

@@ -257,6 +257,7 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
     from app.models.sku import SkuConfig
     from app.models.suggestion import Suggestion, SuggestionItem
     from app.models.suggestion_snapshot import SuggestionSnapshot
+    from app.services.physical_item import load_physical_sku_resolver
 
     enabled_skus = list(
         (
@@ -269,7 +270,10 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
         .scalars()
         .all()
     )
-    enabled_sku_count = len(enabled_skus)
+    resolver = await load_physical_sku_resolver(db)
+    source_skus = resolver.source_skus_for(enabled_skus)
+    canonical_skus = resolver.resolve_many(enabled_skus)
+    enabled_sku_count = len(canonical_skus)
 
     config = (
         await db.execute(select(GlobalConfig).where(GlobalConfig.id == 1))
@@ -303,9 +307,26 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
 
     # velocity 口径与 runner 一致：不受 restock_regions 过滤，
     # 保证采购量公式里的 Σvelocity 覆盖全部销售国家（含白名单外）。
-    velocity = await run_step1(db, enabled_skus, now_beijing().date()) if enabled_skus else {}
+    velocity = (
+        await run_step1(
+            db,
+            source_skus,
+            now_beijing().date(),
+            sku_alias_map=resolver.alias_to_primary,
+        )
+        if enabled_skus
+        else {}
+    )
     all_sale_days, inventory = (
-        await run_step2(db, velocity, enabled_skus) if enabled_skus else ({}, {})
+        await run_step2(
+            db,
+            velocity,
+            source_skus,
+            sku_alias_map=resolver.alias_to_primary,
+            component_source_skus=resolver.aliases_by_primary,
+        )
+        if enabled_skus
+        else ({}, {})
     )
     live_country_qty_all = (
         compute_country_qty(velocity, inventory, effective_target_days) if enabled_skus else {}
@@ -318,9 +339,19 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
         }
     else:
         live_country_qty = live_country_qty_all
-    local_stock = await load_local_inventory(db, enabled_skus, velocity) if enabled_skus else {}
+    local_stock = (
+        await load_local_inventory(
+            db,
+            source_skus,
+            velocity,
+            sku_alias_map=resolver.alias_to_primary,
+            component_source_skus=resolver.aliases_by_primary,
+        )
+        if enabled_skus
+        else {}
+    )
     restock_sku_count = 0
-    for sku in enabled_skus:
+    for sku in canonical_skus:
         sku_country_qty = live_country_qty.get(sku, {})
         if not sku_country_qty:
             continue

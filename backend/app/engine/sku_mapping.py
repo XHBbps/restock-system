@@ -64,6 +64,7 @@ def _local_weights_by_sku(velocity: dict[str, dict[str, float]]) -> dict[str, di
 async def load_active_mapping_rules(
     db: AsyncSession,
     commodity_skus: list[str] | None,
+    sku_alias_map: dict[str, str] | None = None,
 ) -> MappingRules:
     stmt = (
         select(SkuMappingRule)
@@ -74,18 +75,37 @@ async def load_active_mapping_rules(
     if commodity_skus is not None:
         stmt = stmt.where(SkuMappingRule.commodity_sku.in_(commodity_skus))
     rows = (await db.execute(stmt)).scalars().all()
+    aliases = sku_alias_map or {}
     rules: MappingRules = {}
     for row in rows:
         groups: dict[int, MappingGroup] = defaultdict(list)
         for component in row.components:
-            groups[component.group_no].append(
-                MappingComponent(
-                    inventory_sku=component.inventory_sku,
-                    quantity=component.quantity,
-                )
+            normalized_inventory_sku = aliases.get(component.inventory_sku, component.inventory_sku)
+            existing_index = next(
+                (
+                    idx
+                    for idx, existing in enumerate(groups[component.group_no])
+                    if existing.inventory_sku == normalized_inventory_sku
+                ),
+                None,
             )
+            normalized_component = MappingComponent(
+                inventory_sku=normalized_inventory_sku,
+                quantity=component.quantity,
+            )
+            if existing_index is None:
+                groups[component.group_no].append(normalized_component)
+            else:
+                existing = groups[component.group_no][existing_index]
+                groups[component.group_no][existing_index] = MappingComponent(
+                    inventory_sku=existing.inventory_sku,
+                    quantity=max(existing.quantity, component.quantity),
+                )
         if groups:
-            rules[row.commodity_sku] = [groups[group_no] for group_no in sorted(groups)]
+            commodity_sku = aliases.get(row.commodity_sku, row.commodity_sku)
+            rules.setdefault(commodity_sku, []).extend(
+                [groups[group_no] for group_no in sorted(groups)]
+            )
     return rules
 
 
@@ -168,6 +188,7 @@ async def load_inventory_totals_by_warehouse(
     *,
     warehouse_type: int | None = None,
     exclude_warehouse_type: int | None = None,
+    sku_alias_map: dict[str, str] | None = None,
 ) -> dict[tuple[str, str], WarehouseStock]:
     if not inventory_skus:
         return {}
@@ -193,10 +214,19 @@ async def load_inventory_totals_by_warehouse(
     if exclude_warehouse_type is not None:
         stmt = stmt.where(Warehouse.type != exclude_warehouse_type)
     rows = (await db.execute(stmt)).all()
-    return {
-        (sku, warehouse_id): WarehouseStock(country=country, total=int(total or 0))
-        for sku, warehouse_id, country, total in rows
-    }
+    aliases = sku_alias_map or {}
+    result: dict[tuple[str, str], WarehouseStock] = {}
+    for sku, warehouse_id, country, total in rows:
+        key = (aliases.get(sku, sku), warehouse_id)
+        current = result.get(key)
+        if current is None:
+            result[key] = WarehouseStock(country=country, total=int(total or 0))
+        else:
+            result[key] = WarehouseStock(
+                country=current.country or country,
+                total=current.total + int(total or 0),
+            )
+    return result
 
 
 async def load_in_transit_totals_by_warehouse(
@@ -205,6 +235,7 @@ async def load_in_transit_totals_by_warehouse(
     *,
     warehouse_type: int | None = None,
     exclude_warehouse_type: int | None = None,
+    sku_alias_map: dict[str, str] | None = None,
 ) -> dict[tuple[str, str], WarehouseStock]:
     """Load component in-transit quantities that have target warehouse IDs."""
     if not inventory_skus:
@@ -236,10 +267,19 @@ async def load_in_transit_totals_by_warehouse(
     if exclude_warehouse_type is not None:
         stmt = stmt.where(Warehouse.type != exclude_warehouse_type)
     rows = (await db.execute(stmt)).all()
-    return {
-        (sku, warehouse_id): WarehouseStock(country=country, total=int(total or 0))
-        for sku, warehouse_id, country, total in rows
-    }
+    aliases = sku_alias_map or {}
+    result: dict[tuple[str, str], WarehouseStock] = {}
+    for sku, warehouse_id, country, total in rows:
+        key = (aliases.get(sku, sku), warehouse_id)
+        current = result.get(key)
+        if current is None:
+            result[key] = WarehouseStock(country=country, total=int(total or 0))
+        else:
+            result[key] = WarehouseStock(
+                country=current.country or country,
+                total=current.total + int(total or 0),
+            )
+    return result
 
 
 def merge_warehouse_stock(

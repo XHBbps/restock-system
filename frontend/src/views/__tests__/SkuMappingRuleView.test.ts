@@ -6,17 +6,22 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useAuthStore } from '@/stores/auth'
 
-const { mockListSkuMappingRules, messageWarning } = vi.hoisted(() => ({
+const { mockListSkuMappingRules, mockListPhysicalItemGroups, messageWarning } = vi.hoisted(() => ({
   mockListSkuMappingRules: vi.fn(),
+  mockListPhysicalItemGroups: vi.fn(),
   messageWarning: vi.fn(),
 }))
 
 vi.mock('@/api/config', () => ({
+  createPhysicalItemGroup: vi.fn(),
   createSkuMappingRule: vi.fn(),
+  deletePhysicalItemGroup: vi.fn(),
   deleteSkuMappingRule: vi.fn(),
   exportSkuMappingRules: vi.fn(),
   importSkuMappingRules: vi.fn(),
+  listPhysicalItemGroups: (...args: unknown[]) => mockListPhysicalItemGroups(...args),
   listSkuMappingRules: (...args: unknown[]) => mockListSkuMappingRules(...args),
+  updatePhysicalItemGroup: vi.fn(),
   updateSkuMappingRule: vi.fn(),
 }))
 
@@ -59,6 +64,7 @@ describe('SkuMappingRuleView', () => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
     mockListSkuMappingRules.mockResolvedValue({ items: [], total: 0 })
+    mockListPhysicalItemGroups.mockResolvedValue({ items: [], total: 0 })
     const auth = useAuthStore()
     auth.setAuth('test-token', {
       id: 1,

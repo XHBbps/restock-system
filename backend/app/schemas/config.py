@@ -205,6 +205,111 @@ class SkuMappingImportOut(BaseModel):
     total_components: int
 
 
+# ==================== Physical Item Groups ====================
+class PhysicalItemGroupIn(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    primary_sku: str = Field(..., min_length=1, max_length=100)
+    aliases: list[str] = Field(..., min_length=1)
+    enabled: bool = True
+    remark: str | None = Field(default=None, max_length=1000)
+
+    @field_validator("name", "primary_sku")
+    @classmethod
+    def normalize_required_text(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("字段不能为空")
+        return text
+
+    @field_validator("aliases")
+    @classmethod
+    def normalize_aliases(cls, values: list[str]) -> list[str]:
+        aliases: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            sku = value.strip()
+            if not sku:
+                raise ValueError("别名 SKU 不能为空")
+            if sku in seen:
+                raise ValueError(f"别名 SKU 重复：{sku}")
+            seen.add(sku)
+            aliases.append(sku)
+        return aliases
+
+    @field_validator("remark")
+    @classmethod
+    def normalize_physical_remark(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        remark = value.strip()
+        return remark or None
+
+    @model_validator(mode="after")
+    def validate_primary_in_aliases(self) -> "PhysicalItemGroupIn":
+        if self.primary_sku not in set(self.aliases):
+            raise ValueError("主 SKU 必须属于别名成员")
+        return self
+
+
+class PhysicalItemGroupPatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    primary_sku: str | None = Field(default=None, min_length=1, max_length=100)
+    aliases: list[str] | None = Field(default=None, min_length=1)
+    enabled: bool | None = None
+    remark: str | None = Field(default=None, max_length=1000)
+
+    @field_validator("name", "primary_sku")
+    @classmethod
+    def normalize_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        text = value.strip()
+        if not text:
+            raise ValueError("字段不能为空")
+        return text
+
+    @field_validator("aliases")
+    @classmethod
+    def normalize_optional_aliases(cls, values: list[str] | None) -> list[str] | None:
+        if values is None:
+            return None
+        return PhysicalItemGroupIn.normalize_aliases(values)
+
+    @field_validator("remark")
+    @classmethod
+    def normalize_optional_physical_remark(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        remark = value.strip()
+        return remark or None
+
+
+class PhysicalItemAliasOut(BaseModel):
+    id: int
+    sku: str
+
+    model_config = {"from_attributes": True}
+
+
+class PhysicalItemGroupOut(BaseModel):
+    id: int
+    name: str
+    primary_sku: str
+    enabled: bool
+    remark: str | None = None
+    aliases: list[PhysicalItemAliasOut]
+    alias_count: int
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class PhysicalItemGroupListOut(BaseModel):
+    items: list[PhysicalItemGroupOut]
+    total: int
+
+
 # ==================== Warehouse ====================
 class WarehouseOut(BaseModel):
     id: str

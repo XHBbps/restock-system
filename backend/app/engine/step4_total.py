@@ -25,6 +25,8 @@ async def load_local_inventory(
     db: AsyncSession,
     commodity_skus: list[str] | None,
     velocity: VelocityMap | None = None,
+    sku_alias_map: dict[str, str] | None = None,
+    component_source_skus: dict[str, list[str]] | None = None,
 ) -> dict[str, LocalStock]:
     stmt = (
         select(
@@ -39,15 +41,38 @@ async def load_local_inventory(
     if commodity_skus is not None:
         stmt = stmt.where(InventorySnapshotLatest.commodity_sku.in_(commodity_skus))
     rows = (await db.execute(stmt)).all()
-    result = {sku: LocalStock(available=int(a or 0), reserved=int(r or 0)) for sku, a, r in rows}
+    aliases = sku_alias_map or {}
+    result: dict[str, LocalStock] = {}
+    for sku, available, reserved in rows:
+        key = aliases.get(sku, sku)
+        current = result.get(key)
+        if current is None:
+            result[key] = LocalStock(available=int(available or 0), reserved=int(reserved or 0))
+        else:
+            result[key] = LocalStock(
+                available=current.available + int(available or 0),
+                reserved=current.reserved + int(reserved or 0),
+            )
 
-    rules = await load_active_mapping_rules(db, commodity_skus)
+    rules = await load_active_mapping_rules(db, commodity_skus, sku_alias_map=sku_alias_map)
     component_skus = component_skus_for_rules(rules)
     if component_skus:
+        component_query_skus = sorted(
+            {
+                source_sku
+                for component_sku in component_skus
+                for source_sku in (
+                    component_source_skus.get(component_sku, [component_sku])
+                    if component_source_skus is not None
+                    else [component_sku]
+                )
+            }
+        )
         component_inventory = await load_inventory_totals_by_warehouse(
             db,
-            component_skus,
+            component_query_skus,
             warehouse_type=1,
+            sku_alias_map=sku_alias_map,
         )
         mapped_totals = compute_mapped_stock_total_by_sku(
             rules,
