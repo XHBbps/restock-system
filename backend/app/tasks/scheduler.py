@@ -21,13 +21,14 @@ from app.tasks.queue import enqueue_task
 logger = get_logger(__name__)
 
 _scheduler: AsyncIOScheduler | None = None
-_scheduler_signature: tuple[int] | None = None
+_scheduler_signature: tuple[int, int] | None = None
 
 
 @dataclass(frozen=True)
 class SchedulerRuntimeConfig:
     enabled: bool
     sync_interval_minutes: int
+    order_sync_interval_minutes: int
 
 
 def _build_scheduler() -> AsyncIOScheduler:
@@ -50,23 +51,32 @@ async def _load_scheduler_config() -> SchedulerRuntimeConfig:
     async with async_session_factory() as db:
         row = (
             await db.execute(
-                select(GlobalConfig.scheduler_enabled, GlobalConfig.sync_interval_minutes).where(
-                    GlobalConfig.id == 1
-                )
+                select(
+                    GlobalConfig.scheduler_enabled,
+                    GlobalConfig.sync_interval_minutes,
+                    GlobalConfig.order_sync_interval_minutes,
+                ).where(GlobalConfig.id == 1)
             )
         ).one_or_none()
     if row is None:
         return SchedulerRuntimeConfig(
             enabled=True,
             sync_interval_minutes=settings.default_sync_interval_minutes,
+            order_sync_interval_minutes=settings.default_order_sync_interval_minutes,
         )
     return SchedulerRuntimeConfig(
         enabled=bool(row.scheduler_enabled),
         sync_interval_minutes=int(row.sync_interval_minutes),
+        order_sync_interval_minutes=int(row.order_sync_interval_minutes),
     )
 
 
-def _register_jobs(scheduler: AsyncIOScheduler, *, sync_interval_minutes: int) -> None:
+def _register_jobs(
+    scheduler: AsyncIOScheduler,
+    *,
+    sync_interval_minutes: int,
+    order_sync_interval_minutes: int,
+) -> None:
     scheduler.add_job(
         _enqueue_safely,
         trigger=CronTrigger(hour=3, minute=0, timezone=BEIJING),
@@ -78,7 +88,6 @@ def _register_jobs(scheduler: AsyncIOScheduler, *, sync_interval_minutes: int) -
         "sync_product_listing",
         "sync_inventory",
         "sync_out_records",
-        "sync_order_list",
     ]:
         scheduler.add_job(
             _enqueue_safely,
@@ -87,6 +96,13 @@ def _register_jobs(scheduler: AsyncIOScheduler, *, sync_interval_minutes: int) -
             id=f"trigger_{job_name}",
             replace_existing=True,
         )
+    scheduler.add_job(
+        _enqueue_safely,
+        trigger=IntervalTrigger(minutes=order_sync_interval_minutes),
+        args=["sync_order_list"],
+        id="trigger_sync_order_list",
+        replace_existing=True,
+    )
 
     scheduler.add_job(
         _enqueue_safely,
@@ -132,7 +148,7 @@ def _next_run_time_iso(job: Job, *, enabled: bool) -> str | None:
 async def setup_scheduler(force_reload: bool = False) -> AsyncIOScheduler:
     global _scheduler, _scheduler_signature
     config = await _load_scheduler_config()
-    signature = (config.sync_interval_minutes,)
+    signature = (config.sync_interval_minutes, config.order_sync_interval_minutes)
     if _scheduler is not None and not force_reload and _scheduler_signature == signature:
         return _scheduler
 
@@ -140,7 +156,11 @@ async def setup_scheduler(force_reload: bool = False) -> AsyncIOScheduler:
         shutdown_scheduler(clear=True)
 
     scheduler = _build_scheduler()
-    _register_jobs(scheduler, sync_interval_minutes=config.sync_interval_minutes)
+    _register_jobs(
+        scheduler,
+        sync_interval_minutes=config.sync_interval_minutes,
+        order_sync_interval_minutes=config.order_sync_interval_minutes,
+    )
     _scheduler = scheduler
     _scheduler_signature = signature
     return scheduler
@@ -164,6 +184,7 @@ async def scheduler_status() -> SchedulerStatusOut:
         running=scheduler.running,
         timezone=str(BEIJING),
         sync_interval_minutes=config.sync_interval_minutes,
+        order_sync_interval_minutes=config.order_sync_interval_minutes,
         jobs=jobs,
     )
 

@@ -6,7 +6,8 @@
         调度器统一托管自动同步任务。关闭后将暂停自动同步和定时补货计算，手动同步不受影响。
       </div>
       <div class="scheduler-meta">
-        <span>同步间隔：每 {{ status?.sync_interval_minutes ?? '-' }} 分钟</span>
+        <span>常规同步：每 {{ status?.sync_interval_minutes ?? '-' }} 分钟</span>
+        <span>订单处理列表：每 {{ status?.order_sync_interval_minutes ?? '-' }} 分钟</span>
         <span>自动计算：{{ formatCron(status?.calc_cron) }}</span>
       </div>
     </div>
@@ -32,6 +33,7 @@ const props = defineProps<{
     running: boolean
     timezone: string
     sync_interval_minutes: number
+    order_sync_interval_minutes: number
     calc_cron: string
   } | null
   refreshing: boolean

@@ -80,6 +80,7 @@ function makeConfig(overrides: Partial<GlobalConfig> = {}): GlobalConfig {
     restock_regions: [],
     eu_countries: ['DE', 'FR'],
     sync_interval_minutes: 60,
+    order_sync_interval_minutes: 120,
     scheduler_enabled: true,
     shop_sync_mode: 'all',
     ...overrides,
@@ -177,6 +178,31 @@ describe('GlobalConfigView', () => {
       }),
     )
     expect(messageSuccess).toHaveBeenCalled()
+  })
+
+  it('submits regular and order sync intervals when saving', async () => {
+    mockGetGlobalConfig.mockResolvedValue(makeConfig())
+    mockPatchGlobalConfig.mockResolvedValue(
+      makeConfig({ sync_interval_minutes: 45, order_sync_interval_minutes: 120 }),
+    )
+
+    const { default: View } = await import('../GlobalConfigView.vue')
+    const wrapper = shallowMount(View, { global: { stubs: STUBS } })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as { form: GlobalConfig | null; save: () => Promise<void> }
+    if (!vm.form) throw new Error('expected form to be initialized')
+
+    vm.form.sync_interval_minutes = 45
+    vm.form.order_sync_interval_minutes = 120
+    await vm.save()
+
+    expect(mockPatchGlobalConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sync_interval_minutes: 45,
+        order_sync_interval_minutes: 120,
+      }),
+    )
   })
 
   it('blocks toggle-on when can_enable is false', async () => {

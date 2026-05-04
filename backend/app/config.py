@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     default_lead_time_days: int = 50
     default_calc_cron: str = "0 8 * * *"
     default_sync_interval_minutes: int = 60
+    default_order_sync_interval_minutes: int = 120
 
     # Excel 导出文件根目录（相对 backend/ 或绝对路径）
     export_storage_dir: str = "../deploy/data/exports"

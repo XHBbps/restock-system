@@ -10,6 +10,7 @@ export interface SchedulerStatus {
   running: boolean
   timezone: string
   sync_interval_minutes: number
+  order_sync_interval_minutes: number
   calc_cron: string
   jobs: SchedulerJob[]
 }

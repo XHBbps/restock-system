@@ -41,6 +41,7 @@ class GlobalConfig(Base):
 
     # 调度
     sync_interval_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
+    order_sync_interval_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=120)
     scheduler_enabled: Mapped[bool] = mapped_column(nullable=False, default=True)
 
     # 店铺同步模式

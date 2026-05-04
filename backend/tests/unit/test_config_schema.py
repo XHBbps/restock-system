@@ -15,6 +15,17 @@ def test_global_config_patch_rejects_invalid_safety_stock_days() -> None:
         GlobalConfigPatch(safety_stock_days=0)
 
 
+def test_global_config_patch_accepts_order_sync_interval_minutes() -> None:
+    patch = GlobalConfigPatch(order_sync_interval_minutes=120)
+
+    assert patch.order_sync_interval_minutes == 120
+
+
+def test_global_config_patch_rejects_invalid_order_sync_interval_minutes() -> None:
+    with pytest.raises(ValidationError):
+        GlobalConfigPatch(order_sync_interval_minutes=4)
+
+
 def test_global_config_patch_normalizes_restock_regions() -> None:
     patch = GlobalConfigPatch(restock_regions=["us", " GB ", "", "us", "uk", " ro "])
 
@@ -42,6 +53,7 @@ def test_global_config_out_normalizes_existing_eu_countries() -> None:
         restock_regions=[],
         eu_countries=["UK", "RO"],
         sync_interval_minutes=60,
+        order_sync_interval_minutes=120,
         scheduler_enabled=True,
         shop_sync_mode="all",
     )

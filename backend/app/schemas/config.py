@@ -18,6 +18,7 @@ class GlobalConfigOut(BaseModel):
     restock_regions: list[str] = Field(default_factory=list)
     eu_countries: list[str] = Field(default_factory=list)
     sync_interval_minutes: int
+    order_sync_interval_minutes: int
     scheduler_enabled: bool
     shop_sync_mode: Literal["all", "specific"]
 
@@ -42,6 +43,7 @@ class GlobalConfigPatch(BaseModel):
     restock_regions: list[str] | None = None
     eu_countries: list[str] | None = None
     sync_interval_minutes: int | None = Field(default=None, ge=5, le=1440)
+    order_sync_interval_minutes: int | None = Field(default=None, ge=5, le=1440)
     scheduler_enabled: bool | None = None
     shop_sync_mode: Literal["all", "specific"] | None = None
 

@@ -38,6 +38,7 @@ async def test_get_global_config_returns_restock_regions(
     assert body["safety_stock_days"] == 18
     assert body["restock_regions"] == ["US", "GB"]
     assert body["eu_countries"] == ["GB", "RO"]
+    assert body["order_sync_interval_minutes"] == 120
 
 
 @pytest.mark.asyncio
@@ -331,6 +332,34 @@ async def test_patch_global_config_accepts_empty_restock_regions(
 
     assert resp.status_code == 200
     assert resp.json()["restock_regions"] == []
+
+
+@pytest.mark.asyncio
+async def test_patch_global_config_updates_order_sync_interval_and_reloads_scheduler(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import app.api.config as config_api_module
+
+    reload_calls = 0
+
+    async def fake_reload_scheduler():
+        nonlocal reload_calls
+        reload_calls += 1
+
+    await seed_global_config(db_session)
+    await db_session.commit()
+    monkeypatch.setattr(config_api_module, "reload_scheduler", fake_reload_scheduler)
+
+    resp = await client.patch("/api/config/global", json={"order_sync_interval_minutes": 180})
+
+    assert resp.status_code == 200
+    assert resp.json()["order_sync_interval_minutes"] == 180
+    assert reload_calls == 1
+    db_session.expire_all()
+    saved = (
+        await db_session.execute(select(GlobalConfig).where(GlobalConfig.id == 1))
+    ).scalar_one()
+    assert saved.order_sync_interval_minutes == 180
 
 
 @pytest.mark.asyncio

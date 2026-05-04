@@ -66,6 +66,7 @@ async def _ensure_global_config() -> None:
             restock_regions=[],
             eu_countries=[],
             sync_interval_minutes=settings.default_sync_interval_minutes,
+            order_sync_interval_minutes=settings.default_order_sync_interval_minutes,
             scheduler_enabled=True,
             shop_sync_mode="all",
             login_password_hash=hash_password(settings.login_password),

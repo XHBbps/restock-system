@@ -71,6 +71,7 @@ async def seed_global_config(db: AsyncSession, **overrides) -> GlobalConfig:
         "restock_regions": [],
         "eu_countries": [],
         "sync_interval_minutes": 60,
+        "order_sync_interval_minutes": 120,
         "scheduler_enabled": True,
         "shop_sync_mode": "all",
         "login_password_hash": "placeholder_hash",

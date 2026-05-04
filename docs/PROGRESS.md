@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-05-04（订单处理列表明细 SKU 兜底为 `commoditySku || sellerSku`，避免 Wayfair 等平台因 `commoditySku` 为空丢失销量明细。）
+> 最近更新：2026-05-04（订单处理列表自动同步改用独立间隔 `order_sync_interval_minutes`，默认 120 分钟；商品、库存、出库仍使用常规 `sync_interval_minutes`。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -42,11 +42,12 @@
 - **商品主数据同步来源**：`sync_product_listing` 先调用赛狐 SKU 主数据接口 `/api/commodity/pageList.json` 写入 `commodity_master`，再调用在线产品 listing 接口 `/api/order/api/product/pageList.json` 补充店铺、站点、sellerSku 与近 7/14/30 天销量。同步新发现的 SKU 只补建 `sku_config(enabled=true)`，不覆盖已有 `enabled` 与 `lead_time_days`；后续人工禁用的 SKU 不会被商品同步重新打开。
 
 - **调度器开关**：`GET/POST /api/sync/scheduler`，开关状态持久化到 `global_config.scheduler_enabled`
-- **调度参数实时生效**：`sync_interval_minutes`、`calc_cron` 保存后立即 reload
+- **调度参数实时生效**：`sync_interval_minutes`、`order_sync_interval_minutes`、`scheduler_enabled` 保存后立即 reload
 - **cron 校验**：非法表达式在保存前拦截
 - **手动触发**：`POST /api/sync/shop` 及其他 sync 端点
 - **自动同步任务**（APScheduler 间隔触发）：
-  - `sync_product_listing` / `sync_inventory` / `sync_out_records` / `sync_order_list`
+  - `sync_product_listing` / `sync_inventory` / `sync_out_records` 使用 `sync_interval_minutes`
+  - `sync_order_list` 使用独立 `order_sync_interval_minutes`，默认 120 分钟
 - **失败调用自动重试任务**：`retry_failed_api_calls` 每 5 分钟扫描 `api_call_log` 中可精确还原的赛狐 `40019` 失败调用（必须有 `request_payload`），按原始 `endpoint + request_payload` 从老到新重放；相关同步任务活跃时跳过，成功后将原失败日志标记为 `resolved` 并从失败列表隐藏，最多自动重试 5 次。
 - **定时任务**（cron，Asia/Shanghai）：
   - 03:00 `sync_shop`
@@ -106,6 +107,11 @@
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.101 订单同步独立调度间隔（2026-05-04）
+- **配置字段**：`global_config` 新增 `order_sync_interval_minutes`，取值范围 5–1440 分钟，默认值和迁移后的现有配置均为 120 分钟。
+- **调度规则**：`sync_product_listing`、`sync_inventory`、`sync_out_records` 继续按 `sync_interval_minutes` 入队；`sync_order_list` 改为按 `order_sync_interval_minutes` 入队，避免订单处理列表同步耗时变长时拖慢商品、库存和出库同步频率。
+- **接口与前端**：`GET/PATCH /api/config/global` 和 `GET /api/sync/scheduler` 返回 `order_sync_interval_minutes`；全局参数页拆分“常规同步间隔”和“订单同步间隔”，自动同步面板分别展示两个间隔。
 
 ### 3.100 订单明细 SKU 兜底（2026-05-04）
 - **同步口径**：`backend/app/sync/order_list.py` 在解析订单处理列表包裹明细时，`order_item.commodity_sku` 改为优先取 `items.commoditySku`，为空时使用 `items.sellerSku` 兜底；`order_item.seller_sku` 仍原样保存 `sellerSku`。

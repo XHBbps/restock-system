@@ -9,6 +9,7 @@ export interface GlobalConfig {
   restock_regions: string[]
   eu_countries: string[]
   sync_interval_minutes: number
+  order_sync_interval_minutes: number
   scheduler_enabled: boolean
   shop_sync_mode: 'all' | 'specific'
 }

@@ -100,8 +100,11 @@
       <div class="config-section">
         <div class="section-label">同步设置</div>
         <el-form :model="form" label-width="180px" style="max-width: 620px">
-          <el-form-item label="同步间隔(分钟)">
+          <el-form-item label="常规同步间隔(分钟)">
             <el-input-number v-model="form.sync_interval_minutes" :min="5" :max="1440" />
+          </el-form-item>
+          <el-form-item label="订单同步间隔(分钟)">
+            <el-input-number v-model="form.order_sync_interval_minutes" :min="5" :max="1440" />
           </el-form-item>
           <el-form-item label="调度器开关">
             <el-switch v-model="form.scheduler_enabled" />

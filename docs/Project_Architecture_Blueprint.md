@@ -223,7 +223,7 @@ CREATE INDEX ix_task_run_lease
 - **Reaper**：每 60 秒扫描 `lease_expires_at < now()` 的 running 任务，标记为 failed（worker 死亡回收）
 - **Heartbeat**：每 30 秒延长 `lease_expires_at`，约束 `heartbeat × 2 < lease_minutes × 60`
 
-**自动调度规则**：`sync_shop` 每日 03:00 入队，`sync_warehouse` 每日 03:30 入队，`daily_archive` 每日 02:00 入队，`retention_purge` 每日 04:00 入队，`retry_failed_api_calls` 每 5 分钟入队；`sync_product_listing`、`sync_inventory`、`sync_out_records`、`sync_order_list` 按 `global_config.sync_interval_minutes` 间隔入队。`GET /api/sync/scheduler` 由 API 进程提供状态，即使 API 进程本身不启动 APScheduler，也会基于 job trigger 推导下次执行时间；真正入队仍只发生在 `PROCESS_ENABLE_SCHEDULER=true` 的 scheduler 进程。
+**自动调度规则**：`sync_shop` 每日 03:00 入队，`sync_warehouse` 每日 03:30 入队，`daily_archive` 每日 02:00 入队，`retention_purge` 每日 04:00 入队，`retry_failed_api_calls` 每 5 分钟入队；`sync_product_listing`、`sync_inventory`、`sync_out_records` 按 `global_config.sync_interval_minutes` 间隔入队，`sync_order_list` 按 `global_config.order_sync_interval_minutes` 间隔入队，默认 120 分钟。`GET /api/sync/scheduler` 由 API 进程提供状态，即使 API 进程本身不启动 APScheduler，也会基于 job trigger 推导下次执行时间；真正入队仍只发生在 `PROCESS_ENABLE_SCHEDULER=true` 的 scheduler 进程。
 
 **进度追踪**：`TaskRun.current_step / step_detail / total_steps / result_summary` 由 worker 在执行中写入，前端 `TaskProgress` 组件轮询 `/api/tasks/{id}`。`calc_engine` 在生成成功或无需求时写结构化 JSON 摘要（`generated`、`suggestion_id`、`demand_date`、可选 `reason`）；店铺、仓库、商品、库存、订单、出库等分页同步任务复用赛狐分页响应里的 `totalPage` 输出“第 P / N 页”进度，不额外发起预扫描请求。自 2026-04-20 起，worker 的 heartbeat、进度更新和 success/failed 终态回写都带 `status='running' + worker_id` 条件；若租约已被 reaper 回收，则抛 `TaskLeaseLostError` 并停止继续覆盖状态。
 **信息总览快照任务**：`refresh_dashboard_snapshot` 也是标准 TaskRun 任务，复用现有去重、轮询和失败回写机制；它在后台调用 `build_dashboard_payload()` 生成 `dashboard_snapshot` 单例缓存，页面刷新时优先消费该缓存而不是重复现算。
@@ -560,7 +560,7 @@ UPDATE global_config SET suggestion_generation_enabled=true, generation_toggle_u
 
 | 表 | 职责 | 关键约束 / 字段 |
 |---|---|---|
-| `global_config` | 全局配置单行表；包含 `target_days`、`buffer_days`、`lead_time_days`、`safety_stock_days`、`restock_regions`、`eu_countries`、`suggestion_generation_enabled`、`generation_toggle_updated_by / generation_toggle_updated_at`、同步与登录配置 | `CHECK id=1`；`safety_stock_days` 范围 1–90；`restock_regions=[]` 表示全部国家参与补货计算；`eu_countries` 保存和读取时标准化 ISO 二字码别名，并拒绝 `EU` 与 `ZZ` |
+| `global_config` | 全局配置单行表；包含 `target_days`、`buffer_days`、`lead_time_days`、`safety_stock_days`、`restock_regions`、`eu_countries`、`sync_interval_minutes`、`order_sync_interval_minutes`、`suggestion_generation_enabled`、`generation_toggle_updated_by / generation_toggle_updated_at`、同步与登录配置 | `CHECK id=1`；`safety_stock_days` 范围 1–90；`sync_interval_minutes` 控制商品、库存、出库同步，`order_sync_interval_minutes` 控制订单处理列表同步且默认 120 分钟；`restock_regions=[]` 表示全部国家参与补货计算；`eu_countries` 保存和读取时标准化 ISO 二字码别名，并拒绝 `EU` 与 `ZZ` |
 | `commodity_master` | 赛狐 SKU 主数据 | 主键 `sku`；保存 `commodity_id/name/state/is_group/img_url/purchase_days/child_skus/last_sync_at`；仅作为商品展示、搜索和库存匹配依据，不直接决定是否进入补货计算 |
 | `sku_config` | SKU 启用 / 禁用与业务参数 | `commodity_sku` 唯一；`20260504_1000` 已将历史配置一次性启用；商品同步和商品页补齐只为新 SKU 插入 `enabled=true`，不覆盖已有人工禁用 |
 | `sku_mapping_rule` | 商品 SKU 到库存包裹 SKU 的映射规则 | `commodity_sku` 唯一；`enabled=false` 时规则保留但不参与引擎 |
@@ -955,6 +955,7 @@ VITE_API_PROXY_TARGET=http://localhost:8000
 
 | 日期 | 变更 | 相关 PROGRESS 章节 |
 |---|---|---|
+| 2026-05-04 | 订单处理列表自动同步改用独立 `order_sync_interval_minutes`，默认 120 分钟；商品、库存、出库仍使用 `sync_interval_minutes` | PROGRESS.md §3.101 |
 | 2026-05-04 | 订单处理列表明细 SKU 改为 `commoditySku || sellerSku`，保留 `seller_sku` 原值，只有两者都为空才跳过明细 | PROGRESS.md §3.100 |
 | 2026-05-04 | 订单列表新增平台筛选与 `GET /api/data/order-platforms` 动态选项接口；`order_header(order_platform, purchase_date)` 增加复合索引；映射规则页用户可见文案统一为“库存共用组” | PROGRESS.md §3.99 |
 | 2026-05-04 | 库存 SKU 共享组改为平权成员模型：`physical_item_group` 去掉 `primary_sku`，`physical_item` 解析服务仅用于库存组件共享组身份，商品 SKU 不再归一 | PROGRESS.md §3.98 |

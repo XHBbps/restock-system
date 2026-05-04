@@ -106,6 +106,7 @@ GLOBAL_CONFIG_NEUTRAL_FIELDS = frozenset(
     {
         "id",
         "sync_interval_minutes",  # 调度触发频率，不影响 dashboard 数据
+        "order_sync_interval_minutes",  # 订单处理列表独立调度间隔，不影响 dashboard 数据
         "scheduler_enabled",
         "shop_sync_mode",
         "login_password_hash",
@@ -305,7 +306,11 @@ async def patch_global(
                 update(DashboardSnapshot).where(DashboardSnapshot.id == 1).values(stale=True)
             )
         await db.commit()
-        if {"sync_interval_minutes", "scheduler_enabled"} & updates.keys():
+        if {
+            "sync_interval_minutes",
+            "order_sync_interval_minutes",
+            "scheduler_enabled",
+        } & updates.keys():
             await reload_scheduler()
         row = (await db.execute(select(GlobalConfig).where(GlobalConfig.id == 1))).scalar_one()
     return GlobalConfigOut.model_validate(row)
