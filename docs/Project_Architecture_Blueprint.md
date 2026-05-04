@@ -406,7 +406,7 @@ async function reload() {
 ```
 
 当前已按该模式迁移：
-- `DataOrdersView.vue`：订单列表按页返回，并仅对当前页补查 `item_count` / `has_detail`；页面不展示来源和包裹号，也不按包裹号搜索；平台以标签展示，店铺仅显示名称；详情接口默认限定 `source='订单处理'`，前端仅保留 `package_sn` 作为内部精确定位参数
+- `DataOrdersView.vue`：订单列表按页返回，并仅对当前页补查 `item_count` / `has_detail`；筛选支持 SKU / 订单号、国家、店铺、平台和包裹状态，平台选项由 `GET /api/data/order-platforms` 基于已落库订单平台去重返回；页面不展示来源和包裹号，也不按包裹号搜索；平台以标签展示，店铺仅显示名称；详情接口默认限定 `source='订单处理'`，前端仅保留 `package_sn` 作为内部精确定位参数
 - `HistoryView.vue`：建议单历史页直接消费 `GET /api/suggestions` 的 `items/total/page/page_size`；状态列使用 `getSuggestionDisplayStatusMeta(status, snapshot_count)` 派生 4 档显示标签（`未提交 / 已导出 / 已归档 / 异常`），状态下拉对应后端 `display_status=pending|exported|archived|error`，由后端统一按 `snapshot_count` 派生过滤，避免前端只过滤当前页造成 `items` 与 `total` 错位；`canDelete(row)` 规则为 `row.snapshot_count === 0`。派生逻辑定义在 `frontend/src/utils/status.ts::deriveSuggestionDisplayStatus`，`SuggestionListView` 与 `SuggestionDetailView` 的状态 tag 共用该函数，避免多处硬编码映射。
 - `DataProductsView.vue`：商品页通过 `listSkuOverview()` 下推 SKU、商品名、启用状态和分页参数；`/api/data/sku-overview` 以 `commodity_master + sku_config` 为主，商品名、图片、状态、组合标识、采购周期优先取商品主数据，listing 仅作为展开明细和销量参考，无 listing 的 SKU 仍可展示
 - `DataInventoryView.vue`：库存页通过 `GET /api/data/inventory/warehouse-groups` 做仓库分组分页，保持仓库展开明细交互；库存明细的 `is_package` 由“是否存在商品主数据 SKU、在线 listing 商品 SKU 或 SKU 映射组件库存 SKU”实时派生，前端按“全部 / 未匹配 / 已匹配”展示筛选
@@ -478,7 +478,7 @@ async function reload() {
 | `SuggestionListView` | 顶部 `PageSectionCard.actions` 展示生成开关只读状态 tag 与当前建议 `补货日期`；发起区使用默认空的补货日期选择器，提交前校验空值与早于北京时间今天；`loadToggle()` + `loadActiveEngineTask()` 在 `onMounted` / `onActivated` 双钩子刷新开关与活跃 `calc_engine` 任务，活跃任务存在时复用 `TaskProgress` 并禁用日期选择器与生成按钮。列表页已收敛为生成与导出视角，不再保留旧赛狐写入时代的选择列、批量动作和状态筛选死代码。 |
 | `SuggestionDetailView` | 勾选 `export_status='pending'` 的条目 → “导出 Excel”按钮走一步式 `POST /api/suggestions/{id}/snapshots` + `GET /api/snapshots/{id}/download` blob 流程（失败时仍在 `finally` 中 `await load()` 刷新快照历史，并区分”导出成功但下载失败”的独立错误文案）；右侧新增”历史快照区”`PageSectionCard`（6 列，按 `version` 降序，可重复下载）；导出前会先探测生成开关，探测失败时按 fail-close 禁用按钮；`SkuCard` 停止传入 `:blocker`（组件 prop 仍保留但所有调用点不再传值）；条目 `isEditable` 改为 `export_status !== 'exported'`（对应 snapshot 条目不可变的约束，见 §9.5 Don'ts）。 |
 | `GlobalConfigView` | 新增”生成开关卡片”：`el-switch` 即时保存，翻 ON 时弹 `ElMessageBox` 二次确认”将归档全部 draft”，`PATCH` 失败时回滚开关状态并提示；无 `config:edit` 时控件只读并提示”无权限操作此开关”。 |
-| `SkuMappingRuleView` | 位于“设置 > 基础配置 > 映射规则”，通过 `GET /api/config/sku-mapping-rules` 服务端分页、搜索商品 SKU / 库存 SKU、按启用状态筛选；支持新增、编辑、启停、删除、Excel/CSV 导入与 Excel 导出；编辑器按 `group_no` 展示“方案”，公式预览用 `或` 连接替代组合；同页维护“库存 SKU 共享组”，仅配置组名、成员 SKU、启用状态与备注，并在映射规则列表提示组件所属共享组。 |
+| `SkuMappingRuleView` | 位于“设置 > 基础配置 > 映射规则”，通过 `GET /api/config/sku-mapping-rules` 服务端分页、搜索商品 SKU / 库存 SKU、按启用状态筛选；支持新增、编辑、启停、删除、Excel/CSV 导入与 Excel 导出；编辑器按 `group_no` 展示“方案”，公式预览用 `或` 连接替代组合；同页用户可见区域命名为“库存共用组”，仅配置组名、成员 SKU、启用状态与备注，并在映射规则列表提示组件所属共用组。 |
 | `HistoryView` | 参见 §4.5 — 状态筛选 3 项，快照数 + 导出状态列，`canDelete` 基于 `snapshot_count === 0`。 |
 
 ---
@@ -567,7 +567,7 @@ UPDATE global_config SET suggestion_generation_enabled=true, generation_toggle_u
 | `sku_mapping_component` | 映射规则组件行 | `rule_id + inventory_sku` 唯一；允许不同商品规则共享同一 `inventory_sku`；`group_no > 0`；`quantity > 0`；同一 `group_no` 内多行表示 AND 组合，不同 `group_no` 表示 OR 替代方案 |
 | `physical_item_group` / `physical_item_sku_alias` | 库存 SKU 共享组与成员表 | 组表已移除 `primary_sku`；成员 SKU 全局唯一；`enabled=false` 时共享组解析层不参与库存合并 |
 | `warehouse` | 海外仓/国内仓基础资料 | `country` 可为空；变更仓库国家会级联更新库存最新快照口径 |
-| `order_header` / `order_item` | 订单头与订单明细 | `order_header.source='订单处理'` 为当前订单来源，`order_platform` 保存平台名，`package_sn/package_status/shop_name/postal_code` 保存订单处理列表包裹字段；`UNIQUE(shop_id, amazon_order_id, source, package_sn)` 支持同订单拆包；`country_code` 保存映射后国家，`original_country_code` 保存 EU 合并前国家；按 `shop_id + purchase_date`、`order_status + purchase_date`、`package_status + purchase_date` 建索引 |
+| `order_header` / `order_item` | 订单头与订单明细 | `order_header.source='订单处理'` 为当前订单来源，`order_platform` 保存平台名，`package_sn/package_status/shop_name/postal_code` 保存订单处理列表包裹字段；`UNIQUE(shop_id, amazon_order_id, source, package_sn)` 支持同订单拆包；`country_code` 保存映射后国家，`original_country_code` 保存 EU 合并前国家；按 `shop_id + purchase_date`、`order_platform + purchase_date`、`order_status + purchase_date`、`package_status + purchase_date` 建索引 |
 | `order_detail` / `order_detail_fetch_log` | 历史订单详情与拉取日志 | 作为切换前亚马逊订单详情历史表保留；当前订单处理列表同步不再写入或依赖该表 |
 | `product_listing` | 赛狐在线产品信息 | `marketplace_id` 保存映射后 2 字符国家码或 `EU`，`original_marketplace_id` 保存 EU 合并前国家 |
 | `inventory_snapshot_latest` | SKU × 仓库最新库存 | `country` 保存映射后国家，`original_country` 保存 EU 合并前国家；`warehouse_id + commodity_sku` 唯一 |
@@ -955,6 +955,7 @@ VITE_API_PROXY_TARGET=http://localhost:8000
 
 | 日期 | 变更 | 相关 PROGRESS 章节 |
 |---|---|---|
+| 2026-05-04 | 订单列表新增平台筛选与 `GET /api/data/order-platforms` 动态选项接口；`order_header(order_platform, purchase_date)` 增加复合索引；映射规则页用户可见文案统一为“库存共用组” | PROGRESS.md §3.99 |
 | 2026-05-04 | 库存 SKU 共享组改为平权成员模型：`physical_item_group` 去掉 `primary_sku`，`physical_item` 解析服务仅用于库存组件共享组身份，商品 SKU 不再归一 | PROGRESS.md §3.98 |
 | 2026-05-04 | 历史 `sku_config` 一次性启用；商品同步和商品页补齐新 SKU 默认 `enabled=true`，且只插入缺失配置，不覆盖已有人工禁用 | PROGRESS.md §3.96 |
 | 2026-05-03 | 订单同步切换为订单处理列表 `/api/packageShip/v1/getPackagePage.json`；`order_header` 新增包裹字段并调整唯一键；Step 1 / Step 5 只消费非已作废包裹；旧订单详情 job 与旧订单 endpoint 封装删除，历史表保留 | PROGRESS.md §3.91 / §3.92 |

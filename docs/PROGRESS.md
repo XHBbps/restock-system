@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-05-04（同物共享组改为库存 SKU 共享组：取消主 SKU 语义，成员平权；引擎仅在组件库存侧按共享组身份合并，前端配置区已同步改版。）
+> 最近更新：2026-05-04（订单列表新增平台筛选与动态平台选项；映射规则页共享组文案统一为“库存共用组”。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -100,7 +100,7 @@
 - **数据加载模式**：订单页、历史记录页、商品页、库存页、出库记录页使用“后端分页 + 后端筛选”；仓库、店铺等低增长基础页仍保留轻量分页
 - **商品页主数据口径**：`DataProductsView.vue` 通过 `/api/data/sku-overview` 展示 `commodity_master + sku_config`，商品名、图片、状态、组合标识、采购周期优先取主数据；listing 仅作为展开明细和销量参考，无 listing 的商品 SKU 也会显示。
 - **筛选控件高度统一**：`PageSectionCard` 的 `section-actions` 强制所有控件 32px 高度
-- **订单处理列表展示**：`DataOrdersView.vue` 展示包裹状态、店铺名称、平台、国家、邮编与本地订单明细；筛选支持 SKU / 订单号，状态筛选使用订单处理列表包裹状态。来源和包裹号不再作为页面展示或搜索字段，平台字段改为标签样式，店铺仅显示名称，订单明细中的商品 SKU 固定使用 `commoditySku`。
+- **订单处理列表展示**：`DataOrdersView.vue` 展示包裹状态、店铺名称、平台、国家、邮编与本地订单明细；筛选支持 SKU / 订单号、国家、店铺、平台和包裹状态，其中平台选项来自 `GET /api/data/order-platforms` 返回的已落库订单平台。来源和包裹号不再作为页面展示或搜索字段，平台字段改为标签样式，店铺仅显示名称，订单明细中的商品 SKU 固定使用 `commoditySku`。
 - **全局参数页补货区域配置**：`GlobalConfigView.vue` 的“补货区域”多选已接入动态国家选项，保存前变更检测与配置变更提示已纳入 `restock_regions`
 - **动态国家选项**：`GET /api/config/country-options` 返回内置国家与订单、仓库、库存、出库在途中已观测国家的并集，并在输出前统一标准化 ISO 二字码别名；订单、库存、出库、仓库、邮编规则、补货区域和 EU 成员国配置均改用该接口，接口不可用时前端降级使用内置选项。
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
@@ -121,11 +121,18 @@
 - **历史迁移**：新增 `backend/alembic/versions/20260504_1000_enable_existing_sku_configs.py`，一次性执行 `UPDATE sku_config SET enabled = true WHERE enabled = false`；downgrade 不反向关闭历史 SKU。
 - **测试**：更新 `backend/tests/unit/test_sync_product_listing_job.py` 与 `backend/tests/unit/test_sku_init.py`，覆盖同步补齐和商品页补齐的新 SKU 默认启用口径。
 
+### 3.99 订单平台筛选与映射规则文案调整（2026-05-04）
+- **订单平台筛选**：`GET /api/data/orders` 新增 `platform` 查询参数，按 `order_header.order_platform` 精确筛选；`GET /api/data/order-platforms` 返回去重、非空、按名称排序的平台列表，权限沿用 `DATA_BIZ_VIEW`。
+- **数据库索引**：`backend/alembic/versions/20260504_1800_add_order_platform_purchase_index.py` 为 `order_header(order_platform, purchase_date)` 增加复合索引，SQLAlchemy model 同步声明 `ix_order_header_platform_purchase`，用于平台筛选和按下单时间排序。
+- **前端筛选**：`frontend/src/views/data/DataOrdersView.vue` 新增“平台”下拉筛选，页面加载时独立获取平台选项；平台选项加载失败时保留空选项，不阻断订单列表加载。
+- **映射规则文案**：`frontend/src/views/SkuMappingRuleView.vue` 移除映射规则区和库存共用组区的说明描述；共享组相关页面文案统一为“库存共用组 / 新增库存共用组 / 添加SKU”，后端接口路径与模型命名保持不变。
+- **测试**：补充 `backend/tests/unit/test_data_orders_api.py` 与前端 `DataOrdersView`、`SkuMappingRuleView` 测试，覆盖平台筛选、平台选项接口、平台选项失败降级和文案口径。
+
 ### 3.98 库存 SKU 共享组与组件归一（2026-05-04）
 - **数据库表**：`physical_item_group` 与 `physical_item_sku_alias` 继续作为共享组载体，但组表已移除 `primary_sku`；组内成员现在平权，唯一约束只保留组名唯一与成员 SKU 全局唯一。
 - **后端服务**：`backend/app/services/physical_item.py` 改为提供 `sku_to_group_key` / `members_by_group_key`，仅用于库存组件 SKU 的共享组解析；商品 SKU 不再归一到共享组。
 - **引擎接入**：`backend/app/engine/runner.py` 保持商品 SKU 原样进入 Step 1 / Step 5 与建议展示；`backend/app/engine/sku_mapping.py` 在加载规则与汇总组件库存时先将库存组件 SKU 解析到共享组身份，再做库存合并和扣减，并会折叠同一商品下重复的等价替代组。
-- **配置接口**：`GET/POST/PATCH/DELETE /api/config/physical-item-groups` 保留；`frontend/src/views/SkuMappingRuleView.vue` 改为“库存 SKU 共享组”管理区，仅维护组名、成员 SKU、启用状态与备注，并在映射规则表中展示组件所属共享组。
+- **配置接口**：`GET/POST/PATCH/DELETE /api/config/physical-item-groups` 保留；`frontend/src/views/SkuMappingRuleView.vue` 改为“库存共用组”管理区，仅维护组名、成员 SKU、启用状态与备注，并在映射规则表中展示组件所属共用组。
 - **测试**：补充 `backend/tests/unit/test_physical_item.py`、`backend/tests/unit/test_engine_sku_mapping.py` 与前端 `SkuMappingRuleView` 测试，覆盖成员校验、库存共享组解析和重复替代组折叠。
 
 ### 3.95 订单邮编空值不覆盖修复（2026-05-04）

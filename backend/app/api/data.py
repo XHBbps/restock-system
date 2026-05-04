@@ -342,6 +342,7 @@ async def list_orders(
     date_to: date | None = Query(default=None),
     country: str | None = Query(default=None),
     shop_id: str | None = Query(default=None),
+    platform: str | None = Query(default=None),
     status: str | None = Query(default=None),
     sku: str | None = Query(
         default=None, description="按 commodity_sku 或 amazon_order_id 模糊匹配"
@@ -369,6 +370,8 @@ async def list_orders(
         base = base.where(OrderHeader.country_code == country.upper())
     if shop_id:
         base = base.where(OrderHeader.shop_id == shop_id)
+    if platform:
+        base = base.where(OrderHeader.order_platform == platform)
     if status:
         base = base.where(
             (OrderHeader.package_status == status) | (OrderHeader.order_status == status)
@@ -464,6 +467,23 @@ async def list_orders(
         for r in rows
     ]
     return DataOrderListOut(items=items, total=int(total or 0), page=page, page_size=page_size)
+
+
+@router.get("/order-platforms", response_model=list[str])
+async def list_order_platforms(
+    db: AsyncSession = Depends(db_session_readonly),
+    _: None = Depends(require_permission(DATA_BIZ_VIEW)),
+) -> list[str]:
+    platform_expr = func.trim(OrderHeader.order_platform)
+    rows = (
+        await db.execute(
+            select(platform_expr)
+            .where(OrderHeader.order_platform.is_not(None), platform_expr != "")
+            .distinct()
+            .order_by(platform_expr.asc())
+        )
+    ).all()
+    return [platform for (platform,) in rows if platform]
 
 
 @router.get("/orders/{shop_id}/{amazon_order_id}", response_model=DataOrderDetail)

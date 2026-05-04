@@ -6,6 +6,7 @@ import { defineComponent } from 'vue'
 
 const mockListOrders = vi.fn()
 const mockListDataShops = vi.fn()
+const mockListOrderPlatforms = vi.fn()
 const mockGetOrderDetail = vi.fn()
 const mockMessageError = vi.fn()
 const mockMessageSuccess = vi.fn()
@@ -13,6 +14,7 @@ const mockMessageSuccess = vi.fn()
 vi.mock('@/api/data', () => ({
   listOrders: (...args: unknown[]) => mockListOrders(...args),
   listDataShops: (...args: unknown[]) => mockListDataShops(...args),
+  listOrderPlatforms: (...args: unknown[]) => mockListOrderPlatforms(...args),
   getOrderDetail: (...args: unknown[]) => mockGetOrderDetail(...args)
 }))
 
@@ -98,6 +100,14 @@ const STUBS = {
           @click="$emit('update:modelValue', 'US'); $emit('change', 'US')"
         >
           US
+        </button>
+        <button
+          v-if="placeholder === '平台'"
+          type="button"
+          class="platform-temu"
+          @click="$emit('update:modelValue', 'Temu'); $emit('change', 'Temu')"
+        >
+          Temu
         </button>
         <button
           v-if="placeholder === '包裹状态'"
@@ -189,22 +199,25 @@ describe('DataOrdersView', () => {
       ],
       total: 2
     })
+    mockListOrderPlatforms.mockResolvedValue(['Amazon', 'Temu'])
     mockGetOrderDetail.mockResolvedValue({})
   })
 
-  it('loads current page from backend and fetches shop options separately', async () => {
+  it('loads current page from backend and fetches filter options separately', async () => {
     const { default: View } = await import('../data/DataOrdersView.vue')
     const wrapper = shallowMount(View, { global: GLOBAL_CONFIG })
     await flushPromises()
 
     expect(wrapper.find('.pagination').attributes('data-total')).toBe('188')
     expect(mockListDataShops).toHaveBeenCalledTimes(1)
+    expect(mockListOrderPlatforms).toHaveBeenCalledTimes(1)
     expect(mockListOrders).toHaveBeenCalledWith({
       country: undefined,
       date_from: undefined,
       date_to: undefined,
       page: 1,
       page_size: 50,
+      platform: undefined,
       shop_id: undefined,
       sku: undefined,
       sort_by: 'purchaseDate',
@@ -230,6 +243,16 @@ describe('DataOrdersView', () => {
     )
   })
 
+  it('keeps order list usable when platform options fail to load', async () => {
+    mockListOrderPlatforms.mockRejectedValueOnce(new Error('boom'))
+    const { default: View } = await import('../data/DataOrdersView.vue')
+    shallowMount(View, { global: GLOBAL_CONFIG })
+    await flushPromises()
+
+    expect(mockListOrders).toHaveBeenCalled()
+    expect(mockMessageError).not.toHaveBeenCalledWith(expect.stringContaining('平台'))
+  })
+
   it('resets to page 1 and passes shop_id when shop filter changes', async () => {
     const { default: View } = await import('../data/DataOrdersView.vue')
     const wrapper = shallowMount(View, { global: GLOBAL_CONFIG })
@@ -246,6 +269,26 @@ describe('DataOrdersView', () => {
       expect.objectContaining({
         page: 1,
         shop_id: 'SHOP-2'
+      })
+    )
+  })
+
+  it('resets to page 1 and passes platform when platform filter changes', async () => {
+    const { default: View } = await import('../data/DataOrdersView.vue')
+    const wrapper = shallowMount(View, { global: GLOBAL_CONFIG })
+    await flushPromises()
+
+    await wrapper.find('.page-3').trigger('click')
+    await flushPromises()
+    mockListOrders.mockClear()
+
+    await wrapper.find('.platform-temu').trigger('click')
+    await flushPromises()
+
+    expect(mockListOrders).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        page: 1,
+        platform: 'Temu'
       })
     )
   })
@@ -277,7 +320,7 @@ describe('DataOrdersView', () => {
     await skuInput.trigger('keyup.enter')
     await flushPromises()
 
-      expect(mockListOrders).toHaveBeenLastCalledWith(
+    expect(mockListOrders).toHaveBeenLastCalledWith(
       expect.objectContaining({
         page: 1,
         sku: 'SKU-2'

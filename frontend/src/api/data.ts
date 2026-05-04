@@ -59,6 +59,7 @@ export async function listOrders(params: {
   date_to?: string
   country?: string
   shop_id?: string
+  platform?: string
   status?: string
   sku?: string
   page?: number
@@ -67,6 +68,11 @@ export async function listOrders(params: {
   sort_order?: SortOrder
 }): Promise<PageResult<DataOrderSummary>> {
   const { data } = await client.get('/api/data/orders', { params })
+  return data
+}
+
+export async function listOrderPlatforms(): Promise<string[]> {
+  const { data } = await client.get<string[]>('/api/data/order-platforms')
   return data
 }
 

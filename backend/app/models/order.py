@@ -44,6 +44,7 @@ class OrderHeader(Base):
         Index("ix_order_header_purchase_date", "purchase_date"),
         Index("ix_order_header_country_purchase", "country_code", "purchase_date"),
         Index("ix_order_header_shop_purchase", "shop_id", "purchase_date"),
+        Index("ix_order_header_platform_purchase", "order_platform", "purchase_date"),
         Index("ix_order_header_status_purchase", "order_status", "purchase_date"),
         Index("ix_order_header_package_status_purchase", "package_status", "purchase_date"),
         Index("ix_order_header_last_update", "last_update_date"),

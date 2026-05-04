@@ -42,6 +42,21 @@
           <el-option v-for="s in shopOptions" :key="s.id" :label="s.name" :value="s.id" />
         </el-select>
         <el-select
+          v-model="filters.platform"
+          placeholder="平台"
+          clearable
+          filterable
+          style="width: 150px"
+          @change="reloadFirstPage"
+        >
+          <el-option
+            v-for="platform in platformOptions"
+            :key="platform"
+            :label="platform"
+            :value="platform"
+          />
+        </el-select>
+        <el-select
           v-model="filters.status"
           placeholder="包裹状态"
           clearable
@@ -280,6 +295,7 @@ import { getCountryOptions, type CountryOption } from '@/api/config'
 import {
   getOrderDetail,
   listDataShops,
+  listOrderPlatforms,
   listOrders,
   type DataOrderDetail,
   type DataOrderSummary
@@ -311,6 +327,7 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = ref(50)
 const shopOptions = ref<Array<{ id: string; name: string }>>([])
+const platformOptions = ref<string[]>([])
 const countryOptions = ref<CountryOption[]>(
   COUNTRY_OPTIONS.map((option) => ({
     ...option,
@@ -324,6 +341,7 @@ const sortState = ref<SortState>({ prop: 'purchaseDate', order: 'desc' })
 const dateRange = ref<[string, string] | null>(null)
 const filters = reactive({
   country: '',
+  platform: '',
   status: '',
   sku: '',
   shop: ''
@@ -352,6 +370,7 @@ async function reload(): Promise<void> {
       date_to: dateRange.value?.[1],
       country: filters.country || undefined,
       shop_id: filters.shop || undefined,
+      platform: filters.platform || undefined,
       status: filters.status || undefined,
       sku: filters.sku || undefined,
       page: page.value,
@@ -381,6 +400,14 @@ async function loadShopOptions(): Promise<void> {
       .sort((a, b) => a.name.localeCompare(b.name))
   } catch (err) {
     ElMessage.error(getActionErrorMessage(err, '加载店铺列表失败'))
+  }
+}
+
+async function loadPlatformOptions(): Promise<void> {
+  try {
+    platformOptions.value = await listOrderPlatforms()
+  } catch {
+    platformOptions.value = []
   }
 }
 
@@ -488,6 +515,7 @@ function handlePageSizeChange(value: number): void {
 onMounted(() => {
   void loadCountryOptions()
   void loadShopOptions()
+  void loadPlatformOptions()
   void reload()
 })
 

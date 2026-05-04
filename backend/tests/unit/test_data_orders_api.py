@@ -196,6 +196,51 @@ async def test_list_orders_sku_filter_does_not_match_package_sn() -> None:
 
 
 @pytest.mark.asyncio
+async def test_list_orders_applies_platform_filter() -> None:
+    db = _FakeSession(
+        [
+            _ScalarResult(1),
+            _RowsResult([_make_row(order_platform="Amazon")]),
+            _AllResult([(101, 1)]),
+            _AllResult([("SHOP-1", "ORDER-1", "订单处理")]),
+        ]
+    )
+
+    await data_api.list_orders(
+        date_from=None,
+        date_to=None,
+        country=None,
+        shop_id=None,
+        platform="Amazon",
+        status=None,
+        sku=None,
+        page=1,
+        page_size=20,
+        sort_by=None,
+        sort_order="desc",
+        db=db,
+        _=None,
+    )
+
+    compiled_sql = str(db.statements[0])
+    assert "order_header.order_platform = :order_platform_1" in compiled_sql
+
+
+@pytest.mark.asyncio
+async def test_list_order_platforms_returns_distinct_nonblank_sorted_values() -> None:
+    db = _FakeSession([_AllResult([("Amazon",), ("Temu",), ("Walmart",)])])
+
+    result = await data_api.list_order_platforms(db=db, _=None)
+
+    assert result == ["Amazon", "Temu", "Walmart"]
+    compiled_sql = str(db.statements[0])
+    assert "SELECT DISTINCT trim(order_header.order_platform)" in compiled_sql
+    assert "order_header.order_platform IS NOT NULL" in compiled_sql
+    assert "trim(order_header.order_platform) != :trim_" in compiled_sql
+    assert "ORDER BY trim(order_header.order_platform) ASC" in compiled_sql
+
+
+@pytest.mark.asyncio
 async def test_get_order_detail_defaults_to_package_source_and_package_sn_lookup() -> None:
     db = _FakeSession(
         [

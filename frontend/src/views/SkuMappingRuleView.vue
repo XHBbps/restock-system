@@ -1,8 +1,5 @@
 <template>
-  <PageSectionCard
-    title="映射规则"
-    description="维护商品 SKU 与库存包裹 SKU 的组装关系，补货计算会按同仓库组件数量换算。"
-  >
+  <PageSectionCard title="映射规则">
     <template #actions>
       <el-input
         v-model="keyword"
@@ -32,13 +29,23 @@
         type="file"
         accept=".xlsx,.csv"
         @change="handleImportFile"
-      >
+      />
     </template>
 
     <el-table v-loading="loading" :data="rows" row-key="id" empty-text="暂无映射规则">
-      <el-table-column label="商品 SKU" prop="commodity_sku" min-width="180" show-overflow-tooltip />
-      <el-table-column label="公式预览" prop="formula_preview" min-width="260" show-overflow-tooltip />
-      <el-table-column label="组件共享组" min-width="180" show-overflow-tooltip>
+      <el-table-column
+        label="商品 SKU"
+        prop="commodity_sku"
+        min-width="180"
+        show-overflow-tooltip
+      />
+      <el-table-column
+        label="公式预览"
+        prop="formula_preview"
+        min-width="260"
+        show-overflow-tooltip
+      />
+      <el-table-column label="组件共用组" min-width="180" show-overflow-tooltip>
         <template #default="{ row }">{{ componentPhysicalGroupLabels(row) }}</template>
       </el-table-column>
       <el-table-column label="组件数量" prop="component_count" width="100" align="center" />
@@ -68,11 +75,7 @@
       </el-table-column>
     </el-table>
 
-    <TablePaginationBar
-      v-model:current-page="page"
-      v-model:page-size="pageSize"
-      :total="total"
-    />
+    <TablePaginationBar v-model:current-page="page" v-model:page-size="pageSize" :total="total" />
 
     <el-dialog
       v-model="dialogVisible"
@@ -90,14 +93,12 @@
         </el-form-item>
         <el-form-item label="组件">
           <div class="component-editor">
-            <section
-              v-for="group in formGroups"
-              :key="group.groupNo"
-              class="component-group"
-            >
+            <section v-for="group in formGroups" :key="group.groupNo" class="component-group">
               <div class="component-group__header">
                 <span>方案 {{ group.groupNo }}</span>
-                <el-button link type="primary" @click="addComponent(group.groupNo)">添加组件</el-button>
+                <el-button link type="primary" @click="addComponent(group.groupNo)"
+                  >添加组件</el-button
+                >
               </div>
               <div
                 v-for="{ component, index } in group.components"
@@ -159,11 +160,7 @@
     </el-dialog>
   </PageSectionCard>
 
-  <PageSectionCard
-    title="库存 SKU 共享组"
-    description="维护完全等价的库存组件 SKU，补货计算会在映射组件库存侧合并。"
-    class="physical-section"
-  >
+  <PageSectionCard title="库存共用组" class="physical-section">
     <template #actions>
       <el-input
         v-model="physicalKeyword"
@@ -184,14 +181,16 @@
         <el-option label="停用" :value="false" />
       </el-select>
       <el-button @click="reloadPhysicalFromFirstPage">搜索</el-button>
-      <el-button v-if="canEdit" type="primary" @click="openPhysicalCreate">新增库存共享组</el-button>
+      <el-button v-if="canEdit" type="primary" @click="openPhysicalCreate"
+        >新增库存共用组</el-button
+      >
     </template>
 
     <el-table
       v-loading="physicalLoading"
       :data="physicalGroups"
       row-key="id"
-      empty-text="暂无库存 SKU 共享组"
+      empty-text="暂无库存共用组"
     >
       <el-table-column label="组名" prop="name" min-width="160" show-overflow-tooltip />
       <el-table-column label="成员 SKU" min-width="320" show-overflow-tooltip>
@@ -229,14 +228,18 @@
 
     <el-dialog
       v-model="physicalDialogVisible"
-      :title="editingPhysicalId ? '编辑库存 SKU 共享组' : '新增库存 SKU 共享组'"
+      :title="editingPhysicalId ? '编辑库存共用组' : '新增库存共用组'"
       width="640px"
       destroy-on-close
       @closed="resetPhysicalDialog"
     >
       <el-form label-width="108px" class="mapping-form">
         <el-form-item label="组名">
-          <el-input v-model="physicalForm.name" placeholder="例如 B/E 库存共享" class="form-field" />
+          <el-input
+            v-model="physicalForm.name"
+            placeholder="例如 B/E 库存共享"
+            class="form-field"
+          />
         </el-form-item>
         <el-form-item label="启用">
           <el-switch v-model="physicalForm.enabled" />
@@ -254,7 +257,7 @@
                 删除
               </el-button>
             </div>
-            <el-button class="component-add-button" @click="addAlias">添加成员</el-button>
+            <el-button class="component-add-button" @click="addAlias">添加SKU</el-button>
           </div>
         </el-form-item>
         <el-form-item label="备注">
@@ -288,11 +291,11 @@ import {
   listPhysicalItemGroups,
   listSkuMappingRules,
   updatePhysicalItemGroup,
+  updateSkuMappingRule,
   type PhysicalItemGroup,
   type PhysicalItemGroupInput,
-  updateSkuMappingRule,
   type SkuMappingRule,
-  type SkuMappingRuleInput,
+  type SkuMappingRuleInput
 } from '@/api/config'
 import PageSectionCard from '@/components/PageSectionCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
@@ -332,18 +335,21 @@ const form = reactive<SkuMappingRuleInput>({
   commodity_sku: '',
   enabled: true,
   remark: '',
-  components: [{ group_no: 1, inventory_sku: '', quantity: 1 }],
+  components: [{ group_no: 1, inventory_sku: '', quantity: 1 }]
 })
 
 const physicalForm = reactive<PhysicalItemGroupInput>({
   name: '',
   enabled: true,
   remark: '',
-  members: [''],
+  members: ['']
 })
 
 const formGroups = computed(() => {
-  const groups = new Map<number, Array<{ component: SkuMappingRuleInput['components'][number]; index: number }>>()
+  const groups = new Map<
+    number,
+    Array<{ component: SkuMappingRuleInput['components'][number]; index: number }>
+  >()
   form.components.forEach((component, index) => {
     const groupNo = Number(component.group_no) || 1
     const rows = groups.get(groupNo) ?? []
@@ -363,7 +369,7 @@ const formulaPreview = computed(() => {
         .map(({ component }) => component)
         .filter((component) => component.inventory_sku.trim())
         .map((component) => `${component.quantity || 1}*${component.inventory_sku.trim()}`)
-        .join('+'),
+        .join('+')
     )
     .filter(Boolean)
   return `${sku}=${groups.length ? groups.join(' 或 ') : '库存SKU组件'}`
@@ -395,7 +401,7 @@ async function reload(): Promise<void> {
       keyword: keyword.value.trim() || undefined,
       enabled: enabledFilter.value === '' ? undefined : enabledFilter.value,
       page: page.value,
-      page_size: pageSize.value,
+      page_size: pageSize.value
     })
     rows.value = result.items
     total.value = result.total
@@ -413,12 +419,12 @@ async function reloadPhysical(): Promise<void> {
       keyword: physicalKeyword.value.trim() || undefined,
       enabled: physicalEnabledFilter.value === '' ? undefined : physicalEnabledFilter.value,
       page: physicalPage.value,
-      page_size: physicalPageSize.value,
+      page_size: physicalPageSize.value
     })
     physicalGroups.value = result.items
     physicalTotal.value = result.total
   } catch (error) {
-    ElMessage.error(getActionErrorMessage(error, '加载库存 SKU 共享组失败'))
+    ElMessage.error(getActionErrorMessage(error, '加载库存共用组失败'))
   } finally {
     physicalLoading.value = false
   }
@@ -439,7 +445,7 @@ function resetForm(): void {
     commodity_sku: '',
     enabled: true,
     remark: '',
-    components: [{ group_no: 1, inventory_sku: '', quantity: 1 }],
+    components: [{ group_no: 1, inventory_sku: '', quantity: 1 }]
   })
 }
 
@@ -448,7 +454,7 @@ function resetPhysicalForm(): void {
     name: '',
     enabled: true,
     remark: '',
-    members: [''],
+    members: ['']
   })
 }
 
@@ -473,8 +479,8 @@ function openEdit(row: SkuMappingRule): void {
     components: row.components.map((component) => ({
       group_no: component.group_no,
       inventory_sku: component.inventory_sku,
-      quantity: component.quantity,
-    })),
+      quantity: component.quantity
+    }))
   })
   dialogVisible.value = true
 }
@@ -485,7 +491,7 @@ function openPhysicalEdit(row: PhysicalItemGroup): void {
     name: row.name,
     enabled: row.enabled,
     remark: row.remark || '',
-    members: row.members.map((member) => member.sku),
+    members: row.members.map((member) => member.sku)
   })
   physicalDialogVisible.value = true
 }
@@ -505,7 +511,8 @@ function addComponent(groupNo = 1): void {
 }
 
 function addGroup(): void {
-  const nextGroupNo = Math.max(0, ...form.components.map((component) => Number(component.group_no) || 0)) + 1
+  const nextGroupNo =
+    Math.max(0, ...form.components.map((component) => Number(component.group_no) || 0)) + 1
   addComponent(nextGroupNo)
 }
 
@@ -532,17 +539,21 @@ function buildPayload(): SkuMappingRuleInput | null {
   const components = form.components.map((component) => ({
     group_no: Number(component.group_no),
     inventory_sku: component.inventory_sku.trim(),
-    quantity: Number(component.quantity),
+    quantity: Number(component.quantity)
   }))
   if (components.some((component) => !component.inventory_sku)) {
     ElMessage.warning('请输入库存SKU')
     return null
   }
-  if (components.some((component) => !Number.isInteger(component.group_no) || component.group_no <= 0)) {
+  if (
+    components.some((component) => !Number.isInteger(component.group_no) || component.group_no <= 0)
+  ) {
     ElMessage.warning('组合编号必须为正整数')
     return null
   }
-  if (components.some((component) => !Number.isInteger(component.quantity) || component.quantity <= 0)) {
+  if (
+    components.some((component) => !Number.isInteger(component.quantity) || component.quantity <= 0)
+  ) {
     ElMessage.warning('组件数量必须为正整数')
     return null
   }
@@ -555,7 +566,7 @@ function buildPayload(): SkuMappingRuleInput | null {
     commodity_sku: commoditySku,
     enabled: form.enabled,
     remark: form.remark?.trim() || null,
-    components: components.sort((left, right) => left.group_no - right.group_no),
+    components: components.sort((left, right) => left.group_no - right.group_no)
   }
 }
 
@@ -563,7 +574,7 @@ function buildPhysicalPayload(): PhysicalItemGroupInput | null {
   const name = physicalForm.name.trim()
   const members = physicalForm.members.map((sku) => sku.trim()).filter(Boolean)
   if (!name) {
-    ElMessage.warning('请输入共享组名称')
+    ElMessage.warning('请输入共用组名称')
     return null
   }
   if (!members.length) {
@@ -578,7 +589,7 @@ function buildPhysicalPayload(): PhysicalItemGroupInput | null {
     name,
     enabled: physicalForm.enabled,
     remark: physicalForm.remark?.trim() || null,
-    members,
+    members
   }
 }
 
@@ -618,7 +629,7 @@ async function savePhysical(): Promise<void> {
     ElMessage.success('已保存')
     await reloadPhysical()
   } catch (error) {
-    ElMessage.error(getActionErrorMessage(error, '保存库存 SKU 共享组失败'))
+    ElMessage.error(getActionErrorMessage(error, '保存库存共用组失败'))
   } finally {
     physicalSaving.value = false
   }
@@ -640,14 +651,14 @@ async function togglePhysicalEnabled(row: PhysicalItemGroup): Promise<void> {
     ElMessage.success(row.enabled ? '已停用' : '已启用')
     await reloadPhysical()
   } catch (error) {
-    ElMessage.error(getActionErrorMessage(error, '更新库存 SKU 共享组状态失败'))
+    ElMessage.error(getActionErrorMessage(error, '更新库存共用组状态失败'))
   }
 }
 
 async function remove(row: SkuMappingRule): Promise<void> {
   try {
     await ElMessageBox.confirm(`确认删除商品SKU ${row.commodity_sku} 的映射规则吗？`, '删除规则', {
-      type: 'warning',
+      type: 'warning'
     })
   } catch {
     return
@@ -663,8 +674,8 @@ async function remove(row: SkuMappingRule): Promise<void> {
 
 async function removePhysical(row: PhysicalItemGroup): Promise<void> {
   try {
-    await ElMessageBox.confirm(`确认删除库存 SKU 共享组 ${row.name} 吗？`, '删除共享组', {
-      type: 'warning',
+    await ElMessageBox.confirm(`确认删除库存共用组 ${row.name} 吗？`, '删除共用组', {
+      type: 'warning'
     })
   } catch {
     return
@@ -674,7 +685,7 @@ async function removePhysical(row: PhysicalItemGroup): Promise<void> {
     ElMessage.success('已删除')
     await reloadPhysical()
   } catch (error) {
-    ElMessage.error(getActionErrorMessage(error, '删除库存 SKU 共享组失败'))
+    ElMessage.error(getActionErrorMessage(error, '删除库存共用组失败'))
   }
 }
 
@@ -700,7 +711,7 @@ async function handleImportFile(event: Event): Promise<void> {
   try {
     const result = await importSkuMappingRules(file)
     ElMessage.success(
-      `导入完成：新增 ${result.created} 条，更新 ${result.updated} 条，组件 ${result.total_components} 行`,
+      `导入完成：新增 ${result.created} 条，更新 ${result.updated} 条，组件 ${result.total_components} 行`
     )
     await reload()
   } catch (error) {
@@ -709,9 +720,13 @@ async function handleImportFile(event: Event): Promise<void> {
 }
 
 function formatImportError(error: unknown): string {
-  const response = (error as {
-    response?: { data?: { detail?: { errors?: Array<{ row?: number | null; message?: string }> } } }
-  }).response
+  const response = (
+    error as {
+      response?: {
+        data?: { detail?: { errors?: Array<{ row?: number | null; message?: string }> } }
+      }
+    }
+  ).response
   const errors = response?.data?.detail?.errors
   if (errors?.length) {
     const first = errors[0]

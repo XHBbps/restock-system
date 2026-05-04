@@ -9,7 +9,7 @@ import { useAuthStore } from '@/stores/auth'
 const { mockListSkuMappingRules, mockListPhysicalItemGroups, messageWarning } = vi.hoisted(() => ({
   mockListSkuMappingRules: vi.fn(),
   mockListPhysicalItemGroups: vi.fn(),
-  messageWarning: vi.fn(),
+  messageWarning: vi.fn()
 }))
 
 vi.mock('@/api/config', () => ({
@@ -22,7 +22,7 @@ vi.mock('@/api/config', () => ({
   listPhysicalItemGroups: (...args: unknown[]) => mockListPhysicalItemGroups(...args),
   listSkuMappingRules: (...args: unknown[]) => mockListSkuMappingRules(...args),
   updatePhysicalItemGroup: vi.fn(),
-  updateSkuMappingRule: vi.fn(),
+  updateSkuMappingRule: vi.fn()
 }))
 
 vi.mock('element-plus', async () => {
@@ -32,31 +32,36 @@ vi.mock('element-plus', async () => {
     ElMessage: {
       success: vi.fn(),
       warning: messageWarning,
-      error: vi.fn(),
+      error: vi.fn()
     },
     ElMessageBox: {
-      confirm: vi.fn(),
-    },
+      confirm: vi.fn()
+    }
   }
 })
 
 const STUBS = {
   PageSectionCard: {
-    template: '<div><slot name="actions" /><slot /></div>',
+    props: ['title', 'description'],
+    template:
+      '<section><h2>{{ title }}</h2><p v-if="description">{{ description }}</p><slot name="actions" /><slot /></section>'
   },
   TablePaginationBar: true,
   ElInput: true,
   ElSelect: true,
   ElOption: true,
-  ElButton: true,
+  ElButton: { template: '<button type="button"><slot /></button>' },
   ElTable: true,
   ElTableColumn: true,
   ElTag: true,
-  ElDialog: { template: '<div><slot /><slot name="footer" /></div>' },
+  ElDialog: {
+    props: ['title'],
+    template: '<div><h3>{{ title }}</h3><slot /><slot name="footer" /></div>'
+  },
   ElForm: { template: '<form><slot /></form>' },
   ElFormItem: { template: '<div><slot /></div>' },
   ElSwitch: true,
-  ElInputNumber: true,
+  ElInputNumber: true
 }
 
 describe('SkuMappingRuleView', () => {
@@ -73,7 +78,7 @@ describe('SkuMappingRuleView', () => {
       roleName: 'Admin',
       isSuperadmin: true,
       passwordIsDefault: false,
-      permissions: ['config:edit'],
+      permissions: ['config:edit']
     })
   })
 
@@ -94,7 +99,7 @@ describe('SkuMappingRuleView', () => {
     vm.form.components = [
       { group_no: 1, inventory_sku: 'B', quantity: 1 },
       { group_no: 1, inventory_sku: 'C', quantity: 2 },
-      { group_no: 2, inventory_sku: 'D', quantity: 1 },
+      { group_no: 2, inventory_sku: 'D', quantity: 1 }
     ]
 
     expect(vm.formulaPreview).toBe('A=1*B+2*C 或 1*D')
@@ -116,7 +121,7 @@ describe('SkuMappingRuleView', () => {
     vm.form.commodity_sku = 'A'
     vm.form.components = [
       { group_no: 2, inventory_sku: 'D', quantity: 1 },
-      { group_no: 1, inventory_sku: 'B', quantity: 1 },
+      { group_no: 1, inventory_sku: 'B', quantity: 1 }
     ]
 
     expect(vm.buildPayload()).toEqual(
@@ -124,9 +129,9 @@ describe('SkuMappingRuleView', () => {
         commodity_sku: 'A',
         components: [
           { group_no: 1, inventory_sku: 'B', quantity: 1 },
-          { group_no: 2, inventory_sku: 'D', quantity: 1 },
-        ],
-      }),
+          { group_no: 2, inventory_sku: 'D', quantity: 1 }
+        ]
+      })
     )
   })
 
@@ -170,7 +175,23 @@ describe('SkuMappingRuleView', () => {
       name: 'B/E',
       enabled: true,
       remark: null,
-      members: ['B', 'E'],
+      members: ['B', 'E']
     })
+  })
+
+  it('uses updated physical group copy and removes section descriptions', async () => {
+    const { default: View } = await import('../SkuMappingRuleView.vue')
+    const wrapper = shallowMount(View, { global: { stubs: STUBS } })
+    await flushPromises()
+
+    const text = wrapper.text()
+    expect(text).toContain('库存共用组')
+    expect(text).toContain('新增库存共用组')
+    expect(text).toContain('添加SKU')
+    expect(text).not.toContain('库存 SKU 共享组')
+    expect(text).not.toContain('新增库存 SKU 共享组')
+    expect(text).not.toContain('添加成员')
+    expect(text).not.toContain('维护商品 SKU 与库存包裹 SKU 的组装关系')
+    expect(text).not.toContain('维护完全等价的库存组件 SKU')
   })
 })
