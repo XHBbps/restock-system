@@ -251,7 +251,7 @@ async def _backfill_sku_configs_from_commodities(db: AsyncSession) -> int:
         .scalars()
         .all()
     )
-    return await _insert_missing_sku_configs(db, sku_codes, enabled=False)
+    return await _insert_missing_sku_configs(db, sku_codes, enabled=True)
 
 
 async def _backfill_sku_configs_from_synced_listings(db: AsyncSession) -> int:
@@ -270,7 +270,7 @@ async def _backfill_sku_configs_from_synced_listings(db: AsyncSession) -> int:
             if sku is not None
         }
     )
-    return await _insert_missing_sku_configs(db, sku_codes, enabled=False)
+    return await _insert_missing_sku_configs(db, sku_codes, enabled=True)
 
 
 async def _insert_missing_sku_configs(

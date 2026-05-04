@@ -49,7 +49,7 @@ class _FakeDb:
         self.commits += 1
 
 
-async def test_init_sku_configs_from_commodities_only_inserts_missing_disabled() -> None:
+async def test_init_sku_configs_from_commodities_only_inserts_missing_enabled() -> None:
     db = _FakeDb(
         commodity_skus=["SKU-001", "SKU-002", "SKU-003"],
         listing_skus=[],
@@ -60,18 +60,18 @@ async def test_init_sku_configs_from_commodities_only_inserts_missing_disabled()
 
     assert created == 2
     assert db.inserted == ["SKU-001", "SKU-003"]
-    assert db.inserted_enabled == [False, False]
+    assert db.inserted_enabled == [True, True]
     assert db.commits == 1
 
 
-async def test_init_sku_configs_falls_back_to_listing_skus_disabled() -> None:
+async def test_init_sku_configs_falls_back_to_listing_skus_enabled() -> None:
     db = _FakeDb(commodity_skus=[], listing_skus=["SKU-001", "SKU-002"], existing_skus=["SKU-002"])
 
     created = await init_sku_configs_from_listings(db)  # type: ignore[arg-type]
 
     assert created == 1
     assert db.inserted == ["SKU-001"]
-    assert db.inserted_enabled == [False]
+    assert db.inserted_enabled == [True]
     assert db.commits == 1
 
 

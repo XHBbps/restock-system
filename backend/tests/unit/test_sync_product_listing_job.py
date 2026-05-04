@@ -263,7 +263,7 @@ async def test_upsert_commodity_uses_image_field_priority(
 
 
 @pytest.mark.asyncio
-async def test_insert_missing_sku_configs_defaults_disabled() -> None:
+async def test_insert_missing_sku_configs_defaults_enabled() -> None:
     import app.sync.product_listing as product_listing_module
 
     class _ExistingSkuDb(_FakeDb):
@@ -275,13 +275,13 @@ async def test_insert_missing_sku_configs_defaults_disabled() -> None:
 
     db = _ExistingSkuDb()
     created = await product_listing_module._insert_missing_sku_configs(  # type: ignore[arg-type]
-        db, ["SKU-1", "SKU-2"], enabled=False
+        db, ["SKU-1", "SKU-2"], enabled=True
     )
 
     params = db.statements[-1].compile().params
     assert created == 1
     assert params["commodity_sku_m0"] == "SKU-1"
-    assert params["enabled_m0"] is False
+    assert params["enabled_m0"] is True
 
 
 @pytest.mark.asyncio

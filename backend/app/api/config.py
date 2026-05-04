@@ -192,7 +192,7 @@ async def init_sku_configs_from_listings(db: AsyncSession) -> int:
 
     await db.execute(
         pg_insert(SkuConfig).values(
-            [{"commodity_sku": code, "enabled": False} for code in missing_codes]
+            [{"commodity_sku": code, "enabled": True} for code in missing_codes]
         )
     )
     await db.commit()

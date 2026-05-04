@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-05-04（订单处理列表同步修复邮编空值 upsert 口径：赛狐本次返回空邮编或缺失地址时，不再覆盖已有 `order_header.postal_code`。）
+> 最近更新：2026-05-04（商品 SKU 启用口径调整：历史 `sku_config` 一次性启用，新发现 SKU 默认启用；后续人工禁用不会被商品同步覆盖。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -39,7 +39,7 @@
 - **EU 合并同步口径**：订单、商品、出库、库存同步均按全局 eu_countries 将 EU 成员国合并到 EU，并在 original_* 字段保存原国家码；calc_engine 已移出 APScheduler 定时注册，仅保留手动生成入口。
 - **新国家发现口径**：多平台订单同步遇到有效 2 位国家码时直接落入 `order_header.country_code` 并参与计算；若该国家已配置到 `eu_countries`，则归并为 `EU` 并在 `original_country_code` 保留原码；空值或非法国家码才写为 `ZZ` 并记录结构化日志。
 - **订单处理列表同步来源**：`sync_order_list` 当前只调用赛狐订单处理列表 `/api/packageShip/v1/getPackagePage.json`，按 `purchaseDateStart/purchaseDateEnd` 拉取滚动 12 个月窗口，`pageSize=200`，继续复用全局店铺过滤；订单国家现在统一读取响应顶层 `marketplace` 字段，空值或非法值回落 `ZZ`，`address.countryCode/address.country` 不再作为国家来源。包裹数据统一写入 `source='订单处理'`，并保存 `package_sn/package_status/shop_name/postal_code/order_platform`；冲突更新时若本次接口邮编为空或地址缺失，不覆盖已有 `order_header.postal_code`。同步开始前会清理旧 `source in ('亚马逊','多平台')` 的订单头、明细、详情和详情抓取日志，避免切换后重复计算。
-- **商品主数据同步来源**：`sync_product_listing` 先调用赛狐 SKU 主数据接口 `/api/commodity/pageList.json` 写入 `commodity_master`，再调用在线产品 listing 接口 `/api/order/api/product/pageList.json` 补充店铺、站点、sellerSku 与近 7/14/30 天销量。同步新发现的 SKU 只补建 `sku_config(enabled=false)`，不自动扩大补货计算 SKU 集合。
+- **商品主数据同步来源**：`sync_product_listing` 先调用赛狐 SKU 主数据接口 `/api/commodity/pageList.json` 写入 `commodity_master`，再调用在线产品 listing 接口 `/api/order/api/product/pageList.json` 补充店铺、站点、sellerSku 与近 7/14/30 天销量。同步新发现的 SKU 只补建 `sku_config(enabled=true)`，不覆盖已有 `enabled` 与 `lead_time_days`；后续人工禁用的 SKU 不会被商品同步重新打开。
 
 - **调度器开关**：`GET/POST /api/sync/scheduler`，开关状态持久化到 `global_config.scheduler_enabled`
 - **调度参数实时生效**：`sync_interval_minutes`、`calc_cron` 保存后立即 reload
@@ -105,6 +105,12 @@
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
 
+### 3.96 商品 SKU 默认启用与历史启用迁移（2026-05-04）
+- **默认启用**：`backend/app/sync/product_listing.py` 的商品主数据补齐与 listing 补齐均改为只给缺失 SKU 新建 `sku_config(enabled=true)`；`backend/app/api/config.py` 的商品页“同步商品主数据”补齐入口同样默认启用新 SKU。
+- **保留人工禁用**：上述入口都只插入缺失配置，不更新已有 `sku_config`，因此用户后续手动禁用的 SKU 不会被商品同步覆盖。
+- **历史迁移**：新增 `backend/alembic/versions/20260504_1000_enable_existing_sku_configs.py`，一次性执行 `UPDATE sku_config SET enabled = true WHERE enabled = false`；downgrade 不反向关闭历史 SKU。
+- **测试**：更新 `backend/tests/unit/test_sync_product_listing_job.py` 与 `backend/tests/unit/test_sku_init.py`，覆盖同步补齐和商品页补齐的新 SKU 默认启用口径。
+
 ### 3.95 订单邮编空值不覆盖修复（2026-05-04）
 - **同步保护**：`backend/app/sync/order_list.py` 保持从 `raw.address.postalCode` 解析邮编；插入新订单时仍允许 `postal_code=NULL`，但订单头唯一键冲突更新时，若本次赛狐响应邮编为空字符串、`null` 或 `address` 缺失，会从 `ON CONFLICT DO UPDATE SET` 中移除 `postal_code`，避免把已有有效邮编覆盖为空。
 - **有效更新**：当本次响应包含非空 `address.postalCode` 时，`postal_code` 仍正常参与 upsert 更新，用于修正赛狐侧最新邮编。
@@ -147,11 +153,11 @@
 ### 3.89 商品主数据同步接入（2026-05-03）
 - **赛狐接口**：新增 `backend/app/saihu/endpoints/commodity.py`，封装 `POST /api/commodity/pageList.json`，分页请求体为 `pageNo/pageSize`，默认不加 `state`、`isGroup` 过滤，避免漏掉停售、组合 SKU 或加工 SKU。
 - **数据库迁移**：`backend/alembic/versions/20260503_1000_add_commodity_master.py` 新增 `commodity_master` 表，主键为赛狐返回的 `sku`，保存 `commodity_id/name/state/is_group/img_url/purchase_days/child_skus/last_sync_at` 等主数据字段。
-- **同步任务**：`backend/app/sync/product_listing.py` 的 `sync_product_listing` 调整为“商品主数据 → 在线产品 listing”两段同步；主数据和 listing 新发现的 SKU 都只补建 `sku_config(enabled=false)`，已存在的 `enabled` 与 `lead_time_days` 不覆盖。`run_engine` 仍只读取 `SkuConfig.enabled=True`。
+- **同步任务**：`backend/app/sync/product_listing.py` 的 `sync_product_listing` 调整为“商品主数据 → 在线产品 listing”两段同步；主数据和 listing 新发现的 SKU 当前默认补建 `sku_config(enabled=true)`，已存在的 `enabled` 与 `lead_time_days` 不覆盖。`run_engine` 仍只读取 `SkuConfig.enabled=True`。
 - **商品页接口**：`GET /api/data/sku-overview` 改为 `SkuConfig` 左连接 `CommodityMaster`，搜索支持 SKU 与商品名；返回新增 `commodity_id/state/is_group/purchase_days/has_listing`，商品名和图片优先使用主数据，listing 仅用于展开明细和销量汇总。
 - **库存匹配口径**：库存页未匹配判断改为“存在商品主数据 SKU、listing 商品 SKU 或映射组件库存 SKU”即视为已匹配，接入完整商品 SKU 后减少库存 SKU 误判。
 - **前端与监控**：`frontend/src/views/data/DataProductsView.vue` 改为“商品主数据”展示，`frontend/src/config/sync.ts` 与 `frontend/src/utils/monitoring.ts` 将商品同步文案更新为“商品主数据同步”；赛狐 `40019` 精确重试映射新增 `/api/commodity/pageList.json -> sync_product_listing`。
-- **测试**：新增 `backend/tests/unit/test_saihu_commodity_endpoint.py`、`backend/tests/unit/test_data_sku_overview_api.py`，并更新商品同步、SKU 初始化、库存匹配与商品页前端测试，覆盖分页请求、空 SKU 跳过、默认禁用、主数据优先和无 listing 展示。
+- **测试**：新增 `backend/tests/unit/test_saihu_commodity_endpoint.py`、`backend/tests/unit/test_data_sku_overview_api.py`，并更新商品同步、SKU 初始化、库存匹配与商品页前端测试，覆盖分页请求、空 SKU 跳过、默认启用、主数据优先和无 listing 展示。
 
 ### 3.88 SKU 映射替代组合改造（2026-05-02）
 - **数据库迁移**：`sku_mapping_component` 新增 `group_no`，默认值为 1，旧组件行自动归入“组合 1”；当时仍保留 `sku_mapping_rule.commodity_sku` 唯一与 `sku_mapping_component.inventory_sku` 全局唯一，后续 §3.90 已将组件唯一约束收窄为同一规则内唯一。
