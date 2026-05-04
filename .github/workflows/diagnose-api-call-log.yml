@@ -1,0 +1,105 @@
+name: Diagnose API Call Log
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths:
+      - ".github/workflows/diagnose-api-call-log.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    name: Read-only production API call log diagnosis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Query production database
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            cd "${{ secrets.DEPLOY_PATH }}"
+            docker compose --env-file deploy/.env -f deploy/docker-compose.yml exec -T db \
+              psql -U postgres -d replenish -v ON_ERROR_STOP=1 <<'SQL'
+            \pset pager off
+            SELECT now() AS checked_at;
+
+            SELECT
+              COALESCE(retry_status, '<null>') AS retry_status,
+              retry_source_log_id IS NOT NULL AS is_retry_child,
+              saihu_code,
+              request_payload IS NOT NULL AS has_request_payload,
+              COUNT(*) AS count
+            FROM api_call_log
+            WHERE called_at >= now() - interval '7 days'
+              AND COALESCE(saihu_code, 0) != 0
+            GROUP BY 1,2,3,4
+            ORDER BY count DESC, retry_status, saihu_code;
+
+            SELECT
+              CASE
+                WHEN saihu_code IS DISTINCT FROM 40019 THEN 'not_40019'
+                WHEN request_payload IS NULL THEN 'no_payload'
+                WHEN retry_source_log_id IS NOT NULL THEN 'retry_child'
+                WHEN endpoint NOT IN (
+                  '/api/commodity/pageList.json',
+                  '/api/order/api/product/pageList.json',
+                  '/api/warehouseManage/warehouseList.json',
+                  '/api/warehouseManage/warehouseItemList.json',
+                  '/api/warehouseInOut/outRecords.json',
+                  '/api/packageShip/v1/getPackagePage.json',
+                  '/api/shop/pageList.json'
+                ) THEN 'unsupported_endpoint'
+                WHEN retry_count < 2 THEN 'intermediate_retry_attempt'
+                ELSE 'actionable_null_status'
+              END AS reason,
+              COUNT(*) AS count
+            FROM api_call_log
+            WHERE called_at >= now() - interval '14 days'
+              AND COALESCE(saihu_code, 0) != 0
+              AND retry_status IS NULL
+              AND retry_source_log_id IS NULL
+            GROUP BY 1
+            ORDER BY count DESC;
+
+            SELECT
+              endpoint,
+              retry_count,
+              COUNT(*) AS count
+            FROM api_call_log
+            WHERE called_at >= now() - interval '14 days'
+              AND saihu_code = 40019
+              AND retry_status IS NULL
+              AND request_payload IS NOT NULL
+              AND retry_source_log_id IS NULL
+            GROUP BY 1, 2
+            ORDER BY count DESC, endpoint, retry_count;
+
+            SELECT
+              id,
+              endpoint,
+              called_at,
+              saihu_code,
+              retry_status,
+              request_payload IS NOT NULL AS has_request_payload,
+              retry_source_log_id,
+              retry_count,
+              auto_retry_attempts,
+              next_retry_at,
+              left(COALESCE(saihu_msg, ''), 160) AS saihu_msg,
+              left(COALESCE(last_retry_error, ''), 160) AS last_retry_error
+            FROM api_call_log
+            WHERE called_at >= now() - interval '14 days'
+              AND saihu_code = 40019
+              AND retry_status IS NULL
+              AND request_payload IS NOT NULL
+              AND retry_source_log_id IS NULL
+            ORDER BY called_at DESC
+            LIMIT 50;
+            SQL
