@@ -86,7 +86,9 @@ async def run_engine(
         resolver = await load_physical_sku_resolver(db)
         sku_list = sorted({row[0] for row in enabled_skus})
         source_sku_list = sku_list
-        sku_lead_time: dict[str, int | None] = dict(enabled_skus)
+        sku_lead_time: dict[str, int | None] = {}
+        for raw_sku, lead_time_days in enabled_skus:
+            sku_lead_time[raw_sku] = lead_time_days
 
         if not sku_list:
             logger.warning("engine_no_enabled_sku", triggered_by=triggered_by)
