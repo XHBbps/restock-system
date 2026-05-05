@@ -102,7 +102,6 @@ describe('GlobalConfigView', () => {
     mockGetCountryOptions.mockResolvedValue({
       items: [
         { code: 'EU', label: 'EU - 欧盟', builtin: true, observed: true, can_be_eu_member: false },
-        { code: 'ZZ', label: 'ZZ - 无法识别国家', builtin: true, observed: false, can_be_eu_member: false },
         { code: 'US', label: 'US - 美国', builtin: true, observed: true, can_be_eu_member: true },
         { code: 'GB', label: 'GB - 英国', builtin: true, observed: true, can_be_eu_member: true },
         { code: 'CZ', label: 'CZ - 捷克', builtin: true, observed: true, can_be_eu_member: true },

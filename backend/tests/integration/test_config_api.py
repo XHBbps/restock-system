@@ -413,6 +413,12 @@ async def test_get_country_options_merges_builtin_and_observed_countries(
         marketplace_id="EU",
         original_country_code="RO",
     )
+    await _seed_order_header(
+        db_session,
+        order_id="111-0000007-0000007",
+        country_code="ZZ",
+        marketplace_id="ZZ",
+    )
     await db_session.commit()
 
     resp = await client.get("/api/config/country-options")
@@ -430,7 +436,7 @@ async def test_get_country_options_merges_builtin_and_observed_countries(
     assert by_code["RO"]["observed"] is True
     assert by_code["RO"]["can_be_eu_member"] is True
     assert by_code["EU"]["can_be_eu_member"] is False
-    assert by_code["ZZ"]["can_be_eu_member"] is False
+    assert "ZZ" not in by_code
     assert body["unknown_country_codes"] == []
 
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { getCountryLabel } from './countries'
+import { COUNTRY_OPTIONS, formatCountryCodeForDisplay, getCountryLabel } from './countries'
 
 describe('countries', () => {
   it('formats newly observed country codes with Chinese labels', () => {
@@ -14,5 +14,13 @@ describe('countries', () => {
     expect(getCountryLabel('LV')).toBe('LV - 拉脱维亚')
     expect(getCountryLabel('MT')).toBe('MT - 马耳他')
     expect(getCountryLabel('SI')).toBe('SI - 斯洛文尼亚')
+  })
+
+  it('keeps ZZ as an internal sentinel instead of a country option', () => {
+    expect(COUNTRY_OPTIONS.map((option) => option.code)).not.toContain('ZZ')
+    expect(getCountryLabel('ZZ')).toBe('-')
+    expect(formatCountryCodeForDisplay('ZZ')).toBe('-')
+    expect(formatCountryCodeForDisplay('US')).toBe('US')
+    expect(formatCountryCodeForDisplay(null)).toBe('-')
   })
 })

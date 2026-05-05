@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-05-05（订单处理列表明细数量统一以 `items.quantityOrdered` 为唯一来源；订单详情弹窗只展示“下单数”；Step 1 销量与 Step 5 分仓样本改用 `quantity_ordered` 口径。）
+> 最近更新：2026-05-05（订单处理列表缺失或非法国家仍以内部 `ZZ` 落库，但前端展示为 `-`，国家选项不再暴露 `ZZ`，Step 1 销量与 Step 5 分仓样本排除 `ZZ`。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -38,7 +38,7 @@
 ### 2.2 同步与调度
 - **EU 合并同步口径**：订单、商品、出库、库存同步均按全局 eu_countries 将 EU 成员国合并到 EU，并在 original_* 字段保存原国家码；calc_engine 已移出 APScheduler 定时注册，仅保留手动生成入口。
 - **新国家发现口径**：多平台订单同步遇到有效 2 位国家码时直接落入 `order_header.country_code` 并参与计算；若该国家已配置到 `eu_countries`，则归并为 `EU` 并在 `original_country_code` 保留原码；空值或非法国家码才写为 `ZZ` 并记录结构化日志。
-- **订单处理列表同步来源**：`sync_order_list` 当前只调用赛狐订单处理列表 `/api/packageShip/v1/getPackagePage.json`，按 `purchaseDateStart/purchaseDateEnd` 拉取滚动 12 个月窗口，`pageSize=200`，继续复用全局店铺过滤；订单国家现在统一读取响应顶层 `marketplace` 字段，空值或非法值回落 `ZZ`，`address.countryCode/address.country` 不再作为国家来源。包裹数据统一写入 `source='订单处理'`，并保存 `package_sn/package_status/shop_name/postal_code/order_platform`；明细数量只读取 `items.quantityOrdered`，同时写入 `quantity_ordered` 与兼容字段 `quantity_shipped`，`refund_num=0`；冲突更新时若本次接口邮编为空或地址缺失，不覆盖已有 `order_header.postal_code`。同步开始前会清理旧 `source in ('亚马逊','多平台')` 的订单头、明细、详情和详情抓取日志，避免切换后重复计算。
+- **订单处理列表同步来源**：`sync_order_list` 当前只调用赛狐订单处理列表 `/api/packageShip/v1/getPackagePage.json`，按 `purchaseDateStart/purchaseDateEnd` 拉取滚动 12 个月窗口，`pageSize=200`，继续复用全局店铺过滤；订单国家现在统一读取响应顶层 `marketplace` 字段，空值或非法值回落内部哨兵 `ZZ`，`address.countryCode/address.country` 不再作为国家来源。`ZZ` 不暴露为前端国家选项，也不参与补货计算。包裹数据统一写入 `source='订单处理'`，并保存 `package_sn/package_status/shop_name/postal_code/order_platform`；明细数量只读取 `items.quantityOrdered`，同时写入 `quantity_ordered` 与兼容字段 `quantity_shipped`，`refund_num=0`；冲突更新时若本次接口邮编为空或地址缺失，不覆盖已有 `order_header.postal_code`。同步开始前会清理旧 `source in ('亚马逊','多平台')` 的订单头、明细、详情和详情抓取日志，避免切换后重复计算。
 - **商品主数据同步来源**：`sync_product_listing` 先调用赛狐 SKU 主数据接口 `/api/commodity/pageList.json` 写入 `commodity_master`，再调用在线产品 listing 接口 `/api/order/api/product/pageList.json` 补充店铺、站点、sellerSku 与近 7/14/30 天销量。同步新发现的 SKU 只补建 `sku_config(enabled=true)`，不覆盖已有 `enabled` 与 `lead_time_days`；后续人工禁用的 SKU 不会被商品同步重新打开。
 
 - **调度器开关**：`GET/POST /api/sync/scheduler`，开关状态持久化到 `global_config.scheduler_enabled`
@@ -65,9 +65,9 @@
   2. `step2_sale_days` — 可售天数 + 库存聚合（含在途）
   3. `step3_country_qty` — 各国补货量（`target_days + (demand_date - today)` 作为有效目标库存天数）
   4. `step4_total` — 总采购量（基于新的 Σcountry_qty − 本地库存 + ceil(Σvelocity × safety_stock_days)，clamp 到 0；`buffer_days` 不参与采购量）
-  5. `step5_warehouse_split` — 按邮编规则分配到具体仓库；订单样本来自 `source='订单处理'` 且 `package_status!='has_canceled'` 的包裹订单，以 `quantity_ordered` 为样本数量，优先使用 `order_header.postal_code`，已知邮编命中部分按真实比例分配，未知部分按该国家已配置邮编规则的仓均分
+  5. `step5_warehouse_split` — 按邮编规则分配到具体仓库；订单样本来自 `source='订单处理'`、`package_status!='has_canceled'` 且 `country_code!='ZZ'` 的包裹订单，以 `quantity_ordered` 为样本数量，优先使用 `order_header.postal_code`，已知邮编命中部分按真实比例分配，未知部分按该国家已配置邮编规则的仓均分
   6. `step6_timing` — 紧急标志与补货日期（任一正补货国家 `sale_days <= lead_time_days` 即为紧急；`restock_date[sku][country] = today + int(sale_days[sku][country]) − lead_time_days`）
-- **补货区域过滤**：全局参数 `restock_regions` 支持按国家多选；为空数组时表示全部国家参与计算，配置后仅这些国家的订单会参与 `step1_velocity` 销量统计和 `step5_warehouse_split` 的国家订单分仓
+- **补货区域过滤**：全局参数 `restock_regions` 支持按国家多选；为空数组时表示全部业务国家参与计算，配置后仅这些国家的订单会参与 `step1_velocity` 销量统计和 `step5_warehouse_split` 的国家订单分仓；内部哨兵 `ZZ` 始终排除
 - **并发保护**：`pg_advisory_xact_lock(7429001)` 事务级锁，阻止并发引擎覆盖彼此
 - **补货日期参与数量计算**：`POST /api/engine/run` 必填 `demand_date` 且不能早于北京时间今天；runner 按 `today=now_beijing().date()` 计算 `demand_days=max(demand_date - today, 0)`，再用 `target_days + demand_days` 作为 Step 3 有效目标库存天数；`restock_regions` 仍只决定哪些国家参与补货，`restock_dates` 继续保存用于追溯、导出和紧急程度判断，不再按日期过滤国家
 - **快照追溯**：`velocity_snapshot`、`sale_days_snapshot`、`global_config_snapshot` 存入 JSONB 字段；其中 `global_config_snapshot` 会记录 `restock_regions` 与本次补货日期 `demand_date`
@@ -101,12 +101,19 @@
 - **数据加载模式**：订单页、历史记录页、商品页、库存页、出库记录页使用“后端分页 + 后端筛选”；仓库、店铺等低增长基础页仍保留轻量分页
 - **商品页主数据口径**：`DataProductsView.vue` 通过 `/api/data/sku-overview` 展示 `commodity_master + sku_config`，商品名、图片、状态、组合标识、采购周期优先取主数据；listing 仅作为展开明细和销量参考，无 listing 的商品 SKU 也会显示。
 - **筛选控件高度统一**：`PageSectionCard` 的 `section-actions` 强制所有控件 32px 高度
-- **订单处理列表展示**：`DataOrdersView.vue` 展示包裹状态、店铺名称、平台、国家、邮编与本地订单明细；筛选支持 SKU / 订单号、国家、店铺、平台和包裹状态，其中平台选项来自 `GET /api/data/order-platforms` 返回的已落库订单平台。来源和包裹号不再作为页面展示或搜索字段，平台字段改为标签样式，店铺仅显示名称，订单明细中的商品 SKU 使用后端落库后的 `commodity_sku`。
+- **订单处理列表展示**：`DataOrdersView.vue` 展示包裹状态、店铺名称、平台、国家、邮编与本地订单明细；`countryCode='ZZ'` 统一显示为 `-`。筛选支持 SKU / 订单号、国家、店铺、平台和包裹状态，其中平台选项来自 `GET /api/data/order-platforms` 返回的已落库订单平台。来源和包裹号不再作为页面展示或搜索字段，平台字段改为标签样式，店铺仅显示名称，订单明细中的商品 SKU 使用后端落库后的 `commodity_sku`。
 - **全局参数页补货区域配置**：`GlobalConfigView.vue` 的“补货区域”多选已接入动态国家选项，保存前变更检测与配置变更提示已纳入 `restock_regions`
-- **动态国家选项**：`GET /api/config/country-options` 返回内置国家与订单、仓库、库存、出库在途中已观测国家的并集，并在输出前统一标准化 ISO 二字码别名；订单、库存、出库、仓库、邮编规则、补货区域和 EU 成员国配置均改用该接口，接口不可用时前端降级使用内置选项。
+- **动态国家选项**：`GET /api/config/country-options` 返回内置国家与订单、仓库、库存、出库在途中已观测国家的并集，并在输出前统一标准化 ISO 二字码别名；内部哨兵 `ZZ` 不会出现在 `items` 或 `unknown_country_codes`。订单、库存、出库、仓库、邮编规则、补货区域和 EU 成员国配置均改用该接口，接口不可用时前端降级使用内置选项。
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.105 订单缺失国家口径调整（2026-05-05）
+- **同步兼容**：`backend/app/sync/order_list.py` 继续在订单处理列表顶层 `marketplace` 缺失或非法时把 `order_header.country_code` 写为内部哨兵 `ZZ`，不新增字段、不做 migration，也不删除历史缺国家订单。
+- **展示口径**：`frontend/src/views/data/DataOrdersView.vue` 的订单列表、移动端卡片和详情弹窗对 `countryCode='ZZ'` 统一显示 `-`；`frontend/src/utils/countries.ts` 移除 `ZZ - 无法识别国家` fallback 选项，`getCountryLabel('ZZ')` 也返回 `-`。
+- **配置口径**：`GET /api/config/country-options` 不再返回 `ZZ`，即使数据库已观测到历史 `ZZ`；`unknown_country_codes` 也不包含 `ZZ`。EU 成员国配置仍继续拒绝 `EU` 与 `ZZ`。
+- **计算口径**：`backend/app/engine/step1_velocity.py` 与 `backend/app/engine/step5_warehouse_split.py` 在订单输入 SQL 中固定排除 `order_header.country_code='ZZ'`；缺国家订单不进入 `velocity`、`country_qty`、`warehouse_breakdown`、Dashboard 风险分布或新生成补货建议。
+- **测试**：更新 `backend/tests/integration/test_config_api.py`、`backend/tests/unit/test_engine_step1.py`、`backend/tests/unit/test_engine_step5.py`、`frontend/src/utils/countries.test.ts` 与 `frontend/src/views/__tests__/GlobalConfigView.test.ts`，覆盖 `ZZ` 入库兼容、国家选项隐藏、计算 SQL 排除和前端 fallback 选项移除。
 
 ### 3.104 订单处理列表数量口径统一为 quantityOrdered（2026-05-05）
 - **同步口径**：`backend/app/sync/order_list.py` 解析订单处理列表包裹明细时，数量只读取 `items.quantityOrdered`；不再从 `saleNum`、`quantity` 或 `qty` 等非该 OpenAPI 字段兜底。缺失或非法数量按 0 落库。

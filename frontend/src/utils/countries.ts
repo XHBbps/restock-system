@@ -5,7 +5,6 @@ export interface CountryOption {
 
 export const COUNTRY_OPTIONS: CountryOption[] = [
   { code: 'EU', label: 'EU - 欧盟' },
-  { code: 'ZZ', label: 'ZZ - 无法识别国家' },
   { code: 'CN', label: 'CN - 中国' },
   { code: 'US', label: 'US - 美国' },
   { code: 'CA', label: 'CA - 加拿大' },
@@ -45,5 +44,12 @@ export const COUNTRY_OPTIONS: CountryOption[] = [
 export function getCountryLabel(code: string | null | undefined): string {
   if (!code) return '-'
   const normalized = code.toUpperCase()
+  if (normalized === 'ZZ') return '-'
   return COUNTRY_OPTIONS.find((item) => item.code === normalized)?.label || normalized
+}
+
+export function formatCountryCodeForDisplay(code: string | null | undefined): string {
+  if (!code) return '-'
+  const normalized = code.toUpperCase()
+  return normalized === 'ZZ' ? '-' : normalized
 }

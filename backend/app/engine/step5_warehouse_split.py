@@ -114,6 +114,7 @@ async def load_all_sku_country_orders(
         .where(OrderHeader.purchase_date < end_dt)
         .where(OrderHeader.source == ORDER_SOURCE_PACKAGE)
         .where(func.coalesce(OrderHeader.package_status, "") != CANCELED_PACKAGE_STATUS)
+        .where(OrderHeader.country_code != "ZZ")
     )
     if allowed_countries is not None:
         stmt = stmt.where(OrderHeader.country_code.in_(sorted(allowed_countries)))

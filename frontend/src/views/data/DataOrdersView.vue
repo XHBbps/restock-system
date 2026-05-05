@@ -117,7 +117,7 @@
       </el-table-column>
       <el-table-column label="国家" prop="countryCode" width="72" align="center" sortable="custom">
         <template #default="{ row }">
-          <el-tag size="small">{{ row.countryCode }}</el-tag>
+          <el-tag size="small">{{ formatCountryCodeForDisplay(row.countryCode) }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column
@@ -171,7 +171,7 @@
           <div class="mobile-card-meta">
             <span>{{ row.shopName || '-' }}</span>
             <el-tag size="small" effect="plain" type="info">{{ row.orderPlatform }}</el-tag>
-            <el-tag size="small">{{ row.countryCode }}</el-tag>
+            <el-tag size="small">{{ formatCountryCodeForDisplay(row.countryCode) }}</el-tag>
           </div>
           <div class="mobile-kv-grid">
             <div>
@@ -225,7 +225,8 @@
               <span class="label">平台</span><span>{{ detail.orderPlatform }}</span>
             </div>
             <div>
-              <span class="label">国家</span><span class="mono">{{ detail.countryCode }}</span>
+              <span class="label">国家</span
+              ><span class="mono">{{ formatCountryCodeForDisplay(detail.countryCode) }}</span>
             </div>
             <div>
               <span class="label">邮编</span
@@ -297,7 +298,7 @@ import PageSectionCard from '@/components/PageSectionCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
 import { useResponsive } from '@/composables/useResponsive'
 import { getActionErrorMessage } from '@/utils/apiError'
-import { COUNTRY_OPTIONS } from '@/utils/countries'
+import { COUNTRY_OPTIONS, formatCountryCodeForDisplay } from '@/utils/countries'
 import type { TagType } from '@/utils/element'
 import { formatDateTime } from '@/utils/format'
 import { normalizeSortOrder, type SortChangeEvent, type SortState } from '@/utils/tableSort'

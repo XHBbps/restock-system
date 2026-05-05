@@ -86,6 +86,7 @@ from app.tasks.queue import enqueue_task
 from app.tasks.scheduler import reload_scheduler
 
 router = APIRouter(prefix="/api/config", tags=["config"])
+COUNTRY_OPTION_HIDDEN_CODES = frozenset({"ZZ"})
 
 # 改动以下任一字段即把 dashboard_snapshot.stale 置 TRUE，下次 dashboard API
 # 自动 enqueue 刷新。
@@ -251,11 +252,15 @@ async def get_country_options(
     db: AsyncSession = Depends(db_session_readonly),
     _: None = Depends(require_permission(CONFIG_VIEW)),
 ) -> CountryOptionsOut:
-    observed = await _observed_country_codes(db)
-    all_codes = set(BUILTIN_COUNTRY_NAMES) | observed
-    builtin_set = set(BUILTIN_COUNTRY_ORDER)
+    observed = (await _observed_country_codes(db)) - COUNTRY_OPTION_HIDDEN_CODES
+    builtin_set = set(BUILTIN_COUNTRY_ORDER) - COUNTRY_OPTION_HIDDEN_CODES
+    all_codes = (set(BUILTIN_COUNTRY_NAMES) - COUNTRY_OPTION_HIDDEN_CODES) | observed
     ordered_codes = [
-        *[code for code in BUILTIN_COUNTRY_ORDER if code in all_codes],
+        *[
+            code
+            for code in BUILTIN_COUNTRY_ORDER
+            if code in all_codes and code not in COUNTRY_OPTION_HIDDEN_CODES
+        ],
         *sorted(all_codes - builtin_set),
     ]
     unknown_codes = sorted(

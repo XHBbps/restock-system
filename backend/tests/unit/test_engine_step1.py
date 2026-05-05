@@ -118,5 +118,6 @@ async def test_load_velocity_inputs_applies_allowed_country_filter() -> None:
 
     compiled_sql = str(db.executed[0])
     assert "order_header.country_code IN" in compiled_sql
+    assert "order_header.country_code !=" in compiled_sql
     assert "order_item.quantity_ordered" in compiled_sql
     assert "order_item.quantity_shipped - order_item.refund_num" not in compiled_sql

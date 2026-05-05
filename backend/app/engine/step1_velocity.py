@@ -96,6 +96,7 @@ async def load_velocity_inputs(
         .join(OrderHeader, OrderHeader.id == OrderItem.order_id)
         .where(OrderHeader.source == ORDER_SOURCE_PACKAGE)
         .where(func.coalesce(OrderHeader.package_status, "") != CANCELED_PACKAGE_STATUS)
+        .where(OrderHeader.country_code != "ZZ")
         .where(OrderHeader.purchase_date >= earliest_dt)
         .where(OrderHeader.purchase_date < end_dt)
     )

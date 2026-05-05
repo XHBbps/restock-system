@@ -492,6 +492,7 @@ async def test_load_all_sku_country_orders_applies_allowed_country_filter() -> N
 
     compiled_sql = str(db.executed[0])
     assert "order_header.country_code IN" in compiled_sql
+    assert "order_header.country_code !=" in compiled_sql
 
 
 @pytest.mark.asyncio
