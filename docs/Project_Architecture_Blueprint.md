@@ -148,7 +148,7 @@ async def sync_inventory_job(ctx: JobContext) -> None:
 
 **状态追踪**：店铺、仓库、商品、库存、订单、出库等同步 job 在 `sync_state` 表中维护最后运行时间、状态、错误信息；该表同时作为增量同步水位来源。`daily_archive`、`retry_failed_api_calls` 等不参与增量水位的系统后台任务不写 `sync_state`，其运行状态以 `task_run` 为准。
 
-**商品主数据同步**：`sync_product_listing` 是商品同步统一 job。它先通过 `backend/app/saihu/endpoints/commodity.py` 调用赛狐 SKU 主数据接口 `/api/commodity/pageList.json`，不传 `state` 或 `isGroup` 过滤，按 `sku` UPSERT 到 `commodity_master`；随后继续调用在线产品 listing 接口 `/api/order/api/product/pageList.json` 写入 `product_listing`，保留店铺、站点、sellerSku 与近 7/14/30 天销量用于商品页展开明细。同步过程中只为新发现 SKU 补建 `sku_config(enabled=true)`，不覆盖已有 `enabled`、`lead_time_days`，因此后续人工禁用不会被商品同步重新打开；商品状态 `state` 仅作展示/筛选信息，不自动影响补货计算。`run_engine` 仍只消费 `sku_config.enabled=true` 的 SKU。
+**商品主数据同步**：`sync_product_listing` 是商品同步统一 job。它先通过 `backend/app/saihu/endpoints/commodity.py` 调用赛狐 SKU 主数据接口 `/api/commodity/pageList.json`，不传 `state` 或 `isGroup` 过滤，按 `sku` UPSERT 到 `commodity_master`；随后继续调用在线产品 listing 接口 `/api/order/api/product/pageList.json` 写入 `product_listing`，保留店铺、站点、sellerSku 与近 7/14/30 天销量用于商品页展开明细。同步过程中只为新发现 SKU 补建 `sku_config(enabled=true)`，不覆盖已有 `enabled`、`lead_time_days`，因此后续人工禁用不会被商品同步重新打开；商品状态 `state` 与 SKU 类型 `is_group` 仅作展示/筛选信息，不自动影响补货计算。商品概览通过 `SkuConfig.commodity_sku -> CommodityMaster.sku` 定位 SKU 主数据，再用同一个 SKU 查询 `ProductListing.commodity_sku` 关联在线产品。`run_engine` 仍只消费 `sku_config.enabled=true` 的 SKU。
 
 **EU 国家归一化与新国家发现**：同步层写入订单、商品、库存、出库在途数据时，会按 `global_config.eu_countries` 将成员国映射为字面值 `EU`，并在对应 `original_*` 字段保留原国家码。进入国家选项、成员国配置和补货区域配置的国家码先执行 `trim + uppercase + 两位字母校验 + 别名标准化`，当前 `UK` 统一标准化为 ISO 代码 `GB`。订单处理列表只读取响应顶层 `marketplace` 作为国家来源；该值缺失或无法识别时写内部哨兵 `ZZ` 并记录结构化日志，不再从地址、店铺名或平台名猜测国家；`ZZ` 不暴露为前端国家选项，也不进入 Step 1 / Step 5 补货计算；有效国家码若属于 `eu_countries` 则归并为 `EU` 并在 `original_country_code` 保存原码。全局配置接口保存 `eu_countries` 且实际变化时，会在同一事务内调用 `backfill_eu_country_mapping()` 回填本地历史 `order_header`、`inventory_snapshot_latest`、`in_transit_record`：源国家优先取各表 `original_*` 字段，否则取当前国家字段，并先按同一别名表标准化；源国家属于当前 EU 集合时写映射后国家为 `EU` 且 `original_* = 标准化源国家`，否则恢复为标准化源国家并清空 `original_*`。该回填只改本地库，不调用赛狐 API。
 
@@ -409,7 +409,7 @@ async function reload() {
 当前已按该模式迁移：
 - `DataOrdersView.vue`：订单列表按页返回，并仅对当前页补查 `item_count` / `has_detail`；筛选支持 SKU / 订单号、国家、店铺、平台和包裹状态，平台选项由 `GET /api/data/order-platforms` 基于已落库订单平台去重返回；页面不展示来源和包裹号，也不按包裹号搜索；平台以标签展示，店铺仅显示名称；详情接口默认限定 `source='订单处理'`，前端仅保留 `package_sn` 作为内部精确定位参数
 - `HistoryView.vue`：建议单历史页直接消费 `GET /api/suggestions` 的 `items/total/page/page_size`；状态列使用 `getSuggestionDisplayStatusMeta(status, snapshot_count)` 派生 4 档显示标签（`未提交 / 已导出 / 已归档 / 异常`），状态下拉对应后端 `display_status=pending|exported|archived|error`，由后端统一按 `snapshot_count` 派生过滤，避免前端只过滤当前页造成 `items` 与 `total` 错位；`canDelete(row)` 规则为 `row.snapshot_count === 0`。派生逻辑定义在 `frontend/src/utils/status.ts::deriveSuggestionDisplayStatus`，`SuggestionListView` 与 `SuggestionDetailView` 的状态 tag 共用该函数，避免多处硬编码映射。
-- `DataProductsView.vue`：商品页通过 `listSkuOverview()` 下推 SKU、商品名、启用状态和分页参数；`/api/data/sku-overview` 以 `commodity_master + sku_config` 为主，商品名、图片、状态、组合标识、采购周期优先取商品主数据，listing 仅作为展开明细和销量参考，无 listing 的 SKU 仍可展示
+- `DataProductsView.vue`：商品页通过 `listSkuOverview()` 下推 SKU、商品名、启用状态、SKU 类型和分页参数；`/api/data/sku-overview` 以 `commodity_master + sku_config` 为主，商品名、图片、状态、SKU 类型、采购周期优先取商品主数据。SKU 类型展示口径为 `commodity_master.is_group=true` 显示「组合 SKU」、`false` 显示「单品 SKU」、缺少主数据时显示 `-`；筛选项为「全部 / 单品 SKU / 组合 SKU」，接口参数仍使用 `is_group`。listing 仅作为展开明细和销量参考，无 listing 的 SKU 仍可展示
 - `DataInventoryView.vue`：库存页通过 `GET /api/data/inventory/warehouse-groups` 做仓库分组分页，保持仓库展开明细交互；库存明细的 `is_package` 由“是否存在商品主数据 SKU、在线 listing 商品 SKU 或 SKU 映射组件库存 SKU”实时派生，前端按“全部 / 未匹配 / 已匹配”展示筛选
 - `DataOutRecordsView.vue`：出库记录页将 SKU、仓库单号、国家、类型、在途状态、排序和分页下推到后端
 
@@ -562,7 +562,7 @@ UPDATE global_config SET suggestion_generation_enabled=true, generation_toggle_u
 | 表 | 职责 | 关键约束 / 字段 |
 |---|---|---|
 | `global_config` | 全局配置单行表；包含 `target_days`、`buffer_days`、`lead_time_days`、`safety_stock_days`、`restock_regions`、`eu_countries`、`sync_interval_minutes`、`order_sync_interval_minutes`、`suggestion_generation_enabled`、`generation_toggle_updated_by / generation_toggle_updated_at`、同步与登录配置 | `CHECK id=1`；`safety_stock_days` 范围 1–90；`sync_interval_minutes` 控制商品、库存、出库同步，`order_sync_interval_minutes` 控制订单处理列表同步且默认 120 分钟；`restock_regions=[]` 表示全部国家参与补货计算；`eu_countries` 保存和读取时标准化 ISO 二字码别名，并拒绝 `EU` 与 `ZZ` |
-| `commodity_master` | 赛狐 SKU 主数据 | 主键 `sku`；保存 `commodity_id/name/state/is_group/img_url/purchase_days/child_skus/last_sync_at`；仅作为商品展示、搜索和库存匹配依据，不直接决定是否进入补货计算 |
+| `commodity_master` | 赛狐 SKU 主数据 | 主键 `sku`；保存 `commodity_id/name/state/is_group/img_url/purchase_days/child_skus/last_sync_at`；商品概览通过 `sku_config.commodity_sku -> commodity_master.sku` 关联，`is_group` 在前端命名为「SKU类型」并支持筛选；仅作为商品展示、搜索和库存匹配依据，不直接决定是否进入补货计算 |
 | `sku_config` | SKU 启用 / 禁用与业务参数 | `commodity_sku` 唯一；`20260504_1000` 已将历史配置一次性启用；商品同步和商品页补齐只为新 SKU 插入 `enabled=true`，不覆盖已有人工禁用 |
 | `sku_mapping_rule` | 商品 SKU 到库存包裹 SKU 的映射规则 | `commodity_sku` 唯一；`enabled=false` 时规则保留但不参与引擎 |
 | `sku_mapping_component` | 映射规则组件行 | `rule_id + inventory_sku` 唯一；允许不同商品规则共享同一 `inventory_sku`；`group_no > 0`；`quantity > 0`；同一 `group_no` 内多行表示 AND 组合，不同 `group_no` 表示 OR 替代方案 |
@@ -570,7 +570,7 @@ UPDATE global_config SET suggestion_generation_enabled=true, generation_toggle_u
 | `warehouse` | 海外仓/国内仓基础资料 | `country` 可为空；变更仓库国家会级联更新库存最新快照口径 |
 | `order_header` / `order_item` | 订单头与订单明细 | `order_header.source='订单处理'` 为当前订单来源，`order_platform` 保存平台名，`package_sn/package_status/shop_name/postal_code` 保存订单处理列表包裹字段；`UNIQUE(shop_id, amazon_order_id, source, package_sn)` 支持同订单拆包；`country_code` 保存映射后国家，`original_country_code` 保存 EU 合并前国家；按 `shop_id + purchase_date`、`order_platform + purchase_date`、`order_status + purchase_date`、`package_status + purchase_date` 建索引 |
 | `order_detail` / `order_detail_fetch_log` | 历史订单详情与拉取日志 | 作为切换前亚马逊订单详情历史表保留；当前订单处理列表同步不再写入或依赖该表 |
-| `product_listing` | 赛狐在线产品信息 | `marketplace_id` 保存映射后 2 字符国家码或 `EU`，`original_marketplace_id` 保存 EU 合并前国家 |
+| `product_listing` | 赛狐在线产品信息 | `commodity_sku` 与 `commodity_master.sku` 同口径，用于商品概览展开在线产品明细；`marketplace_id` 保存映射后 2 字符国家码或 `EU`，`original_marketplace_id` 保存 EU 合并前国家 |
 | `inventory_snapshot_latest` | SKU × 仓库最新库存 | `country` 保存映射后国家，`original_country` 保存 EU 合并前国家；`warehouse_id + commodity_sku` 唯一 |
 | `in_transit_record` / `in_transit_item` | 出库 / 在途记录与明细 | `target_country` 保存映射后国家，`original_target_country` 保存 EU 合并前国家 |
 | `suggestion` | 建议单头 | `status IN ('draft','archived','error')`；`procurement_item_count` / `restock_item_count` 分别统计采购与补货需求 SKU 数 |
@@ -956,6 +956,7 @@ VITE_API_PROXY_TARGET=http://localhost:8000
 
 | 日期 | 变更 | 相关 PROGRESS 章节 |
 |---|---|---|
+| 2026-05-05 | 商品页新增「SKU类型」筛选与展示；`GET /api/data/sku-overview` 支持按 `commodity_master.is_group` 过滤，并明确 SKU 主数据与在线产品 listing 的关联口径 | PROGRESS.md §3.106 |
 | 2026-05-05 | 订单处理列表明细数量只读取 `items.quantityOrdered`；Step 1 销量与 Step 5 分仓样本统一使用 `quantity_ordered` | PROGRESS.md §3.104 |
 | 2026-05-05 | 订单缺失国家继续以内部 `ZZ` 落库，但前端显示为 `-`，动态国家选项隐藏 `ZZ`，Step 1 / Step 5 固定排除 `ZZ` 订单 | PROGRESS.md §3.105 |
 | 2026-05-04 | 订单处理列表自动同步改用独立 `order_sync_interval_minutes`，默认 120 分钟；商品、库存、出库仍使用 `sync_interval_minutes` | PROGRESS.md §3.101 |

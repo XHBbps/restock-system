@@ -55,7 +55,27 @@ const STUBS = {
     emits: ['update:modelValue', 'change'],
     template: `
       <div :data-placeholder="placeholder">
-        <button class="enabled-true" @click="$emit('update:modelValue', true); $emit('change', true)">enabled</button>
+        <button
+          v-if="placeholder === '启用状态'"
+          class="enabled-true"
+          @click="$emit('update:modelValue', true); $emit('change', true)"
+        >
+          enabled
+        </button>
+        <button
+          v-if="placeholder === 'SKU类型'"
+          class="sku-type-group"
+          @click="$emit('update:modelValue', 'group'); $emit('change', 'group')"
+        >
+          group
+        </button>
+        <button
+          v-if="placeholder === 'SKU类型'"
+          class="sku-type-single"
+          @click="$emit('update:modelValue', 'single'); $emit('change', 'single')"
+        >
+          single
+        </button>
       </div>
     `,
   },
@@ -68,6 +88,12 @@ const STUBS = {
   ElTable: { template: '<div><slot /></div>' },
   ElTableColumn: { template: '<div><slot :row="{}" /></div>' },
   ElTag: { template: '<span><slot /></span>' },
+  MobileRecordList: {
+    props: ['items'],
+    template: '<div><div v-for="item in items" :key="item.commodity_sku"><slot :item="item" /></div></div>',
+  },
+  ElCollapse: { template: '<div><slot /></div>' },
+  ElCollapseItem: { template: '<div><slot /></div>' },
 }
 
 function buildResponse(total = 88) {
@@ -97,6 +123,7 @@ function buildResponse(total = 88) {
 
 describe('DataProductsView', () => {
   beforeEach(() => {
+    window.innerWidth = 1024
     setActivePinia(createPinia())
     vi.clearAllMocks()
     mockListSkuOverview.mockResolvedValue(buildResponse())
@@ -113,6 +140,7 @@ describe('DataProductsView', () => {
     expect(mockListSkuOverview).toHaveBeenCalledWith({
       keyword: undefined,
       enabled: undefined,
+      is_group: undefined,
       page: 1,
       page_size: 50,
     })
@@ -135,5 +163,35 @@ describe('DataProductsView', () => {
     await wrapper.find('.enabled-true').trigger('click')
     await flushPromises()
     expect(mockListSkuOverview).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, enabled: true }))
+
+    await wrapper.find('.sku-type-group').trigger('click')
+    await flushPromises()
+    expect(mockListSkuOverview).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, is_group: true }))
+
+    await wrapper.find('.sku-type-single').trigger('click')
+    await flushPromises()
+    expect(mockListSkuOverview).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, is_group: false }))
+  })
+
+  it('renders SKU type labels on mobile cards', async () => {
+    window.innerWidth = 500
+    mockListSkuOverview.mockResolvedValue({
+      items: [
+        { ...buildResponse().items[0], commodity_sku: 'GROUP-1', is_group: true },
+        { ...buildResponse().items[0], commodity_sku: 'SINGLE-1', is_group: false },
+        { ...buildResponse().items[0], commodity_sku: 'UNKNOWN-1', is_group: null },
+      ],
+      total: 3,
+      page: 1,
+      pageSize: 50,
+    })
+    const { default: View } = await import('../data/DataProductsView.vue')
+    const wrapper = shallowMount(View, { global: { stubs: STUBS, directives: { loading: {} } } })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('SKU类型')
+    expect(wrapper.text()).toContain('组合 SKU')
+    expect(wrapper.text()).toContain('单品 SKU')
+    expect(wrapper.text()).toContain('-')
   })
 })

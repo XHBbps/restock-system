@@ -283,6 +283,7 @@ export interface SkuOverviewItem {
 export async function listSkuOverview(params: {
   keyword?: string
   enabled?: boolean
+  is_group?: boolean
   page?: number
   page_size?: number
 }): Promise<PageResult<SkuOverviewItem>> {

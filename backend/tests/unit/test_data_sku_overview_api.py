@@ -52,6 +52,7 @@ async def test_sku_overview_returns_commodity_without_listing() -> None:
     result = await list_sku_overview(
         keyword="Master",
         enabled=False,
+        is_group=None,
         page=1,
         page_size=50,
         db=db,
@@ -102,6 +103,7 @@ async def test_sku_overview_prefers_commodity_name_over_listing() -> None:
     result = await list_sku_overview(
         keyword=None,
         enabled=None,
+        is_group=None,
         page=1,
         page_size=50,
         db=db,
@@ -114,3 +116,61 @@ async def test_sku_overview_prefers_commodity_name_over_listing() -> None:
     assert item.has_listing is True
     assert item.listing_count == 1
     assert item.total_day30_sales == 3
+
+
+@pytest.mark.asyncio
+async def test_sku_overview_filters_group_skus() -> None:
+    sku_cfg = SimpleNamespace(commodity_sku="GROUP-1", enabled=True, lead_time_days=30)
+    commodity = SimpleNamespace(
+        sku="GROUP-1",
+        commodity_id="CID-GROUP",
+        name="Group Product",
+        img_url=None,
+        state="active",
+        is_group=True,
+        purchase_days=None,
+    )
+    db = _FakeSession([_ScalarResult(1), _AllResult([(sku_cfg, commodity)]), _AllResult([])])
+
+    result = await list_sku_overview(
+        keyword=None,
+        enabled=None,
+        is_group=True,
+        page=1,
+        page_size=50,
+        db=db,
+        _=None,
+    )
+
+    assert result.items[0].commodity_sku == "GROUP-1"
+    assert result.items[0].is_group is True
+    assert "commodity_master.is_group IS true" in str(db.statements[0])
+
+
+@pytest.mark.asyncio
+async def test_sku_overview_filters_single_skus() -> None:
+    sku_cfg = SimpleNamespace(commodity_sku="SINGLE-1", enabled=True, lead_time_days=30)
+    commodity = SimpleNamespace(
+        sku="SINGLE-1",
+        commodity_id="CID-SINGLE",
+        name="Single Product",
+        img_url=None,
+        state="active",
+        is_group=False,
+        purchase_days=None,
+    )
+    db = _FakeSession([_ScalarResult(1), _AllResult([(sku_cfg, commodity)]), _AllResult([])])
+
+    result = await list_sku_overview(
+        keyword=None,
+        enabled=None,
+        is_group=False,
+        page=1,
+        page_size=50,
+        db=db,
+        _=None,
+    )
+
+    assert result.items[0].commodity_sku == "SINGLE-1"
+    assert result.items[0].is_group is False
+    assert "commodity_master.is_group IS false" in str(db.statements[0])

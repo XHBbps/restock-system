@@ -1083,6 +1083,7 @@ async def list_product_listings_data(
 async def list_sku_overview(
     keyword: str | None = Query(default=None, description="按 commodity_sku 模糊搜索"),
     enabled: bool | None = Query(default=None),
+    is_group: bool | None = Query(default=None, description="按 SKU 类型过滤：true=组合 SKU，false=单品 SKU"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=5000),
     db: AsyncSession = Depends(db_session_readonly),
@@ -1098,6 +1099,8 @@ async def list_sku_overview(
     )
     if enabled is not None:
         base = base.where(SkuConfig.enabled.is_(enabled))
+    if is_group is not None:
+        base = base.where(CommodityMaster.is_group.is_(is_group))
     if keyword:
         keyword_like = f"%{escape_like(keyword)}%"
         base = base.where(

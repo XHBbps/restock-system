@@ -19,6 +19,16 @@
         <el-option label="已启用" :value="true" />
         <el-option label="已禁用" :value="false" />
       </el-select>
+      <el-select
+        v-model="filters.skuType"
+        placeholder="SKU类型"
+        style="width: 140px"
+        @change="reloadFirstPage"
+      >
+        <el-option label="全部" value="all" />
+        <el-option label="单品 SKU" value="single" />
+        <el-option label="组合 SKU" value="group" />
+      </el-select>
       <el-button
         :loading="initLoading"
         :disabled="!auth.hasPermission('data_base:edit')"
@@ -71,6 +81,11 @@
         </template>
       </el-table-column>
 
+      <el-table-column label="SKU类型" width="110" align="center">
+        <template #default="{ row }">
+          {{ formatSkuType(row.is_group) }}
+        </template>
+      </el-table-column>
       <el-table-column label="listing数" prop="listing_count" width="100" align="right" />
       <el-table-column label="30天总销量" prop="total_day30_sales" width="120" align="right" />
     </el-table>
@@ -96,6 +111,10 @@
             <div>
               <span>状态</span>
               <strong>{{ row.enabled ? '已启用' : '已禁用' }}</strong>
+            </div>
+            <div>
+              <span>SKU类型</span>
+              <strong>{{ formatSkuType(row.is_group) }}</strong>
             </div>
             <div>
               <span>listing 数</span>
@@ -169,6 +188,7 @@ const initLoading = ref(false)
 const filters = reactive({
   keyword: '',
   enabled: undefined as boolean | undefined,
+  skuType: 'all',
 })
 
 async function reload(resetPage = false): Promise<void> {
@@ -180,6 +200,7 @@ async function reload(resetPage = false): Promise<void> {
     const resp = await listSkuOverview({
       keyword: filters.keyword || undefined,
       enabled: filters.enabled,
+      is_group: selectedSkuTypeFilter(),
       page: page.value,
       page_size: pageSize.value,
     })
@@ -232,6 +253,26 @@ function handlePageSizeChange(value: number): void {
   void reload(true)
 }
 
+function selectedSkuTypeFilter(): boolean | undefined {
+  if (filters.skuType === 'group') {
+    return true
+  }
+  if (filters.skuType === 'single') {
+    return false
+  }
+  return undefined
+}
+
+function formatSkuType(value: boolean | null): string {
+  if (value === true) {
+    return '组合 SKU'
+  }
+  if (value === false) {
+    return '单品 SKU'
+  }
+  return '-'
+}
+
 </script>
 
 <style lang="scss" scoped>
@@ -268,7 +309,7 @@ function handlePageSizeChange(value: number): void {
 
   .mobile-kv-grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: $space-2;
   }
 
