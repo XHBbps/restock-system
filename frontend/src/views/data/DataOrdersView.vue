@@ -275,14 +275,6 @@
               align="right"
               sortable
             />
-            <el-table-column
-              label="计算数"
-              prop="quantityShipped"
-              width="88"
-              align="right"
-              sortable
-            />
-            <el-table-column label="退款数" prop="refundNum" width="88" align="right" sortable />
           </el-table>
         </div>
       </div>

@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-05-05（订单处理列表明细数量统一以 `items.quantityOrdered` 为唯一来源；Step 1 销量与 Step 5 分仓样本改用 `quantity_ordered` 口径。）
+> 最近更新：2026-05-05（订单处理列表明细数量统一以 `items.quantityOrdered` 为唯一来源；订单详情弹窗只展示“下单数”；Step 1 销量与 Step 5 分仓样本改用 `quantity_ordered` 口径。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -111,6 +111,7 @@
 ### 3.104 订单处理列表数量口径统一为 quantityOrdered（2026-05-05）
 - **同步口径**：`backend/app/sync/order_list.py` 解析订单处理列表包裹明细时，数量只读取 `items.quantityOrdered`；不再从 `saleNum`、`quantity` 或 `qty` 等非该 OpenAPI 字段兜底。缺失或非法数量按 0 落库。
 - **计算口径**：`backend/app/engine/step1_velocity.py` 与 `backend/app/engine/step5_warehouse_split.py` 对 `source='订单处理'` 的明细统一使用 `max(order_item.quantity_ordered, 0)` 作为有效销量 / 分仓样本数量，继续排除 `package_status='has_canceled'`。
+- **展示口径**：`frontend/src/views/data/DataOrdersView.vue` 的订单详情弹窗明细表只展示“下单数”并绑定 `quantityOrdered`；兼容字段 `quantityShipped` / `refundNum` 不再作为“计算数”/“退款数”展示。
 - **兼容范围**：不新增字段、不做数据库迁移或历史回填；当前订单处理列表同步已将 `quantityOrdered` 同步写入 `quantity_ordered` 与 `quantity_shipped`，本次只收敛字段语义并移除不存在字段的 fallback。
 - **测试**：更新 `backend/tests/unit/test_sync_order_list_eu.py`、`backend/tests/unit/test_engine_step1.py` 与 `backend/tests/unit/test_engine_step5.py`，覆盖缺少 `quantityOrdered` 时数量为 0、Step 1 下单数聚合和 Step 5 SQL 使用 `quantity_ordered`。
 
@@ -181,7 +182,7 @@
 
 ### 3.91 订单同步切换为订单处理列表接口（2026-05-03）
 - **赛狐接口**：`backend/app/saihu/endpoints/package_ship.py` 新增 `POST /api/packageShip/v1/getPackagePage.json` 封装；`sync_order_list` 改为只按 `purchaseDateStart/purchaseDateEnd` 同步滚动 12 个月订单处理列表，`pageSize=200`，继续支持 `shopIdList` 店铺过滤。
-- **落库字段**：`backend/alembic/versions/20260503_1700_use_package_order_source.py` 为 `order_header` 新增 `package_sn/package_status/shop_name/postal_code`，唯一键调整为 `shop_id + amazon_order_id + source + package_sn`。新数据统一写 `source='订单处理'`，`order_platform=platformName`，包裹内 `orders` 生成订单头，`items.commoditySku` 写入 `order_item.commodity_sku`，`quantityOrdered` 同时作为下单数和计算数。
+- **落库字段**：`backend/alembic/versions/20260503_1700_use_package_order_source.py` 为 `order_header` 新增 `package_sn/package_status/shop_name/postal_code`，唯一键调整为 `shop_id + amazon_order_id + source + package_sn`。新数据统一写 `source='订单处理'`，`order_platform=platformName`，包裹内 `orders` 生成订单头，`items.commoditySku` 写入 `order_item.commodity_sku`，`quantityOrdered` 写入 `quantity_ordered`，并同步写入兼容字段 `quantity_shipped`。
 - **旧来源清理**：每次订单处理列表同步前会删除旧 `source in ('亚马逊','多平台')` 的 `order_header`、级联明细、`order_detail` 与 `order_detail_fetch_log`，避免旧亚马逊 / 多平台订单与新包裹订单重复参与销量计算。
 - **补货计算口径**：`step1_velocity` 和 `step5_warehouse_split` 只消费 `source='订单处理'`；除 `package_status='has_canceled'` 的已作废包裹外，其余包裹状态都参与销量和分仓样本。Step 5 邮编优先读取 `order_header.postal_code`。
 - **入口停用**：`sync_all` 与 APScheduler 不再入队 `sync_order_detail`；`POST /api/sync/order-detail/refetch`、前端 `OrderDetailFetchAction` 和相关手动详情获取 API 已移除。`retry_failed_api_calls` 仅把 `/api/packageShip/v1/getPackagePage.json` 映射到 `sync_order_list / sync_all`，旧订单列表、旧多平台订单和旧订单详情接口不再自动重放。
