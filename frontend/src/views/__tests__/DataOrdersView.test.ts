@@ -8,14 +8,39 @@ const mockListOrders = vi.fn()
 const mockListDataShops = vi.fn()
 const mockListOrderPlatforms = vi.fn()
 const mockGetOrderDetail = vi.fn()
+const mockUpdateOrderDetail = vi.fn()
+const mockDownloadTemplate = vi.fn()
+const mockPreviewOrderInfoMatch = vi.fn()
+const mockApplyOrderInfoMatch = vi.fn()
+const mockGetCountryOptions = vi.fn()
+const mockHasPermission = vi.fn()
 const mockMessageError = vi.fn()
 const mockMessageSuccess = vi.fn()
+const mockTriggerBlobDownload = vi.fn()
 
 vi.mock('@/api/data', () => ({
   listOrders: (...args: unknown[]) => mockListOrders(...args),
   listDataShops: (...args: unknown[]) => mockListDataShops(...args),
   listOrderPlatforms: (...args: unknown[]) => mockListOrderPlatforms(...args),
-  getOrderDetail: (...args: unknown[]) => mockGetOrderDetail(...args)
+  getOrderDetail: (...args: unknown[]) => mockGetOrderDetail(...args),
+  updateOrderDetail: (...args: unknown[]) => mockUpdateOrderDetail(...args),
+  downloadOrderInfoMatchTemplate: (...args: unknown[]) => mockDownloadTemplate(...args),
+  previewOrderInfoMatch: (...args: unknown[]) => mockPreviewOrderInfoMatch(...args),
+  applyOrderInfoMatch: (...args: unknown[]) => mockApplyOrderInfoMatch(...args)
+}))
+
+vi.mock('@/api/config', () => ({
+  getCountryOptions: (...args: unknown[]) => mockGetCountryOptions(...args)
+}))
+
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => ({
+    hasPermission: (...args: unknown[]) => mockHasPermission(...args)
+  })
+}))
+
+vi.mock('@/utils/download', () => ({
+  triggerBlobDownload: (...args: unknown[]) => mockTriggerBlobDownload(...args)
 }))
 
 vi.mock('element-plus', async () => {
@@ -117,6 +142,7 @@ const STUBS = {
         >
           has_shipped
         </button>
+        <slot />
       </div>
     `
   }),
@@ -137,11 +163,22 @@ const STUBS = {
   ElTable: { template: '<div><slot /></div>' },
   ElTableColumn: {
     props: ['label', 'prop'],
-    template: '<div><span>{{ label }}</span></div>'
+    template: '<div><span>{{ label }}</span><slot name="default" :row="{}" /></div>'
   },
   ElTag: { template: '<span><slot /></span>' },
   ElButton: { template: '<button type="button" @click="$emit(\'click\')"><slot /></button>' },
-  ElDialog: { template: '<div><slot /></div>' },
+  ElDialog: { template: '<div><slot /><slot name="footer" /></div>' },
+  ElForm: { template: '<form><slot /></form>' },
+  ElFormItem: { template: '<label><slot /></label>' },
+  ElCheckboxGroup: {
+    props: ['modelValue'],
+    emits: ['update:modelValue'],
+    template: '<div><slot /></div>'
+  },
+  ElCheckbox: {
+    props: ['label'],
+    template: '<label><input type="checkbox" :value="label" /> <slot /></label>'
+  },
   ElAlert: true,
   ElEmpty: true
 }
@@ -191,6 +228,7 @@ describe('DataOrdersView', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.clearAllMocks()
+    mockHasPermission.mockReturnValue(false)
     mockListOrders.mockResolvedValue(buildOrdersResponse())
     mockListDataShops.mockResolvedValue({
       items: [
@@ -200,7 +238,32 @@ describe('DataOrdersView', () => {
       total: 2
     })
     mockListOrderPlatforms.mockResolvedValue(['Amazon', 'Temu'])
-    mockGetOrderDetail.mockResolvedValue({})
+    mockGetCountryOptions.mockResolvedValue({
+      items: [
+        {
+          code: 'US',
+          label: 'US - 美国',
+          builtin: true,
+          observed: true,
+          can_be_eu_member: true
+        }
+      ],
+      unknown_country_codes: []
+    })
+    mockGetOrderDetail.mockResolvedValue(buildOrdersResponse().items[0])
+    mockUpdateOrderDetail.mockResolvedValue({})
+    mockDownloadTemplate.mockResolvedValue(new Blob(['x']))
+    mockPreviewOrderInfoMatch.mockResolvedValue({
+      matchedOrderCount: 1,
+      updateFields: ['国家'],
+      errors: []
+    })
+    mockApplyOrderInfoMatch.mockResolvedValue({
+      matchedOrderCount: 1,
+      updateFields: ['国家'],
+      errors: [],
+      updatedOrderCount: 1
+    })
   })
 
   it('loads current page from backend and fetches filter options separately', async () => {
@@ -326,5 +389,35 @@ describe('DataOrdersView', () => {
         sku: 'SKU-2'
       })
     )
+  })
+
+  it('shows match and edit actions only with edit permission', async () => {
+    const { default: View } = await import('../data/DataOrdersView.vue')
+
+    const readonlyWrapper = shallowMount(View, { global: GLOBAL_CONFIG })
+    await flushPromises()
+    expect(readonlyWrapper.text()).not.toContain('信息匹配')
+
+    mockHasPermission.mockReturnValue(true)
+    const editableWrapper = shallowMount(View, { global: GLOBAL_CONFIG })
+    await flushPromises()
+    expect(editableWrapper.text()).toContain('信息匹配')
+    expect(editableWrapper.text()).toContain('编辑')
+  })
+
+  it('downloads template with selected field keys', async () => {
+    mockHasPermission.mockReturnValue(true)
+    const { default: View } = await import('../data/DataOrdersView.vue')
+    const wrapper = shallowMount(View, { global: GLOBAL_CONFIG })
+    await flushPromises()
+
+    await wrapper.findAll('button').find((button) => button.text() === '信息匹配')?.trigger('click')
+    await wrapper.findAll('button').find((button) => button.text() === '导出空模板')?.trigger('click')
+    await flushPromises()
+
+    expect(mockDownloadTemplate).toHaveBeenCalledWith(
+      expect.arrayContaining(['shop_name', 'country_code'])
+    )
+    expect(mockTriggerBlobDownload).toHaveBeenCalled()
   })
 })

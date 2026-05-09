@@ -15,14 +15,21 @@ READ-ONLY。所有端点从本地同步落库的表查询,返回与赛狐接口
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Depends, Path, Query, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy import Float, case, func, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.api.deps import db_session_readonly, require_permission
+from app.api.deps import (
+    UserContext,
+    db_session,
+    db_session_readonly,
+    get_current_user,
+    require_permission,
+)
 from app.core.exceptions import NotFound
-from app.core.permissions import DATA_BASE_VIEW, DATA_BIZ_VIEW, SYNC_VIEW
+from app.core.permissions import DATA_BASE_VIEW, DATA_BIZ_EDIT, DATA_BIZ_VIEW, SYNC_VIEW
 from app.core.query import escape_like
 from app.core.timezone import BEIJING
 from app.models.commodity import CommodityMaster
@@ -47,6 +54,7 @@ from app.schemas.data import (
     DataOrderDetail,
     DataOrderItem,
     DataOrderListOut,
+    DataOrderPatch,
     DataOrderSummary,
     DataOutRecord,
     DataOutRecordItem,
@@ -58,7 +66,16 @@ from app.schemas.data import (
     DataSyncStateRow,
     DataWarehouse,
     DataWarehouseListOut,
+    OrderInfoMatchApplyOut,
+    OrderInfoMatchPreviewOut,
     SkuOverviewListOut,
+)
+from app.services.order_edit import (
+    apply_order_info_match,
+    build_template_workbook,
+    parse_requested_fields,
+    patch_order_header,
+    preview_order_info_match,
 )
 
 router = APIRouter(prefix="/api/data", tags=["data"])
@@ -496,29 +513,10 @@ async def list_order_platforms(
     return [platform for (platform,) in rows if platform]
 
 
-@router.get("/orders/{shop_id}/{amazon_order_id}", response_model=DataOrderDetail)
-async def get_order_detail(
-    shop_id: str = Path(...),
-    amazon_order_id: str = Path(...),
-    package_sn: str | None = Query(default=None),
-    db: AsyncSession = Depends(db_session_readonly),
-    _: None = Depends(require_permission(DATA_BIZ_VIEW)),
+async def _data_order_detail_from_header(
+    db: AsyncSession,
+    header: OrderHeader,
 ) -> DataOrderDetail:
-    header_stmt = select(OrderHeader).where(
-        (OrderHeader.shop_id == shop_id)
-        & (OrderHeader.amazon_order_id == amazon_order_id)
-        & (OrderHeader.source == ORDER_SOURCE_PACKAGE)
-    )
-    if package_sn is not None:
-        header_stmt = header_stmt.where(OrderHeader.package_sn == package_sn)
-    else:
-        header_stmt = header_stmt.order_by(
-            OrderHeader.purchase_date.desc(), OrderHeader.id.desc()
-        ).limit(1)
-    header = (await db.execute(header_stmt)).scalar_one_or_none()
-    if header is None:
-        raise NotFound(f"订单 {shop_id}/{amazon_order_id}/{ORDER_SOURCE_PACKAGE} 不存在")
-
     item_rows = (
         (await db.execute(select(OrderItem).where(OrderItem.order_id == header.id))).scalars().all()
     )
@@ -526,8 +524,8 @@ async def get_order_detail(
     detail = (
         await db.execute(
             select(OrderDetail).where(
-                (OrderDetail.shop_id == shop_id)
-                & (OrderDetail.amazon_order_id == amazon_order_id)
+                (OrderDetail.shop_id == header.shop_id)
+                & (OrderDetail.amazon_order_id == header.amazon_order_id)
                 & (OrderDetail.source == ORDER_SOURCE_PACKAGE)
             )
         )
@@ -569,6 +567,97 @@ async def get_order_detail(
             "items": [DataOrderItem.model_validate(it) for it in item_rows],
             **detail_payload,
         }
+    )
+
+
+@router.get("/orders/{shop_id}/{amazon_order_id}", response_model=DataOrderDetail)
+async def get_order_detail(
+    shop_id: str = Path(...),
+    amazon_order_id: str = Path(...),
+    package_sn: str | None = Query(default=None),
+    db: AsyncSession = Depends(db_session_readonly),
+    _: None = Depends(require_permission(DATA_BIZ_VIEW)),
+) -> DataOrderDetail:
+    header_stmt = select(OrderHeader).where(
+        (OrderHeader.shop_id == shop_id)
+        & (OrderHeader.amazon_order_id == amazon_order_id)
+        & (OrderHeader.source == ORDER_SOURCE_PACKAGE)
+    )
+    if package_sn is not None:
+        header_stmt = header_stmt.where(OrderHeader.package_sn == package_sn)
+    else:
+        header_stmt = header_stmt.order_by(
+            OrderHeader.purchase_date.desc(), OrderHeader.id.desc()
+        ).limit(1)
+    header = (await db.execute(header_stmt)).scalar_one_or_none()
+    if header is None:
+        raise NotFound(f"订单 {shop_id}/{amazon_order_id}/{ORDER_SOURCE_PACKAGE} 不存在")
+
+    return await _data_order_detail_from_header(db, header)
+
+
+@router.patch("/orders/{shop_id}/{amazon_order_id}", response_model=DataOrderDetail)
+async def patch_order_detail(
+    patch: DataOrderPatch,
+    shop_id: str = Path(...),
+    amazon_order_id: str = Path(...),
+    package_sn: str | None = Query(default=None),
+    db: AsyncSession = Depends(db_session),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(DATA_BIZ_EDIT)),
+) -> DataOrderDetail:
+    header = await patch_order_header(
+        db,
+        shop_id=shop_id,
+        amazon_order_id=amazon_order_id,
+        package_sn=package_sn,
+        patch=patch,
+        user_id=user.id,
+    )
+    return await _data_order_detail_from_header(db, header)
+
+
+@router.get("/order-info-match/template")
+async def export_order_info_match_template(
+    fields: str = Query(default=""),
+    _: None = Depends(require_permission(DATA_BIZ_EDIT)),
+) -> StreamingResponse:
+    selected_fields = parse_requested_fields(fields)
+    workbook = build_template_workbook(selected_fields)
+    return StreamingResponse(
+        workbook,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=order-info-match-template.xlsx"},
+    )
+
+
+@router.post("/order-info-match/preview", response_model=OrderInfoMatchPreviewOut)
+async def preview_order_info_match_endpoint(
+    request: Request,
+    fields: str = Query(default=""),
+    db: AsyncSession = Depends(db_session_readonly),
+    _: None = Depends(require_permission(DATA_BIZ_EDIT)),
+) -> OrderInfoMatchPreviewOut:
+    selected_fields = parse_requested_fields(fields)
+    content = await request.body()
+    return await preview_order_info_match(db, fields=selected_fields, content=content)
+
+
+@router.post("/order-info-match/apply", response_model=OrderInfoMatchApplyOut)
+async def apply_order_info_match_endpoint(
+    request: Request,
+    fields: str = Query(default=""),
+    db: AsyncSession = Depends(db_session),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(DATA_BIZ_EDIT)),
+) -> OrderInfoMatchApplyOut:
+    selected_fields = parse_requested_fields(fields)
+    content = await request.body()
+    return await apply_order_info_match(
+        db,
+        fields=selected_fields,
+        content=content,
+        user_id=user.id,
     )
 
 

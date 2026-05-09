@@ -6,6 +6,7 @@ Alembic env.py 通过 `from app.models import *` 触发所有模型注册到 Bas
 from app.models.access_token import AccessTokenCache
 from app.models.api_call_log import ApiCallLog
 from app.models.commodity import CommodityMaster
+from app.models.country import CountryNameOverride
 from app.models.dashboard_snapshot import DashboardSnapshot
 from app.models.excel_export_log import ExcelExportLog
 from app.models.global_config import GlobalConfig
@@ -13,8 +14,8 @@ from app.models.in_transit import InTransitItem, InTransitRecord
 from app.models.inventory import InventorySnapshotHistory, InventorySnapshotLatest
 from app.models.login_attempt import LoginAttempt
 from app.models.order import OrderDetail, OrderDetailFetchLog, OrderHeader, OrderItem
-from app.models.physical_item import PhysicalItemGroup, PhysicalItemSkuAlias
 from app.models.permission import Permission
+from app.models.physical_item import PhysicalItemGroup, PhysicalItemSkuAlias
 from app.models.product_listing import ProductListing
 from app.models.role import Role
 from app.models.role_permission import RolePermission
@@ -33,6 +34,7 @@ __all__ = [
     "AccessTokenCache",
     "ApiCallLog",
     "CommodityMaster",
+    "CountryNameOverride",
     "DashboardSnapshot",
     "ExcelExportLog",
     "GlobalConfig",
@@ -45,9 +47,9 @@ __all__ = [
     "OrderDetailFetchLog",
     "OrderHeader",
     "OrderItem",
+    "Permission",
     "PhysicalItemGroup",
     "PhysicalItemSkuAlias",
-    "Permission",
     "ProductListing",
     "Role",
     "RolePermission",

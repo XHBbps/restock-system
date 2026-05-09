@@ -7,7 +7,7 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Any, cast
 
-from sqlalchemy import delete, select
+from sqlalchemy import case, delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,6 +38,22 @@ PACKAGE_PAGE_SIZE = 200
 DEFAULT_BATCH_SIZE = 200
 LEGACY_ORDER_SOURCES = (ORDER_SOURCE_AMAZON, ORDER_SOURCE_MULTIPLATFORM)
 CANCELED_PACKAGE_STATUS = "has_canceled"
+MANUAL_EDIT_PROTECTED_FIELDS = frozenset(
+    {
+        "order_platform",
+        "shop_name",
+        "postal_code",
+        "marketplace_id",
+        "country_code",
+        "original_country_code",
+        "order_total_currency",
+        "order_total_amount",
+        "fulfillment_channel",
+        "purchase_date",
+        "last_update_date",
+        "refund_status",
+    }
+)
 
 
 @register(JOB_NAME)
@@ -257,6 +273,7 @@ async def _upsert_package_ship_order(
         }
         if postal_code is None:
             update_set.pop("postal_code", None)
+        update_set = _protect_manual_edit_fields(update_set)
         header_stmt = header_stmt.on_conflict_do_update(  # type: ignore[attr-defined]
             constraint="uq_order_header_key",
             set_=update_set,
@@ -337,6 +354,19 @@ async def _upsert_package_ship_order(
             )
 
     return orders_inserted, items_inserted
+
+
+def _protect_manual_edit_fields(update_set: dict[str, Any]) -> dict[str, Any]:
+    protected: dict[str, Any] = {}
+    for key, value in update_set.items():
+        if key in MANUAL_EDIT_PROTECTED_FIELDS:
+            protected[key] = case(
+                (OrderHeader.manual_edit_locked.is_(True), getattr(OrderHeader, key)),
+                else_=value,
+            )
+        else:
+            protected[key] = value
+    return protected
 
 
 def _normalize_orders_from_package(

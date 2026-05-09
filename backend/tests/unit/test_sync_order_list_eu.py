@@ -174,6 +174,24 @@ async def test_upsert_package_order_updates_postal_code_when_present() -> None:
 
 
 @pytest.mark.asyncio
+async def test_upsert_package_order_preserves_manual_fields_when_locked() -> None:
+    from app.sync.order_list import _upsert_package_ship_order
+
+    db = _FakeDb()
+    await _upsert_package_ship_order(
+        db,  # type: ignore[arg-type]
+        _package_payload(address={"postalCode": "10115"}),
+        set(),
+    )
+
+    header_sql = _compiled_postgres_sql(db.statements[0])
+    assert "manual_edit_locked" in header_sql
+    assert "CASE WHEN (order_header.manual_edit_locked IS true)" in header_sql
+    assert "package_status =" in header_sql
+    assert "last_sync_at =" in header_sql
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("address", [{}, {"postalCode": ""}, None])
 async def test_upsert_package_order_does_not_clear_postal_code_when_missing(
     address: dict[str, Any] | None,

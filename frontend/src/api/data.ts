@@ -47,6 +47,36 @@ export interface DataOrderDetail extends Omit<DataOrderSummary, 'hasDetail' | 'i
   detailFetchedAt: string | null
 }
 
+export interface DataOrderPatch {
+  shopName?: string | null
+  orderPlatform?: string | null
+  countryCode?: string | null
+  postalCode?: string | null
+  marketplaceId?: string | null
+  orderTotalAmount?: string | number | null
+  orderTotalCurrency?: string | null
+  fulfillmentChannel?: string | null
+  purchaseDate?: string | null
+  lastUpdateDate?: string | null
+  refundStatus?: string | null
+}
+
+export interface OrderInfoMatchError {
+  row: number
+  field: string
+  message: string
+}
+
+export interface OrderInfoMatchPreview {
+  matchedOrderCount: number
+  updateFields: string[]
+  errors: OrderInfoMatchError[]
+}
+
+export interface OrderInfoMatchApply extends OrderInfoMatchPreview {
+  updatedOrderCount: number
+}
+
 export interface PageResult<T> {
   items: T[]
   total: number
@@ -84,6 +114,58 @@ export async function getOrderDetail(
   const { data } = await client.get<DataOrderDetail>(
     `/api/data/orders/${encodeURIComponent(shopId)}/${encodeURIComponent(amazonOrderId)}`,
     { params: { package_sn: packageSn } }
+  )
+  return data
+}
+
+export async function updateOrderDetail(
+  shopId: string,
+  amazonOrderId: string,
+  packageSn: string,
+  patch: DataOrderPatch
+): Promise<DataOrderDetail> {
+  const { data } = await client.patch<DataOrderDetail>(
+    `/api/data/orders/${encodeURIComponent(shopId)}/${encodeURIComponent(amazonOrderId)}`,
+    patch,
+    { params: { package_sn: packageSn } }
+  )
+  return data
+}
+
+export async function downloadOrderInfoMatchTemplate(fields: string[]): Promise<Blob> {
+  const { data } = await client.get('/api/data/order-info-match/template', {
+    params: { fields: fields.join(',') },
+    responseType: 'blob',
+  })
+  return data
+}
+
+export async function previewOrderInfoMatch(
+  file: File,
+  fields: string[]
+): Promise<OrderInfoMatchPreview> {
+  const { data } = await client.post<OrderInfoMatchPreview>(
+    '/api/data/order-info-match/preview',
+    file,
+    {
+      params: { fields: fields.join(',') },
+      headers: { 'Content-Type': file.type || 'application/octet-stream' },
+    }
+  )
+  return data
+}
+
+export async function applyOrderInfoMatch(
+  file: File,
+  fields: string[]
+): Promise<OrderInfoMatchApply> {
+  const { data } = await client.post<OrderInfoMatchApply>(
+    '/api/data/order-info-match/apply',
+    file,
+    {
+      params: { fields: fields.join(',') },
+      headers: { 'Content-Type': file.type || 'application/octet-stream' },
+    }
   )
   return data
 }

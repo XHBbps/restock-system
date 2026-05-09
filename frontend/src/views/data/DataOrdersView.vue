@@ -70,6 +70,9 @@
             :value="item.value"
           />
         </el-select>
+        <el-button v-if="canEdit" type="primary" plain @click="openMatchDialog">
+          信息匹配
+        </el-button>
       </div>
     </template>
 
@@ -110,9 +113,9 @@
         show-overflow-tooltip
       >
         <template #default="{ row }">
-          <el-tag size="small" effect="plain" type="info" class="nowrap">{{
-            row.orderPlatform
-          }}</el-tag>
+          <el-tag size="small" effect="plain" type="info" class="nowrap">
+            {{ row.orderPlatform }}
+          </el-tag>
         </template>
       </el-table-column>
       <el-table-column label="国家" prop="countryCode" width="72" align="center" sortable="custom">
@@ -146,8 +149,9 @@
           <span class="muted mono nowrap">{{ formatDateTime(row.purchaseDate) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="84" align="center">
+      <el-table-column label="操作" width="112" align="center">
         <template #default="{ row }">
+          <el-button v-if="canEdit" link type="primary" @click="openEdit(row)">编辑</el-button>
           <el-button link type="primary" @click="openDetail(row)">详情</el-button>
         </template>
       </el-table-column>
@@ -188,6 +192,7 @@
             </div>
           </div>
           <div class="mobile-card-actions">
+            <el-button v-if="canEdit" link type="primary" @click="openEdit(row)">编辑</el-button>
             <el-button link type="primary" @click="openDetail(row)">详情</el-button>
           </div>
         </div>
@@ -210,75 +215,154 @@
       :fullscreen="isMobile"
       class="order-detail-dialog"
     >
-      <div v-if="detail" class="detail-body">
+      <OrderDetailBody v-if="detail" :detail="detail" />
+    </el-dialog>
+
+    <el-dialog
+      v-model="editDialogVisible"
+      :title="editDetail ? `编辑订单 · ${editDetail.amazonOrderId}` : '加载中...'"
+      width="820px"
+      :fullscreen="isMobile"
+      class="order-detail-dialog"
+    >
+      <div v-if="editDetail" class="detail-body">
         <div class="detail-section">
           <div class="section-title">基本信息</div>
-          <div class="kv-grid">
-            <div>
-              <span class="label">包裹状态</span
-              ><span>{{ statusLabel(detail.packageStatus || detail.orderStatus) }}</span>
-            </div>
-            <div>
-              <span class="label">店铺</span><span>{{ detail.shopName || '-' }}</span>
-            </div>
-            <div>
-              <span class="label">平台</span><span>{{ detail.orderPlatform }}</span>
-            </div>
-            <div>
-              <span class="label">国家</span
-              ><span class="mono">{{ formatCountryCodeForDisplay(detail.countryCode) }}</span>
-            </div>
-            <div>
-              <span class="label">邮编</span
-              ><span class="mono">{{ detail.postalCode || '-' }}</span>
-            </div>
-            <div>
-              <span class="label">订单号</span><span class="mono">{{ detail.amazonOrderId }}</span>
-            </div>
-            <div>
-              <span class="label">下单时间</span
-              ><span class="mono">{{ formatDateTime(detail.purchaseDate) }}</span>
-            </div>
-            <div>
-              <span class="label">最后更新时间</span
-              ><span class="mono">{{ formatDateTime(detail.lastUpdateDate) }}</span>
-            </div>
-            <div>
-              <span class="label">订单金额</span>
-              <span class="mono">{{
-                detail.orderTotalAmount
-                  ? `${detail.orderTotalAmount} ${detail.orderTotalCurrency || ''}`
-                  : '-'
-              }}</span>
-            </div>
+          <el-form label-position="top" class="edit-form">
+            <el-form-item label="订单号">
+              <el-input :model-value="editDetail.amazonOrderId" disabled />
+            </el-form-item>
+            <el-form-item label="包裹号">
+              <el-input :model-value="editDetail.packageSn" disabled />
+            </el-form-item>
+            <el-form-item label="包裹状态">
+              <el-input :model-value="statusLabel(editDetail.packageStatus || editDetail.orderStatus)" disabled />
+            </el-form-item>
+            <el-form-item label="店铺名称">
+              <el-select v-model="editForm.shopName" filterable>
+                <el-option v-for="s in shopOptions" :key="s.id" :label="s.name" :value="s.name" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="平台">
+              <el-select v-model="editForm.orderPlatform" filterable>
+                <el-option v-for="platform in platformOptions" :key="platform" :label="platform" :value="platform" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="国家">
+              <el-select v-model="editForm.countryCode" filterable allow-create default-first-option>
+                <el-option v-for="c in countryOptions" :key="c.code" :label="c.label" :value="c.code" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="邮编">
+              <el-input v-model="editForm.postalCode" />
+            </el-form-item>
+            <el-form-item label="Marketplace ID">
+              <el-input v-model="editForm.marketplaceId" />
+            </el-form-item>
+            <el-form-item label="订单金额">
+              <el-input v-model="editForm.orderTotalAmount" />
+            </el-form-item>
+            <el-form-item label="币种">
+              <el-input v-model="editForm.orderTotalCurrency" />
+            </el-form-item>
+            <el-form-item label="履约渠道">
+              <el-input v-model="editForm.fulfillmentChannel" />
+            </el-form-item>
+            <el-form-item label="下单时间">
+              <el-date-picker
+                v-model="editForm.purchaseDate"
+                type="datetime"
+                value-format="YYYY-MM-DD HH:mm:ss"
+              />
+            </el-form-item>
+            <el-form-item label="最后更新时间">
+              <el-date-picker
+                v-model="editForm.lastUpdateDate"
+                type="datetime"
+                value-format="YYYY-MM-DD HH:mm:ss"
+              />
+            </el-form-item>
+            <el-form-item label="退款状态">
+              <el-input v-model="editForm.refundStatus" />
+            </el-form-item>
+          </el-form>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="editDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="editSaving" @click="saveEdit">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="matchDialogVisible"
+      title="订单信息匹配"
+      width="860px"
+      :fullscreen="isMobile"
+      class="order-match-dialog"
+    >
+      <div class="match-body">
+        <div class="detail-section">
+          <div class="section-title">匹配字段</div>
+          <el-checkbox-group v-model="matchSelectedFields" class="field-grid">
+            <el-checkbox
+              v-for="field in matchFields"
+              :key="field.key"
+              :label="field.key"
+            >
+              {{ field.label }}
+            </el-checkbox>
+          </el-checkbox-group>
+          <div class="match-actions">
+            <el-button
+              type="primary"
+              plain
+              :disabled="matchSelectedFields.length === 0"
+              :loading="templateDownloading"
+              @click="downloadTemplate"
+            >
+              导出空模板
+            </el-button>
           </div>
         </div>
 
         <div class="detail-section">
-          <div class="section-title">订单明细（{{ detail.items.length }}）</div>
-          <el-table :data="detail.items" size="small">
-            <el-table-column label="明细 ID" prop="orderItemId" width="160" show-overflow-tooltip>
-              <template #default="{ row }"
-                ><span class="mono">{{ row.orderItemId }}</span></template
-              >
-            </el-table-column>
-            <el-table-column
-              label="商品 SKU"
-              prop="commoditySku"
-              min-width="160"
-              sortable
-              show-overflow-tooltip
-            />
-            <el-table-column
-              label="下单数"
-              prop="quantityOrdered"
-              width="88"
-              align="right"
-              sortable
-            />
+          <div class="section-title">导入预览</div>
+          <div class="file-row">
+            <input class="file-input" type="file" accept=".xlsx" @change="handleMatchFileChange" />
+            <span class="muted">{{ matchFile ? matchFile.name : '未选择文件' }}</span>
+            <el-button
+              type="primary"
+              :disabled="!matchFile || matchSelectedFields.length === 0"
+              :loading="previewLoading"
+              @click="previewMatch"
+            >
+              预览
+            </el-button>
+          </div>
+          <div v-if="matchPreview" class="preview-summary">
+            <span>命中订单：{{ matchPreview.matchedOrderCount }}</span>
+            <span>更新字段：{{ matchPreview.updateFields.join('、') || '-' }}</span>
+          </div>
+          <el-table v-if="matchPreview?.errors.length" :data="matchPreview.errors" size="small">
+            <el-table-column label="行号" prop="row" width="80" />
+            <el-table-column label="字段" prop="field" width="140" />
+            <el-table-column label="原因" prop="message" min-width="260" show-overflow-tooltip />
           </el-table>
+          <el-empty v-else-if="matchPreview" description="预览通过，可以确认导入" />
         </div>
       </div>
+      <template #footer>
+        <el-button @click="matchDialogVisible = false">取消</el-button>
+        <el-button
+          type="primary"
+          :disabled="!canApplyMatch"
+          :loading="applyLoading"
+          @click="applyMatch"
+        >
+          确认导入
+        </el-button>
+      </template>
     </el-dialog>
   </PageSectionCard>
 </template>
@@ -286,24 +370,33 @@
 <script setup lang="ts">
 import { getCountryOptions, type CountryOption } from '@/api/config'
 import {
+  applyOrderInfoMatch,
+  downloadOrderInfoMatchTemplate,
   getOrderDetail,
   listDataShops,
   listOrderPlatforms,
   listOrders,
+  previewOrderInfoMatch,
+  updateOrderDetail,
   type DataOrderDetail,
-  type DataOrderSummary
+  type DataOrderPatch,
+  type DataOrderSummary,
+  type OrderInfoMatchPreview
 } from '@/api/data'
 import MobileRecordList from '@/components/MobileRecordList.vue'
 import PageSectionCard from '@/components/PageSectionCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
 import { useResponsive } from '@/composables/useResponsive'
+import { useAuthStore } from '@/stores/auth'
 import { getActionErrorMessage } from '@/utils/apiError'
 import { COUNTRY_OPTIONS, formatCountryCodeForDisplay } from '@/utils/countries'
+import { triggerBlobDownload } from '@/utils/download'
 import type { TagType } from '@/utils/element'
 import { formatDateTime } from '@/utils/format'
 import { normalizeSortOrder, type SortChangeEvent, type SortState } from '@/utils/tableSort'
+import dayjs from 'dayjs'
 import { ElMessage } from 'element-plus'
-import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, defineComponent, h, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 
 const packageStatusOptions = [
   { label: '待审核', value: 'to_audit' },
@@ -314,8 +407,24 @@ const packageStatusOptions = [
   { label: '已作废', value: 'has_canceled' }
 ]
 
+const matchFields = [
+  { key: 'shop_name', label: '店铺名称' },
+  { key: 'order_platform', label: '平台' },
+  { key: 'country_code', label: '国家' },
+  { key: 'postal_code', label: '邮编' },
+  { key: 'marketplace_id', label: 'Marketplace ID' },
+  { key: 'order_total_amount', label: '订单金额' },
+  { key: 'order_total_currency', label: '币种' },
+  { key: 'fulfillment_channel', label: '履约渠道' },
+  { key: 'purchase_date', label: '下单时间' },
+  { key: 'last_update_date', label: '最后更新时间' },
+  { key: 'refund_status', label: '退款状态' }
+]
+
 const rows = ref<DataOrderSummary[]>([])
 const { isMobile } = useResponsive()
+const auth = useAuthStore()
+const canEdit = computed(() => auth.hasPermission('data_biz:edit'))
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(50)
@@ -342,9 +451,97 @@ const filters = reactive({
 
 const dialogVisible = ref(false)
 const detail = ref<DataOrderDetail | null>(null)
+const editDialogVisible = ref(false)
+const editDetail = ref<DataOrderDetail | null>(null)
+const editSaving = ref(false)
+const editForm = reactive({
+  shopName: '',
+  orderPlatform: '',
+  countryCode: '',
+  postalCode: '',
+  marketplaceId: '',
+  orderTotalAmount: '',
+  orderTotalCurrency: '',
+  fulfillmentChannel: '',
+  purchaseDate: '',
+  lastUpdateDate: '',
+  refundStatus: ''
+})
+
+const matchDialogVisible = ref(false)
+const matchSelectedFields = ref<string[]>(matchFields.map((field) => field.key))
+const matchFile = ref<File | null>(null)
+const matchPreview = ref<OrderInfoMatchPreview | null>(null)
+const templateDownloading = ref(false)
+const previewLoading = ref(false)
+const applyLoading = ref(false)
+const canApplyMatch = computed(
+  () => !!matchFile.value && !!matchPreview.value && matchPreview.value.errors.length === 0
+)
+
 let detailReqId = 0
+let editReqId = 0
 let listReqId = 0
 let skuReloadTimer: ReturnType<typeof setTimeout> | null = null
+
+const OrderDetailBody = defineComponent({
+  name: 'OrderDetailBody',
+  props: {
+    detail: {
+      type: Object as () => DataOrderDetail,
+      required: true
+    }
+  },
+  setup(props) {
+    return () =>
+      h('div', { class: 'detail-body' }, [
+        h('div', { class: 'detail-section' }, [
+          h('div', { class: 'section-title' }, '基本信息'),
+          h('div', { class: 'kv-grid' }, [
+            renderKv('包裹状态', statusLabel(props.detail.packageStatus || props.detail.orderStatus)),
+            renderKv('店铺', props.detail.shopName || '-'),
+            renderKv('平台', props.detail.orderPlatform),
+            renderKv('国家', formatCountryCodeForDisplay(props.detail.countryCode), true),
+            renderKv('邮编', props.detail.postalCode || '-', true),
+            renderKv('订单号', props.detail.amazonOrderId, true),
+            renderKv('下单时间', formatDateTime(props.detail.purchaseDate), true),
+            renderKv('最后更新时间', formatDateTime(props.detail.lastUpdateDate), true),
+            renderKv(
+              '订单金额',
+              props.detail.orderTotalAmount
+                ? `${props.detail.orderTotalAmount} ${props.detail.orderTotalCurrency || ''}`
+                : '-',
+              true
+            )
+          ])
+        ]),
+        h('div', { class: 'detail-section' }, [
+          h('div', { class: 'section-title' }, `订单明细（${props.detail.items.length}）`),
+          h(
+            'table',
+            { class: 'detail-items-table' },
+            [
+              h('thead', [h('tr', [h('th', '明细 ID'), h('th', '商品 SKU'), h('th', '下单数')])]),
+              h(
+                'tbody',
+                props.detail.items.map((item) =>
+                  h('tr', { key: item.orderItemId }, [
+                    h('td', { class: 'mono' }, item.orderItemId),
+                    h('td', item.commoditySku),
+                    h('td', { class: 'align-right' }, String(item.quantityOrdered))
+                  ])
+                )
+              )
+            ]
+          )
+        ])
+      ])
+  }
+})
+
+function renderKv(label: string, value: string, mono = false) {
+  return h('div', [h('span', { class: 'label' }, label), h('span', { class: mono ? 'mono' : '' }, value)])
+}
 
 function clearSkuReloadTimer(): void {
   if (skuReloadTimer !== null) {
@@ -445,6 +642,130 @@ async function openDetail(row: DataOrderSummary): Promise<void> {
   }
 }
 
+async function openEdit(row: DataOrderSummary): Promise<void> {
+  if (!canEdit.value) return
+  const myReqId = ++editReqId
+  editDialogVisible.value = true
+  editDetail.value = null
+  try {
+    const data = await getOrderDetail(row.shopId, row.amazonOrderId, row.packageSn)
+    if (myReqId === editReqId && editDialogVisible.value) {
+      editDetail.value = data
+      fillEditForm(data)
+    }
+  } catch (err) {
+    if (myReqId === editReqId) {
+      editDialogVisible.value = false
+      ElMessage.error(getActionErrorMessage(err, '获取订单详情失败'))
+    }
+  }
+}
+
+function fillEditForm(data: DataOrderDetail): void {
+  editForm.shopName = data.shopName || ''
+  editForm.orderPlatform = data.orderPlatform || ''
+  editForm.countryCode = data.countryCode || ''
+  editForm.postalCode = data.postalCode || ''
+  editForm.marketplaceId = data.marketplaceId || ''
+  editForm.orderTotalAmount = data.orderTotalAmount || ''
+  editForm.orderTotalCurrency = data.orderTotalCurrency || ''
+  editForm.fulfillmentChannel = data.fulfillmentChannel || ''
+  editForm.purchaseDate = toDateTimeSeconds(data.purchaseDate)
+  editForm.lastUpdateDate = toDateTimeSeconds(data.lastUpdateDate)
+  editForm.refundStatus = data.refundStatus || ''
+}
+
+function toDateTimeSeconds(value: string | null | undefined): string {
+  return value ? dayjs(value).format('YYYY-MM-DD HH:mm:ss') : ''
+}
+
+async function saveEdit(): Promise<void> {
+  if (!editDetail.value) return
+  editSaving.value = true
+  try {
+    const payload: DataOrderPatch = {
+      shopName: editForm.shopName,
+      orderPlatform: editForm.orderPlatform,
+      countryCode: editForm.countryCode,
+      postalCode: editForm.postalCode,
+      marketplaceId: editForm.marketplaceId,
+      orderTotalAmount: editForm.orderTotalAmount,
+      orderTotalCurrency: editForm.orderTotalCurrency,
+      fulfillmentChannel: editForm.fulfillmentChannel,
+      purchaseDate: editForm.purchaseDate,
+      lastUpdateDate: editForm.lastUpdateDate,
+      refundStatus: editForm.refundStatus
+    }
+    await updateOrderDetail(
+      editDetail.value.shopId,
+      editDetail.value.amazonOrderId,
+      editDetail.value.packageSn,
+      payload
+    )
+    ElMessage.success('订单已更新')
+    editDialogVisible.value = false
+    await loadCountryOptions()
+    await reload()
+  } catch (err) {
+    ElMessage.error(getActionErrorMessage(err, '保存失败'))
+  } finally {
+    editSaving.value = false
+  }
+}
+
+function openMatchDialog(): void {
+  matchDialogVisible.value = true
+  matchPreview.value = null
+  matchFile.value = null
+}
+
+async function downloadTemplate(): Promise<void> {
+  templateDownloading.value = true
+  try {
+    const blob = await downloadOrderInfoMatchTemplate(matchSelectedFields.value)
+    triggerBlobDownload(blob, '订单信息匹配模板.xlsx')
+  } catch (err) {
+    ElMessage.error(getActionErrorMessage(err, '模板导出失败'))
+  } finally {
+    templateDownloading.value = false
+  }
+}
+
+function handleMatchFileChange(event: Event): void {
+  const files = (event.target as HTMLInputElement).files
+  matchFile.value = files?.[0] || null
+  matchPreview.value = null
+}
+
+async function previewMatch(): Promise<void> {
+  if (!matchFile.value) return
+  previewLoading.value = true
+  try {
+    matchPreview.value = await previewOrderInfoMatch(matchFile.value, matchSelectedFields.value)
+  } catch (err) {
+    matchPreview.value = null
+    ElMessage.error(getActionErrorMessage(err, '预览失败'))
+  } finally {
+    previewLoading.value = false
+  }
+}
+
+async function applyMatch(): Promise<void> {
+  if (!matchFile.value) return
+  applyLoading.value = true
+  try {
+    const resp = await applyOrderInfoMatch(matchFile.value, matchSelectedFields.value)
+    ElMessage.success(`已更新 ${resp.updatedOrderCount} 条订单`)
+    matchDialogVisible.value = false
+    await loadCountryOptions()
+    await reload()
+  } catch (err) {
+    ElMessage.error(getActionErrorMessage(err, '导入失败'))
+  } finally {
+    applyLoading.value = false
+  }
+}
+
 function statusType(status: string): TagType {
   return (
     (
@@ -538,7 +859,8 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-.detail-body {
+.detail-body,
+.match-body {
   display: flex;
   flex-direction: column;
   gap: $space-5;
@@ -553,9 +875,10 @@ onBeforeUnmount(() => {
   margin-bottom: $space-3;
 }
 
-.kv-grid {
+.kv-grid,
+.edit-form {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: $space-3;
 }
 
@@ -576,6 +899,43 @@ onBeforeUnmount(() => {
   font-weight: $font-weight-semibold;
 }
 
+.detail-items-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: $font-size-sm;
+}
+
+.detail-items-table th,
+.detail-items-table td {
+  padding: $space-2;
+  border-bottom: 1px solid $color-border-subtle;
+  text-align: left;
+}
+
+.align-right {
+  text-align: right;
+}
+
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: $space-2 $space-3;
+}
+
+.match-actions,
+.file-row,
+.preview-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: $space-3;
+  margin-top: $space-3;
+}
+
+.file-input {
+  max-width: 280px;
+}
+
 @media (max-width: 900px) {
   .order-filters {
     width: 100%;
@@ -588,7 +948,8 @@ onBeforeUnmount(() => {
 
     :deep(.el-input),
     :deep(.el-select),
-    :deep(.el-date-editor) {
+    :deep(.el-date-editor),
+    :deep(.el-button) {
       width: 100% !important;
     }
   }
@@ -664,16 +1025,20 @@ onBeforeUnmount(() => {
     justify-content: flex-end;
   }
 
-  .kv-grid {
+  .kv-grid,
+  .edit-form,
+  .field-grid {
     grid-template-columns: 1fr;
   }
 
-  :global(.order-detail-dialog.is-fullscreen) {
+  :global(.order-detail-dialog.is-fullscreen),
+  :global(.order-match-dialog.is-fullscreen) {
     display: flex;
     flex-direction: column;
   }
 
-  :global(.order-detail-dialog.is-fullscreen .el-dialog__body) {
+  :global(.order-detail-dialog.is-fullscreen .el-dialog__body),
+  :global(.order-match-dialog.is-fullscreen .el-dialog__body) {
     flex: 1;
     max-height: none;
   }

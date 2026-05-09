@@ -15,6 +15,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
@@ -76,6 +77,11 @@ class OrderHeader(Base):
 
     is_buyer_requested_cancel: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     refund_status: Mapped[str | None] = mapped_column(String(10), nullable=True)
+
+    manual_edit_locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    manual_edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    manual_edited_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    manual_edit_fields: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
 
     last_sync_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(

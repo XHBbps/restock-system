@@ -12,7 +12,7 @@
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 
@@ -101,6 +101,44 @@ class DataOrderDetail(SaihuLikeModel):
     detail_address: str | None = None
     receiver_name: str | None = None
     detail_fetched_at: datetime | None = None
+
+
+class DataOrderPatch(SaihuLikeModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+        alias_generator=to_camel,
+        extra="forbid",
+    )
+
+    shop_name: str | None = None
+    order_platform: str | None = None
+    country_code: str | None = None
+    postal_code: str | None = None
+    marketplace_id: str | None = None
+    order_total_amount: Decimal | None = None
+    order_total_currency: str | None = None
+    fulfillment_channel: str | None = None
+    purchase_date: datetime | None = None
+    last_update_date: datetime | None = None
+    refund_status: str | None = None
+
+
+class OrderInfoMatchError(BaseModel):
+    row: int
+    field: str
+    message: str
+
+
+class OrderInfoMatchPreviewOut(BaseModel):
+    matched_order_count: int = Field(alias="matchedOrderCount")
+    update_fields: list[str] = Field(alias="updateFields")
+    errors: list[OrderInfoMatchError]
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class OrderInfoMatchApplyOut(OrderInfoMatchPreviewOut):
+    updated_order_count: int = Field(alias="updatedOrderCount")
 
 
 # ==================== 库存明细 ====================

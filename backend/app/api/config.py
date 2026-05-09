@@ -39,6 +39,7 @@ from app.core.permissions import (
 from app.core.query import escape_like
 from app.core.timezone import now_beijing
 from app.models.commodity import CommodityMaster
+from app.models.country import CountryNameOverride
 from app.models.dashboard_snapshot import DashboardSnapshot
 from app.models.global_config import GlobalConfig
 from app.models.in_transit import InTransitRecord
@@ -253,8 +254,18 @@ async def get_country_options(
     _: None = Depends(require_permission(CONFIG_VIEW)),
 ) -> CountryOptionsOut:
     observed = (await _observed_country_codes(db)) - COUNTRY_OPTION_HIDDEN_CODES
+    override_rows = (
+        (await db.execute(select(CountryNameOverride).order_by(CountryNameOverride.code)))
+        .scalars()
+        .all()
+    )
+    overrides = {
+        row.code.upper(): row.name
+        for row in override_rows
+        if row.code.upper() not in COUNTRY_OPTION_HIDDEN_CODES
+    }
     builtin_set = set(BUILTIN_COUNTRY_ORDER) - COUNTRY_OPTION_HIDDEN_CODES
-    all_codes = (set(BUILTIN_COUNTRY_NAMES) - COUNTRY_OPTION_HIDDEN_CODES) | observed
+    all_codes = (set(BUILTIN_COUNTRY_NAMES) - COUNTRY_OPTION_HIDDEN_CODES) | observed | set(overrides)
     ordered_codes = [
         *[
             code
@@ -266,14 +277,16 @@ async def get_country_options(
     unknown_codes = sorted(
         code
         for code in observed
-        if code not in BUILTIN_COUNTRY_NAMES and code not in NON_EU_MEMBER_CODES
+        if code not in BUILTIN_COUNTRY_NAMES
+        and code not in overrides
+        and code not in NON_EU_MEMBER_CODES
     )
     return CountryOptionsOut(
         items=[
             CountryOptionOut(
                 code=code,
-                label=country_label(code),
-                builtin=code in BUILTIN_COUNTRY_NAMES,
+                label=country_label(code, overrides),
+                builtin=code in BUILTIN_COUNTRY_NAMES or code in overrides,
                 observed=code in observed,
                 can_be_eu_member=code not in NON_EU_MEMBER_CODES,
             )

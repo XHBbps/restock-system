@@ -55,10 +55,10 @@ COUNTRY_CODE_ALIASES: dict[str, str] = {
 }
 
 
-def country_label(code: str) -> str:
+def country_label(code: str, overrides: dict[str, str] | None = None) -> str:
     raw_code = code.strip().upper()
     normalized = COUNTRY_CODE_ALIASES.get(raw_code, raw_code)
-    name = BUILTIN_COUNTRY_NAMES.get(normalized)
+    name = (overrides or {}).get(normalized) or BUILTIN_COUNTRY_NAMES.get(normalized)
     if name is None:
         return normalized
     return f"{normalized} - {name}"

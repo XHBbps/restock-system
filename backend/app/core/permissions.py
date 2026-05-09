@@ -35,6 +35,7 @@ DATA_BASE_VIEW = "data_base:view"
 DATA_BASE_EDIT = "data_base:edit"
 
 DATA_BIZ_VIEW = "data_biz:view"
+DATA_BIZ_EDIT = "data_biz:edit"
 
 SYNC_VIEW = "sync:view"
 SYNC_OPERATE = "sync:operate"
@@ -61,6 +62,7 @@ REGISTRY: list[PermDef] = [
     PermDef(DATA_BASE_VIEW, "基础数据-查看", "基础数据"),
     PermDef(DATA_BASE_EDIT, "基础数据-编辑", "基础数据"),
     PermDef(DATA_BIZ_VIEW, "业务数据-查看", "业务数据"),
+    PermDef(DATA_BIZ_EDIT, "业务数据-编辑", "业务数据"),
     PermDef(SYNC_VIEW, "同步管理-查看", "同步管理"),
     PermDef(SYNC_OPERATE, "同步管理-操作", "同步管理"),
     PermDef(CONFIG_VIEW, "基础配置-查看", "基础配置"),
