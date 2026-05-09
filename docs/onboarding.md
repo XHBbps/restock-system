@@ -168,6 +168,7 @@ docker compose --env-file deploy/.env.dev -f deploy/docker-compose.dev.yml up -d
 补充说明：
 
 - `deploy/.env.dev` 默认提供 `PIP_INDEX_URL=https://pypi.org/simple`；若本机访问官方源较慢，可自行覆盖 `PIP_INDEX_URL`，并按需补充 `PIP_TRUSTED_HOST`
+- 生产发布默认不在服务器本地构建应用镜像，依赖 CI 发布到 GHCR 的 `sha-<commit>` 镜像；`ALLOW_LOCAL_IMAGE_BUILD=true` 仅用于人工应急，不作为常规部署路径
 - 全栈 Compose 使用独立项目名 `restock-dev`，不会影响生产 `deploy/docker-compose.yml`
 - PostgreSQL 对宿主机暴露 `5433`，避免占用本地原生开发常用的 `5432`
 - 容器名固定为 `restock-dev-*`，因此 `docker ps` 不会再出现 Compose 自动追加的 `-1`
@@ -314,6 +315,13 @@ bash scripts/check.sh
 |---|---|---|
 | `SMOKE_BASE_URL` | 覆盖 `deploy/scripts/smoke_check.sh` 的检查入口 | `APP_BASE_URL` |
 | `SMOKE_RESOLVE_LOCAL` | 生产发布时是否将 `APP_DOMAIN` 解析到 `127.0.0.1` 后检查 | `true` |
+
+### 6.4 生产镜像发布（`deploy/.env`）
+
+| 变量 | 说明 | 默认 |
+|---|---|---|
+| `IMAGE_PULL_TIMEOUT_SECONDS` | `deploy.sh` / `rollback.sh` 拉取应用镜像的最长等待时间 | `1800` |
+| `ALLOW_LOCAL_IMAGE_BUILD` | 是否允许生产机本地构建 backend/frontend 镜像；仅人工应急使用 | `false` |
 
 ---
 

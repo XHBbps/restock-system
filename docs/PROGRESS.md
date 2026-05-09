@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-05-09（订单页新增「信息匹配」Excel 导入与单条编辑；订单人工编辑锁保护已修正信息，动态国家选项支持人工新增国家中文名。）
+> 最近更新：2026-05-09（生产部署链路加固：应用镜像默认只使用 GHCR `sha-<commit>`，拉取失败不再自动回退服务器本地构建。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -109,6 +109,12 @@
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.108 生产部署镜像拉取与回滚加固（2026-05-09）
+- **后端镜像依赖收口**：`backend/Dockerfile` 改为安装 `pyproject.toml` 的主依赖，不再把完整 `requirements.lock` 的开发/工具依赖打进生产镜像，保留 `openpyxl` 等运行时依赖。
+- **发布脚本**：`deploy/scripts/deploy.sh` 的应用镜像拉取超时默认调整为 `1800` 秒；GHCR 拉取失败或超时默认直接失败并触发回滚，不再自动执行服务器本地 `docker compose build`。仅显式 `ALLOW_LOCAL_IMAGE_BUILD=true` 时允许人工应急本地构建。
+- **回滚脚本**：`deploy/scripts/rollback.sh` 回滚时导出 `IMAGE_TAG=sha-<previous-git-sha>`，优先拉取已发布 GHCR 镜像并以 `--no-build` 重启应用服务；本地构建同样只在 `ALLOW_LOCAL_IMAGE_BUILD=true` 时启用。
+- **文档同步**：`docs/deployment.md`、`docs/runbook.md`、`docs/onboarding.md` 统一说明生产发布和回滚依赖 immutable GHCR tag，生产机默认不做 PyPI 构建。
 
 ### 3.107 订单信息匹配与人工编辑锁（2026-05-09）
 - **数据库迁移**：`backend/alembic/versions/20260509_1000_order_manual_edit_and_country_override.py` 为 `order_header` 新增 `manual_edit_locked`、`manual_edited_at`、`manual_edited_by`、`manual_edit_fields`，并新增 `country_name_override(code, name, created_at, updated_at)`；迁移同时注册 `data_biz:edit` 并授予默认“业务人员”角色。

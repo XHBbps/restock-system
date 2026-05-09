@@ -578,7 +578,7 @@ docker compose -f deploy/docker-compose.yml restart backend
 
 | 变更类型 | 回滚方式 |
 |---|---|
-| **应用代码** | 切换到上一个 git tag，重新运行 `deploy.sh`（自带回滚脚本） |
+| **应用代码** | 使用上一版 `sha-<commit>` GHCR 镜像执行 `rollback.sh`，或切换到目标 ref 后重新运行 `deploy.sh` |
 | **数据库迁移** | 不默认执行 `alembic downgrade`，优先"恢复备份 + 回退应用版本" |
 | **配置变更** | 修改 `deploy/.env` 后重启对应服务 |
 | **高风险变更** | 先在开发环境验证，生产走完整 deploy.sh（含备份） |
@@ -590,7 +590,7 @@ docker compose -f deploy/docker-compose.yml restart backend
 
 ### 5.1 回滚 SOP（带迁移的发布失败时）
 
-`deploy.sh` 失败会自动触发 `rollback.sh` 回退应用代码 + 重启服务，但**数据库 schema 不会自动回滚**。按下列顺序处理（对照 P1-E5 审计结论）：
+`deploy.sh` 失败会自动触发 `rollback.sh` 回退应用代码 + 重启服务，但**数据库 schema 不会自动回滚**。回滚脚本会设置 `IMAGE_TAG=sha-<previous-git-sha>` 并优先拉取 GHCR 已发布镜像；默认不在生产机本地构建镜像。按下列顺序处理（对照 P1-E5 审计结论）：
 
 1. **停业务流量**（确保 worker / scheduler 不在写入过期 schema 的表）
    ```bash
@@ -618,6 +618,7 @@ docker compose -f deploy/docker-compose.yml restart backend
    ```bash
    bash deploy/scripts/rollback.sh <previous-git-sha>
    ```
+   若失败原因为 GHCR 镜像暂时不可拉取，应优先等待 CI `publish` 或修复 GHCR 访问；只有人工确认需要应急时，才设置 `ALLOW_LOCAL_IMAGE_BUILD=true` 后重试，此时会在生产机本地构建 backend/frontend 镜像。
 6. **健康检查 + 放回流量**
    ```bash
    curl -fsS https://<domain>/readyz

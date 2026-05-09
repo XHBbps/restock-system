@@ -185,6 +185,7 @@ Scheduler 保持单例避免重复触发，Worker 可水平扩展。
 - `CI` workflow 会在 `main`、`master` 和 `v*` tag 上发布 GHCR 镜像，镜像标签统一为 `sha-<commit>`，并自动将 owner 归一化为小写
 - `Deploy` workflow 支持传入分支名、tag 名、完整 commit SHA 或短 commit SHA；`check-ci` 会先解析为完整 SHA，再等待 `backend`、`frontend`、`docker-build`、`publish` 四个 required checks 全部通过，确保 `sha-<commit>` 镜像已经发布到 GHCR。部署机会切到对应 ref 后导出 `IMAGE_TAG=sha-<commit>` 给 Compose 使用。分支部署会强制把服务器本地同名分支重置为 `origin/<branch>`，避免远端主分支切换后被服务器旧本地分支的非快进历史阻塞
 - `latest` 仅作为主分支便捷标签，生产发布以 `sha-<commit>` 为准，避免分支名与镜像 tag 脱节
+- 生产发布和回滚默认只使用 GHCR 上已发布的 immutable `sha-<commit>` 镜像；应用镜像拉取失败会中止发布并触发回滚，不再自动在服务器本地从 PyPI 构建镜像。本地构建仅保留为人工应急路径，需要显式设置 `ALLOW_LOCAL_IMAGE_BUILD=true`
 
 ---
 
@@ -200,6 +201,8 @@ Scheduler 保持单例避免重复触发，Worker 可水平扩展。
 | `SMOKE_RESOLVE_LOCAL` | 冒烟检查是否把 `APP_DOMAIN` 解析到 `127.0.0.1`（可选） | `true` |
 | `APP_DOCS_ENABLED` | 是否开放 `/docs`（生产建议 `false`） | `false` |
 | `GHCR_OWNER` | GHCR 命名空间所有者，必须小写 | `xhbbps` |
+| `IMAGE_PULL_TIMEOUT_SECONDS` | 应用镜像拉取超时时间（可选） | `1800` |
+| `ALLOW_LOCAL_IMAGE_BUILD` | 是否允许发布/回滚在服务器本地构建应用镜像（仅人工应急） | `false` |
 | `DB_PASSWORD` | PostgreSQL 密码（强密码） | — |
 | `SAIHU_CLIENT_ID` | 赛狐应用 ID | — |
 | `SAIHU_CLIENT_SECRET` | 赛狐应用密钥 | — |
@@ -232,6 +235,8 @@ Scheduler 保持单例避免重复触发，Worker 可水平扩展。
 | `SMOKE_RESOLVE_LOCAL` | 可选 `deploy/.env.dev` | 可选 `deploy/.env` | — | `deploy/scripts/smoke_check.sh` | 默认 `true`，让生产冒烟检查从服务器本机访问 Caddy，避免公网健康端点被 404 保护误判 |
 | `APP_DOCS_ENABLED` | `deploy/.env.dev` | `deploy/.env` | `backend/.env` | `deploy/docker-compose*.yml`、`backend/app/config.py` | 控制 `/docs` 是否开放；生产默认建议关闭 |
 | `GHCR_OWNER` | — | `deploy/.env` | — | `deploy/docker-compose.yml`、`deploy/scripts/validate_env.sh` | 生产镜像命名空间；必须使用全小写 GitHub 用户名/组织名 |
+| `IMAGE_PULL_TIMEOUT_SECONDS` | — | 可选 `deploy/.env` | — | `deploy/scripts/deploy.sh`、`deploy/scripts/rollback.sh` | 应用镜像从 GHCR 拉取的最长等待时间；默认 `1800` 秒 |
+| `ALLOW_LOCAL_IMAGE_BUILD` | — | 可选 `deploy/.env` | — | `deploy/scripts/deploy.sh`、`deploy/scripts/rollback.sh` | 生产默认 `false`；仅 GHCR 异常且人工确认时设为 `true`，允许服务器本地构建应用镜像 |
 | `DB_PASSWORD` | `deploy/.env.dev` | `deploy/.env` | — | `deploy/docker-compose*.yml` | Compose 内部 PostgreSQL 密码；修改前需确认数据卷兼容性 |
 | `DATABASE_URL` | — | — | `backend/.env` | `backend/app/config.py` | 仅原生后端开发使用；容器内由 Compose 拼装生成 |
 | `SAIHU_CLIENT_ID` | `deploy/.env.dev` | `deploy/.env` | `backend/.env` | `deploy/docker-compose*.yml`、`backend/app/saihu/token.py` | 赛狐 access_token 申请参数 |
@@ -309,9 +314,9 @@ bash deploy/scripts/deploy.sh
 
 1. **校验环境变量** — `deploy/scripts/validate_env.sh` 检查必填项，并拦截 `.env.example` 中的示例占位值（包括 `LOGIN_PASSWORD=your_initial_login_password` 与非小写 `GHCR_OWNER`）
 2. **数据库备份** — `deploy/scripts/pg_backup.sh` 生成 `deploy/data/backups/<timestamp>.sql.gz`
-3. **拉取镜像** — `docker compose pull backend worker scheduler frontend`（`IMAGE_TAG` 默认取当前 git commit 的 `sha-<commit>`）；应用镜像 pull 默认最多等待 600 秒（可用 `IMAGE_PULL_TIMEOUT_SECONDS` 覆盖），若 GHCR 拉取失败或超时，`deploy.sh` 会回退为在服务器本地执行 `docker compose build backend frontend`，再继续后续迁移与滚动更新（`worker` / `scheduler` 共用 backend 镜像）
+3. **拉取镜像** — `docker compose pull backend worker scheduler frontend`（`IMAGE_TAG` 默认取当前 git commit 的 `sha-<commit>`）；应用镜像 pull 默认最多等待 1800 秒（可用 `IMAGE_PULL_TIMEOUT_SECONDS` 覆盖）。若 GHCR 拉取失败或超时，`deploy.sh` 默认直接失败并触发回滚，不在生产机本地构建；仅显式设置 `ALLOW_LOCAL_IMAGE_BUILD=true` 时才允许应急执行 `docker compose build backend frontend`（`worker` / `scheduler` 共用 backend 镜像）
 4. **执行迁移** — `docker compose run --rm backend alembic upgrade head`
-5. **滚动更新服务** — `docker compose up -d db backend worker scheduler frontend caddy`
+5. **滚动更新服务** — 依次对 `backend`、`worker`、`scheduler`、`frontend` 执行 `docker compose up -d --no-deps --no-build`，最后更新 `caddy`
 6. **冒烟检查** — `deploy/scripts/smoke_check.sh` 访问 `/healthz` 和 `/readyz`；生产默认通过 `--resolve` 将 `APP_DOMAIN` 指向 `127.0.0.1`，验证 Caddy + 后端路由但不公开健康端点
 7. **失败自动回滚** — 任何步骤失败触发 `deploy/scripts/rollback.sh`，仅恢复上一版应用；若迁移已执行，数据库必须通过最近一次备份手动恢复
 
@@ -331,6 +336,7 @@ bash deploy/scripts/deploy.sh
 | 仅备份数据库 | `bash deploy/scripts/pg_backup.sh` |
 | 从备份恢复 | `bash deploy/scripts/restore_db.sh deploy/data/backups/replenish_20260411_120000.sql.gz` |
 | 回滚到上一版本 | `bash deploy/scripts/rollback.sh <previous-git-sha>` |
+| 人工应急允许本地构建 | `ALLOW_LOCAL_IMAGE_BUILD=true bash deploy/scripts/deploy.sh` 或写入 `deploy/.env` 后执行 |
 | 查看所有服务状态 | `docker compose -f deploy/docker-compose.yml ps` |
 | 查看单个服务日志 | `docker compose -f deploy/docker-compose.yml logs -f <service>` |
 | 重启单个服务 | `docker compose -f deploy/docker-compose.yml restart <service>` |

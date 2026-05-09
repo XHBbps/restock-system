@@ -23,18 +23,45 @@ fi
 
 PREV_SHA="$1"
 
+set -a
+source "$ENV_FILE"
+set +a
+GHCR_OWNER="${GHCR_OWNER,,}"
+export GHCR_OWNER
+
 echo "[rollback] checking out $PREV_SHA"
 cd "$REPO_DIR"
 git checkout -B "rollback-$(date +%Y%m%d-%H%M%S)" "$PREV_SHA"
+IMAGE_TAG="sha-$PREV_SHA"
+export IMAGE_TAG
+echo "[rollback] image tag: $IMAGE_TAG"
 
 echo "[rollback] database schema is not downgraded automatically"
 echo "[rollback] if migrations already ran: restore the latest backup with deploy/scripts/restore_db.sh BEFORE bringing services back"
 echo "[rollback] SOP details: docs/runbook.md §回滚 SOP"
 
-echo "[rollback] rebuilding images"
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" build backend frontend
+pull_application_images() {
+    local pull_timeout="${IMAGE_PULL_TIMEOUT_SECONDS:-1800}"
+
+    echo "[rollback] pulling application images (timeout: ${pull_timeout}s)"
+    if timeout "$pull_timeout" docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" pull backend worker scheduler frontend; then
+        return 0
+    fi
+
+    if [[ "${ALLOW_LOCAL_IMAGE_BUILD:-false}" == "true" ]]; then
+        echo "[rollback] WARNING: image pull failed or timed out; ALLOW_LOCAL_IMAGE_BUILD=true, building backend/frontend locally" >&2
+        docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" build backend frontend
+        return 0
+    fi
+
+    echo "[rollback] ERROR: failed or timed out pulling application images for IMAGE_TAG=$IMAGE_TAG" >&2
+    echo "[rollback] ERROR: rollback does not build application images locally by default; confirm GHCR image availability or set ALLOW_LOCAL_IMAGE_BUILD=true for manual emergency recovery" >&2
+    return 1
+}
+
+pull_application_images
 
 echo "[rollback] restarting services"
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d backend worker scheduler frontend caddy
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --no-build backend worker scheduler frontend caddy
 
 echo "[rollback] done; previous revision $PREV_SHA restored"

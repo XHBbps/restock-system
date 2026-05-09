@@ -34,16 +34,23 @@ rollback_on_failure() {
 }
 trap rollback_on_failure EXIT
 
-pull_or_build_application_images() {
-    local pull_timeout="${IMAGE_PULL_TIMEOUT_SECONDS:-600}"
+pull_application_images() {
+    local pull_timeout="${IMAGE_PULL_TIMEOUT_SECONDS:-1800}"
 
-    echo "[deploy] pulling application images"
+    echo "[deploy] pulling application images (timeout: ${pull_timeout}s)"
     if timeout "$pull_timeout" docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" pull backend worker scheduler frontend; then
         return 0
     fi
 
-    echo "[deploy] WARNING: failed or timed out pulling application images; building backend/frontend locally" >&2
-    docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" build backend frontend
+    if [[ "${ALLOW_LOCAL_IMAGE_BUILD:-false}" == "true" ]]; then
+        echo "[deploy] WARNING: image pull failed or timed out; ALLOW_LOCAL_IMAGE_BUILD=true, building backend/frontend locally" >&2
+        docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" build backend frontend
+        return 0
+    fi
+
+    echo "[deploy] ERROR: failed or timed out pulling application images for IMAGE_TAG=$IMAGE_TAG" >&2
+    echo "[deploy] ERROR: production deploy does not build application images locally by default; wait for GHCR publish or set ALLOW_LOCAL_IMAGE_BUILD=true for manual emergency recovery" >&2
+    return 1
 }
 
 "$SCRIPT_DIR/validate_env.sh" || exit 1
@@ -67,22 +74,22 @@ if [[ "$db_ready" -ne 1 ]]; then
 fi
 
 "$BACKUP_SCRIPT"
-pull_or_build_application_images
+pull_application_images
 "$SCRIPT_DIR/migrate.sh"
 echo "[deploy] rolling update: backend"
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --no-deps backend
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --no-deps --no-build backend
 sleep 5
 
 echo "[deploy] rolling update: worker"
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --no-deps worker
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --no-deps --no-build worker
 sleep 3
 
 echo "[deploy] rolling update: scheduler"
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --no-deps scheduler
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --no-deps --no-build scheduler
 sleep 3
 
 echo "[deploy] rolling update: frontend"
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --no-deps frontend
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --no-deps --no-build frontend
 sleep 3
 
 echo "[deploy] rolling update: caddy"
