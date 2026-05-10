@@ -142,17 +142,21 @@ def _sanitize_dashboard_payload(
     top_urgent_skus = [
         item for item in payload.top_urgent_skus if is_reportable_country_code(item.country)
     ]
-    return payload.model_copy(
-        update={
-            "urgent_count": sum(item.urgent_count for item in risk_distribution),
-            "warning_count": sum(item.warning_count for item in risk_distribution),
-            "safe_count": sum(item.safe_count for item in risk_distribution),
-            "risk_country_count": len(risk_distribution),
-            "country_risk_distribution": risk_distribution,
-            "country_restock_distribution": country_restock_distribution,
-            "top_urgent_skus": top_urgent_skus,
-        }
-    )
+    update: dict[str, Any] = {
+        "country_risk_distribution": risk_distribution,
+        "country_restock_distribution": country_restock_distribution,
+        "top_urgent_skus": top_urgent_skus,
+    }
+    if payload.country_risk_distribution:
+        update.update(
+            {
+                "urgent_count": sum(item.urgent_count for item in risk_distribution),
+                "warning_count": sum(item.warning_count for item in risk_distribution),
+                "safe_count": sum(item.safe_count for item in risk_distribution),
+                "risk_country_count": len(risk_distribution),
+            }
+        )
+    return payload.model_copy(update=update)
 
 
 def _build_country_risk_distribution(
