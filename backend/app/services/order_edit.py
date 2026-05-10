@@ -45,13 +45,11 @@ EDITABLE_FIELDS: tuple[EditableField, ...] = (
     EditableField("order_platform", "平台", "order_platform", "platform"),
     EditableField("country_code", "国家", "country_code", "country"),
     EditableField("postal_code", "邮编", "postal_code", "text"),
-    EditableField("marketplace_id", "Marketplace ID", "marketplace_id", "text"),
     EditableField("order_total_amount", "订单金额", "order_total_amount", "decimal"),
     EditableField("order_total_currency", "币种", "order_total_currency", "text"),
     EditableField("fulfillment_channel", "履约渠道", "fulfillment_channel", "text"),
     EditableField("purchase_date", "下单时间", "purchase_date", "datetime"),
     EditableField("last_update_date", "最后更新时间", "last_update_date", "datetime"),
-    EditableField("refund_status", "退款状态", "refund_status", "text"),
 )
 
 FIELD_BY_KEY = {field.key: field for field in EDITABLE_FIELDS}
@@ -138,6 +136,7 @@ async def patch_order_header(
         platform_options=platform_options,
         country_options=country_options,
         require_non_empty=False,
+        country_code_only=False,
     )
     if errors:
         raise ValidationFailed("订单编辑校验失败", detail={"errors": [e.model_dump() for e in errors]})
@@ -307,6 +306,7 @@ async def _parse_match_workbook(
             platform_options=platform_options,
             country_options=country_options,
             require_non_empty=True,
+            country_code_only=True,
         )
         errors.extend(row_errors)
         if not row_errors:
@@ -331,6 +331,7 @@ def _normalize_update_values(
     platform_options: set[str],
     country_options: dict[str, str],
     require_non_empty: bool,
+    country_code_only: bool,
 ) -> tuple[dict[str, Any], dict[str, str], list[OrderInfoMatchError]]:
     normalized: dict[str, Any] = {}
     country_overrides: dict[str, str] = {}
@@ -339,6 +340,9 @@ def _normalize_update_values(
         raw_value = raw_updates.get(field.model_field)
         text_value = _string_cell(raw_value)
         if require_non_empty and not text_value:
+            if field.model_field == "postal_code":
+                normalized[field.model_field] = None
+                continue
             errors.append(OrderInfoMatchError(row=row_number, field=field.label, message="该字段不能为空"))
             continue
         if not require_non_empty and raw_value is None:
@@ -355,7 +359,11 @@ def _normalize_update_values(
                     raise ValueError("平台必须存在于当前已落库平台选项")
                 normalized[field.model_field] = text_value
             elif field.kind == "country":
-                code, name = _normalize_country_value(text_value, country_options)
+                if country_code_only:
+                    code = _normalize_country_code_value(text_value)
+                    name = None
+                else:
+                    code, name = _normalize_country_value(text_value, country_options)
                 normalized[field.model_field] = code
                 if name is not None:
                     country_overrides[code] = name
@@ -369,6 +377,13 @@ def _normalize_update_values(
         except ValueError as exc:
             errors.append(OrderInfoMatchError(row=row_number, field=field.label, message=str(exc)))
     return normalized, country_overrides, errors
+
+
+def _normalize_country_code_value(value: str) -> str:
+    code = normalize_observed_country_code(value)
+    if code is None:
+        raise ValueError("国家必须填写有效二字码")
+    return code
 
 
 def _normalize_country_value(value: str, options: dict[str, str]) -> tuple[str, str | None]:

@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from openpyxl import Workbook, load_workbook
 
+from app.core.exceptions import ValidationFailed
 from app.services.order_edit import (
     apply_order_info_match,
     build_template_workbook,
@@ -82,6 +83,12 @@ def test_parse_requested_fields_accepts_keys_and_labels() -> None:
     assert [field.key for field in fields] == ["shop_name", "country_code"]
 
 
+@pytest.mark.parametrize("field", ["marketplace_id", "Marketplace ID", "refund_status", "退款状态"])
+def test_parse_requested_fields_rejects_removed_edit_fields(field: str) -> None:
+    with pytest.raises(ValidationFailed):
+        parse_requested_fields(field)
+
+
 def test_build_template_workbook_has_exact_header_order() -> None:
     fields = parse_requested_fields("shop_name,country_code")
     workbook = load_workbook(build_template_workbook(fields))
@@ -111,6 +118,45 @@ async def test_preview_order_info_match_reports_duplicate_and_missing_order() ->
     assert [error.row for error in result.errors] == [3, 4]
     assert "重复" in result.errors[0].message
     assert result.errors[1].message == "订单号不存在"
+
+
+@pytest.mark.asyncio
+async def test_preview_order_info_match_requires_country_two_letter_code() -> None:
+    content = _workbook_bytes(
+        ["订单号", "国家"],
+        [["ORDER-1", "US - 美国"]],
+    )
+    db = _FakeSession(_base_parse_responses())
+
+    result = await preview_order_info_match(
+        db,  # type: ignore[arg-type]
+        fields=parse_requested_fields("country_code"),
+        content=content,
+    )
+
+    assert result.matched_order_count == 0
+    assert len(result.errors) == 1
+    assert result.errors[0].field == "国家"
+    assert result.errors[0].message == "国家必须填写有效二字码"
+
+
+@pytest.mark.asyncio
+async def test_preview_order_info_match_allows_blank_postal_code_to_clear() -> None:
+    content = _workbook_bytes(
+        ["订单号", "国家", "邮编"],
+        [["ORDER-1", "US", None]],
+    )
+    db = _FakeSession(_base_parse_responses())
+
+    result = await preview_order_info_match(
+        db,  # type: ignore[arg-type]
+        fields=parse_requested_fields("country_code,postal_code"),
+        content=content,
+    )
+
+    assert result.matched_order_count == 1
+    assert result.errors == []
+    assert result.update_fields == ["国家", "邮编"]
 
 
 @pytest.mark.asyncio

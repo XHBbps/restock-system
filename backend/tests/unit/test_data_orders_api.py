@@ -6,8 +6,10 @@ from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
+from pydantic import ValidationError
 
 from app.api import data as data_api
+from app.schemas.data import DataOrderPatch
 
 BEIJING = ZoneInfo("Asia/Shanghai")
 
@@ -56,10 +58,18 @@ class _FakeSession:
     def __init__(self, responses):
         self._responses = list(responses)
         self.statements = []
+        self.committed = False
+        self.refreshed = []
 
     async def execute(self, statement):
         self.statements.append(statement)
         return self._responses.pop(0)
+
+    async def commit(self):
+        self.committed = True
+
+    async def refresh(self, value):
+        self.refreshed.append(value)
 
 
 def _make_row(**overrides):
@@ -288,3 +298,57 @@ async def test_get_order_detail_defaults_to_package_source_and_package_sn_lookup
 
     compiled_params = dict(db.statements[0].compile().params)
     assert "订单处理" in compiled_params.values()
+
+
+def test_data_order_patch_rejects_removed_edit_fields() -> None:
+    with pytest.raises(ValidationError):
+        DataOrderPatch(marketplaceId="ATVPDKIKX0DER")
+
+    with pytest.raises(ValidationError):
+        DataOrderPatch(refundStatus="none")
+
+
+@pytest.mark.asyncio
+async def test_patch_order_detail_allows_clearing_postal_code() -> None:
+    header = _make_row()
+    header.manual_edit_fields = None
+    item = SimpleNamespace(
+        order_item_id="ITEM-1",
+        commodity_sku="SKU-1",
+        seller_sku="SELLER-1",
+        quantity_ordered=2,
+        quantity_shipped=2,
+        quantity_unfulfillable=0,
+        refund_num=0,
+        item_price_currency="USD",
+        item_price_amount=Decimal("10.00"),
+    )
+    db = _FakeSession(
+        [
+            _AllResult([("SHOP-1", "Main Shop")]),
+            _RowsResult(["Amazon"]),
+            _RowsResult(["US"]),
+            _RowsResult([]),
+            _ScalarMaybeResult(header),
+            _RowsResult([item]),
+            _ScalarMaybeResult(None),
+        ]
+    )
+
+    result = await data_api.patch_order_detail(
+        patch=DataOrderPatch(postalCode=""),
+        shop_id="SHOP-1",
+        amazon_order_id="ORDER-1",
+        package_sn="PKG-1",
+        db=db,
+        user=SimpleNamespace(id=7),
+        _=None,
+    )
+
+    assert db.committed is True
+    assert db.refreshed == [header]
+    assert header.postal_code is None
+    assert header.manual_edit_locked is True
+    assert header.manual_edited_by == 7
+    assert header.manual_edit_fields == ["postal_code"]
+    assert result.postal_code is None

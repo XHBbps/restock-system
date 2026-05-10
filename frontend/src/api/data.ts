@@ -52,13 +52,11 @@ export interface DataOrderPatch {
   orderPlatform?: string | null
   countryCode?: string | null
   postalCode?: string | null
-  marketplaceId?: string | null
   orderTotalAmount?: string | number | null
   orderTotalCurrency?: string | null
   fulfillmentChannel?: string | null
   purchaseDate?: string | null
   lastUpdateDate?: string | null
-  refundStatus?: string | null
 }
 
 export interface OrderInfoMatchError {

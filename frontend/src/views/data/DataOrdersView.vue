@@ -256,9 +256,6 @@
             <el-form-item label="邮编">
               <el-input v-model="editForm.postalCode" />
             </el-form-item>
-            <el-form-item label="Marketplace ID">
-              <el-input v-model="editForm.marketplaceId" />
-            </el-form-item>
             <el-form-item label="订单金额">
               <el-input v-model="editForm.orderTotalAmount" />
             </el-form-item>
@@ -282,9 +279,6 @@
                 value-format="YYYY-MM-DD HH:mm:ss"
               />
             </el-form-item>
-            <el-form-item label="退款状态">
-              <el-input v-model="editForm.refundStatus" />
-            </el-form-item>
           </el-form>
         </div>
       </div>
@@ -300,6 +294,7 @@
       width="860px"
       :fullscreen="isMobile"
       class="order-match-dialog"
+      @closed="resetMatchSession"
     >
       <div class="match-body">
         <div class="detail-section">
@@ -327,17 +322,24 @@
         </div>
 
         <div class="detail-section">
-          <div class="section-title">导入预览</div>
+          <div class="section-title">导入校验</div>
           <div class="file-row">
-            <input class="file-input" type="file" accept=".xlsx" @change="handleMatchFileChange" />
+            <input
+              ref="matchFileInput"
+              class="file-input"
+              type="file"
+              accept=".xlsx"
+              @change="handleMatchFileChange"
+            />
             <span class="muted">{{ matchFile ? matchFile.name : '未选择文件' }}</span>
+            <el-button v-if="matchFile" plain size="small" @click="clearMatchFile">x</el-button>
             <el-button
               type="primary"
               :disabled="!matchFile || matchSelectedFields.length === 0"
               :loading="previewLoading"
               @click="previewMatch"
             >
-              预览
+              校验
             </el-button>
           </div>
           <div v-if="matchPreview" class="preview-summary">
@@ -349,7 +351,7 @@
             <el-table-column label="字段" prop="field" width="140" />
             <el-table-column label="原因" prop="message" min-width="260" show-overflow-tooltip />
           </el-table>
-          <el-empty v-else-if="matchPreview" description="预览通过，可以确认导入" />
+          <el-empty v-else-if="matchPreview" description="校验通过，可以确认导入" />
         </div>
       </div>
       <template #footer>
@@ -396,7 +398,7 @@ import { formatDateTime } from '@/utils/format'
 import { normalizeSortOrder, type SortChangeEvent, type SortState } from '@/utils/tableSort'
 import dayjs from 'dayjs'
 import { ElMessage } from 'element-plus'
-import { computed, defineComponent, h, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, defineComponent, h, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 
 const packageStatusOptions = [
   { label: '待审核', value: 'to_audit' },
@@ -412,14 +414,13 @@ const matchFields = [
   { key: 'order_platform', label: '平台' },
   { key: 'country_code', label: '国家' },
   { key: 'postal_code', label: '邮编' },
-  { key: 'marketplace_id', label: 'Marketplace ID' },
   { key: 'order_total_amount', label: '订单金额' },
   { key: 'order_total_currency', label: '币种' },
   { key: 'fulfillment_channel', label: '履约渠道' },
   { key: 'purchase_date', label: '下单时间' },
-  { key: 'last_update_date', label: '最后更新时间' },
-  { key: 'refund_status', label: '退款状态' }
+  { key: 'last_update_date', label: '最后更新时间' }
 ]
+const DEFAULT_MATCH_FIELDS = ['country_code', 'postal_code']
 
 const rows = ref<DataOrderSummary[]>([])
 const { isMobile } = useResponsive()
@@ -459,18 +460,17 @@ const editForm = reactive({
   orderPlatform: '',
   countryCode: '',
   postalCode: '',
-  marketplaceId: '',
   orderTotalAmount: '',
   orderTotalCurrency: '',
   fulfillmentChannel: '',
   purchaseDate: '',
-  lastUpdateDate: '',
-  refundStatus: ''
+  lastUpdateDate: ''
 })
 
 const matchDialogVisible = ref(false)
-const matchSelectedFields = ref<string[]>(matchFields.map((field) => field.key))
+const matchSelectedFields = ref<string[]>([...DEFAULT_MATCH_FIELDS])
 const matchFile = ref<File | null>(null)
+const matchFileInput = ref<HTMLInputElement | null>(null)
 const matchPreview = ref<OrderInfoMatchPreview | null>(null)
 const templateDownloading = ref(false)
 const previewLoading = ref(false)
@@ -521,7 +521,7 @@ const OrderDetailBody = defineComponent({
             'table',
             { class: 'detail-items-table' },
             [
-              h('thead', [h('tr', [h('th', '明细 ID'), h('th', '商品 SKU'), h('th', '下单数')])]),
+              h('thead', [h('tr', [h('th', '订单商品ID'), h('th', '商品 SKU'), h('th', '下单数')])]),
               h(
                 'tbody',
                 props.detail.items.map((item) =>
@@ -666,13 +666,11 @@ function fillEditForm(data: DataOrderDetail): void {
   editForm.orderPlatform = data.orderPlatform || ''
   editForm.countryCode = data.countryCode || ''
   editForm.postalCode = data.postalCode || ''
-  editForm.marketplaceId = data.marketplaceId || ''
   editForm.orderTotalAmount = data.orderTotalAmount || ''
   editForm.orderTotalCurrency = data.orderTotalCurrency || ''
   editForm.fulfillmentChannel = data.fulfillmentChannel || ''
   editForm.purchaseDate = toDateTimeSeconds(data.purchaseDate)
   editForm.lastUpdateDate = toDateTimeSeconds(data.lastUpdateDate)
-  editForm.refundStatus = data.refundStatus || ''
 }
 
 function toDateTimeSeconds(value: string | null | undefined): string {
@@ -688,13 +686,11 @@ async function saveEdit(): Promise<void> {
       orderPlatform: editForm.orderPlatform,
       countryCode: editForm.countryCode,
       postalCode: editForm.postalCode,
-      marketplaceId: editForm.marketplaceId,
       orderTotalAmount: editForm.orderTotalAmount,
       orderTotalCurrency: editForm.orderTotalCurrency,
       fulfillmentChannel: editForm.fulfillmentChannel,
       purchaseDate: editForm.purchaseDate,
-      lastUpdateDate: editForm.lastUpdateDate,
-      refundStatus: editForm.refundStatus
+      lastUpdateDate: editForm.lastUpdateDate
     }
     await updateOrderDetail(
       editDetail.value.shopId,
@@ -715,8 +711,6 @@ async function saveEdit(): Promise<void> {
 
 function openMatchDialog(): void {
   matchDialogVisible.value = true
-  matchPreview.value = null
-  matchFile.value = null
 }
 
 async function downloadTemplate(): Promise<void> {
@@ -732,9 +726,23 @@ async function downloadTemplate(): Promise<void> {
 }
 
 function handleMatchFileChange(event: Event): void {
-  const files = (event.target as HTMLInputElement).files
+  const input = event.target as HTMLInputElement
+  const files = input.files
   matchFile.value = files?.[0] || null
   matchPreview.value = null
+  input.value = ''
+}
+
+function clearMatchFile(): void {
+  matchFile.value = null
+  matchPreview.value = null
+  if (matchFileInput.value) {
+    matchFileInput.value.value = ''
+  }
+}
+
+function resetMatchSession(): void {
+  clearMatchFile()
 }
 
 async function previewMatch(): Promise<void> {
@@ -744,7 +752,7 @@ async function previewMatch(): Promise<void> {
     matchPreview.value = await previewOrderInfoMatch(matchFile.value, matchSelectedFields.value)
   } catch (err) {
     matchPreview.value = null
-    ElMessage.error(getActionErrorMessage(err, '预览失败'))
+    ElMessage.error(getActionErrorMessage(err, '校验失败'))
   } finally {
     previewLoading.value = false
   }
@@ -832,6 +840,14 @@ onMounted(() => {
   void loadPlatformOptions()
   void reload()
 })
+
+watch(
+  matchSelectedFields,
+  () => {
+    matchPreview.value = null
+  },
+  { deep: true }
+)
 
 onBeforeUnmount(() => {
   clearSkuReloadTimer()

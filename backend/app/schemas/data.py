@@ -114,13 +114,11 @@ class DataOrderPatch(SaihuLikeModel):
     order_platform: str | None = None
     country_code: str | None = None
     postal_code: str | None = None
-    marketplace_id: str | None = None
     order_total_amount: Decimal | None = None
     order_total_currency: str | None = None
     fulfillment_channel: str | None = None
     purchase_date: datetime | None = None
     last_update_date: datetime | None = None
-    refund_status: str | None = None
 
 
 class OrderInfoMatchError(BaseModel):

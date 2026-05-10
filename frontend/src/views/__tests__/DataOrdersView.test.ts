@@ -416,8 +416,24 @@ describe('DataOrdersView', () => {
     await flushPromises()
 
     expect(mockDownloadTemplate).toHaveBeenCalledWith(
-      expect.arrayContaining(['shop_name', 'country_code'])
+      expect.arrayContaining(['country_code', 'postal_code'])
+    )
+    expect(mockDownloadTemplate).not.toHaveBeenCalledWith(
+      expect.arrayContaining(['marketplace_id', 'refund_status'])
     )
     expect(mockTriggerBlobDownload).toHaveBeenCalled()
+  })
+
+  it('uses validation wording and hides removed edit/import fields', async () => {
+    mockHasPermission.mockReturnValue(true)
+    const { default: View } = await import('../data/DataOrdersView.vue')
+    const wrapper = shallowMount(View, { global: GLOBAL_CONFIG })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('导入校验')
+    expect(wrapper.text()).toContain('校验')
+    expect(wrapper.text()).not.toContain('导入预览')
+    expect(wrapper.text()).not.toContain('Marketplace ID')
+    expect(wrapper.text()).not.toContain('退款状态')
   })
 })
