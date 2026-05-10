@@ -110,15 +110,8 @@ class DataOrderPatch(SaihuLikeModel):
         extra="forbid",
     )
 
-    shop_name: str | None = None
-    order_platform: str | None = None
     country_code: str | None = None
     postal_code: str | None = None
-    order_total_amount: Decimal | None = None
-    order_total_currency: str | None = None
-    fulfillment_channel: str | None = None
-    purchase_date: datetime | None = None
-    last_update_date: datetime | None = None
 
 
 class OrderInfoMatchError(BaseModel):

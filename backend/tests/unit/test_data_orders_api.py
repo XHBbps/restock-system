@@ -301,11 +301,22 @@ async def test_get_order_detail_defaults_to_package_source_and_package_sn_lookup
 
 
 def test_data_order_patch_rejects_removed_edit_fields() -> None:
-    with pytest.raises(ValidationError):
-        DataOrderPatch(marketplaceId="ATVPDKIKX0DER")
+    assert DataOrderPatch(countryCode="US").country_code == "US"
+    assert DataOrderPatch(postalCode="").postal_code == ""
 
-    with pytest.raises(ValidationError):
-        DataOrderPatch(refundStatus="none")
+    for payload in (
+        {"shopName": "Main Shop"},
+        {"orderPlatform": "Amazon"},
+        {"orderTotalAmount": "10.00"},
+        {"orderTotalCurrency": "USD"},
+        {"fulfillmentChannel": "AFN"},
+        {"purchaseDate": "2026-05-09T10:00:00+08:00"},
+        {"lastUpdateDate": "2026-05-09T10:00:00+08:00"},
+        {"marketplaceId": "ATVPDKIKX0DER"},
+        {"refundStatus": "none"},
+    ):
+        with pytest.raises(ValidationError):
+            DataOrderPatch(**payload)
 
 
 def test_order_info_match_preview_serializes_matched_order_ids() -> None:
@@ -337,8 +348,6 @@ async def test_patch_order_detail_allows_clearing_postal_code() -> None:
     )
     db = _FakeSession(
         [
-            _AllResult([("SHOP-1", "Main Shop")]),
-            _RowsResult(["Amazon"]),
             _RowsResult(["US"]),
             _RowsResult([]),
             _ScalarMaybeResult(header),

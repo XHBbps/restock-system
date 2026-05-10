@@ -458,12 +458,7 @@ describe('DataOrdersView', () => {
     await wrapper.findAll('button').find((button) => button.text() === '导出空模板')?.trigger('click')
     await flushPromises()
 
-    expect(mockDownloadTemplate).toHaveBeenCalledWith(
-      expect.arrayContaining(['country_code', 'postal_code'])
-    )
-    expect(mockDownloadTemplate).not.toHaveBeenCalledWith(
-      expect.arrayContaining(['marketplace_id', 'refund_status'])
-    )
+    expect(mockDownloadTemplate).toHaveBeenCalledWith(['country_code', 'postal_code'])
     expect(mockTriggerBlobDownload).toHaveBeenCalled()
   })
 
@@ -476,8 +471,26 @@ describe('DataOrdersView', () => {
     expect(wrapper.text()).toContain('导入校验')
     expect(wrapper.text()).toContain('校验')
     expect(wrapper.text()).not.toContain('导入预览')
-    expect(wrapper.text()).not.toContain('Marketplace ID')
-    expect(wrapper.text()).not.toContain('退款状态')
+    const matchFieldText = wrapper.find('.field-grid').text()
+    expect(matchFieldText).toContain('国家')
+    expect(matchFieldText).toContain('邮编')
+    expect(matchFieldText).not.toContain('店铺名称')
+    expect(matchFieldText).not.toContain('平台')
+    expect(matchFieldText).not.toContain('订单金额')
+    expect(matchFieldText).not.toContain('币种')
+    expect(matchFieldText).not.toContain('履约渠道')
+    expect(matchFieldText).not.toContain('下单时间')
+    expect(matchFieldText).not.toContain('最后更新时间')
+
+    await (wrapper.vm as unknown as { openEdit: (row: unknown) => Promise<void> }).openEdit(
+      buildOrdersResponse().items[0]
+    )
+    await flushPromises()
+    expect(
+      Object.keys(
+        (wrapper.vm as unknown as { editForm: Record<string, string> }).editForm
+      ).sort()
+    ).toEqual(['countryCode', 'postalCode'])
   })
 
   it('renders compact successful match validation result and enables apply', async () => {
@@ -570,6 +583,26 @@ describe('DataOrdersView', () => {
 
     expect(mockUpdateOrderDetail).toHaveBeenCalledWith('SHOP-1', 'ORDER-1', 'PKG-1', {
       postalCode: '11'
+    })
+  })
+
+  it('submits only changed country when editing order', async () => {
+    mockHasPermission.mockReturnValue(true)
+    mockGetOrderDetail.mockResolvedValue(buildOrderDetail({ countryCode: 'US' }))
+    const { default: View } = await import('../data/DataOrdersView.vue')
+    const wrapper = shallowMount(View, { global: GLOBAL_CONFIG })
+    await flushPromises()
+
+    await (wrapper.vm as unknown as { openEdit: (row: unknown) => Promise<void> }).openEdit(
+      buildOrdersResponse().items[0]
+    )
+    await flushPromises()
+    ;(wrapper.vm as unknown as { editForm: { countryCode: string } }).editForm.countryCode = 'CA'
+    await (wrapper.vm as unknown as { saveEdit: () => Promise<void> }).saveEdit()
+    await flushPromises()
+
+    expect(mockUpdateOrderDetail).toHaveBeenCalledWith('SHOP-1', 'ORDER-1', 'PKG-1', {
+      countryCode: 'CA'
     })
   })
 

@@ -48,15 +48,8 @@ export interface DataOrderDetail extends Omit<DataOrderSummary, 'hasDetail' | 'i
 }
 
 export interface DataOrderPatch {
-  shopName?: string | null
-  orderPlatform?: string | null
   countryCode?: string | null
   postalCode?: string | null
-  orderTotalAmount?: string | number | null
-  orderTotalCurrency?: string | null
-  fulfillmentChannel?: string | null
-  purchaseDate?: string | null
-  lastUpdateDate?: string | null
 }
 
 export interface OrderInfoMatchError {

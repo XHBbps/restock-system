@@ -305,16 +305,6 @@
             <el-form-item label="包裹状态">
               <el-input :model-value="statusLabel(editDetail.packageStatus || editDetail.orderStatus)" disabled />
             </el-form-item>
-            <el-form-item label="店铺名称">
-              <el-select v-model="editForm.shopName" filterable>
-                <el-option v-for="s in shopOptions" :key="s.id" :label="s.name" :value="s.name" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="平台">
-              <el-select v-model="editForm.orderPlatform" filterable>
-                <el-option v-for="platform in platformOptions" :key="platform" :label="platform" :value="platform" />
-              </el-select>
-            </el-form-item>
             <el-form-item label="国家">
               <el-select v-model="editForm.countryCode" filterable allow-create default-first-option>
                 <el-option v-for="c in countryOptions" :key="c.code" :label="c.label" :value="c.code" />
@@ -322,29 +312,6 @@
             </el-form-item>
             <el-form-item label="邮编">
               <el-input v-model="editForm.postalCode" />
-            </el-form-item>
-            <el-form-item label="订单金额">
-              <el-input v-model="editForm.orderTotalAmount" />
-            </el-form-item>
-            <el-form-item label="币种">
-              <el-input v-model="editForm.orderTotalCurrency" />
-            </el-form-item>
-            <el-form-item label="履约渠道">
-              <el-input v-model="editForm.fulfillmentChannel" />
-            </el-form-item>
-            <el-form-item label="下单时间">
-              <el-date-picker
-                v-model="editForm.purchaseDate"
-                type="datetime"
-                value-format="YYYY-MM-DD HH:mm:ss"
-              />
-            </el-form-item>
-            <el-form-item label="最后更新时间">
-              <el-date-picker
-                v-model="editForm.lastUpdateDate"
-                type="datetime"
-                value-format="YYYY-MM-DD HH:mm:ss"
-              />
             </el-form-item>
           </el-form>
         </div>
@@ -515,7 +482,6 @@ import { triggerBlobDownload } from '@/utils/download'
 import type { TagType } from '@/utils/element'
 import { formatDateTime } from '@/utils/format'
 import { normalizeSortOrder, type SortChangeEvent, type SortState } from '@/utils/tableSort'
-import dayjs from 'dayjs'
 import { ElMessage } from 'element-plus'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 
@@ -529,15 +495,8 @@ const packageStatusOptions = [
 ]
 
 const matchFields = [
-  { key: 'shop_name', label: '店铺名称' },
-  { key: 'order_platform', label: '平台' },
   { key: 'country_code', label: '国家' },
-  { key: 'postal_code', label: '邮编' },
-  { key: 'order_total_amount', label: '订单金额' },
-  { key: 'order_total_currency', label: '币种' },
-  { key: 'fulfillment_channel', label: '履约渠道' },
-  { key: 'purchase_date', label: '下单时间' },
-  { key: 'last_update_date', label: '最后更新时间' }
+  { key: 'postal_code', label: '邮编' }
 ]
 const DEFAULT_MATCH_FIELDS = ['country_code', 'postal_code']
 
@@ -575,15 +534,8 @@ const editDialogVisible = ref(false)
 const editDetail = ref<DataOrderDetail | null>(null)
 const editSaving = ref(false)
 const editForm = reactive({
-  shopName: '',
-  orderPlatform: '',
   countryCode: '',
-  postalCode: '',
-  orderTotalAmount: '',
-  orderTotalCurrency: '',
-  fulfillmentChannel: '',
-  purchaseDate: '',
-  lastUpdateDate: ''
+  postalCode: ''
 })
 type EditFormSnapshot = typeof editForm
 const editOriginalSnapshot = ref<EditFormSnapshot | null>(null)
@@ -740,20 +692,9 @@ function fillEditForm(data: DataOrderDetail): void {
 
 function buildEditSnapshot(data: DataOrderDetail): EditFormSnapshot {
   return {
-    shopName: data.shopName || '',
-    orderPlatform: data.orderPlatform || '',
     countryCode: data.countryCode || '',
-    postalCode: data.postalCode || '',
-    orderTotalAmount: data.orderTotalAmount || '',
-    orderTotalCurrency: data.orderTotalCurrency || '',
-    fulfillmentChannel: data.fulfillmentChannel || '',
-    purchaseDate: toDateTimeSeconds(data.purchaseDate),
-    lastUpdateDate: toDateTimeSeconds(data.lastUpdateDate)
+    postalCode: data.postalCode || ''
   }
-}
-
-function toDateTimeSeconds(value: string | null | undefined): string {
-  return value ? dayjs(value).format('YYYY-MM-DD HH:mm:ss') : ''
 }
 
 async function saveEdit(): Promise<void> {
@@ -786,15 +727,8 @@ function buildChangedEditPayload(): DataOrderPatch {
   const original = editOriginalSnapshot.value
   if (!original) return {}
   const fieldMap = {
-    shopName: 'shopName',
-    orderPlatform: 'orderPlatform',
     countryCode: 'countryCode',
-    postalCode: 'postalCode',
-    orderTotalAmount: 'orderTotalAmount',
-    orderTotalCurrency: 'orderTotalCurrency',
-    fulfillmentChannel: 'fulfillmentChannel',
-    purchaseDate: 'purchaseDate',
-    lastUpdateDate: 'lastUpdateDate'
+    postalCode: 'postalCode'
   } as const
   const payload: DataOrderPatch = {}
   for (const key of Object.keys(fieldMap) as Array<keyof typeof fieldMap>) {

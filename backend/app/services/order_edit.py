@@ -41,15 +41,8 @@ class EditableField:
 
 
 EDITABLE_FIELDS: tuple[EditableField, ...] = (
-    EditableField("shop_name", "店铺名称", "shop_name", "shop"),
-    EditableField("order_platform", "平台", "order_platform", "platform"),
     EditableField("country_code", "国家", "country_code", "country"),
     EditableField("postal_code", "邮编", "postal_code", "text"),
-    EditableField("order_total_amount", "订单金额", "order_total_amount", "decimal"),
-    EditableField("order_total_currency", "币种", "order_total_currency", "text"),
-    EditableField("fulfillment_channel", "履约渠道", "fulfillment_channel", "text"),
-    EditableField("purchase_date", "下单时间", "purchase_date", "datetime"),
-    EditableField("last_update_date", "最后更新时间", "last_update_date", "datetime"),
 )
 
 FIELD_BY_KEY = {field.key: field for field in EDITABLE_FIELDS}
@@ -125,15 +118,11 @@ async def patch_order_header(
     if not updates:
         raise ValidationFailed("没有提交任何可更新字段")
 
-    shop_map = await _load_shop_map(db)
-    platform_options = await _load_platform_options(db)
     country_options = await _load_country_options(db)
     normalized, country_overrides, errors = _normalize_update_values(
         updates,
         fields=[FIELD_BY_MODEL[key] for key in updates],
         row_number=0,
-        shop_map=shop_map,
-        platform_options=platform_options,
         country_options=country_options,
         require_non_empty=False,
         country_code_only=False,
@@ -249,8 +238,6 @@ async def _parse_match_workbook(
             },
         )
 
-    shop_map = await _load_shop_map(db)
-    platform_options = await _load_platform_options(db)
     country_options = await _load_country_options(db)
     all_order_ids = set(
         (
@@ -304,8 +291,6 @@ async def _parse_match_workbook(
             raw_updates,
             fields=fields,
             row_number=row_number,
-            shop_map=shop_map,
-            platform_options=platform_options,
             country_options=country_options,
             require_non_empty=True,
             country_code_only=True,
@@ -329,8 +314,6 @@ def _normalize_update_values(
     *,
     fields: list[EditableField],
     row_number: int,
-    shop_map: dict[str, str],
-    platform_options: set[str],
     country_options: dict[str, str],
     require_non_empty: bool,
     country_code_only: bool,
@@ -351,16 +334,7 @@ def _normalize_update_values(
             normalized[field.model_field] = None
             continue
         try:
-            if field.kind == "shop":
-                canonical = shop_map.get(text_value)
-                if canonical is None:
-                    raise ValueError("店铺名称必须匹配现有店铺名称或店铺 ID")
-                normalized[field.model_field] = canonical
-            elif field.kind == "platform":
-                if text_value not in platform_options:
-                    raise ValueError("平台必须存在于当前已落库平台选项")
-                normalized[field.model_field] = text_value
-            elif field.kind == "country":
+            if field.kind == "country":
                 if country_code_only:
                     code = _normalize_country_code_value(text_value)
                     name = None
