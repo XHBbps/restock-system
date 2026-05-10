@@ -2,7 +2,7 @@
 
 from collections.abc import Iterable
 
-from app.core.countries import normalize_observed_country_code
+from app.core.countries import is_reportable_country_code, normalize_observed_country_code
 
 
 def normalize_restock_regions(value: Iterable[str] | None) -> list[str]:
@@ -29,4 +29,4 @@ def resolve_allowed_restock_regions(value: Iterable[str] | None) -> set[str] | N
     normalized = normalize_restock_regions(value)
     if not normalized:
         return None
-    return set(normalized)
+    return {code for code in normalized if is_reportable_country_code(code)}

@@ -73,6 +73,22 @@ def test_compute_sale_days_does_not_create_inventory_only_country() -> None:
     assert sale_days == {"sku-A": {"US": 2.0}}
 
 
+def test_compute_sale_days_excludes_unknown_and_invalid_countries() -> None:
+    sale_days = compute_sale_days(
+        velocity={"sku-A": {"US": 4.0, "ZZ": 4.0, "": 4.0, "USA": 4.0}},
+        inventory={
+            "sku-A": {
+                "US": InventoryStock(available=8, reserved=0, in_transit=0),
+                "ZZ": InventoryStock(available=100, reserved=0, in_transit=0),
+                "": InventoryStock(available=100, reserved=0, in_transit=0),
+                "USA": InventoryStock(available=100, reserved=0, in_transit=0),
+            }
+        },
+    )
+
+    assert sale_days == {"sku-A": {"US": 2.0}}
+
+
 @pytest.mark.asyncio
 async def test_load_in_transit_reads_synced_tables_and_aggregates_goods() -> None:
     db = _FakeDb(

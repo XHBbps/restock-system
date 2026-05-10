@@ -106,14 +106,16 @@
 
 | Step | 文件 | 输入 | 输出 | 规则 |
 |---|---|---|---|---|
-| 1 | `step1_velocity.py` | 近 30 天订单处理列表订单 | `velocity[sku][country]` | 加权日均销量：7日×0.5 + 14日×0.3 + 30日×0.2；仅消费 `source='订单处理'`、`package_status!='has_canceled'` 且 `country_code!='ZZ'` 的包裹订单；有效数量为 `max(quantity_ordered, 0)`；若 `global_config.restock_regions` 非空，仅这些国家参与补货国家维度计算 |
-| 2 | `step2_sale_days.py` | 库存 + 在途 + velocity + SKU 映射规则 | `sale_days[sku][country]` | `(available + reserved + in_transit) / velocity`；启用映射规则会先将库存组件 SKU 解析到共享组身份，再在同仓库、同组件维度按该国家 velocity 分配共享库存，最后按组合短板换算商品 SKU 视角库存，跨组合替代方案求和；velocity≤0 跳过 |
-| 3 | `step3_country_qty.py` | velocity + 库存 + 有效目标库存天数 | `country_qty[sku][country]` | `effective_target_days = target_days + max(demand_date - today, 0)`；`max(0, ceil(effective_target_days × velocity - (available + reserved + in_transit)))` |
+| 1 | `step1_velocity.py` | 近 30 天订单处理列表订单 | `velocity[sku][country]` | 加权日均销量：7日×0.5 + 14日×0.3 + 30日×0.2；仅消费 `source='订单处理'`、`package_status!='has_canceled'` 且国家码可统计的包裹订单；有效数量为 `max(quantity_ordered, 0)`；若 `global_config.restock_regions` 非空，仅这些国家参与补货国家维度计算 |
+| 2 | `step2_sale_days.py` | 库存 + 在途 + velocity + SKU 映射规则 | `sale_days[sku][country]` | `(available + reserved + in_transit) / velocity`；启用映射规则会先将库存组件 SKU 解析到共享组身份，再在同仓库、同组件维度按该国家 velocity 分配共享库存，最后按组合短板换算商品 SKU 视角库存，跨组合替代方案求和；velocity≤0 或国家码不可统计时跳过 |
+| 3 | `step3_country_qty.py` | velocity + 库存 + 有效目标库存天数 | `country_qty[sku][country]` | `effective_target_days = target_days + max(demand_date - today, 0)`；仅对可统计国家输出 `max(0, ceil(effective_target_days × velocity - (available + reserved + in_transit)))` |
 | 4 | `step4_total.py` | country_qty + velocity + 国内库存 + safety_stock_days | `purchase_qty[sku]` | `max(0, Σcountry_qty − (local.available + local.reserved) + ceil(Σvelocity × safety_stock_days))`；`Σcountry_qty` 使用 Step 3 的补货日期口径，`Σvelocity` 覆盖所有国家，不受 `restock_regions` 限制；`buffer_days` 不参与采购量 |
-| 5 | `step5_warehouse_split.py` | country_qty + 有效包裹订单 + 订单头邮编 + 邮编规则 + 国家规则仓映射 | `warehouse_breakdown[country][wh_id]` | 样本来自 `source='订单处理'`、`package_status!='has_canceled'` 且 `country_code!='ZZ'` 的包裹订单，样本数量为 `max(quantity_ordered, 0)`；邮编优先读取 `order_header.postal_code`；按邮编规则分配到具体仓库，已知部分按命中比例分配，未知部分按该国家已配置邮编规则的仓均分；仅规则仓参与分仓与均分兜底；若无规则仓则该国家不分仓；若配置 `restock_regions`，仅消费这些国家的订单作为分仓依据；同优先级 tied 均分；整数分配使用 floor + 最大余数法，保证仓内合计等于国家补货量 |
+| 5 | `step5_warehouse_split.py` | country_qty + 有效包裹订单 + 订单头邮编 + 邮编规则 + 国家规则仓映射 | `warehouse_breakdown[country][wh_id]` | 样本来自 `source='订单处理'`、`package_status!='has_canceled'` 且国家码可统计的包裹订单，样本数量为 `max(quantity_ordered, 0)`；邮编优先读取 `order_header.postal_code`；按邮编规则分配到具体仓库，已知部分按命中比例分配，未知部分按该国家已配置邮编规则的仓均分；仅规则仓参与分仓与均分兜底；若无规则仓则该国家不分仓；若配置 `restock_regions`，仅消费这些国家的订单作为分仓依据；同优先级 tied 均分；整数分配使用 floor + 最大余数法，保证仓内合计等于国家补货量 |
 | 6 | `step6_timing.py` | sale_days + lead_time + country_qty | `urgent` + `restock_dates` | `urgent` 仍按任一正补货国家 `sale_days <= lead_time_days`；`restock_date[sku][country] = today + int(sale_days[sku][country]) − lead_time_days`，仅对正补货国家输出，缺少 sale_days 时记为 `null` |
 
 **运行上下文**：`EngineContext` 包含 `target_days`、`buffer_days`、`lead_time_days`、`safety_stock_days`、`restock_regions`、`eu_countries` 和本次请求的补货日期 `demand_date`。runner 会计算 `demand_days=max(demand_date - today, 0)` 并传给 Step 3 形成有效目标库存天数；`buffer_days` 作为全局配置快照保留，但当前仅用于追溯，不参与 `purchase_qty` 或 `restock_dates` 计算；`restock_regions` 保存前会走统一国家码标准化，`UK` 等别名按 ISO 代码去重为 `GB`；`global_config.eu_countries` 由同步层消费，保存该配置且实际变化时会同步回填历史订单、库存与在途国家码，`global_config_snapshot` 会冻结这些全局参数与 `demand_date` 以便追溯。
+
+**可统计国家边界**：`backend/app/core/countries.py` 统一定义可统计国家，空值、非法国家码和内部哨兵 `ZZ` 均不可进入补货计算与信息总览统计。runner 会在 Step 1/2/3 结果和 Step 5 输入后再次过滤，保证新生成建议单的 `velocity_snapshot`、`sale_days_snapshot`、`country_breakdown`、`warehouse_breakdown`、`allocation_snapshot` 与 `restock_dates` 不包含 `ZZ` 或空/非法国家。
 
 **SKU 映射转换层**：`backend/app/engine/sku_mapping.py` 只在计算读取阶段消费 `sku_mapping_rule` / `sku_mapping_component`，不会改写同步落库的 `inventory_snapshot_latest`、`in_transit_record` 或库存明细展示。`sku_mapping_component.group_no` 表示替代组合编号：同一 `commodity_sku` 下相同 `group_no` 的组件是 AND，不同 `group_no` 是 OR。`A=2*B` 按同仓库 `floor(B/2)` 计算，`A=1*B+2*C` 按同仓库 `min(floor(B/1), floor(C/2))` 计算，`A=B 或 C 或 D` 按同仓库各单组件组合可组装数求和，`A=B+C+D 或 E+F+G` 则两个组合分别取最小组件数后求和；组件不能跨仓库、跨国家组合。不同商品规则可以共享同一个库存 SKU，计算时先把库存组件 SKU 解析到共享组身份，再在每个仓库、每个共享组件 SKU 内按启用商品规则分配组件库存，避免重复计入；同一商品下 `A=B+C+D` 与 `A=E+F+D` 若经共享组解析后组件集合完全等价，会折叠为一个替代方案，避免重复计算同一批库存。Step 2 使用仓库所在国家的 `velocity[sku][country]` 作为分配权重，Step 4 使用 SKU 全国家 velocity 合计作为本地仓分配权重，若任一共享商品没有正销量信号则该组件在共享商品间均分。Step 2 会把海外仓库存和有目标仓库 ID 的组件在途合并后按上述规则计算可组装数量，再按国家汇总到商品 SKU；Step 4 会按国内仓同仓库组件库存按上述规则计算可组装数量，再汇总为本地商品 SKU 库存。停用规则保留但不参与计算；未映射且不等于商品 SKU 的库存 SKU 不进入补货计算。
 
@@ -121,7 +123,7 @@
 
 **持久化**：一次完整计算在事务内执行，受 `pg_advisory_xact_lock(7429001)` 保护；runner 不再按 `restock_dates[country] <= demand_date` 过滤补货国家，补货国家是否进入本次建议只由 Step 3 的正补货量与 `restock_regions` 白名单决定。若 `purchase_qty <= 0` 且国家补货合计为 0，则跳过该 SKU；若仅安全库存触发采购但无国家补货量，仍保留为采购-only 条目，并保持 `country_breakdown` / `warehouse_breakdown` / `allocation_snapshot` / `restock_dates` 为空、`total_qty=0`、`urgent=false`；若无条目则返回 `None`，不归档旧 `draft`、不关闭生成开关、不生成空建议单；成功生成非空建议单后才归档旧 `draft`，写入 `suggestion` / `suggestion_item`，统计 `procurement_item_count`、`restock_item_count`，并由 `calc_engine_job` 将 `global_config.suggestion_generation_enabled` 自动翻 OFF。
 
-**快照字段**：`velocity_snapshot`、`sale_days_snapshot`、`allocation_snapshot`、`global_config_snapshot` 均以 JSONB 保存；其中 `velocity_snapshot` / `sale_days_snapshot` 保留完整 SKU 追溯数据，`global_config_snapshot.demand_date` 记录业务补货日期；`suggestion_item.purchase_qty` 用于采购视图，`country_breakdown` / `warehouse_breakdown` 用于补货视图，`restock_dates` 用于追溯、紧急程度判断与 Excel 导出（前端当前列表不展示）。
+**快照字段**：`velocity_snapshot`、`sale_days_snapshot`、`allocation_snapshot`、`global_config_snapshot` 均以 JSONB 保存；其中 `velocity_snapshot` / `sale_days_snapshot` 保留已通过可统计国家过滤的 SKU 追溯数据，`global_config_snapshot.demand_date` 记录业务补货日期；`suggestion_item.purchase_qty` 用于采购视图，`country_breakdown` / `warehouse_breakdown` 用于补货视图，`restock_dates` 用于追溯、紧急程度判断与 Excel 导出（前端当前列表不展示）。
 
 ### 3.2 数据同步层（app/sync）
 
@@ -150,7 +152,7 @@ async def sync_inventory_job(ctx: JobContext) -> None:
 
 **商品主数据同步**：`sync_product_listing` 是商品同步统一 job。它先通过 `backend/app/saihu/endpoints/commodity.py` 调用赛狐 SKU 主数据接口 `/api/commodity/pageList.json`，不传 `state` 或 `isGroup` 过滤，按 `sku` UPSERT 到 `commodity_master`；随后继续调用在线产品 listing 接口 `/api/order/api/product/pageList.json` 写入 `product_listing`，保留店铺、站点、sellerSku 与近 7/14/30 天销量用于商品页展开明细。同步过程中只为新发现 SKU 补建 `sku_config(enabled=true)`，不覆盖已有 `enabled`、`lead_time_days`，因此后续人工禁用不会被商品同步重新打开；商品状态 `state` 与 SKU 类型 `is_group` 仅作展示/筛选信息，不自动影响补货计算。商品概览通过 `SkuConfig.commodity_sku -> CommodityMaster.sku` 定位 SKU 主数据，再用同一个 SKU 查询 `ProductListing.commodity_sku` 关联在线产品。`run_engine` 仍只消费 `sku_config.enabled=true` 的 SKU。
 
-**EU 国家归一化与新国家发现**：同步层写入订单、商品、库存、出库在途数据时，会按 `global_config.eu_countries` 将成员国映射为字面值 `EU`，并在对应 `original_*` 字段保留原国家码。进入国家选项、成员国配置和补货区域配置的国家码先执行 `trim + uppercase + 两位字母校验 + 别名标准化`，当前 `UK` 统一标准化为 ISO 代码 `GB`。订单处理列表只读取响应顶层 `marketplace` 作为国家来源；该值缺失或无法识别时写内部哨兵 `ZZ` 并记录结构化日志，不再从地址、店铺名或平台名猜测国家；`ZZ` 不暴露为前端国家选项，也不进入 Step 1 / Step 5 补货计算；有效国家码若属于 `eu_countries` 则归并为 `EU` 并在 `original_country_code` 保存原码。全局配置接口保存 `eu_countries` 且实际变化时，会在同一事务内调用 `backfill_eu_country_mapping()` 回填本地历史 `order_header`、`inventory_snapshot_latest`、`in_transit_record`：源国家优先取各表 `original_*` 字段，否则取当前国家字段，并先按同一别名表标准化；源国家属于当前 EU 集合时写映射后国家为 `EU` 且 `original_* = 标准化源国家`，否则恢复为标准化源国家并清空 `original_*`。该回填只改本地库，不调用赛狐 API。
+**EU 国家归一化与新国家发现**：同步层写入订单、商品、库存、出库在途数据时，会按 `global_config.eu_countries` 将成员国映射为字面值 `EU`，并在对应 `original_*` 字段保留原国家码。进入国家选项、成员国配置和补货区域配置的国家码先执行 `trim + uppercase + 两位字母校验 + 别名标准化`，当前 `UK` 统一标准化为 ISO 代码 `GB`。订单处理列表只读取响应顶层 `marketplace` 作为国家来源；该值缺失或无法识别时写内部哨兵 `ZZ` 并记录结构化日志，不再从地址、店铺名或平台名猜测国家；`ZZ` 不暴露为前端国家选项，也不进入补货计算或信息总览统计，空值与非法国家码同样被视为不可统计国家；有效国家码若属于 `eu_countries` 则归并为 `EU` 并在 `original_country_code` 保存原码。全局配置接口保存 `eu_countries` 且实际变化时，会在同一事务内调用 `backfill_eu_country_mapping()` 回填本地历史 `order_header`、`inventory_snapshot_latest`、`in_transit_record`：源国家优先取各表 `original_*` 字段，否则取当前国家字段，并先按同一别名表标准化；源国家属于当前 EU 集合时写映射后国家为 `EU` 且 `original_* = 标准化源国家`，否则恢复为标准化源国家并清空 `original_*`。该回填只改本地库，不调用赛狐 API。
 
 **动态国家选项**：`GET /api/config/country-options` 汇总内置常见国家、`country_name_override` 人工国家名称覆盖与数据库已观测国家，观测来源包括订单 `country_code/original_country_code`、仓库 `country`、库存 `country/original_country`、出库 `target_country/original_target_country`。观测值会先走统一标准化，因此历史 `UK` 只会以 `GB` 输出；接口返回 `builtin`、`observed`、`can_be_eu_member` 与 `unknown_country_codes`，但会隐藏内部哨兵 `ZZ`，即使历史订单已观测到 `ZZ` 也不会出现在 `items` 或 `unknown_country_codes`；订单信息匹配或编辑输入 `XX - 中文名` 时会写入覆盖表，后续所有动态国家下拉展示该中文名；前端订单、库存、出库、仓库、邮编规则、补货区域和 EU 成员国配置均消费该接口；EU 成员国配置不允许 `EU` 与 `ZZ`。内置国家名包含 `GB - 英国`、`CZ - 捷克`、`RO - 罗马尼亚`，以及订单处理列表新观测到的 `AT - 奥地利`、`CH - 瑞士`、`CY - 塞浦路斯`、`DK - 丹麦`、`EE - 爱沙尼亚`、`FI - 芬兰`、`LT - 立陶宛`、`LV - 拉脱维亚`、`MT - 马耳他`、`SI - 斯洛文尼亚`。
 
@@ -468,9 +470,9 @@ async function reload() {
 
 **信息总览页口径**：
 - `WorkspaceView` 首行卡片展示补货概览：`restock_sku_count` 为按当前补货引擎口径计算后 `total_qty > 0` 的启用 SKU 数，`no_restock_sku_count` 为其余启用 SKU 数，`risk_country_count` 表示当前快照中按 `restock_regions` 过滤后进入风险分层的国家数
-- 左图使用分组柱状图展示各国缺货风险分布，统计对象是实时计算后写入 `dashboard_snapshot.payload.country_risk_distribution` 的 SKU+国家数量，而不是当前建议单快照；若 `restock_regions=[]` 则展示全部国家，若配置为 `["EU"]` 则只展示 `EU`
-- “急需补货SKU”列表同样使用快照中的国家级 `sale_days`，并与风险分布使用同一 `restock_regions` 过滤口径；一行只表示一个 SKU 在一个国家上的风险，不再按 SKU 聚合
-- 右图继续使用饼图，数据仍为 `country_restock_distribution`，即当前建议单全部条目的 `country_breakdown` 汇总，用于展示实际建议补货量的国家分布
+- 左图使用分组柱状图展示各国缺货风险分布，统计对象是实时计算后写入 `dashboard_snapshot.payload.country_risk_distribution` 的 SKU+国家数量，而不是当前建议单快照；若 `restock_regions=[]` 则展示全部可统计国家，若配置为 `["EU"]` 则只展示 `EU`；空值、非法国家码和 `ZZ` 不计入 `urgent_count` / `warning_count` / `safe_count`
+- “急需补货SKU”列表同样使用快照中的国家级 `sale_days`，并与风险分布使用同一 `restock_regions` 与可统计国家过滤口径；一行只表示一个 SKU 在一个国家上的风险，不再按 SKU 聚合；手机端三列 grid 固定商品、国家、可售天数列宽
+- 右图继续使用饼图，数据仍为 `country_restock_distribution`，即当前建议单全部可统计国家条目的 `country_breakdown` 汇总，用于展示实际建议补货量的国家分布
 
 **建议单与全局配置视图职责**：
 
@@ -961,6 +963,7 @@ VITE_API_PROXY_TARGET=http://localhost:8000
 | 2026-05-09 | 订单页新增单条编辑与 Excel 信息匹配；`order_header` 人工编辑锁保护同步覆盖；动态国家选项支持 `country_name_override` 人工中文名 | PROGRESS.md §3.107 |
 | 2026-05-05 | 订单处理列表明细数量只读取 `items.quantityOrdered`；Step 1 销量与 Step 5 分仓样本统一使用 `quantity_ordered` | PROGRESS.md §3.104 |
 | 2026-05-05 | 订单缺失国家继续以内部 `ZZ` 落库，但前端显示为 `-`，动态国家选项隐藏 `ZZ`，Step 1 / Step 5 固定排除 `ZZ` 订单 | PROGRESS.md §3.105 |
+| 2026-05-10 | 空值、非法国家码和内部 `ZZ` 统一视为不可统计国家，补货计算链路与信息总览快照/API 返回均过滤这些国家；信息总览移动端导航按钮和急需补货 SKU 三列布局修复 | PROGRESS.md §3.113 |
 | 2026-05-04 | 订单处理列表自动同步改用独立 `order_sync_interval_minutes`，默认 120 分钟；商品、库存、出库仍使用 `sync_interval_minutes` | PROGRESS.md §3.101 |
 | 2026-05-04 | 订单处理列表明细 SKU 改为 `commoditySku || sellerSku`，保留 `seller_sku` 原值，只有两者都为空才跳过明细 | PROGRESS.md §3.100 |
 | 2026-05-04 | 订单列表新增平台筛选与 `GET /api/data/order-platforms` 动态选项接口；`order_header(order_platform, purchase_date)` 增加复合索引；映射规则页用户可见文案统一为“库存共用组” | PROGRESS.md §3.99 |

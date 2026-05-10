@@ -169,6 +169,54 @@ async def test_run_engine_writes_purchase_fields_and_item_counts() -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_engine_filters_unknown_countries_from_snapshots_and_breakdown() -> None:
+    config = _make_config()
+    db = _FakeDb([None, _ScalarResult(config), _ScalarResult([("SKU-001", 50)])])
+    captured: dict[str, Any] = {}
+
+    async def fake_persist(_db: Any, **kwargs: Any) -> int:
+        captured.update(kwargs)
+        return 123
+
+    with (
+        patch("app.engine.runner.async_session_factory", _FakeSessionFactory(db)),
+        patch(
+            "app.engine.runner.run_step1",
+            AsyncMock(return_value={"SKU-001": {"US": 3.0, "ZZ": 9.0, "": 9.0, "USA": 9.0}}),
+        ),
+        patch(
+            "app.engine.runner.run_step2",
+            AsyncMock(
+                return_value=(
+                    {"SKU-001": {"US": 30.0, "ZZ": 1.0, "": 1.0, "USA": 1.0}},
+                    {"SKU-001": {}},
+                )
+            ),
+        ),
+        patch(
+            "app.engine.runner.compute_country_qty",
+            return_value={"SKU-001": {"US": 100, "ZZ": 999, "": 999, "USA": 999}},
+        ),
+        patch(
+            "app.engine.runner.load_local_inventory",
+            AsyncMock(return_value={"SKU-001": LocalStock(available=0, reserved=0)}),
+        ),
+        patch("app.engine.runner.load_country_warehouses", AsyncMock(return_value={})),
+        patch("app.engine.runner.load_zipcode_rules", AsyncMock(return_value=[])),
+        patch("app.engine.runner.load_all_sku_country_orders", AsyncMock(return_value={})),
+        patch("app.engine.runner._persist_suggestion", fake_persist),
+    ):
+        result = await run_engine(_FakeContext(), demand_date=_today())  # type: ignore[arg-type]
+
+    assert result == 123
+    item = captured["items"][0]
+    assert item["country_breakdown"] == {"US": 100}
+    assert item["sale_days_snapshot"] == {"US": 30.0}
+    assert item["velocity_snapshot"] == {"US": 3.0}
+    assert item["restock_dates"] == {"US": (_today() - timedelta(days=20)).isoformat()}
+
+
+@pytest.mark.asyncio
 async def test_run_engine_velocity_unaffected_by_restock_regions() -> None:
     """回归测试：restock_regions 白名单不应影响 Σvelocity 的取值。
 

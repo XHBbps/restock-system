@@ -8,6 +8,7 @@
 import math
 from collections import defaultdict
 
+from app.core.countries import is_reportable_country_code
 from app.engine.context import CountryQtyMap, InventoryMap, VelocityMap
 
 
@@ -25,6 +26,8 @@ def compute_country_qty(
 
     for sku, country_map in velocity.items():
         for country, v in country_map.items():
+            if not is_reportable_country_code(country):
+                continue
             if v <= 0:
                 continue
             stock = inventory.get(sku, {}).get(country)

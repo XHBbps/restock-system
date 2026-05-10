@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-05-10（订单页移动端筛选与分页体验优化。）
+> 最近更新：2026-05-10（信息总览移动端导航、急需补货 SKU 布局与未知国家过滤修复。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -67,7 +67,7 @@
   4. `step4_total` — 总采购量（基于新的 Σcountry_qty − 本地库存 + ceil(Σvelocity × safety_stock_days)，clamp 到 0；`buffer_days` 不参与采购量）
   5. `step5_warehouse_split` — 按邮编规则分配到具体仓库；订单样本来自 `source='订单处理'`、`package_status!='has_canceled'` 且 `country_code!='ZZ'` 的包裹订单，以 `quantity_ordered` 为样本数量，优先使用 `order_header.postal_code`，已知邮编命中部分按真实比例分配，未知部分按该国家已配置邮编规则的仓均分
   6. `step6_timing` — 紧急标志与补货日期（任一正补货国家 `sale_days <= lead_time_days` 即为紧急；`restock_date[sku][country] = today + int(sale_days[sku][country]) − lead_time_days`）
-- **补货区域过滤**：全局参数 `restock_regions` 支持按国家多选；为空数组时表示全部业务国家参与计算，配置后仅这些国家的订单会参与 `step1_velocity` 销量统计和 `step5_warehouse_split` 的国家订单分仓；内部哨兵 `ZZ` 始终排除
+- **补货区域过滤**：全局参数 `restock_regions` 支持按国家多选；为空数组时表示全部业务国家参与计算，配置后仅这些国家的订单会参与 `step1_velocity` 销量统计和 `step5_warehouse_split` 的国家订单分仓；空国家、非法国家码和内部哨兵 `ZZ` 始终排除
 - **并发保护**：`pg_advisory_xact_lock(7429001)` 事务级锁，阻止并发引擎覆盖彼此
 - **补货日期参与数量计算**：`POST /api/engine/run` 必填 `demand_date` 且不能早于北京时间今天；runner 按 `today=now_beijing().date()` 计算 `demand_days=max(demand_date - today, 0)`，再用 `target_days + demand_days` 作为 Step 3 有效目标库存天数；`restock_regions` 仍只决定哪些国家参与补货，`restock_dates` 继续保存用于追溯、导出和紧急程度判断，不再按日期过滤国家
 - **快照追溯**：`velocity_snapshot`、`sale_days_snapshot`、`global_config_snapshot` 存入 JSONB 字段；其中 `global_config_snapshot` 会记录 `restock_regions` 与本次补货日期 `demand_date`
@@ -86,7 +86,7 @@
 - **嵌套路由与 Tab 视图**：当前建议、建议详情、历史记录均拆为 procurement / restock 子路由，`SuggestionTabBar` 统一切换；采购页默认按 `commodity_sku` 稳定排序，仅展示商品信息、采购量与导出状态，补货页支持国家与仓库下钻。
 
 - **统一页面容器**：所有列表页使用 `PageSectionCard`（`#title` + `#actions` slot）
-- **移动端增强基础设施**：`AppLayout.vue` 在窄屏改用顶部菜单按钮 + `el-drawer` 导航；`PageSectionCard` 的 actions 区在小屏自动纵向排列；`TablePaginationBar` 基于 `useResponsive()` 在手机端切换为紧凑分页；`element-overrides.scss` 统一补齐移动端 dialog、表单与表格横向滚动兜底。
+- **移动端增强基础设施**：`AppLayout.vue` 在窄屏改用顶部菜单按钮 + `el-drawer` 导航，且移动端菜单按钮与桌面侧栏折叠按钮样式解耦；`PageSectionCard` 的 actions 区在小屏自动纵向排列；`TablePaginationBar` 基于 `useResponsive()` 在手机端切换为紧凑分页；`element-overrides.scss` 统一补齐移动端 dialog、表单与表格横向滚动兜底。
 - **移动端卡片列表**：新增 `frontend/src/components/MobileRecordList.vue` 与 `frontend/src/composables/useResponsive.ts`，桌面端保留原 `el-table`，移动端复用同一份接口响应展示卡片，不新增移动专用 API 或 store。
 - **共享工具模块**：
   - `frontend/src/utils/format.ts` — 时间格式化（`formatShortTime` / `formatDateTime` / `formatDetailTime`）和分页工具（`clampPage`）
@@ -107,8 +107,15 @@
 - **动态国家选项**：`GET /api/config/country-options` 返回内置国家与订单、仓库、库存、出库在途中已观测国家的并集，并在输出前统一标准化 ISO 二字码别名；内部哨兵 `ZZ` 不会出现在 `items` 或 `unknown_country_codes`。订单、库存、出库、仓库、邮编规则、补货区域和 EU 成员国配置均改用该接口，接口不可用时前端降级使用内置选项。
 - **人工国家名称**：订单编辑输入新国家时可使用 `XX - 中文名`，后端写入 `country_name_override`，后续 `GET /api/config/country-options` 对该国家统一展示人工中文名；信息匹配导入国家只接受二字码。
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
-- **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
+- **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`；移动端使用三列 grid 固定商品、国家、可售天数列宽，避免商品信息与国家列挤压
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.113 信息总览移动端与未知国家过滤修复（2026-05-10）
+- **移动端导航**：`frontend/src/components/AppLayout.vue` 去掉移动端菜单按钮对桌面折叠按钮样式的 `@extend` 依赖，手机端只展示顶部菜单按钮，点击后通过 `el-drawer` 打开完整导航，订单页入口可正常跳转。
+- **急需补货 SKU 移动端布局**：`frontend/src/views/WorkspaceView.vue` 在手机端将“商品信息 / 国家 / 可售天数”行改为固定三列 grid，国家列增加左侧分隔线和内边距，商品列设置收缩与截断约束；桌面端原横向布局保持不变。
+- **未知国家过滤**：`backend/app/core/countries.py` 新增可统计国家判定，空国家、非法国家码和内部哨兵 `ZZ` 不再进入信息总览的风险分布、覆盖国家数、急需补货列表、补货量国家分布和风险计数；`GET /api/metrics/dashboard` 读取旧快照时也会按同一规则过滤返回。
+- **补货计算过滤**：`backend/app/engine/runner.py`、`step1_velocity.py`、`step2_sale_days.py`、`step3_country_qty.py`、`step5_warehouse_split.py` 在计算链路中统一排除不可统计国家，避免新建议单的 `sale_days_snapshot`、`country_breakdown`、`warehouse_breakdown` 与 `restock_dates` 生成 `ZZ` 或空/非法国家。
+- **测试**：`pytest -p no:cacheprovider tests/unit/test_metrics_dashboard.py tests/unit/test_engine_runner.py tests/unit/test_engine_step1.py tests/unit/test_engine_step2.py tests/unit/test_engine_step5.py tests/unit/test_country_mapping.py`、`cmd /c npx vitest run src/views/__tests__/WorkspaceView.test.ts src/components/__tests__/AppLayout.test.ts` 与 `cmd /c npm run build` 通过。
 
 ### 3.112 订单页移动端筛选与分页体验优化（2026-05-10）
 - **移动端筛选**：`frontend/src/views/data/DataOrdersView.vue` 在手机端将 actions 区收敛为 SKU / 订单号搜索、「筛选」按钮和「信息匹配」按钮；日期范围、国家、店铺、平台、包裹状态移动到 `el-drawer` 筛选抽屉，继续复用现有 `filters` / `dateRange` 状态并触发后端分页筛选。

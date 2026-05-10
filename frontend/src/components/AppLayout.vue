@@ -605,6 +605,7 @@ async function handleChangePassword() {
   gap: $space-3;
 }
 
+.mobile-menu-btn,
 .collapse-btn {
   width: 32px;
   height: 32px;
@@ -625,7 +626,6 @@ async function handleChangePassword() {
 }
 
 .mobile-menu-btn {
-  @extend .collapse-btn;
   display: none;
 }
 

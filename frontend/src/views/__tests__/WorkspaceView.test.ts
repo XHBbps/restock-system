@@ -188,6 +188,10 @@ describe('WorkspaceView', () => {
 
     const urgentItems = wrapper.findAll('.urgent-item')
     expect(urgentItems).toHaveLength(3)
+    expect(urgentItems.every((item) => item.classes().includes('urgent-item--mobile-grid'))).toBe(true)
+    expect(urgentItems[0].find('.urgent-col-product').exists()).toBe(true)
+    expect(urgentItems[0].find('.urgent-col-country').exists()).toBe(true)
+    expect(urgentItems[0].find('.urgent-col-qty').exists()).toBe(true)
     expect(wrapper.text()).toContain(getCountryLabel('US'))
     expect(wrapper.text()).toContain(getCountryLabel('CA'))
     expect(wrapper.text()).toContain(getCountryLabel('JP'))

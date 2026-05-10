@@ -19,6 +19,7 @@ from app.api.deps import (
     get_current_user,
     require_permission,
 )
+from app.core.countries import is_reportable_country_code
 from app.core.permissions import HOME_REFRESH, HOME_VIEW, MONITOR_VIEW
 from app.core.restock_regions import resolve_allowed_restock_regions
 from app.core.timezone import now_beijing
@@ -99,6 +100,61 @@ def _country_sale_days(snapshot: dict[str, Any] | None, country: str) -> float |
     return float(raw) if isinstance(raw, (int, float)) else None
 
 
+def _filter_reportable_country_map(
+    values_by_sku: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    return {
+        sku: {
+            country: value
+            for country, value in country_map.items()
+            if is_reportable_country_code(country)
+        }
+        for sku, country_map in values_by_sku.items()
+    }
+
+
+def _filter_allowed_country_map(
+    values_by_sku: dict[str, dict[str, Any]],
+    allowed_countries: set[str] | None,
+) -> dict[str, dict[str, Any]]:
+    reportable = _filter_reportable_country_map(values_by_sku)
+    if allowed_countries is None:
+        return reportable
+    return {
+        sku: {country: value for country, value in country_map.items() if country in allowed_countries}
+        for sku, country_map in reportable.items()
+    }
+
+
+def _sanitize_dashboard_payload(
+    payload: DashboardOverviewPayload,
+) -> DashboardOverviewPayload:
+    risk_distribution = [
+        item
+        for item in payload.country_risk_distribution
+        if is_reportable_country_code(item.country)
+    ]
+    country_restock_distribution = [
+        item
+        for item in payload.country_restock_distribution
+        if is_reportable_country_code(item.country)
+    ]
+    top_urgent_skus = [
+        item for item in payload.top_urgent_skus if is_reportable_country_code(item.country)
+    ]
+    return payload.model_copy(
+        update={
+            "urgent_count": sum(item.urgent_count for item in risk_distribution),
+            "warning_count": sum(item.warning_count for item in risk_distribution),
+            "safe_count": sum(item.safe_count for item in risk_distribution),
+            "risk_country_count": len(risk_distribution),
+            "country_risk_distribution": risk_distribution,
+            "country_restock_distribution": country_restock_distribution,
+            "top_urgent_skus": top_urgent_skus,
+        }
+    )
+
+
 def _build_country_risk_distribution(
     sale_days_by_sku: SaleDaysMap,
     *,
@@ -113,6 +169,8 @@ def _build_country_risk_distribution(
 
     for country_map in sale_days_by_sku.values():
         for country, days_val in country_map.items():
+            if not is_reportable_country_code(country):
+                continue
             if allowed_countries is not None and country not in allowed_countries:
                 continue
             if not isinstance(days_val, (int, float)) or days_val < 0:
@@ -182,6 +240,8 @@ async def _build_top_urgent_skus(
     urgent_rows: list[tuple[str, str, float]] = []
     for sku, country_qty in country_qty_by_sku.items():
         for country, qty in country_qty.items():
+            if not is_reportable_country_code(country):
+                continue
             if qty <= 0:
                 continue
             sale_days = _country_sale_days(sale_days_by_sku.get(sku), country)
@@ -307,10 +367,12 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
     # velocity 口径与 runner 一致：不受 restock_regions 过滤，
     # 保证采购量公式里的 Σvelocity 覆盖全部销售国家（含白名单外）。
     velocity = (
-        await run_step1(
-            db,
-            source_skus,
-            now_beijing().date(),
+        _filter_reportable_country_map(
+            await run_step1(
+                db,
+                source_skus,
+                now_beijing().date(),
+            )
         )
         if enabled_skus
         else {}
@@ -326,17 +388,13 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
         if enabled_skus
         else ({}, {})
     )
+    all_sale_days = _filter_reportable_country_map(all_sale_days)
+    inventory = _filter_reportable_country_map(inventory)
     live_country_qty_all = (
         compute_country_qty(velocity, inventory, effective_target_days) if enabled_skus else {}
     )
     # country_qty 只保留白名单国家（和 runner 行为一致）。
-    if allowed_countries is not None:
-        live_country_qty = {
-            sku: {c: q for c, q in cq.items() if c in allowed_countries}
-            for sku, cq in live_country_qty_all.items()
-        }
-    else:
-        live_country_qty = live_country_qty_all
+    live_country_qty = _filter_allowed_country_map(live_country_qty_all, allowed_countries)
     local_stock = (
         await load_local_inventory(
             db,
@@ -386,24 +444,26 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
     )
 
     if not suggestion:
-        return DashboardOverviewPayload(
-            enabled_sku_count=enabled_sku_count,
-            restock_sku_count=restock_sku_count,
-            no_restock_sku_count=no_restock_sku_count,
-            suggestion_item_count=0,
-            exported_count=0,
-            urgent_count=urgent_count,
-            warning_count=warning_count,
-            safe_count=safe_count,
-            risk_country_count=len(country_risk_distribution),
-            suggestion_id=None,
-            suggestion_status=None,
-            suggestion_snapshot_count=0,
-            lead_time_days=lead_time_days,
-            target_days=target_days,
-            country_risk_distribution=country_risk_distribution,
-            country_restock_distribution=[],
-            top_urgent_skus=top_urgent_skus,
+        return _sanitize_dashboard_payload(
+            DashboardOverviewPayload(
+                enabled_sku_count=enabled_sku_count,
+                restock_sku_count=restock_sku_count,
+                no_restock_sku_count=no_restock_sku_count,
+                suggestion_item_count=0,
+                exported_count=0,
+                urgent_count=urgent_count,
+                warning_count=warning_count,
+                safe_count=safe_count,
+                risk_country_count=len(country_risk_distribution),
+                suggestion_id=None,
+                suggestion_status=None,
+                suggestion_snapshot_count=0,
+                lead_time_days=lead_time_days,
+                target_days=target_days,
+                country_risk_distribution=country_risk_distribution,
+                country_restock_distribution=[],
+                top_urgent_skus=top_urgent_skus,
+            )
         )
 
     items = (
@@ -434,6 +494,8 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
     country_restock_totals: dict[str, int] = {}
     for it in items:
         for country, qty in (it.country_breakdown or {}).items():
+            if not is_reportable_country_code(country):
+                continue
             if isinstance(qty, (int, float)) and qty > 0:
                 country_restock_totals[country] = country_restock_totals.get(country, 0) + int(qty)
 
@@ -445,24 +507,26 @@ async def build_dashboard_payload(db: AsyncSession) -> DashboardOverviewPayload:
         key=lambda item: (-item.total_qty, item.country),
     )
 
-    return DashboardOverviewPayload(
-        enabled_sku_count=enabled_sku_count,
-        restock_sku_count=restock_sku_count,
-        no_restock_sku_count=no_restock_sku_count,
-        suggestion_item_count=len(items),
-        exported_count=exported_count,
-        urgent_count=urgent_count,
-        warning_count=warning_count,
-        safe_count=safe_count,
-        risk_country_count=len(country_risk_distribution),
-        suggestion_id=suggestion.id,
-        suggestion_status=suggestion.status,
-        suggestion_snapshot_count=int(suggestion_snapshot_count or 0),
-        lead_time_days=lead_time_days,
-        target_days=target_days,
-        country_risk_distribution=country_risk_distribution,
-        country_restock_distribution=country_restock_distribution,
-        top_urgent_skus=top_urgent_skus,
+    return _sanitize_dashboard_payload(
+        DashboardOverviewPayload(
+            enabled_sku_count=enabled_sku_count,
+            restock_sku_count=restock_sku_count,
+            no_restock_sku_count=no_restock_sku_count,
+            suggestion_item_count=len(items),
+            exported_count=exported_count,
+            urgent_count=urgent_count,
+            warning_count=warning_count,
+            safe_count=safe_count,
+            risk_country_count=len(country_risk_distribution),
+            suggestion_id=suggestion.id,
+            suggestion_status=suggestion.status,
+            suggestion_snapshot_count=int(suggestion_snapshot_count or 0),
+            lead_time_days=lead_time_days,
+            target_days=target_days,
+            country_risk_distribution=country_risk_distribution,
+            country_restock_distribution=country_restock_distribution,
+            top_urgent_skus=top_urgent_skus,
+        )
     )
 
 
@@ -551,6 +615,7 @@ async def get_dashboard_overview(
             )
         # 旧快照缺少新增字段时，Pydantic 自动填充默认值（restock_sku_count=0 等）；
         # 同时入队刷新任务，后台更新快照后下次请求即为完整数据
+        payload = _sanitize_dashboard_payload(payload)
         needs_refresh = not _has_restock_summary_keys(snapshot.payload)
         if (active_task is not None) or stale:
             status: Literal["ready", "missing", "refreshing"] = "refreshing"

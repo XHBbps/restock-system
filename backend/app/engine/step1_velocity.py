@@ -19,6 +19,7 @@ from datetime import date, datetime, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.countries import is_reportable_country_code
 from app.core.timezone import BEIJING
 from app.engine.context import VelocityMap
 from app.models.order import ORDER_SOURCE_PACKAGE, OrderHeader, OrderItem
@@ -64,6 +65,8 @@ def aggregate_velocity_from_items(
 
     result: defaultdict[str, dict[str, float]] = defaultdict(dict)
     for (sku, country), date_map in daily.items():
+        if not is_reportable_country_code(country):
+            continue
         d7_sum = sum(qty for d, qty in date_map.items() if is_in_window(d, today, 7))
         d14_sum = sum(qty for d, qty in date_map.items() if is_in_window(d, today, 14))
         d30_sum = sum(qty for d, qty in date_map.items() if is_in_window(d, today, 30))
@@ -106,7 +109,7 @@ async def load_velocity_inputs(
         stmt = stmt.where(OrderHeader.country_code.in_(sorted(allowed_countries)))
 
     rows = (await db.execute(stmt)).all()
-    return [(r[0], r[1], r[2], r[3] or 0) for r in rows]
+    return [(r[0], r[1], r[2], r[3] or 0) for r in rows if is_reportable_country_code(r[1])]
 
 
 async def run_step1(

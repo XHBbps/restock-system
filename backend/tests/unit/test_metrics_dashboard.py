@@ -136,6 +136,54 @@ async def test_dashboard_returns_empty_risk_distribution_without_active_suggesti
 
 
 @pytest.mark.asyncio
+async def test_dashboard_filters_unknown_and_invalid_countries() -> None:
+    db = _FakeDb(
+        [
+            _ScalarsResult(["SKU-1", "SKU-2"]),
+            _RowsResult([]),
+            _ScalarOneOrNoneResult(
+                SimpleNamespace(target_days=60, lead_time_days=50, restock_regions=[])
+            ),
+            _ScalarOneOrNoneResult(None),
+            _RowsResult([]),
+            _ScalarsResult([]),
+            _RowsResult([("SKU-1", "Alpha", None)]),
+        ]
+    )
+
+    async def _fake_run_step1(*_args, **_kwargs):
+        return {
+            "SKU-1": {"US": 1.0, "ZZ": 99.0, "": 99.0, "USA": 99.0},
+            "SKU-2": {"US": 1.0},
+        }
+
+    async def _fake_run_step2(*_args, **_kwargs):
+        return (
+            {
+                "SKU-1": {"US": 10.0, "ZZ": 1.0, "": 1.0, "USA": 1.0},
+                "SKU-2": {"US": 70.0},
+            },
+            {},
+        )
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(metrics_module, "run_step1", _fake_run_step1)
+    monkeypatch.setattr(metrics_module, "run_step2", _fake_run_step2)
+
+    try:
+        result = await build_dashboard_payload(db=db)  # type: ignore[arg-type]
+    finally:
+        monkeypatch.undo()
+
+    assert result.urgent_count == 1
+    assert result.warning_count == 0
+    assert result.safe_count == 1
+    assert result.risk_country_count == 1
+    assert [item.country for item in result.country_risk_distribution] == ["US"]
+    assert [item.country for item in result.top_urgent_skus] == ["US"]
+
+
+@pytest.mark.asyncio
 async def test_dashboard_risk_distribution_uses_restock_regions_filter() -> None:
     db = _FakeDb(
         [
@@ -254,7 +302,7 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
             sale_days_snapshot={"US": 10, "CA": 70},
             urgent=True,
             total_qty=12,
-            country_breakdown={"US": 12, "CA": 4},
+            country_breakdown={"US": 12, "CA": 4, "ZZ": 99, "": 99, "USA": 99},
             procurement_export_status="pending",
             restock_export_status="pending",
         ),
@@ -263,7 +311,7 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
             sale_days_snapshot={"US": 30, "CA": 15},
             urgent=False,
             total_qty=8,
-            country_breakdown={"CA": 8},
+            country_breakdown={"CA": 8, "ZZ": 99},
             procurement_export_status="exported",
             restock_export_status="pending",
         ),

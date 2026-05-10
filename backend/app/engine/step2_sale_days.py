@@ -13,6 +13,7 @@ from collections import defaultdict
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.countries import is_reportable_country_code
 from app.engine.context import InventoryMap, InventoryStock, SaleDaysMap, VelocityMap
 from app.engine.sku_mapping import (
     component_skus_for_rules,
@@ -49,6 +50,8 @@ async def load_oversea_inventory(
     rows = (await db.execute(stmt)).all()
     result: dict[tuple[str, str], dict[str, int]] = {}
     for sku, country, avail, reserv in rows:
+        if not is_reportable_country_code(country):
+            continue
         key = (sku, country)
         current = result.setdefault(key, {"available": 0, "reserved": 0})
         current["available"] += int(avail or 0)
@@ -82,6 +85,8 @@ async def load_in_transit(
 
     result: defaultdict[tuple[str, str], int] = defaultdict(int)
     for sku, country, goods_total in rows:
+        if not is_reportable_country_code(country):
+            continue
         result[(sku, country)] += int(goods_total or 0)
     return dict(result)
 
@@ -115,6 +120,8 @@ def compute_sale_days(
     result: defaultdict[str, dict[str, float]] = defaultdict(dict)
     for sku, country_map in velocity.items():
         for country, v in country_map.items():
+            if not is_reportable_country_code(country):
+                continue
             if v <= 0:
                 continue
             stock = inventory.get(sku, {}).get(country)

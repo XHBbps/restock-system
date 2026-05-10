@@ -92,6 +92,20 @@ def test_aggregate_multi_country() -> None:
     assert result["sku-A"]["US"] > result["sku-A"]["JP"]
 
 
+def test_aggregate_excludes_unknown_and_invalid_countries() -> None:
+    today = date(2026, 4, 8)
+    items = [
+        ("sku-A", "US", today - timedelta(days=1), 10),
+        ("sku-A", "ZZ", today - timedelta(days=1), 99),
+        ("sku-A", "", today - timedelta(days=1), 99),
+        ("sku-A", "USA", today - timedelta(days=1), 99),
+    ]
+
+    result = aggregate_velocity_from_items(items, today)
+
+    assert set(result["sku-A"]) == {"US"}
+
+
 def test_aggregate_empty() -> None:
     assert aggregate_velocity_from_items([], date(2026, 4, 8)) == {}
 

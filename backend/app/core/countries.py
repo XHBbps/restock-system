@@ -76,6 +76,18 @@ def normalize_observed_country_code(value: Any) -> str | None:
     return COUNTRY_CODE_ALIASES.get(code, code)
 
 
+def normalize_reportable_country_code(value: Any) -> str | None:
+    """Return a normalized country code only when it can participate in metrics/engine output."""
+    code = normalize_observed_country_code(value)
+    if code is None or code == "ZZ":
+        return None
+    return code
+
+
+def is_reportable_country_code(value: Any) -> bool:
+    return normalize_reportable_country_code(value) is not None
+
+
 def normalize_source_country_or_unknown(
     value: Any,
     *,

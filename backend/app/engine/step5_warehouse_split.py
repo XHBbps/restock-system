@@ -16,6 +16,7 @@ from fractions import Fraction
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.countries import is_reportable_country_code
 from app.core.timezone import BEIJING
 from app.engine.zipcode_matcher import ZipcodeRule, match_warehouses
 from app.models.order import ORDER_SOURCE_PACKAGE, OrderHeader, OrderItem
@@ -58,6 +59,8 @@ async def load_country_warehouses(
     ).all()
     result: defaultdict[str, list[str]] = defaultdict(list)
     for country, wid in rows:
+        if not is_reportable_country_code(country):
+            continue
         if wid not in result[country]:
             result[country].append(wid)
     return dict(result)
@@ -122,6 +125,8 @@ async def load_all_sku_country_orders(
 
     grouped: dict[tuple[str, str], list[tuple[str | None, int]]] = {}
     for sku, country, postal, qty in rows:
+        if not is_reportable_country_code(country):
+            continue
         effective_qty = max(int(qty or 0), 0)
         if effective_qty <= 0:
             continue

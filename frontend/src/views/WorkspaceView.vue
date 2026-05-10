@@ -53,7 +53,7 @@
               <div
                 v-for="item in data.top_urgent_skus"
                 :key="`${item.commodity_sku}-${item.country}`"
-                class="urgent-item"
+                class="urgent-item urgent-item--mobile-grid"
               >
                 <el-tooltip
                   placement="top-start"
@@ -638,6 +638,53 @@ onMounted(loadDashboard)
 
   .country-distribution-legend {
     grid-template-columns: repeat(2, minmax(0, max-content));
+  }
+}
+
+@media (max-width: 767px) {
+  .urgent-header,
+  .urgent-item--mobile-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 74px 76px;
+    align-items: center;
+    column-gap: 0;
+  }
+
+  .urgent-header {
+    padding-bottom: $space-2;
+  }
+
+  .urgent-item--mobile-grid {
+    padding: $space-3 0;
+  }
+
+  .urgent-col-product {
+    min-width: 0;
+    margin-right: $space-2;
+    overflow: hidden;
+
+    :deep(.sku-card) {
+      min-width: 0;
+      max-width: 100%;
+    }
+  }
+
+  .urgent-col-country {
+    width: auto;
+    min-width: 0;
+    padding-left: $space-3;
+    padding-right: $space-2;
+    border-left: 1px solid $color-border-default;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .urgent-col-qty {
+    width: auto;
+    min-width: 0;
+    padding-right: 0;
+    white-space: nowrap;
   }
 }
 </style>

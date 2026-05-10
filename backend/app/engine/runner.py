@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy import insert, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.countries import is_reportable_country_code
 from app.core.locks import ENGINE_RUN_ADVISORY_LOCK_KEY
 from app.core.logging import get_logger
 from app.core.restock_regions import resolve_allowed_restock_regions
@@ -31,6 +32,32 @@ from app.services.physical_item import load_physical_sku_resolver
 from app.tasks.jobs import JobContext
 
 logger = get_logger(__name__)
+
+
+def _filter_reportable_country_map(
+    values_by_sku: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    return {
+        sku: {
+            country: value
+            for country, value in country_map.items()
+            if is_reportable_country_code(country)
+        }
+        for sku, country_map in values_by_sku.items()
+    }
+
+
+def _filter_allowed_country_map(
+    values_by_sku: dict[str, dict[str, Any]],
+    allowed_countries: set[str] | None,
+) -> dict[str, dict[str, Any]]:
+    reportable = _filter_reportable_country_map(values_by_sku)
+    if allowed_countries is None:
+        return reportable
+    return {
+        sku: {country: value for country, value in country_map.items() if country in allowed_countries}
+        for sku, country_map in reportable.items()
+    }
 
 
 async def run_engine(
@@ -98,10 +125,12 @@ async def run_engine(
         await ctx.progress(current_step="Step 1: 计算 velocity", total_steps=7)
         # Σvelocity 参与采购量（step4）计算时须覆盖所有国家（含白名单外的动销），
         # 因此这里不按 restock_regions 过滤。白名单只作用于后续的 country_qty。
-        velocity = await run_step1(
-            db,
-            source_sku_list,
-            today,
+        velocity = _filter_reportable_country_map(
+            await run_step1(
+                db,
+                source_sku_list,
+                today,
+            )
         )
 
         await ctx.progress(current_step="Step 2: 计算 sale_days")
@@ -112,16 +141,12 @@ async def run_engine(
             sku_to_group_key=resolver.sku_to_group_key,
             members_by_group_key=resolver.members_by_group_key,
         )
+        sale_days = _filter_reportable_country_map(sale_days)
+        inventory = _filter_reportable_country_map(inventory)
 
         await ctx.progress(current_step="Step 3: 计算各国补货量")
         country_qty_all = compute_country_qty(velocity, inventory, effective_target_days)
-        if allowed_countries is not None:
-            country_qty = {
-                sku: {c: q for c, q in cq.items() if c in allowed_countries}
-                for sku, cq in country_qty_all.items()
-            }
-        else:
-            country_qty = country_qty_all
+        country_qty = _filter_allowed_country_map(country_qty_all, allowed_countries)
 
         await ctx.progress(current_step="Step 4: 计算采购量")
         local_stock = await load_local_inventory(

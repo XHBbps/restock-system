@@ -8,8 +8,10 @@ from __future__ import annotations
 
 from app.core.countries import (
     country_label,
+    is_reportable_country_code,
     normalize_country_list_for_eu_members,
     normalize_observed_country_code,
+    normalize_reportable_country_code,
 )
 from app.core.country_mapping import apply_eu_mapping
 
@@ -51,6 +53,16 @@ def test_apply_eu_mapping_empty_string_returns_empty() -> None:
 def test_normalize_observed_country_code_applies_iso_alias() -> None:
     assert normalize_observed_country_code("uk") == "GB"
     assert normalize_observed_country_code(" GB ") == "GB"
+
+
+def test_reportable_country_code_excludes_unknown_and_invalid_values() -> None:
+    assert normalize_reportable_country_code("uk") == "GB"
+    assert normalize_reportable_country_code("US") == "US"
+    assert normalize_reportable_country_code("ZZ") is None
+    assert normalize_reportable_country_code("") is None
+    assert normalize_reportable_country_code("USA") is None
+    assert is_reportable_country_code("EU") is True
+    assert is_reportable_country_code("ZZ") is False
 
 
 def test_normalize_country_list_for_eu_members_applies_alias_and_dedupes() -> None:

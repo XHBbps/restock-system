@@ -502,6 +502,9 @@ async def test_load_all_sku_country_orders_uses_quantity_ordered() -> None:
             ("sku-A", "US", None, 3),
             ("sku-A", "US", "90210", 0),
             ("sku-A", "US", "10001", -2),
+            ("sku-A", "ZZ", "00000", 9),
+            ("sku-A", "", "00000", 9),
+            ("sku-A", "USA", "00000", 9),
         ]
     )
 
@@ -529,6 +532,8 @@ async def test_load_country_warehouses_only_keeps_rule_warehouses_and_deduplicat
             ("JP", "WH-A"),
             ("JP", "WH-B"),
             ("US", "WH-Z"),
+            ("ZZ", "WH-UNKNOWN"),
+            ("", "WH-BLANK"),
         ]
     )
 
