@@ -115,6 +115,7 @@ async def test_preview_order_info_match_reports_duplicate_and_missing_order() ->
     )
 
     assert result.matched_order_count == 0
+    assert result.matched_order_ids == []
     assert [error.row for error in result.errors] == [3, 4]
     assert "重复" in result.errors[0].message
     assert result.errors[1].message == "订单号不存在"
@@ -155,6 +156,7 @@ async def test_preview_order_info_match_allows_blank_postal_code_to_clear() -> N
     )
 
     assert result.matched_order_count == 1
+    assert result.matched_order_ids == ["ORDER-1"]
     assert result.errors == []
     assert result.update_fields == ["国家", "邮编"]
 
@@ -177,6 +179,7 @@ async def test_apply_order_info_match_updates_all_packages_and_sets_manual_lock(
     )
 
     assert result.updated_order_count == 2
+    assert result.matched_order_ids == ["ORDER-1"]
     assert db.committed is True
     for header in (header_1, header_2):
         assert header.manual_edit_locked is True

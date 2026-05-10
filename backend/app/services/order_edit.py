@@ -170,6 +170,7 @@ async def preview_order_info_match(
     parsed = await _parse_match_workbook(db, fields=fields, content=content)
     return OrderInfoMatchPreviewOut(
         matched_order_count=parsed.matched_order_count,
+        matched_order_ids=list(parsed.updates_by_order),
         update_fields=parsed.update_fields,
         errors=parsed.errors,
     )
@@ -209,6 +210,7 @@ async def apply_order_info_match(
     await db.commit()
     return OrderInfoMatchApplyOut(
         matched_order_count=parsed.matched_order_count,
+        matched_order_ids=list(parsed.updates_by_order),
         update_fields=parsed.update_fields,
         errors=[],
         updated_order_count=updated,

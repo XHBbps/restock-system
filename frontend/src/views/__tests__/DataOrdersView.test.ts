@@ -162,13 +162,26 @@ const STUBS = {
       </button>
     `
   },
-  ElTable: { template: '<div><slot /></div>' },
+  ElTable: {
+    props: ['data'],
+    template: `
+      <div>
+        <slot />
+        <div v-for="(row, index) in data" :key="index" class="table-row">
+          {{ row.row }} {{ row.field }} {{ row.message }}
+        </div>
+      </div>
+    `
+  },
   ElTableColumn: {
     props: ['label', 'prop'],
     template: '<div><span>{{ label }}</span><slot name="default" :row="{}" /></div>'
   },
   ElTag: { template: '<span><slot /></span>' },
-  ElButton: { template: '<button type="button" @click="$emit(\'click\')"><slot /></button>' },
+  ElButton: {
+    props: ['disabled', 'loading'],
+    template: '<button type="button" :disabled="disabled" @click="$emit(\'click\')"><slot /></button>'
+  },
   ElDialog: { template: '<div><slot /><slot name="footer" /></div>' },
   ElForm: { template: '<form><slot /></form>' },
   ElFormItem: { template: '<label><slot /></label>' },
@@ -283,11 +296,13 @@ describe('DataOrdersView', () => {
     mockDownloadTemplate.mockResolvedValue(new Blob(['x']))
     mockPreviewOrderInfoMatch.mockResolvedValue({
       matchedOrderCount: 1,
+      matchedOrderIds: ['ORDER-1'],
       updateFields: ['国家'],
       errors: []
     })
     mockApplyOrderInfoMatch.mockResolvedValue({
       matchedOrderCount: 1,
+      matchedOrderIds: ['ORDER-1'],
       updateFields: ['国家'],
       errors: [],
       updatedOrderCount: 1
@@ -463,6 +478,79 @@ describe('DataOrdersView', () => {
     expect(wrapper.text()).not.toContain('导入预览')
     expect(wrapper.text()).not.toContain('Marketplace ID')
     expect(wrapper.text()).not.toContain('退款状态')
+  })
+
+  it('renders compact successful match validation result and enables apply', async () => {
+    mockHasPermission.mockReturnValue(true)
+    mockPreviewOrderInfoMatch.mockReset()
+    mockPreviewOrderInfoMatch.mockResolvedValueOnce({
+      matchedOrderCount: 1,
+      matchedOrderIds: ['ORDER-1'],
+      updateFields: ['国家', '邮编'],
+      errors: []
+    })
+    const { default: View } = await import('../data/DataOrdersView.vue')
+    const wrapper = shallowMount(View, { global: GLOBAL_CONFIG })
+    await flushPromises()
+
+    const applyButton = wrapper.findAll('button').find((button) => button.text() === '确认导入')
+    expect(applyButton?.attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).not.toContain('校验通过，可以确认导入')
+
+    const file = new File(['x'], 'orders.xlsx', {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    })
+    const input = wrapper.find<HTMLInputElement>('input[type="file"]')
+    Object.defineProperty(input.element, 'files', {
+      value: [file],
+      configurable: true
+    })
+    await input.trigger('change')
+    await (wrapper.vm as unknown as { previewMatch: () => Promise<void> }).previewMatch()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('校验通过，可以确认导入')
+    expect(wrapper.text()).toContain('ORDER-1')
+    expect(wrapper.text()).toContain('国家')
+    expect(wrapper.text()).toContain('邮编')
+    expect(wrapper.text()).toContain('邮编校验通过，空值将清空原邮编')
+    expect(
+      wrapper.findAll('button').find((button) => button.text() === '确认导入')?.attributes('disabled')
+    ).toBeUndefined()
+  })
+
+  it('renders failed match validation result and keeps apply disabled', async () => {
+    mockHasPermission.mockReturnValue(true)
+    mockPreviewOrderInfoMatch.mockReset()
+    mockPreviewOrderInfoMatch.mockResolvedValueOnce({
+      matchedOrderCount: 0,
+      matchedOrderIds: [],
+      updateFields: ['国家'],
+      errors: [{ row: 2, field: '订单号', message: '订单号不存在' }]
+    })
+    const { default: View } = await import('../data/DataOrdersView.vue')
+    const wrapper = shallowMount(View, { global: GLOBAL_CONFIG })
+    await flushPromises()
+
+    const file = new File(['x'], 'orders.xlsx', {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    })
+    const input = wrapper.find<HTMLInputElement>('input[type="file"]')
+    Object.defineProperty(input.element, 'files', {
+      value: [file],
+      configurable: true
+    })
+    await input.trigger('change')
+    await (wrapper.vm as unknown as { previewMatch: () => Promise<void> }).previewMatch()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('校验未通过')
+    expect(wrapper.text()).toContain('错误数量：1')
+    expect(wrapper.text()).toContain('订单号不存在')
+    expect(wrapper.text()).not.toContain('校验通过，可以确认导入')
+    expect(
+      wrapper.findAll('button').find((button) => button.text() === '确认导入')?.attributes('disabled')
+    ).toBeDefined()
   })
 
   it('submits only changed postal code when editing order', async () => {

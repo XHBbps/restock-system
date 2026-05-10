@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-05-10（订单编辑与信息匹配收窄可写字段：移除 Marketplace ID / 退款状态编辑入口，编辑保存只提交实际变更字段，邮编无格式校验且支持清空。）
+> 最近更新：2026-05-10（订单信息匹配导入校验结果区改为紧凑展示，预览/应用响应返回命中订单号列表。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -102,13 +102,18 @@
 - **商品页主数据口径**：`DataProductsView.vue` 通过 `/api/data/sku-overview` 展示 `commodity_master + sku_config`，商品名、图片、状态、SKU 类型、采购周期优先取主数据；SKU 类型按 `commodity_master.is_group` 展示为「单品 SKU / 组合 SKU」，并支持「全部 / 单品 SKU / 组合 SKU」筛选。listing 仅作为展开明细和销量参考，无 listing 的商品 SKU 也会显示。
 - **筛选控件高度统一**：`PageSectionCard` 的 `section-actions` 强制所有控件 32px 高度
 - **订单处理列表展示**：`DataOrdersView.vue` 展示包裹状态、店铺名称、平台、国家、邮编与本地订单明细；`countryCode='ZZ'` 统一显示为 `-`。筛选支持 SKU / 订单号、国家、店铺、平台和包裹状态，其中平台选项来自 `GET /api/data/order-platforms` 返回的已落库订单平台。来源和包裹号不再作为页面展示或搜索字段，平台字段改为标签样式，店铺仅显示名称，订单明细中的商品 SKU 使用后端落库后的 `commodity_sku`。
-- **订单信息匹配与编辑**：具备 `data_biz:edit` 权限时，订单页提供「编辑」入口和「信息匹配」Excel 导入弹窗，支持批量校验后更新店铺名称、平台、国家、邮编、订单金额、币种、履约渠道、下单时间和最后更新时间；编辑保存只提交实际变更字段，未修改的空金额/日期不会被提交；导入国家使用二字码（如 `US`），邮编无格式校验，允许 `11` 等普通文本，也允许留空以清空原值；人工编辑后的订单由 `manual_edit_locked` 保护，后续同步不覆盖这些字段。
+- **订单信息匹配与编辑**：具备 `data_biz:edit` 权限时，订单页提供「编辑」入口和「信息匹配」Excel 导入弹窗，支持批量校验后更新店铺名称、平台、国家、邮编、订单金额、币种、履约渠道、下单时间和最后更新时间；编辑保存只提交实际变更字段，未修改的空金额/日期不会被提交；导入国家使用二字码（如 `US`），邮编无格式校验，允许 `11` 等普通文本，也允许留空以清空原值；导入校验通过时展示命中订单号、更新字段和邮编清空提示；人工编辑后的订单由 `manual_edit_locked` 保护，后续同步不覆盖这些字段。
 - **全局参数页补货区域配置**：`GlobalConfigView.vue` 的“补货区域”多选已接入动态国家选项，保存前变更检测与配置变更提示已纳入 `restock_regions`
 - **动态国家选项**：`GET /api/config/country-options` 返回内置国家与订单、仓库、库存、出库在途中已观测国家的并集，并在输出前统一标准化 ISO 二字码别名；内部哨兵 `ZZ` 不会出现在 `items` 或 `unknown_country_codes`。订单、库存、出库、仓库、邮编规则、补货区域和 EU 成员国配置均改用该接口，接口不可用时前端降级使用内置选项。
 - **人工国家名称**：订单编辑输入新国家时可使用 `XX - 中文名`，后端写入 `country_name_override`，后续 `GET /api/config/country-options` 对该国家统一展示人工中文名；信息匹配导入国家只接受二字码。
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.110 订单信息匹配导入校验结果紧凑化（2026-05-10）
+- **接口响应**：`backend/app/schemas/data.py` 的 `OrderInfoMatchPreviewOut` / `OrderInfoMatchApplyOut` 新增 `matchedOrderIds`，由 `backend/app/services/order_edit.py` 在 workbook 无校验错误时从 `updates_by_order` key 返回命中订单号；有错误时返回空数组且 `matchedOrderCount` 保持 0。
+- **前端交互**：`frontend/src/views/data/DataOrdersView.vue` 移除导入校验成功态的 `el-empty` 大块空白，改为紧凑结果面板；成功时展示「校验通过，可以确认导入」、命中订单号 tag、更新字段 tag，勾选「邮编」且无错误时展示「邮编校验通过，空值将清空原邮编」；失败时展示「校验未通过」和错误数量，并保留错误表格。
+- **测试**：补充 `backend/tests/unit/test_order_edit_service.py`、`backend/tests/unit/test_data_orders_api.py` 与 `frontend/src/views/__tests__/DataOrdersView.test.ts`，覆盖命中订单号返回、成功/失败结果面板与确认导入启用条件。
 
 ### 3.109 订单编辑与信息匹配字段收窄（2026-05-10）
 - **可写字段**：`backend/app/services/order_edit.py` 的 `EDITABLE_FIELDS` 移除 `marketplace_id` 与 `refund_status`，`backend/app/schemas/data.py` 的 `DataOrderPatch` 同步禁止提交 `marketplaceId` / `refundStatus`；只读列表和详情响应字段暂时保留，便于历史数据核查。

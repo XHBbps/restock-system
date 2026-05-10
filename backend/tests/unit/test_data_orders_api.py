@@ -9,7 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.api import data as data_api
-from app.schemas.data import DataOrderPatch
+from app.schemas.data import DataOrderPatch, OrderInfoMatchPreviewOut
 
 BEIJING = ZoneInfo("Asia/Shanghai")
 
@@ -306,6 +306,18 @@ def test_data_order_patch_rejects_removed_edit_fields() -> None:
 
     with pytest.raises(ValidationError):
         DataOrderPatch(refundStatus="none")
+
+
+def test_order_info_match_preview_serializes_matched_order_ids() -> None:
+    payload = OrderInfoMatchPreviewOut(
+        matched_order_count=1,
+        matched_order_ids=["ORDER-1"],
+        update_fields=["国家"],
+        errors=[],
+    ).model_dump(by_alias=True)
+
+    assert payload["matchedOrderIds"] == ["ORDER-1"]
+    assert payload["matchedOrderCount"] == 1
 
 
 @pytest.mark.asyncio

@@ -129,6 +129,7 @@ class OrderInfoMatchError(BaseModel):
 
 class OrderInfoMatchPreviewOut(BaseModel):
     matched_order_count: int = Field(alias="matchedOrderCount")
+    matched_order_ids: list[str] = Field(alias="matchedOrderIds")
     update_fields: list[str] = Field(alias="updateFields")
     errors: list[OrderInfoMatchError]
 

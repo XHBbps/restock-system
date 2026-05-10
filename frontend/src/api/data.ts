@@ -67,6 +67,7 @@ export interface OrderInfoMatchError {
 
 export interface OrderInfoMatchPreview {
   matchedOrderCount: number
+  matchedOrderIds: string[]
   updateFields: string[]
   errors: OrderInfoMatchError[]
 }

@@ -410,16 +410,67 @@
               校验
             </el-button>
           </div>
-          <div v-if="matchPreview" class="preview-summary">
-            <span>命中订单：{{ matchPreview.matchedOrderCount }}</span>
-            <span>更新字段：{{ matchPreview.updateFields.join('、') || '-' }}</span>
+          <div
+            v-if="matchPreview"
+            class="match-result"
+            :class="{ 'match-result--success': matchPreview.errors.length === 0 }"
+          >
+            <div class="match-result__header">
+              <strong>
+                {{
+                  matchPreview.errors.length === 0
+                    ? '校验通过，可以确认导入'
+                    : '校验未通过'
+                }}
+              </strong>
+              <span v-if="matchPreview.errors.length">
+                错误数量：{{ matchPreview.errors.length }}
+              </span>
+              <span v-else>命中 {{ matchPreview.matchedOrderCount }} 个订单</span>
+            </div>
+            <div v-if="matchPreview.errors.length === 0" class="match-result__content">
+              <div class="match-result__row">
+                <span class="match-result__label">命中订单</span>
+                <div class="match-tags">
+                  <el-tag
+                    v-for="orderId in displayedMatchedOrderIds"
+                    :key="orderId"
+                    size="small"
+                    effect="plain"
+                  >
+                    {{ orderId }}
+                  </el-tag>
+                  <span v-if="hiddenMatchedOrderCount > 0" class="muted">
+                    等 {{ hiddenMatchedOrderCount }} 个订单
+                  </span>
+                  <span v-if="matchPreview.matchedOrderIds.length === 0" class="muted">-</span>
+                </div>
+              </div>
+              <div class="match-result__row">
+                <span class="match-result__label">更新字段</span>
+                <div class="match-tags">
+                  <el-tag
+                    v-for="field in matchPreview.updateFields"
+                    :key="field"
+                    size="small"
+                    type="info"
+                    effect="plain"
+                  >
+                    {{ field }}
+                  </el-tag>
+                  <span v-if="matchPreview.updateFields.length === 0" class="muted">-</span>
+                </div>
+              </div>
+              <div v-if="postalCodeSelected" class="postal-pass-tip">
+                邮编校验通过，空值将清空原邮编
+              </div>
+            </div>
           </div>
           <el-table v-if="matchPreview?.errors.length" :data="matchPreview.errors" size="small">
             <el-table-column label="行号" prop="row" width="80" />
             <el-table-column label="字段" prop="field" width="140" />
             <el-table-column label="原因" prop="message" min-width="260" show-overflow-tooltip />
           </el-table>
-          <el-empty v-else-if="matchPreview" description="校验通过，可以确认导入" />
         </div>
       </div>
       <template #footer>
@@ -547,6 +598,16 @@ const previewLoading = ref(false)
 const applyLoading = ref(false)
 const canApplyMatch = computed(
   () => !!matchFile.value && !!matchPreview.value && matchPreview.value.errors.length === 0
+)
+const postalCodeSelected = computed(() => matchSelectedFields.value.includes('postal_code'))
+const displayedMatchedOrderIds = computed(
+  () => matchPreview.value?.matchedOrderIds.slice(0, 8) ?? []
+)
+const hiddenMatchedOrderCount = computed(() =>
+  Math.max(
+    (matchPreview.value?.matchedOrderIds.length ?? 0) - displayedMatchedOrderIds.value.length,
+    0
+  )
 )
 
 let detailReqId = 0
@@ -978,13 +1039,59 @@ onBeforeUnmount(() => {
 }
 
 .match-actions,
-.file-row,
-.preview-summary {
+.file-row {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: $space-3;
   margin-top: $space-3;
+}
+
+.match-result {
+  display: flex;
+  flex-direction: column;
+  gap: $space-3;
+  margin-top: $space-3;
+  padding: $space-3;
+  border: 1px solid $color-border-subtle;
+  border-radius: $radius-md;
+  background: $color-bg-subtle;
+}
+
+.match-result--success {
+  border-color: var(--el-color-success-light-5);
+  background: var(--el-color-success-light-9);
+}
+
+.match-result__header,
+.match-result__row,
+.match-tags {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: $space-2;
+}
+
+.match-result__header {
+  justify-content: space-between;
+  color: $color-text-primary;
+}
+
+.match-result__content {
+  display: flex;
+  flex-direction: column;
+  gap: $space-2;
+}
+
+.match-result__label {
+  flex: 0 0 64px;
+  color: $color-text-secondary;
+  font-size: $font-size-xs;
+}
+
+.postal-pass-tip {
+  color: var(--el-color-success);
+  font-size: $font-size-sm;
 }
 
 .file-input {
