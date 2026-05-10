@@ -183,6 +183,10 @@ const STUBS = {
     template: '<button type="button" :disabled="disabled" @click="$emit(\'click\')"><slot /></button>'
   },
   ElDialog: { template: '<div><slot /><slot name="footer" /></div>' },
+  ElDrawer: {
+    props: ['modelValue'],
+    template: '<div v-if="modelValue" class="drawer"><slot /><slot name="footer" /></div>'
+  },
   ElForm: { template: '<form><slot /></form>' },
   ElFormItem: { template: '<label><slot /></label>' },
   ElCheckboxGroup: {
@@ -203,6 +207,15 @@ const GLOBAL_CONFIG = {
   directives: {
     loading: {}
   }
+}
+
+function setViewportWidth(width: number) {
+  Object.defineProperty(window, 'innerWidth', {
+    configurable: true,
+    writable: true,
+    value: width
+  })
+  window.dispatchEvent(new Event('resize'))
 }
 
 function buildOrdersResponse(
@@ -269,6 +282,7 @@ describe('DataOrdersView', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.clearAllMocks()
+    setViewportWidth(1024)
     mockHasPermission.mockReturnValue(false)
     mockListOrders.mockResolvedValue(buildOrdersResponse())
     mockListDataShops.mockResolvedValue({
@@ -662,5 +676,101 @@ describe('DataOrdersView', () => {
 
     expect(wrapper.text()).toContain('未选择文件')
     expect(wrapper.text()).not.toContain('orders.xlsx')
+  })
+
+  it('renders compact mobile filters and fixed mobile pagination without desktop pagination', async () => {
+    setViewportWidth(375)
+    mockHasPermission.mockReturnValue(true)
+    const { default: View } = await import('../data/DataOrdersView.vue')
+    const wrapper = shallowMount(View, { global: GLOBAL_CONFIG })
+    await flushPromises()
+
+    expect(wrapper.find('.mobile-order-actions').exists()).toBe(true)
+    expect(wrapper.find('input[placeholder="SKU / 订单号"]').exists()).toBe(true)
+    expect(wrapper.find('.mobile-filter-trigger').text()).toContain('筛选')
+    expect(wrapper.text()).toContain('信息匹配')
+    expect(wrapper.find('.desktop-order-filters').exists()).toBe(false)
+    expect(wrapper.find('.pagination').exists()).toBe(false)
+    expect(wrapper.find('.mobile-fixed-pagination').exists()).toBe(true)
+    expect(wrapper.find('.mobile-page-indicator').text()).toBe('第 1 / 4 页')
+  })
+
+  it('opens mobile filter drawer and applies backend filters from drawer controls', async () => {
+    setViewportWidth(375)
+    const { default: View } = await import('../data/DataOrdersView.vue')
+    const wrapper = shallowMount(View, { global: GLOBAL_CONFIG })
+    await flushPromises()
+    mockListOrders.mockClear()
+
+    await wrapper.find('.mobile-filter-trigger').trigger('click')
+    await wrapper.find('.country-us').trigger('click')
+    await flushPromises()
+    expect(mockListOrders).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, country: 'US' }))
+
+    await wrapper.find('.shop-shop-2').trigger('click')
+    await flushPromises()
+    expect(mockListOrders).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, shop_id: 'SHOP-2' }))
+
+    await wrapper.find('.platform-temu').trigger('click')
+    await flushPromises()
+    expect(mockListOrders).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, platform: 'Temu' }))
+
+    await wrapper.find('.status-shipped').trigger('click')
+    await flushPromises()
+    expect(mockListOrders).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 1, status: 'has_shipped' })
+    )
+
+    await wrapper.find('.date-range').trigger('click')
+    await flushPromises()
+    expect(mockListOrders).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 1, date_from: '2026-04-01', date_to: '2026-04-15' })
+    )
+  })
+
+  it('resets mobile filters and reloads the first page', async () => {
+    setViewportWidth(375)
+    const { default: View } = await import('../data/DataOrdersView.vue')
+    const wrapper = shallowMount(View, { global: GLOBAL_CONFIG })
+    await flushPromises()
+
+    await wrapper.find('input[placeholder="SKU / 订单号"]').setValue('SKU-1')
+    await vi.advanceTimersByTimeAsync(300)
+    await wrapper.find('.mobile-filter-trigger').trigger('click')
+    await wrapper.find('.country-us').trigger('click')
+    await flushPromises()
+    mockListOrders.mockClear()
+
+    await wrapper.findAll('button').find((button) => button.text() === '重置筛选')?.trigger('click')
+    await flushPromises()
+
+    expect(mockListOrders).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        country: undefined,
+        date_from: undefined,
+        date_to: undefined,
+        page: 1,
+        sku: undefined
+      })
+    )
+  })
+
+  it('uses the mobile fixed pagination buttons with boundary disabled states', async () => {
+    setViewportWidth(375)
+    mockListOrders.mockResolvedValue(buildOrdersResponse({ total: 60 }))
+    const { default: View } = await import('../data/DataOrdersView.vue')
+    const wrapper = shallowMount(View, { global: GLOBAL_CONFIG })
+    await flushPromises()
+    mockListOrders.mockClear()
+
+    expect(wrapper.find('.mobile-page-prev').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('.mobile-page-next').attributes('disabled')).toBeUndefined()
+
+    await wrapper.find('.mobile-page-next').trigger('click')
+    await flushPromises()
+
+    expect(mockListOrders).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2 }))
+    expect(wrapper.find('.mobile-page-indicator').text()).toBe('第 2 / 2 页')
+    expect(wrapper.find('.mobile-page-next').attributes('disabled')).toBeDefined()
   })
 })

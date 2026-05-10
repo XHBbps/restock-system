@@ -1,7 +1,7 @@
 <template>
   <PageSectionCard title="订单列表">
     <template #actions>
-      <div class="order-filters">
+      <div v-if="!isMobile" class="order-filters desktop-order-filters">
         <el-date-picker
           v-model="dateRange"
           type="daterange"
@@ -74,7 +74,118 @@
           信息匹配
         </el-button>
       </div>
+      <div v-else class="mobile-order-actions">
+        <el-input
+          v-model="filters.sku"
+          placeholder="SKU / 订单号"
+          clearable
+          class="mobile-order-search"
+          @input="scheduleSkuReload"
+          @keyup.enter="reloadFirstPage"
+          @clear="reloadFirstPage"
+        />
+        <el-button plain class="mobile-filter-trigger" @click="mobileFilterDrawerVisible = true">
+          <SlidersHorizontal :size="14" />
+          <span>筛选</span>
+        </el-button>
+        <el-button
+          v-if="canEdit"
+          type="primary"
+          plain
+          class="mobile-match-action"
+          @click="openMatchDialog"
+        >
+          信息匹配
+        </el-button>
+      </div>
     </template>
+
+    <el-drawer
+      v-if="isMobile"
+      v-model="mobileFilterDrawerVisible"
+      title="筛选订单"
+      direction="btt"
+      size="78%"
+      class="mobile-order-filter-drawer"
+    >
+      <div class="mobile-filter-form">
+        <label class="mobile-filter-field">
+          <span>日期范围</span>
+          <el-date-picker
+            v-model="dateRange"
+            type="daterange"
+            range-separator="至"
+            start-placeholder="开始"
+            end-placeholder="结束"
+            value-format="YYYY-MM-DD"
+            @change="reloadFirstPage"
+          />
+        </label>
+        <label class="mobile-filter-field">
+          <span>国家</span>
+          <el-select
+            v-model="filters.country"
+            placeholder="国家"
+            clearable
+            filterable
+            @change="reloadFirstPage"
+          >
+            <el-option v-for="c in countryOptions" :key="c.code" :label="c.label" :value="c.code" />
+          </el-select>
+        </label>
+        <label class="mobile-filter-field">
+          <span>店铺</span>
+          <el-select
+            v-model="filters.shop"
+            placeholder="店铺"
+            clearable
+            filterable
+            @change="reloadFirstPage"
+          >
+            <el-option v-for="s in shopOptions" :key="s.id" :label="s.name" :value="s.id" />
+          </el-select>
+        </label>
+        <label class="mobile-filter-field">
+          <span>平台</span>
+          <el-select
+            v-model="filters.platform"
+            placeholder="平台"
+            clearable
+            filterable
+            @change="reloadFirstPage"
+          >
+            <el-option
+              v-for="platform in platformOptions"
+              :key="platform"
+              :label="platform"
+              :value="platform"
+            />
+          </el-select>
+        </label>
+        <label class="mobile-filter-field">
+          <span>包裹状态</span>
+          <el-select
+            v-model="filters.status"
+            placeholder="包裹状态"
+            clearable
+            @change="reloadFirstPage"
+          >
+            <el-option
+              v-for="item in packageStatusOptions"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
+        </label>
+      </div>
+      <template #footer>
+        <div class="mobile-filter-footer">
+          <el-button plain @click="resetMobileFilters">重置筛选</el-button>
+          <el-button type="primary" @click="mobileFilterDrawerVisible = false">关闭</el-button>
+        </div>
+      </template>
+    </el-drawer>
 
     <el-table
       v-if="!isMobile"
@@ -163,6 +274,7 @@
       :loading="loading"
       row-key="amazonOrderId"
       empty-text="暂无订单"
+      class="mobile-orders-list"
     >
       <template #default="{ item: row }">
         <div class="mobile-order-card">
@@ -200,6 +312,7 @@
     </MobileRecordList>
 
     <TablePaginationBar
+      v-if="!isMobile"
       v-model:current-page="page"
       v-model:page-size="pageSize"
       :total="total"
@@ -207,6 +320,28 @@
       @current-change="handlePageChange"
       @size-change="handlePageSizeChange"
     />
+
+    <div v-if="isMobile" class="mobile-fixed-pagination" aria-label="订单分页">
+      <el-button
+        plain
+        size="small"
+        class="mobile-page-prev"
+        :disabled="page <= 1"
+        @click="goMobilePage(page - 1)"
+      >
+        上一页
+      </el-button>
+      <span class="mobile-page-indicator">第 {{ page }} / {{ totalPages }} 页</span>
+      <el-button
+        plain
+        size="small"
+        class="mobile-page-next"
+        :disabled="page >= totalPages"
+        @click="goMobilePage(page + 1)"
+      >
+        下一页
+      </el-button>
+    </div>
 
     <el-dialog
       v-model="dialogVisible"
@@ -483,6 +618,7 @@ import type { TagType } from '@/utils/element'
 import { formatDateTime } from '@/utils/format'
 import { normalizeSortOrder, type SortChangeEvent, type SortState } from '@/utils/tableSort'
 import { ElMessage } from 'element-plus'
+import { SlidersHorizontal } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 
 const packageStatusOptions = [
@@ -520,6 +656,7 @@ const countryOptions = ref<CountryOption[]>(
 const loading = ref(false)
 const sortState = ref<SortState>({ prop: 'purchaseDate', order: 'desc' })
 const dateRange = ref<[string, string] | null>(null)
+const mobileFilterDrawerVisible = ref(false)
 const filters = reactive({
   country: '',
   platform: '',
@@ -561,6 +698,7 @@ const hiddenMatchedOrderCount = computed(() =>
     0
   )
 )
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
 
 let detailReqId = 0
 let editReqId = 0
@@ -868,6 +1006,25 @@ function handlePageSizeChange(value: number): void {
   void reload()
 }
 
+function goMobilePage(value: number): void {
+  if (value < 1 || value > totalPages.value || value === page.value) return
+  handlePageChange(value)
+}
+
+function resetMobileFilters(): void {
+  clearSkuReloadTimer()
+  dateRange.value = null
+  Object.assign(filters, {
+    country: '',
+    platform: '',
+    status: '',
+    sku: '',
+    shop: ''
+  })
+  page.value = 1
+  void reload()
+}
+
 onMounted(() => {
   void loadCountryOptions()
   void loadShopOptions()
@@ -894,6 +1051,10 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: $space-3;
   flex-wrap: wrap;
+}
+
+.mobile-order-actions {
+  display: none;
 }
 
 .muted {
@@ -1046,15 +1207,101 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 767px) {
-  .order-filters {
+  .desktop-order-filters {
+    display: none;
+  }
+
+  .mobile-order-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    width: 100%;
+    gap: $space-2;
     align-items: stretch;
 
     :deep(.el-input),
-    :deep(.el-select),
-    :deep(.el-date-editor),
     :deep(.el-button) {
+      height: 32px;
+    }
+  }
+
+  .mobile-order-search {
+    min-width: 0;
+  }
+
+  .mobile-filter-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: $space-1;
+  }
+
+  .mobile-match-action {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .mobile-filter-form {
+    display: flex;
+    flex-direction: column;
+    gap: $space-4;
+  }
+
+  .mobile-filter-field {
+    display: flex;
+    flex-direction: column;
+    gap: $space-2;
+    color: $color-text-primary;
+    font-size: $font-size-sm;
+    font-weight: $font-weight-medium;
+
+    :deep(.el-select),
+    :deep(.el-input),
+    :deep(.el-date-editor) {
       width: 100% !important;
     }
+  }
+
+  .mobile-filter-footer {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: $space-2;
+    width: 100%;
+  }
+
+  .mobile-orders-list {
+    padding-bottom: calc(68px + env(safe-area-inset-bottom));
+  }
+
+  .mobile-fixed-pagination {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 20;
+    display: grid;
+    grid-template-columns: 82px minmax(0, 1fr) 82px;
+    align-items: center;
+    gap: $space-2;
+    padding: $space-3 $space-4 calc($space-3 + env(safe-area-inset-bottom));
+    border-top: 1px solid $color-border-subtle;
+    background: rgba($color-bg-card, 0.96);
+    box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.08);
+    backdrop-filter: blur(10px);
+
+    :deep(.el-button) {
+      width: 100%;
+      margin: 0;
+    }
+  }
+
+  .mobile-page-indicator {
+    min-width: 0;
+    overflow: hidden;
+    color: $color-text-primary;
+    font-size: $font-size-sm;
+    font-weight: $font-weight-semibold;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .mobile-order-card {
