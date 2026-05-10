@@ -16,6 +16,7 @@ const mockGetCountryOptions = vi.fn()
 const mockHasPermission = vi.fn()
 const mockMessageError = vi.fn()
 const mockMessageSuccess = vi.fn()
+const mockMessageInfo = vi.fn()
 const mockTriggerBlobDownload = vi.fn()
 
 vi.mock('@/api/data', () => ({
@@ -49,6 +50,7 @@ vi.mock('element-plus', async () => {
     ...actual,
     ElMessage: {
       error: (...args: unknown[]) => mockMessageError(...args),
+      info: (...args: unknown[]) => mockMessageInfo(...args),
       success: (...args: unknown[]) => mockMessageSuccess(...args)
     }
   }
@@ -224,6 +226,32 @@ function buildOrdersResponse(
   }
 }
 
+function buildOrderDetail(overrides: Record<string, unknown> = {}) {
+  return {
+    ...buildOrdersResponse().items[0],
+    isBuyerRequestedCancel: false,
+    items: [
+      {
+        orderItemId: 'ITEM-1',
+        commoditySku: 'SKU-1',
+        sellerSku: 'SELLER-SKU-1',
+        quantityOrdered: 2,
+        quantityShipped: 2,
+        quantityUnfulfillable: 0,
+        refundNum: 0,
+        itemPriceCurrency: 'USD',
+        itemPriceAmount: '10.00'
+      }
+    ],
+    stateOrRegion: null,
+    city: null,
+    detailAddress: null,
+    receiverName: null,
+    detailFetchedAt: null,
+    ...overrides
+  }
+}
+
 describe('DataOrdersView', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -250,7 +278,7 @@ describe('DataOrdersView', () => {
       ],
       unknown_country_codes: []
     })
-    mockGetOrderDetail.mockResolvedValue(buildOrdersResponse().items[0])
+    mockGetOrderDetail.mockResolvedValue(buildOrderDetail())
     mockUpdateOrderDetail.mockResolvedValue({})
     mockDownloadTemplate.mockResolvedValue(new Blob(['x']))
     mockPreviewOrderInfoMatch.mockResolvedValue({
@@ -435,5 +463,83 @@ describe('DataOrdersView', () => {
     expect(wrapper.text()).not.toContain('导入预览')
     expect(wrapper.text()).not.toContain('Marketplace ID')
     expect(wrapper.text()).not.toContain('退款状态')
+  })
+
+  it('submits only changed postal code when editing order', async () => {
+    mockHasPermission.mockReturnValue(true)
+    mockGetOrderDetail.mockResolvedValue(buildOrderDetail({ postalCode: '' }))
+    const { default: View } = await import('../data/DataOrdersView.vue')
+    const wrapper = shallowMount(View, { global: GLOBAL_CONFIG })
+    await flushPromises()
+
+    await (wrapper.vm as unknown as { openEdit: (row: unknown) => Promise<void> }).openEdit(
+      buildOrdersResponse().items[0]
+    )
+    await flushPromises()
+    ;(wrapper.vm as unknown as { editForm: { postalCode: string } }).editForm.postalCode = '11'
+    await (wrapper.vm as unknown as { saveEdit: () => Promise<void> }).saveEdit()
+    await flushPromises()
+
+    expect(mockUpdateOrderDetail).toHaveBeenCalledWith('SHOP-1', 'ORDER-1', 'PKG-1', {
+      postalCode: '11'
+    })
+  })
+
+  it('does not call update API when saving unchanged edit form', async () => {
+    mockHasPermission.mockReturnValue(true)
+    const { default: View } = await import('../data/DataOrdersView.vue')
+    const wrapper = shallowMount(View, { global: GLOBAL_CONFIG })
+    await flushPromises()
+
+    await (wrapper.vm as unknown as { openEdit: (row: unknown) => Promise<void> }).openEdit(
+      buildOrdersResponse().items[0]
+    )
+    await flushPromises()
+    await (wrapper.vm as unknown as { saveEdit: () => Promise<void> }).saveEdit()
+    await flushPromises()
+
+    expect(mockUpdateOrderDetail).not.toHaveBeenCalled()
+    expect(mockMessageInfo).toHaveBeenCalledWith('没有修改内容')
+  })
+
+  it('renders order detail content inside scoped template classes', async () => {
+    const { default: View } = await import('../data/DataOrdersView.vue')
+    const wrapper = shallowMount(View, { global: GLOBAL_CONFIG })
+    await flushPromises()
+
+    await (wrapper.vm as unknown as { openDetail: (row: unknown) => Promise<void> }).openDetail(
+      buildOrdersResponse().items[0]
+    )
+    await flushPromises()
+
+    expect(wrapper.find('.kv-grid').exists()).toBe(true)
+    expect(wrapper.find('.detail-items-table').exists()).toBe(true)
+    expect(wrapper.text()).toContain('订单商品ID')
+  })
+
+  it('uses custom file picker label and clears selected match file', async () => {
+    mockHasPermission.mockReturnValue(true)
+    const { default: View } = await import('../data/DataOrdersView.vue')
+    const wrapper = shallowMount(View, { global: GLOBAL_CONFIG })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('选择文件')
+    expect(wrapper.text()).toContain('未选择文件')
+
+    const file = new File(['x'], 'orders.xlsx', {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    })
+    const input = wrapper.find<HTMLInputElement>('input[type="file"]')
+    Object.defineProperty(input.element, 'files', {
+      value: [file],
+      configurable: true
+    })
+    await input.trigger('change')
+
+    expect(wrapper.text()).toContain('orders.xlsx')
+    await wrapper.findAll('button').find((button) => button.text() === 'x')?.trigger('click')
+
+    expect(wrapper.text()).toContain('未选择文件')
+    expect(wrapper.text()).not.toContain('orders.xlsx')
   })
 })

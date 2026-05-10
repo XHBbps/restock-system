@@ -215,7 +215,74 @@
       :fullscreen="isMobile"
       class="order-detail-dialog"
     >
-      <OrderDetailBody v-if="detail" :detail="detail" />
+      <div v-if="detail" class="detail-body">
+        <div class="detail-section">
+          <div class="section-title">基本信息</div>
+          <div class="kv-grid">
+            <div>
+              <span class="label">包裹状态</span>
+              <span>{{ statusLabel(detail.packageStatus || detail.orderStatus) }}</span>
+            </div>
+            <div>
+              <span class="label">店铺</span>
+              <span>{{ detail.shopName || '-' }}</span>
+            </div>
+            <div>
+              <span class="label">平台</span>
+              <span>{{ detail.orderPlatform }}</span>
+            </div>
+            <div>
+              <span class="label">国家</span>
+              <span class="mono">{{ formatCountryCodeForDisplay(detail.countryCode) }}</span>
+            </div>
+            <div>
+              <span class="label">邮编</span>
+              <span class="mono">{{ detail.postalCode || '-' }}</span>
+            </div>
+            <div>
+              <span class="label">订单号</span>
+              <span class="mono">{{ detail.amazonOrderId }}</span>
+            </div>
+            <div>
+              <span class="label">下单时间</span>
+              <span class="mono">{{ formatDateTime(detail.purchaseDate) }}</span>
+            </div>
+            <div>
+              <span class="label">最后更新时间</span>
+              <span class="mono">{{ formatDateTime(detail.lastUpdateDate) }}</span>
+            </div>
+            <div>
+              <span class="label">订单金额</span>
+              <span class="mono">
+                {{
+                  detail.orderTotalAmount
+                    ? `${detail.orderTotalAmount} ${detail.orderTotalCurrency || ''}`
+                    : '-'
+                }}
+              </span>
+            </div>
+          </div>
+        </div>
+        <div class="detail-section">
+          <div class="section-title">订单明细（{{ detail.items.length }}）</div>
+          <table class="detail-items-table">
+            <thead>
+              <tr>
+                <th>订单商品ID</th>
+                <th>商品 SKU</th>
+                <th>下单数</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in detail.items" :key="item.orderItemId">
+                <td class="mono">{{ item.orderItemId }}</td>
+                <td>{{ item.commoditySku }}</td>
+                <td class="align-right">{{ item.quantityOrdered }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </el-dialog>
 
     <el-dialog
@@ -331,7 +398,8 @@
               accept=".xlsx"
               @change="handleMatchFileChange"
             />
-            <span class="muted">{{ matchFile ? matchFile.name : '未选择文件' }}</span>
+            <el-button plain @click="chooseMatchFile">选择文件</el-button>
+            <span class="file-name muted">{{ matchFile ? matchFile.name : '未选择文件' }}</span>
             <el-button v-if="matchFile" plain size="small" @click="clearMatchFile">x</el-button>
             <el-button
               type="primary"
@@ -398,7 +466,7 @@ import { formatDateTime } from '@/utils/format'
 import { normalizeSortOrder, type SortChangeEvent, type SortState } from '@/utils/tableSort'
 import dayjs from 'dayjs'
 import { ElMessage } from 'element-plus'
-import { computed, defineComponent, h, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 
 const packageStatusOptions = [
   { label: '待审核', value: 'to_audit' },
@@ -466,6 +534,8 @@ const editForm = reactive({
   purchaseDate: '',
   lastUpdateDate: ''
 })
+type EditFormSnapshot = typeof editForm
+const editOriginalSnapshot = ref<EditFormSnapshot | null>(null)
 
 const matchDialogVisible = ref(false)
 const matchSelectedFields = ref<string[]>([...DEFAULT_MATCH_FIELDS])
@@ -483,65 +553,6 @@ let detailReqId = 0
 let editReqId = 0
 let listReqId = 0
 let skuReloadTimer: ReturnType<typeof setTimeout> | null = null
-
-const OrderDetailBody = defineComponent({
-  name: 'OrderDetailBody',
-  props: {
-    detail: {
-      type: Object as () => DataOrderDetail,
-      required: true
-    }
-  },
-  setup(props) {
-    return () =>
-      h('div', { class: 'detail-body' }, [
-        h('div', { class: 'detail-section' }, [
-          h('div', { class: 'section-title' }, '基本信息'),
-          h('div', { class: 'kv-grid' }, [
-            renderKv('包裹状态', statusLabel(props.detail.packageStatus || props.detail.orderStatus)),
-            renderKv('店铺', props.detail.shopName || '-'),
-            renderKv('平台', props.detail.orderPlatform),
-            renderKv('国家', formatCountryCodeForDisplay(props.detail.countryCode), true),
-            renderKv('邮编', props.detail.postalCode || '-', true),
-            renderKv('订单号', props.detail.amazonOrderId, true),
-            renderKv('下单时间', formatDateTime(props.detail.purchaseDate), true),
-            renderKv('最后更新时间', formatDateTime(props.detail.lastUpdateDate), true),
-            renderKv(
-              '订单金额',
-              props.detail.orderTotalAmount
-                ? `${props.detail.orderTotalAmount} ${props.detail.orderTotalCurrency || ''}`
-                : '-',
-              true
-            )
-          ])
-        ]),
-        h('div', { class: 'detail-section' }, [
-          h('div', { class: 'section-title' }, `订单明细（${props.detail.items.length}）`),
-          h(
-            'table',
-            { class: 'detail-items-table' },
-            [
-              h('thead', [h('tr', [h('th', '订单商品ID'), h('th', '商品 SKU'), h('th', '下单数')])]),
-              h(
-                'tbody',
-                props.detail.items.map((item) =>
-                  h('tr', { key: item.orderItemId }, [
-                    h('td', { class: 'mono' }, item.orderItemId),
-                    h('td', item.commoditySku),
-                    h('td', { class: 'align-right' }, String(item.quantityOrdered))
-                  ])
-                )
-              )
-            ]
-          )
-        ])
-      ])
-  }
-})
-
-function renderKv(label: string, value: string, mono = false) {
-  return h('div', [h('span', { class: 'label' }, label), h('span', { class: mono ? 'mono' : '' }, value)])
-}
 
 function clearSkuReloadTimer(): void {
   if (skuReloadTimer !== null) {
@@ -662,15 +673,22 @@ async function openEdit(row: DataOrderSummary): Promise<void> {
 }
 
 function fillEditForm(data: DataOrderDetail): void {
-  editForm.shopName = data.shopName || ''
-  editForm.orderPlatform = data.orderPlatform || ''
-  editForm.countryCode = data.countryCode || ''
-  editForm.postalCode = data.postalCode || ''
-  editForm.orderTotalAmount = data.orderTotalAmount || ''
-  editForm.orderTotalCurrency = data.orderTotalCurrency || ''
-  editForm.fulfillmentChannel = data.fulfillmentChannel || ''
-  editForm.purchaseDate = toDateTimeSeconds(data.purchaseDate)
-  editForm.lastUpdateDate = toDateTimeSeconds(data.lastUpdateDate)
+  Object.assign(editForm, buildEditSnapshot(data))
+  editOriginalSnapshot.value = { ...editForm }
+}
+
+function buildEditSnapshot(data: DataOrderDetail): EditFormSnapshot {
+  return {
+    shopName: data.shopName || '',
+    orderPlatform: data.orderPlatform || '',
+    countryCode: data.countryCode || '',
+    postalCode: data.postalCode || '',
+    orderTotalAmount: data.orderTotalAmount || '',
+    orderTotalCurrency: data.orderTotalCurrency || '',
+    fulfillmentChannel: data.fulfillmentChannel || '',
+    purchaseDate: toDateTimeSeconds(data.purchaseDate),
+    lastUpdateDate: toDateTimeSeconds(data.lastUpdateDate)
+  }
 }
 
 function toDateTimeSeconds(value: string | null | undefined): string {
@@ -679,19 +697,13 @@ function toDateTimeSeconds(value: string | null | undefined): string {
 
 async function saveEdit(): Promise<void> {
   if (!editDetail.value) return
+  const payload = buildChangedEditPayload()
+  if (Object.keys(payload).length === 0) {
+    ElMessage.info('没有修改内容')
+    return
+  }
   editSaving.value = true
   try {
-    const payload: DataOrderPatch = {
-      shopName: editForm.shopName,
-      orderPlatform: editForm.orderPlatform,
-      countryCode: editForm.countryCode,
-      postalCode: editForm.postalCode,
-      orderTotalAmount: editForm.orderTotalAmount,
-      orderTotalCurrency: editForm.orderTotalCurrency,
-      fulfillmentChannel: editForm.fulfillmentChannel,
-      purchaseDate: editForm.purchaseDate,
-      lastUpdateDate: editForm.lastUpdateDate
-    }
     await updateOrderDetail(
       editDetail.value.shopId,
       editDetail.value.amazonOrderId,
@@ -707,6 +719,29 @@ async function saveEdit(): Promise<void> {
   } finally {
     editSaving.value = false
   }
+}
+
+function buildChangedEditPayload(): DataOrderPatch {
+  const original = editOriginalSnapshot.value
+  if (!original) return {}
+  const fieldMap = {
+    shopName: 'shopName',
+    orderPlatform: 'orderPlatform',
+    countryCode: 'countryCode',
+    postalCode: 'postalCode',
+    orderTotalAmount: 'orderTotalAmount',
+    orderTotalCurrency: 'orderTotalCurrency',
+    fulfillmentChannel: 'fulfillmentChannel',
+    purchaseDate: 'purchaseDate',
+    lastUpdateDate: 'lastUpdateDate'
+  } as const
+  const payload: DataOrderPatch = {}
+  for (const key of Object.keys(fieldMap) as Array<keyof typeof fieldMap>) {
+    if (editForm[key] !== original[key]) {
+      payload[fieldMap[key]] = editForm[key]
+    }
+  }
+  return payload
 }
 
 function openMatchDialog(): void {
@@ -731,6 +766,10 @@ function handleMatchFileChange(event: Event): void {
   matchFile.value = files?.[0] || null
   matchPreview.value = null
   input.value = ''
+}
+
+function chooseMatchFile(): void {
+  matchFileInput.value?.click()
 }
 
 function clearMatchFile(): void {
@@ -949,7 +988,14 @@ onBeforeUnmount(() => {
 }
 
 .file-input {
-  max-width: 280px;
+  display: none;
+}
+
+.file-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (max-width: 900px) {
