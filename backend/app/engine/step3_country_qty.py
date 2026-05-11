@@ -31,7 +31,9 @@ def compute_country_qty(
             if v <= 0:
                 continue
             stock = inventory.get(sku, {}).get(country)
-            stock_total = stock.total if stock is not None else 0
+            if stock is None:
+                continue
+            stock_total = stock.total
             raw = target_days * v - stock_total
             if raw <= 0:
                 continue

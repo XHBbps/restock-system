@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.core.timezone import now_beijing
-from app.engine.context import LocalStock
+from app.engine.context import InventoryStock, LocalStock
 from app.engine.runner import (
     ENGINE_RUN_ADVISORY_LOCK_KEY,
     _config_snapshot,
@@ -169,6 +169,67 @@ async def test_run_engine_writes_purchase_fields_and_item_counts() -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_engine_respects_zero_sku_lead_time() -> None:
+    config = _make_config(lead_time_days=50)
+    db = _FakeDb([None, _ScalarResult(config), _ScalarResult([("SKU-001", 0)])])
+    captured: dict[str, Any] = {}
+
+    async def fake_persist(_db: Any, **kwargs: Any) -> int:
+        captured.update(kwargs)
+        return 123
+
+    with (
+        patch("app.engine.runner.async_session_factory", _FakeSessionFactory(db)),
+        patch("app.engine.runner.run_step1", AsyncMock(return_value={"SKU-001": {"US": 3.0}})),
+        patch(
+            "app.engine.runner.run_step2",
+            AsyncMock(return_value=({"SKU-001": {"US": 5.0}}, {"SKU-001": {"US": object()}})),
+        ),
+        patch("app.engine.runner.compute_country_qty", return_value={"SKU-001": {"US": 10}}),
+        patch("app.engine.runner.load_local_inventory", AsyncMock(return_value={})),
+        patch("app.engine.runner.load_country_warehouses", AsyncMock(return_value={})),
+        patch("app.engine.runner.load_zipcode_rules", AsyncMock(return_value=[])),
+        patch("app.engine.runner.load_all_sku_country_orders", AsyncMock(return_value={})),
+        patch("app.engine.runner._persist_suggestion", fake_persist),
+    ):
+        result = await run_engine(_FakeContext(), demand_date=_today())  # type: ignore[arg-type]
+
+    assert result == 123
+    item = captured["items"][0]
+    assert item["urgent"] is False
+    assert item["restock_dates"] == {"US": (_today() + timedelta(days=5)).isoformat()}
+
+
+@pytest.mark.asyncio
+async def test_run_engine_marks_missing_inventory_record_warning() -> None:
+    config = _make_config(restock_regions=["US"])
+    db = _FakeDb([None, _ScalarResult(config), _ScalarResult([("SKU-001", 50)])])
+    captured: dict[str, Any] = {}
+
+    async def fake_persist(_db: Any, **kwargs: Any) -> int:
+        captured.update(kwargs)
+        return 123
+
+    with (
+        patch("app.engine.runner.async_session_factory", _FakeSessionFactory(db)),
+        patch("app.engine.runner.run_step1", AsyncMock(return_value={"SKU-001": {"US": 3.0}})),
+        patch("app.engine.runner.run_step2", AsyncMock(return_value=({"SKU-001": {}}, {"SKU-001": {}}))),
+        patch("app.engine.runner.compute_country_qty", return_value={"SKU-001": {}}),
+        patch("app.engine.runner.load_local_inventory", AsyncMock(return_value={})),
+        patch("app.engine.runner.load_country_warehouses", AsyncMock(return_value={})),
+        patch("app.engine.runner.load_zipcode_rules", AsyncMock(return_value=[])),
+        patch("app.engine.runner.load_all_sku_country_orders", AsyncMock(return_value={})),
+        patch("app.engine.runner._persist_suggestion", fake_persist),
+    ):
+        result = await run_engine(_FakeContext(), demand_date=_today())  # type: ignore[arg-type]
+
+    assert result == 123
+    warning = captured["items"][0]["calculation_warnings"][0]
+    assert warning["code"] == "missing_inventory_record"
+    assert warning["country"] == "US"
+
+
+@pytest.mark.asyncio
 async def test_run_engine_filters_unknown_countries_from_snapshots_and_breakdown() -> None:
     config = _make_config()
     db = _FakeDb([None, _ScalarResult(config), _ScalarResult([("SKU-001", 50)])])
@@ -240,7 +301,17 @@ async def test_run_engine_velocity_unaffected_by_restock_regions() -> None:
         patch("app.engine.runner.run_step1", step1_mock),
         patch(
             "app.engine.runner.run_step2",
-            AsyncMock(return_value=({"SKU-001": {"US": 30.0, "JP": 30.0}}, {"SKU-001": {}})),
+            AsyncMock(
+                return_value=(
+                    {"SKU-001": {"US": 30.0, "JP": 30.0}},
+                    {
+                        "SKU-001": {
+                            "US": InventoryStock(available=0, reserved=0, in_transit=0),
+                            "JP": InventoryStock(available=0, reserved=0, in_transit=0),
+                        }
+                    },
+                )
+            ),
         ),
         # 不 mock compute_country_qty，让真实 step3 基于 velocity 算出两国 qty
         patch(
@@ -460,7 +531,12 @@ async def test_run_engine_keeps_countries_after_restock_date() -> None:
             AsyncMock(
                 return_value=(
                     {"SKU-001": {"US": 10.0, "GB": 100.0}},
-                    {"SKU-001": {}},
+                    {
+                        "SKU-001": {
+                            "US": InventoryStock(available=0, reserved=0, in_transit=0),
+                            "GB": InventoryStock(available=0, reserved=0, in_transit=0),
+                        }
+                    },
                 )
             ),
         ),

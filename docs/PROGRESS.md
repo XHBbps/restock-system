@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-05-11（运行稳定性修复：同步业务锁、补货计算按日期去重、快照导出事务边界、下载路径校验与赛狐重试分类。）
+> 最近更新：2026-05-11（结果准确性修复：缺库存不按 0 库存计算、计算诊断冻结、单条重算、导出确认与同步解析 fail-fast。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -38,7 +38,7 @@
 ### 2.2 同步与调度
 - **EU 合并同步口径**：订单、商品、出库、库存同步均按全局 eu_countries 将 EU 成员国合并到 EU，并在 original_* 字段保存原国家码；calc_engine 已移出 APScheduler 定时注册，仅保留手动生成入口。
 - **新国家发现口径**：多平台订单同步遇到有效 2 位国家码时直接落入 `order_header.country_code` 并参与计算；若该国家已配置到 `eu_countries`，则归并为 `EU` 并在 `original_country_code` 保留原码；空值或非法国家码才写为 `ZZ` 并记录结构化日志。
-- **订单处理列表同步来源**：`sync_order_list` 当前只调用赛狐订单处理列表 `/api/packageShip/v1/getPackagePage.json`，按 `purchaseDateStart/purchaseDateEnd` 拉取滚动 12 个月窗口，`pageSize=200`，继续复用全局店铺过滤；订单国家现在统一读取响应顶层 `marketplace` 字段，空值或非法值回落内部哨兵 `ZZ`，`address.countryCode/address.country` 不再作为国家来源。`ZZ` 不暴露为前端国家选项，也不参与补货计算。包裹数据统一写入 `source='订单处理'`，并保存 `package_sn/package_status/shop_name/postal_code/order_platform`；明细数量只读取 `items.quantityOrdered`，同时写入 `quantity_ordered` 与兼容字段 `quantity_shipped`，`refund_num=0`；冲突更新时若本次接口邮编为空或地址缺失，不覆盖已有 `order_header.postal_code`。同步开始前会清理旧 `source in ('亚马逊','多平台')` 的订单头、明细、详情和详情抓取日志，避免切换后重复计算。
+- **订单处理列表同步来源**：`sync_order_list` 当前只调用赛狐订单处理列表 `/api/packageShip/v1/getPackagePage.json`，按 `purchaseDateStart/purchaseDateEnd` 拉取滚动 12 个月窗口，`pageSize=200`，继续复用全局店铺过滤；订单国家现在统一读取响应顶层 `marketplace` 字段，空值或非法值回落内部哨兵 `ZZ`，`address.countryCode/address.country` 不再作为国家来源。`ZZ` 不暴露为前端国家选项，也不参与补货计算。包裹数据统一写入 `source='订单处理'`，并保存 `package_sn/package_status/shop_name/postal_code/order_platform`；下单日期主值与 fallback 均无法解析时跳过该订单，最后更新时间解析失败时回退到已解析下单日期，不再用当前时间兜底；明细数量只读取 `items.quantityOrdered`，空值按 0，非法值跳过明细并记录结构化日志，同时写入 `quantity_ordered` 与兼容字段 `quantity_shipped`，`refund_num=0`；冲突更新时若本次接口邮编为空或地址缺失，不覆盖已有 `order_header.postal_code`。同步开始前会清理旧 `source in ('亚马逊','多平台')` 的订单头、明细、详情和详情抓取日志，避免切换后重复计算。
 - **商品主数据同步来源**：`sync_product_listing` 先调用赛狐 SKU 主数据接口 `/api/commodity/pageList.json` 写入 `commodity_master`，再调用在线产品 listing 接口 `/api/order/api/product/pageList.json` 补充店铺、站点、sellerSku 与近 7/14/30 天销量。同步新发现的 SKU 只补建 `sku_config(enabled=true)`，不覆盖已有 `enabled` 与 `lead_time_days`；后续人工禁用的 SKU 不会被商品同步重新打开。
 
 - **调度器开关**：`GET/POST /api/sync/scheduler`，开关状态持久化到 `global_config.scheduler_enabled`
@@ -71,6 +71,7 @@
 - **并发保护**：`pg_advisory_xact_lock(7429001)` 事务级锁，阻止并发引擎覆盖彼此
 - **补货日期参与数量计算**：`POST /api/engine/run` 必填 `demand_date` 且不能早于北京时间今天；runner 按 `today=now_beijing().date()` 计算 `demand_days=max(demand_date - today, 0)`，再用 `target_days + demand_days` 作为 Step 3 有效目标库存天数；`restock_regions` 仍只决定哪些国家参与补货，`restock_dates` 继续保存用于追溯、导出和紧急程度判断，不再按日期过滤国家
 - **快照追溯**：`velocity_snapshot`、`sale_days_snapshot`、`global_config_snapshot` 存入 JSONB 字段；其中 `global_config_snapshot` 会记录 `restock_regions` 与本次补货日期 `demand_date`
+- **准确性诊断**：Step 2/3 区分“已知 0 库存”和“缺少库存记录”；有销量但没有库存/在途记录的 SKU+国家不会按 0 库存生成国家补货量，并在 `suggestion_item.calculation_warnings` 写入 `missing_inventory_record`。SKU 级 `lead_time_days=0` 是有效值，不再回退全局货期。
 
 ### 2.4 补货建议管理
 - **采购/补货独立导出**：建议单分为采购 Tab 与补货 Tab，采购快照只要求 purchase_qty > 0，补货快照只要求国家补货量大于 0；两类快照按 snapshot_type 独立递增版本、独立更新条目导出状态。
@@ -78,9 +79,10 @@
 - **建议单**：`draft / archived / error` 状态流转（Plan A 后端重构后旧链路状态 `partial` / `pushed` 已随 §3.49 一并移除）
 - **跨页选择**：补货发起页的 `selectedIds` 数组跨分页保持，支持全选筛选后的所有条目
 - **编辑校验**：建议详情支持编辑 `total_qty` / `country_breakdown` / `warehouse_breakdown`；国家补货量不要求与总采购量一致，已配置仓库时仓内分量之和必须等于国家补货量；`urgent` 会随国家补货量变更按对应 SKU 的提前期重新判定
+- **单条重算与诊断**：新增 `POST /api/suggestions/{suggestion_id}/items/{item_id}/recalculate`，仅允许 `draft` 建议单条目重算 `sale_days_snapshot`、`urgent`、`restock_dates` 与 `calculation_warnings`，不改变 `country_breakdown`、`warehouse_breakdown` 或 `purchase_qty`。手工新增国家缺少 `sale_days` 时写入 `country_added_after_generation` 等诊断，补货日期重算统一使用建议单原始生成日期基准。
 - **历史记录删除**：历史记录页新增建议单删除入口，删除准入统一为 `snapshot_count === 0`（尚未生成任何导出快照的建议单才可物理删除，保留快照的建议单保留历史追溯不允许删除）
 - **触发方式中文化**：历史记录页“触发方式”由原始值改为中文展示，当前口径统一为“手动触发 / 自动触发”
-- **Excel 导出**：业务人员在建议详情勾选 `export_status='pending'` 的条目，点击“导出 Excel”走一步式 `POST /api/suggestions/{id}/snapshots` + `GET /api/snapshots/{id}/download` blob 下载；服务端生成不可变 `suggestion_snapshot` + `suggestion_snapshot_item` JSONB 快照并同步落盘 Excel 文件，后续可反复下载；元信息页记录“补货日期”，采购/补货明细表不增加补货日期列；首次导出后 `global_config.suggestion_generation_enabled` 自动翻 OFF，业务人员在全局配置页翻回 ON 时会二次确认并归档全部 `draft` 建议单以开启下一周期
+- **Excel 导出**：业务人员在建议详情勾选 `export_status='pending'` 的条目，点击“导出 Excel”走一步式 `POST /api/suggestions/{id}/snapshots` + `GET /api/snapshots/{id}/download` blob 下载；服务端生成不可变 `suggestion_snapshot` + `suggestion_snapshot_item` JSONB 快照并同步落盘 Excel 文件，后续可反复下载；补货快照生成前严格校验国家可报表展示、国家补货量为正整数、仓库拆分合计等于国家补货量（允许未拆仓）；`calculation_warnings` 会冻结到快照并写入补货 Excel 的诊断列，后端不因诊断阻断导出，前端在选中条目存在诊断时二次确认；元信息页记录“补货日期”，采购/补货明细表不增加补货日期列；首次导出后 `global_config.suggestion_generation_enabled` 自动翻 OFF，业务人员在全局配置页翻回 ON 时会二次确认并归档全部 `draft` 建议单以开启下一周期
 
 ### 2.5 前端 Dashboard 体系
 - **嵌套路由与 Tab 视图**：当前建议、建议详情、历史记录均拆为 procurement / restock 子路由，`SuggestionTabBar` 统一切换；采购页默认按 `commodity_sku` 稳定排序，仅展示商品信息、采购量与导出状态，补货页支持国家与仓库下钻。
@@ -109,6 +111,14 @@
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`；移动端使用三列 grid 固定商品、国家、可售天数列宽，避免商品信息与国家列挤压
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.116 结果准确性修复（2026-05-11）
+- **数据库迁移**：`backend/alembic/versions/20260511_1500_add_calculation_warnings.py` 为 `suggestion_item` 与 `suggestion_snapshot_item` 新增 `calculation_warnings JSONB NOT NULL DEFAULT '[]'`，用于冻结缺库存、缺 velocity、缺/非法 sale_days、手工新增国家和不可报表国家等诊断。
+- **同步解析 fail-fast**：`sync_order_list` 不再用当前时间兜底无法解析的核心订单日期；库存与在途数量空值按真实 0，非法数量跳过对应库存行或在途明细并记录结构化日志。
+- **引擎准确性**：`step2_sale_days` 与 `step3_country_qty` 不再把缺少库存/在途记录视为 0 库存；有销量但库存未知的国家不参与国家补货量计算，并在建议条目写入 `missing_inventory_record`。SKU 级 `lead_time_days=0` 按有效值参与紧急状态与补货日期计算。
+- **建议单编辑与单条重算**：编辑补货国家后，`restock_dates` 使用建议单原始生成日期基准；新增 `POST /api/suggestions/{suggestion_id}/items/{item_id}/recalculate`，仅重算单条的 `sale_days_snapshot`、`urgent`、`restock_dates` 与 `calculation_warnings`，不重算补货量、采购量或仓库拆分。
+- **快照与前端确认**：补货快照生成前校验国家与数量拆分，`calculation_warnings` 冻结到快照和补货 Excel；补货列表展示“需确认”诊断标签和“重新计算”按钮，选中条目含诊断时导出前二次确认，后端不因诊断阻断导出。
+- **测试**：`pytest -p no:cacheprovider tests/unit/test_engine_step2.py tests/unit/test_engine_step3.py tests/unit/test_engine_step6.py tests/unit/test_engine_runner.py tests/unit/test_sync_order_list.py tests/unit/test_sync_order_list_eu.py tests/unit/test_sync_inventory.py tests/unit/test_sync_out_records_job.py tests/unit/test_suggestion_patch.py tests/unit/test_snapshot_validation.py tests/unit/test_suggestion_model.py tests/unit/test_suggestion_snapshot_model.py tests/unit/test_suggestion_snapshot_schemas.py tests/unit/test_excel_export_service.py tests/integration/test_snapshot_api.py` 通过（快照集成测试因本机未设置 `TEST_DATABASE_URL` 跳过）；`cmd /c npx vue-tsc --noEmit` 与相关 Vitest 通过。
 
 ### 3.115 运行稳定性修复（2026-05-11）
 - **同步业务锁**：`backend/app/sync/locks.py` 新增 PostgreSQL advisory lock；`sync_shop`、`sync_warehouse`、`sync_product_listing`、`sync_inventory`、`sync_out_records`、`sync_order_list` 执行前按 job 维度互斥，`sync_all` 会一次性持有全部子同步锁，避免全量同步内部步骤与单独子 job 并发。

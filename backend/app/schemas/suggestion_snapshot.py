@@ -43,6 +43,7 @@ class SnapshotItemOut(BaseModel):
     urgent: bool
     velocity_snapshot: dict[str, Any] | None = None
     sale_days_snapshot: dict[str, Any] | None = None
+    calculation_warnings: list[dict[str, Any]] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 

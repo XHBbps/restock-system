@@ -157,6 +157,70 @@ async def test_upsert_package_order_does_not_use_legacy_quantity_fallbacks() -> 
 
 
 @pytest.mark.asyncio
+async def test_upsert_package_order_skips_invalid_quantity_ordered() -> None:
+    from app.sync.order_list import _upsert_package_ship_order
+
+    db = _FakeDb()
+    orders, items = await _upsert_package_ship_order(
+        db,  # type: ignore[arg-type]
+        _package_payload(
+            items=[
+                {
+                    "amazonOrderId": "AMZ-1",
+                    "orderItemId": "ITEM-1",
+                    "commoditySku": "SKU-1",
+                    "sellerSku": "SELLER-1",
+                    "quantityOrdered": "not-a-number",
+                }
+            ],
+        ),
+        set(),
+    )
+
+    assert (orders, items) == (1, 0)
+    assert len(db.statements) == 1
+
+
+@pytest.mark.asyncio
+async def test_upsert_package_order_skips_invalid_purchase_date() -> None:
+    from app.sync.order_list import _upsert_package_ship_order
+
+    db = _FakeDb()
+    orders, items = await _upsert_package_ship_order(
+        db,  # type: ignore[arg-type]
+        _package_payload(orders=[{"amazonOrderId": "AMZ-1", "purchaseDate": "bad-date"}]),
+        set(),
+    )
+
+    assert (orders, items) == (0, 0)
+    assert db.statements == []
+
+
+@pytest.mark.asyncio
+async def test_upsert_package_order_invalid_last_update_falls_back_to_purchase_date() -> None:
+    from app.sync.order_list import _upsert_package_ship_order
+
+    db = _FakeDb()
+    await _upsert_package_ship_order(
+        db,  # type: ignore[arg-type]
+        _package_payload(
+            orders=[
+                {
+                    "amazonOrderId": "AMZ-1",
+                    "purchaseDate": "2026-04-21 08:00:00",
+                    "lastUpdateDate": "bad-date",
+                }
+            ],
+            updateTime="still-bad",
+        ),
+        set(),
+    )
+
+    header_values = _compiled_params(db.statements[0])
+    assert header_values["last_update_date"] == header_values["purchase_date"]
+
+
+@pytest.mark.asyncio
 async def test_upsert_package_order_updates_postal_code_when_present() -> None:
     from app.sync.order_list import _upsert_package_ship_order
 

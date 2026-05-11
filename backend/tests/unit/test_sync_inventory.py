@@ -38,3 +38,45 @@ async def test_upsert_inventory_applies_eu_mapping_and_preserves_original_countr
     values = _statement_values(db.statements[0])
     assert values["country"] == "EU"
     assert values["original_country"] == "DE"
+
+
+@pytest.mark.asyncio
+async def test_upsert_inventory_empty_quantity_defaults_to_zero() -> None:
+    from app.sync.inventory import _upsert_inventory
+
+    db = _FakeDb()
+    await _upsert_inventory(
+        db,  # type: ignore[arg-type]
+        {
+            "commoditySku": "SKU-1",
+            "warehouseId": "WH-1",
+            "stockAvailable": "",
+            "stockOccupy": None,
+        },
+        {"WH-1": "US"},
+        set(),
+    )
+
+    values = _statement_values(db.statements[0])
+    assert values["available"] == 0
+    assert values["reserved"] == 0
+
+
+@pytest.mark.asyncio
+async def test_upsert_inventory_skips_invalid_quantity() -> None:
+    from app.sync.inventory import _upsert_inventory
+
+    db = _FakeDb()
+    await _upsert_inventory(
+        db,  # type: ignore[arg-type]
+        {
+            "commoditySku": "SKU-1",
+            "warehouseId": "WH-1",
+            "stockAvailable": "bad",
+            "stockOccupy": "2",
+        },
+        {"WH-1": "US"},
+        set(),
+    )
+
+    assert db.statements == []

@@ -30,6 +30,12 @@ export interface SnapshotItemOut {
   urgent: boolean
   velocity_snapshot: Record<string, unknown> | null
   sale_days_snapshot: Record<string, unknown> | null
+  calculation_warnings: Array<{
+    code: string
+    country: string
+    reason: string | null
+    message: string
+  }>
 }
 
 export interface SnapshotDetailOut extends SnapshotOut {

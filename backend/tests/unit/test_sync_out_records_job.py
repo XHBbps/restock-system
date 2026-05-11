@@ -122,6 +122,33 @@ async def test_upsert_out_record_skips_non_positive_items() -> None:
     assert len(db.statements) == 2
 
 
+@pytest.mark.asyncio
+async def test_upsert_out_record_empty_goods_defaults_to_zero_and_invalid_goods_skips() -> None:
+    from app.sync.out_records import _upsert_out_record
+
+    db = _FakeDb()
+    sync_start = datetime(2026, 4, 14, 12, 0, 0)
+
+    raw = {
+        "id": "OUT-3",
+        "warehouseId": "WH-SRC-3",
+        "items": [
+            {"commodityId": "CID-0", "commoditySku": "SKU-0", "goods": "", "perPurchase": "8.00"},
+            {"commodityId": "CID-1", "commoditySku": "SKU-1", "goods": "bad", "perPurchase": "9.00"},
+        ],
+    }
+
+    inserted = await _upsert_out_record(
+        db,  # type: ignore[arg-type]
+        raw,
+        set(),
+        sync_start,
+    )
+
+    assert inserted == 0
+    assert len(db.statements) == 2
+
+
 def test_extract_country_from_remark_returns_country_code() -> None:
     from app.sync.out_records import _extract_country_from_remark
 

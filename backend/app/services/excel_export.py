@@ -123,7 +123,7 @@ def build_restock_workbook(ctx: SnapshotExportContext) -> Workbook:
     _build_meta_sheet(wb, ctx)
 
     sku_ws = wb.create_sheet("SKU汇总")
-    _apply_header(sku_ws, 1, ["SKU", "商品名", "补货总量", "紧急"])
+    _apply_header(sku_ws, 1, ["SKU", "商品名", "补货总量", "紧急", "计算诊断"])
     for item in ctx.items:
         sku_ws.append(
             [
@@ -131,12 +131,13 @@ def build_restock_workbook(ctx: SnapshotExportContext) -> Workbook:
                 item.get("commodity_name") or "",
                 item["total_qty"],
                 "是" if item.get("urgent") else "",
+                _format_warnings(item.get("calculation_warnings") or []),
             ]
         )
     _autosize(sku_ws)
 
     country_ws = wb.create_sheet("SKU×国家")
-    _apply_header(country_ws, 1, ["SKU", "国家", "补货量", "补货日期"])
+    _apply_header(country_ws, 1, ["SKU", "国家", "补货量", "补货日期", "计算诊断"])
     for item in ctx.items:
         for country, qty in (item.get("country_breakdown") or {}).items():
             country_ws.append(
@@ -145,12 +146,13 @@ def build_restock_workbook(ctx: SnapshotExportContext) -> Workbook:
                     country,
                     qty,
                     (item.get("restock_dates") or {}).get(country) or "",
+                    _format_warnings(item.get("calculation_warnings") or [], country=country),
                 ]
             )
     _autosize(country_ws)
 
     warehouse_ws = wb.create_sheet("SKU×国家×仓库")
-    _apply_header(warehouse_ws, 1, ["SKU", "国家", "仓库", "补货量", "补货日期"])
+    _apply_header(warehouse_ws, 1, ["SKU", "国家", "仓库", "补货量", "补货日期", "计算诊断"])
     for item in ctx.items:
         for country, warehouse_map in (item.get("warehouse_breakdown") or {}).items():
             for warehouse_id, qty in warehouse_map.items():
@@ -161,7 +163,21 @@ def build_restock_workbook(ctx: SnapshotExportContext) -> Workbook:
                         warehouse_id,
                         qty,
                         (item.get("restock_dates") or {}).get(country) or "",
+                        _format_warnings(item.get("calculation_warnings") or [], country=country),
                     ]
                 )
     _autosize(warehouse_ws)
     return wb
+
+
+def _format_warnings(warnings: list[dict[str, Any]], *, country: str | None = None) -> str:
+    parts: list[str] = []
+    for warning in warnings:
+        if country is not None and warning.get("country") != country:
+            continue
+        message = str(warning.get("message") or warning.get("code") or "").strip()
+        warning_country = str(warning.get("country") or "").strip()
+        if not message:
+            continue
+        parts.append(f"{warning_country}: {message}" if warning_country else message)
+    return "；".join(parts)

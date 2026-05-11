@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import UserContext, db_session, get_current_user, require_permission
 from app.config import get_settings
+from app.core.countries import is_reportable_country_code
 from app.core.logging import get_logger
 from app.core.permissions import RESTOCK_EXPORT, RESTOCK_VIEW
 from app.core.timezone import now_beijing
@@ -126,9 +127,7 @@ async def _create_snapshot(
         if invalid_items:
             raise HTTPException(status_code=422, detail=f"采购快照仅允许 purchase_qty > 0 的条目：{invalid_items}")
     else:
-        invalid_items = [item.id for item in items if sum((item.country_breakdown or {}).values()) <= 0]
-        if invalid_items:
-            raise HTTPException(status_code=422, detail=f"补货快照仅允许补货量 > 0 的条目：{invalid_items}")
+        _validate_restock_snapshot_items(items)
 
     next_version = int(
         (
@@ -182,6 +181,7 @@ async def _create_snapshot(
                 urgent=item.urgent,
                 velocity_snapshot=item.velocity_snapshot,
                 sale_days_snapshot=item.sale_days_snapshot,
+                calculation_warnings=item.calculation_warnings or [],
                 commodity_name=commodity_name,
                 main_image_url=main_image_url,
             )
@@ -199,6 +199,7 @@ async def _create_snapshot(
                 "urgent": item.urgent,
                 "velocity_snapshot": item.velocity_snapshot,
                 "sale_days_snapshot": item.sale_days_snapshot,
+                "calculation_warnings": item.calculation_warnings or [],
             }
         )
 
@@ -296,6 +297,47 @@ async def _create_snapshot(
         file_size_bytes=snapshot.file_size_bytes,
         download_count=snapshot.download_count,
     )
+
+
+def _validate_restock_snapshot_items(items: list[SuggestionItem]) -> None:
+    errors: list[str] = []
+    for item in items:
+        country_breakdown = item.country_breakdown or {}
+        positive_total = 0
+        for country, qty in country_breakdown.items():
+            if not is_reportable_country_code(country):
+                errors.append(f"{item.id}:{country} 国家不可报表展示")
+                continue
+            if not _is_positive_int(qty):
+                errors.append(f"{item.id}:{country} 补货量必须为正整数")
+                continue
+            positive_total += int(qty)
+
+        if positive_total <= 0:
+            errors.append(f"{item.id}:补货快照仅允许补货量 > 0 的条目")
+
+        warehouse_breakdown = item.warehouse_breakdown or {}
+        for country, warehouse_map in warehouse_breakdown.items():
+            if country not in country_breakdown:
+                errors.append(f"{item.id}:{country} 仓库拆分缺少国家补货量")
+                continue
+            if not warehouse_map:
+                continue
+            split_total = 0
+            for warehouse_id, qty in warehouse_map.items():
+                if not _is_positive_int(qty):
+                    errors.append(f"{item.id}:{country}:{warehouse_id} 仓库补货量必须为正整数")
+                    continue
+                split_total += int(qty)
+            if split_total != int(country_breakdown.get(country) or 0):
+                errors.append(f"{item.id}:{country} 仓库拆分合计必须等于国家补货量")
+
+    if errors:
+        raise HTTPException(status_code=422, detail="; ".join(errors))
+
+
+def _is_positive_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
 
 @router.get("/suggestions/{suggestion_id}/snapshots", response_model=list[SnapshotOut])

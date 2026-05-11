@@ -119,6 +119,9 @@ class SuggestionSnapshotItem(Base):
 
     velocity_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     sale_days_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    calculation_warnings: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
 
     # 商品展示冻结
     commodity_name: Mapped[str | None] = mapped_column(String(500), nullable=True)

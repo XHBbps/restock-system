@@ -14,6 +14,7 @@ from app.services.order_edit import (
     preview_order_info_match,
 )
 
+
 class _ScalarsWrapper:
     def __init__(self, values):
         self._values = values

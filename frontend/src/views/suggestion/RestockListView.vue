@@ -116,11 +116,27 @@
           </div>
         </template>
       </el-table-column>
-      <el-table-column label="状态" width="110">
+      <el-table-column label="状态" width="180">
         <template #default="{ row }">
-          <el-tag :type="row.restock_export_status === 'exported' ? 'success' : 'warning'" size="small">
-            {{ row.restock_export_status === 'exported' ? '已导出' : '未导出' }}
-          </el-tag>
+          <div class="status-tags">
+            <el-tag :type="row.restock_export_status === 'exported' ? 'success' : 'warning'" size="small">
+              {{ row.restock_export_status === 'exported' ? '已导出' : '未导出' }}
+            </el-tag>
+            <el-tooltip v-if="hasWarnings(row)" :content="warningText(row)" placement="top">
+              <el-tag type="danger" effect="plain" size="small">需确认</el-tag>
+            </el-tooltip>
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column v-if="editable" label="操作" width="120" align="center">
+        <template #default="{ row }">
+          <el-button
+            size="small"
+            :loading="recalculatingId === row.id"
+            @click="handleRecalculate(row)"
+          >
+            重新计算
+          </el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -149,11 +165,24 @@
             </div>
             <div class="mobile-field">
               <span>状态</span>
-              <el-tag :type="row.restock_export_status === 'exported' ? 'success' : 'warning'" size="small">
-                {{ row.restock_export_status === 'exported' ? '已导出' : '未导出' }}
-              </el-tag>
+              <div class="status-tags">
+                <el-tag :type="row.restock_export_status === 'exported' ? 'success' : 'warning'" size="small">
+                  {{ row.restock_export_status === 'exported' ? '已导出' : '未导出' }}
+                </el-tag>
+                <el-tooltip v-if="hasWarnings(row)" :content="warningText(row)" placement="top">
+                  <el-tag type="danger" effect="plain" size="small">需确认</el-tag>
+                </el-tooltip>
+              </div>
             </div>
           </div>
+          <el-button
+            v-if="editable"
+            size="small"
+            :loading="recalculatingId === row.id"
+            @click="handleRecalculate(row)"
+          >
+            重新计算
+          </el-button>
           <div class="country-chips">
             <el-tag v-for="country in countryRows(row)" :key="country.country" size="small">
               {{ country.country }}: {{ country.qty }}
@@ -202,7 +231,7 @@
 
 <script setup lang="ts">
 import { listWarehouses, type Warehouse } from '@/api/config'
-import type { SuggestionDetail, SuggestionItem } from '@/api/suggestion'
+import { recalculateSuggestionItem, type SuggestionDetail, type SuggestionItem } from '@/api/suggestion'
 import { createRestockSnapshot, downloadSnapshotBlob } from '@/api/snapshot'
 import MobileRecordList from '@/components/MobileRecordList.vue'
 import SkuCard from '@/components/SkuCard.vue'
@@ -212,7 +241,7 @@ import { getActionErrorMessage } from '@/utils/apiError'
 import { getCountryLabel } from '@/utils/countries'
 import { triggerBlobDownload } from '@/utils/download'
 import { useCrossPageSelection } from '@/views/suggestion/useCrossPageSelection'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, onMounted, ref, watch } from 'vue'
 
 interface CountryRow {
@@ -236,6 +265,7 @@ const { isMobile } = useResponsive()
 const page = ref(1)
 const pageSize = ref(20)
 const exporting = ref(false)
+const recalculatingId = ref<number | null>(null)
 const warehouseMap = ref<Record<string, string>>({})
 
 watch(skuFilter, () => {
@@ -278,6 +308,16 @@ function countryRows(item: SuggestionItem): CountryRow[] {
     }))
 }
 
+function hasWarnings(item: SuggestionItem): boolean {
+  return (item.calculation_warnings || []).length > 0
+}
+
+function warningText(item: SuggestionItem): string {
+  return (item.calculation_warnings || [])
+    .map((warning) => `${warning.country}: ${warning.message || warning.code}`)
+    .join('；')
+}
+
 const restockItems = computed(() =>
   props.items
     .filter((item) => restockTotal(item) > 0)
@@ -312,8 +352,47 @@ const {
 
 const exportButtonLabel = computed(() => `导出补货单 Excel (${selectedCount.value}项)`)
 
+const selectedItems = computed(() => {
+  const selected = new Set(selectedIds.value)
+  return filteredItems.value.filter((item) => selected.has(item.id))
+})
+
+async function confirmWarningsBeforeExport(): Promise<void> {
+  const warningCount = selectedItems.value.filter(hasWarnings).length
+  if (warningCount === 0) return
+  await ElMessageBox.confirm(
+    `已选 ${warningCount} 个条目存在计算诊断，导出后诊断信息会冻结到快照。确认继续导出？`,
+    '导出确认',
+    {
+      confirmButtonText: '继续导出',
+      cancelButtonText: '取消',
+      type: 'warning',
+    },
+  )
+}
+
+async function handleRecalculate(item: SuggestionItem): Promise<void> {
+  if (!props.suggestion || recalculatingId.value !== null) return
+  recalculatingId.value = item.id
+  try {
+    await recalculateSuggestionItem(props.suggestion.id, item.id)
+    ElMessage.success('已重新计算')
+    emit('refresh')
+  } catch (error) {
+    ElMessage.error(getActionErrorMessage(error, '重新计算失败'))
+  } finally {
+    recalculatingId.value = null
+  }
+}
+
 async function handleExport(): Promise<void> {
   if (!props.suggestion || selectedIds.value.length === 0) return
+
+  try {
+    await confirmWarningsBeforeExport()
+  } catch {
+    return
+  }
 
   exporting.value = true
   let snapshotId: number | null = null
@@ -364,6 +443,13 @@ async function handleExport(): Promise<void> {
   display: flex;
   flex-wrap: wrap;
   gap: $space-2;
+}
+
+.status-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $space-2;
+  align-items: center;
 }
 
 .breakdown-table {

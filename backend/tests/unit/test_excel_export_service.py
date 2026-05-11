@@ -79,6 +79,13 @@ def restock_context() -> SnapshotExportContext:
                 "restock_dates": {"US": "2026-04-24", "GB": "2026-05-14"},
                 "velocity_snapshot": {"US": 1.5, "GB": 0.8},
                 "sale_days_snapshot": {"US": 20, "GB": 40},
+                "calculation_warnings": [
+                    {
+                        "code": "missing_velocity",
+                        "country": "GB",
+                        "message": "缺少该国家的销量速度",
+                    }
+                ],
             }
         ],
     )
@@ -121,11 +128,12 @@ def test_restock_country_and_warehouse_rows(restock_context):
     country_ws = wb[wb.sheetnames[2]]
     warehouse_ws = wb[wb.sheetnames[3]]
     assert country_ws.max_row == 3
-    assert country_ws.max_column == 4
+    assert country_ws.max_column == 5
     assert warehouse_ws.max_row == 4
-    assert warehouse_ws.max_column == 5
+    assert warehouse_ws.max_column == 6
     assert country_ws.cell(row=2, column=4).value == "2026-04-24"
     assert warehouse_ws.cell(row=2, column=5).value == "2026-04-24"
+    assert country_ws.cell(row=3, column=5).value == "GB: 缺少该国家的销量速度"
 
 
 def test_workbook_writes_to_bytes(restock_context):

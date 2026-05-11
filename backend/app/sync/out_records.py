@@ -201,7 +201,15 @@ async def _upsert_out_record(
         commodity_sku = raw_item.get("commoditySku")
         if not commodity_sku:
             continue
-        goods = _to_int(raw_item.get("goods"), 0) or 0
+        goods = _to_required_int(raw_item.get("goods"), 0)
+        if goods is None:
+            logger.warning(
+                "out_record_item_skipped_invalid_goods",
+                saihu_out_record_id=record_id,
+                commodity_sku=commodity_sku,
+                raw_goods=raw_item.get("goods"),
+            )
+            continue
         if goods <= 0:
             continue
         items.append(
@@ -296,6 +304,15 @@ def _to_int(v: Any, default: int | None = 0) -> int | None:
         return int(float(v))
     except (TypeError, ValueError):
         return default
+
+
+def _to_required_int(v: Any, default: int = 0) -> int | None:
+    if v is None or v == "":
+        return default
+    try:
+        return int(float(v))
+    except (TypeError, ValueError):
+        return None
 
 
 def _to_optional_text(v: Any) -> str | None:

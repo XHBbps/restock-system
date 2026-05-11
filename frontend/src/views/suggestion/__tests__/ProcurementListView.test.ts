@@ -48,6 +48,7 @@ function makeItem(id: number, overrides: Partial<SuggestionItem> = {}): Suggesti
     allocation_snapshot: null,
     velocity_snapshot: null,
     sale_days_snapshot: null,
+    calculation_warnings: [],
     urgent: false,
     purchase_qty: 10,
     procurement_export_status: 'pending',

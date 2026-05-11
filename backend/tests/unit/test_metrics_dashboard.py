@@ -5,6 +5,17 @@ import pytest
 
 import app.api.metrics as metrics_module
 from app.api.metrics import build_dashboard_payload
+from app.engine.context import InventoryStock
+
+
+def _zero_inventory(sale_days_by_sku: dict[str, dict[str, float]]):
+    return {
+        sku: {
+            country: InventoryStock(available=0, reserved=0, in_transit=0)
+            for country in country_map
+        }
+        for sku, country_map in sale_days_by_sku.items()
+    }
 
 
 class _ScalarOneResult:
@@ -79,13 +90,14 @@ async def test_dashboard_returns_empty_risk_distribution_without_active_suggesti
         }
 
     async def _fake_run_step2(*_args, **_kwargs):
+        sale_days_by_sku = {
+            "SKU-1": {"US": 10.0},
+            "SKU-2": {"US": 35.0},
+            "SKU-3": {"US": 70.0},
+        }
         return (
-            {
-                "SKU-1": {"US": 10.0},
-                "SKU-2": {"US": 35.0},
-                "SKU-3": {"US": 70.0},
-            },
-            {},
+            sale_days_by_sku,
+            _zero_inventory(sale_days_by_sku),
         )
 
     monkeypatch = pytest.MonkeyPatch()
@@ -158,12 +170,13 @@ async def test_dashboard_filters_unknown_and_invalid_countries() -> None:
         }
 
     async def _fake_run_step2(*_args, **_kwargs):
+        sale_days_by_sku = {
+            "SKU-1": {"US": 10.0, "ZZ": 1.0, "": 1.0, "USA": 1.0},
+            "SKU-2": {"US": 70.0},
+        }
         return (
-            {
-                "SKU-1": {"US": 10.0, "ZZ": 1.0, "": 1.0, "USA": 1.0},
-                "SKU-2": {"US": 70.0},
-            },
-            {},
+            sale_days_by_sku,
+            _zero_inventory(sale_days_by_sku),
         )
 
     monkeypatch = pytest.MonkeyPatch()
@@ -206,12 +219,13 @@ async def test_dashboard_risk_distribution_uses_restock_regions_filter() -> None
         }
 
     async def _fake_run_step2(*_args, **_kwargs):
+        sale_days_by_sku = {
+            "SKU-1": {"EU": 10.0, "DE": 10.0, "US": 10.0},
+            "SKU-2": {"EU": 55.0, "DE": 10.0, "US": 10.0},
+        }
         return (
-            {
-                "SKU-1": {"EU": 10.0, "DE": 10.0, "US": 10.0},
-                "SKU-2": {"EU": 55.0, "DE": 10.0, "US": 10.0},
-            },
-            {},
+            sale_days_by_sku,
+            _zero_inventory(sale_days_by_sku),
         )
 
     monkeypatch = pytest.MonkeyPatch()
@@ -392,14 +406,15 @@ async def test_dashboard_buckets_sale_days_by_country_using_global_thresholds() 
         }
 
     async def _fake_run_step2(*_args, **_kwargs):
+        sale_days_by_sku = {
+            "SKU-1": {"US": 10.0, "CA": 70.0},
+            "SKU-2": {"US": 30.0, "CA": 15.0},
+            "SKU-3": {"US": 60.0, "JP": 19.0},
+            "SKU-7": {"US": 18.0, "CA": 12.0},
+        }
         return (
-            {
-                "SKU-1": {"US": 10.0, "CA": 70.0},
-                "SKU-2": {"US": 30.0, "CA": 15.0},
-                "SKU-3": {"US": 60.0, "JP": 19.0},
-                "SKU-7": {"US": 18.0, "CA": 12.0},
-            },
-            {},
+            sale_days_by_sku,
+            _zero_inventory(sale_days_by_sku),
         )
 
     monkeypatch = pytest.MonkeyPatch()

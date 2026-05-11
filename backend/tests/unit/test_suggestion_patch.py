@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from app.api.suggestion import delete_suggestion, patch_item
+from app.api.suggestion import delete_suggestion, patch_item, recalculate_item
 from app.core.exceptions import NotFound, ValidationFailed
 from app.schemas.suggestion import SuggestionItemPatch
 
@@ -81,10 +81,18 @@ class _FakeItem:
         self.country_breakdown = {"US": 1}
         self.warehouse_breakdown = {"US": {"W1": 1}}
         self.allocation_snapshot: dict[str, Any] | None = {"US": {"allocation_mode": "matched"}}
+        self.velocity_snapshot: dict[str, float] | None = {"US": 1.0}
         self.sale_days_snapshot: dict[str, float] | None = {"US": 25.0}
+        self.calculation_warnings: list[dict[str, Any]] = []
         self.purchase_qty = 0
         self.restock_dates: dict[str, str | None] = {}
         self.urgent = False
+
+
+async def _async_resolver() -> Any:
+    from types import SimpleNamespace
+
+    return SimpleNamespace(sku_to_group_key={}, members_by_group_key={})
 
 
 def test_suggestion_item_patch_rejects_negative_purchase_qty() -> None:
@@ -203,6 +211,100 @@ async def test_suggestion_patch_ignores_missing_sale_days_when_recomputing_urgen
     assert normalized_values["urgent"] is False
     assert normalized_values["restock_dates"]["US"] is not None
     assert normalized_values["restock_dates"]["UK"] is None
+
+
+async def test_suggestion_patch_uses_original_snapshot_date(monkeypatch) -> None:
+    import app.api.suggestion as suggestion_module
+
+    async def _fake_enrich_item(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    async def _fake_lead_time(*_args: Any, **_kwargs: Any) -> int:
+        return 20
+
+    suggestion = _FakeSuggestion()
+    suggestion.global_config_snapshot = {
+        "lead_time_days": 20,
+        "snapshot_at": "2026-04-01T10:00:00+08:00",
+    }
+    item = _FakeItem()
+    item.sale_days_snapshot = {"US": 20.0}
+    db = _FakeSession([suggestion, item, None])
+    patch = SuggestionItemPatch(country_breakdown={"US": 1})
+    monkeypatch.setattr(suggestion_module, "_enrich_item", _fake_enrich_item)
+    monkeypatch.setattr(suggestion_module, "_resolve_effective_lead_time_days", _fake_lead_time)
+
+    await patch_item(patch=patch, suggestion_id=1, item_id=10, db=db, _={})  # type: ignore[arg-type]
+
+    values = _normalize_update_values(db.executed_statements[-1])
+    assert values["restock_dates"] == {"US": "2026-04-01"}
+
+
+async def test_suggestion_patch_marks_added_country_warning(monkeypatch) -> None:
+    import app.api.suggestion as suggestion_module
+
+    async def _fake_enrich_item(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    async def _fake_lead_time(*_args: Any, **_kwargs: Any) -> int:
+        return 20
+
+    item = _FakeItem()
+    item.sale_days_snapshot = {"US": 25.0}
+    item.velocity_snapshot = {"US": 1.0}
+    db = _FakeSession([_FakeSuggestion(), item, None])
+    patch = SuggestionItemPatch(
+        country_breakdown={"US": 1, "GB": 2},
+        warehouse_breakdown={"US": {"W1": 1}, "GB": {"W2": 2}},
+    )
+    monkeypatch.setattr(suggestion_module, "_enrich_item", _fake_enrich_item)
+    monkeypatch.setattr(suggestion_module, "_resolve_effective_lead_time_days", _fake_lead_time)
+
+    await patch_item(patch=patch, suggestion_id=1, item_id=10, db=db, _={})  # type: ignore[arg-type]
+
+    values = _normalize_update_values(db.executed_statements[-1])
+    assert values["calculation_warnings"][0]["code"] == "country_added_after_generation"
+    assert values["calculation_warnings"][0]["country"] == "GB"
+
+
+async def test_recalculate_item_updates_only_timing_diagnostics(monkeypatch) -> None:
+    import app.api.suggestion as suggestion_module
+
+    async def _fake_enrich_item(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    async def _fake_lead_time(*_args: Any, **_kwargs: Any) -> int:
+        return 20
+
+    async def _fake_run_step2(*_args: Any, **_kwargs: Any) -> tuple[dict[str, dict[str, float]], dict[str, dict[str, object]]]:
+        return {"SKU-A": {"US": 15.0}}, {"SKU-A": {"US": object()}}
+
+    item = _FakeItem()
+    item.country_breakdown = {"US": 1, "GB": 2}
+    item.velocity_snapshot = {"US": 1.0, "GB": 2.0}
+    db = _FakeSession([_FakeSuggestion(), item, None])
+    monkeypatch.setattr(suggestion_module, "_enrich_item", _fake_enrich_item)
+    monkeypatch.setattr(suggestion_module, "_resolve_effective_lead_time_days", _fake_lead_time)
+    monkeypatch.setattr(
+        suggestion_module,
+        "load_physical_sku_resolver",
+        lambda _db: _async_resolver(),
+    )
+    monkeypatch.setattr(suggestion_module, "run_step2", _fake_run_step2)
+
+    await recalculate_item(suggestion_id=1, item_id=10, db=db, _={})  # type: ignore[arg-type]
+
+    values = _normalize_update_values(db.executed_statements[-1])
+    assert set(values) == {
+        "sale_days_snapshot",
+        "urgent",
+        "restock_dates",
+        "calculation_warnings",
+    }
+    assert values["sale_days_snapshot"] == {"US": 15.0}
+    assert values["urgent"] is True
+    assert values["calculation_warnings"][0]["code"] == "missing_inventory_record"
+    assert values["calculation_warnings"][0]["country"] == "GB"
 
 
 async def test_suggestion_patch_rejects_warehouse_sum_mismatch() -> None:

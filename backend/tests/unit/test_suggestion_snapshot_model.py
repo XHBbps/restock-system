@@ -40,6 +40,7 @@ def test_snapshot_item_fields():
         "urgent",
         "velocity_snapshot",
         "sale_days_snapshot",
+        "calculation_warnings",
         "commodity_name",
         "main_image_url",
     }

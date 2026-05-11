@@ -89,6 +89,15 @@ async def _upsert_inventory(
 
     available = _to_int(raw.get("stockAvailable"), 0)
     reserved = _to_int(raw.get("stockOccupy"), 0)
+    if available is None or reserved is None:
+        logger.warning(
+            "inventory_row_skipped_invalid_quantity",
+            commodity_sku=commodity_sku,
+            warehouse_id=warehouse_id,
+            stock_available=raw.get("stockAvailable"),
+            stock_occupy=raw.get("stockOccupy"),
+        )
+        return
     original_country = warehouse_country_map.get(warehouse_id)
     mapped_country = apply_eu_mapping(original_country, eu_countries or set())
 
@@ -116,10 +125,10 @@ async def _upsert_inventory(
     await db.execute(stmt)
 
 
-def _to_int(v: Any, default: int = 0) -> int:
+def _to_int(v: Any, default: int = 0) -> int | None:
     if v is None or v == "":
         return default
     try:
         return int(v)
     except (TypeError, ValueError):
-        return default
+        return None

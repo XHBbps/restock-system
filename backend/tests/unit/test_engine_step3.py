@@ -51,8 +51,8 @@ def test_exact_target_yields_zero() -> None:
     assert "JP" not in qty.get("sku-A", {})
 
 
-def test_no_inventory_record_treated_as_zero_stock() -> None:
+def test_no_inventory_record_is_skipped() -> None:
     velocity = {"sku-A": {"JP": 10.0}}
     inventory: dict = {}
     qty = compute_country_qty(velocity, inventory, 60)
-    assert qty["sku-A"]["JP"] == 600
+    assert qty == {}

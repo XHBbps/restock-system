@@ -23,6 +23,7 @@ def test_suggestion_item_export_fields():
     assert "restock_export_status" in cols
     assert "restock_exported_snapshot_id" in cols
     assert "restock_exported_at" in cols
+    assert "calculation_warnings" in cols
     assert "push_status" not in cols
     assert "saihu_po_number" not in cols
     assert "commodity_id" not in cols

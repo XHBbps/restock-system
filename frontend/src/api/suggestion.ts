@@ -45,6 +45,12 @@ export interface SuggestionItem {
   allocation_snapshot: Record<string, AllocationExplanation> | null
   velocity_snapshot: Record<string, number> | null
   sale_days_snapshot: Record<string, number> | null
+  calculation_warnings: Array<{
+    code: string
+    country: string
+    reason: string | null
+    message: string
+  }>
   urgent: boolean
   purchase_qty: number
   procurement_export_status: 'pending' | 'exported'
@@ -99,6 +105,16 @@ export async function patchSuggestionItem(
   const { data } = await client.patch<SuggestionItem>(
     `/api/suggestions/${suggestionId}/items/${itemId}`,
     patch,
+  )
+  return data
+}
+
+export async function recalculateSuggestionItem(
+  suggestionId: number,
+  itemId: number,
+): Promise<SuggestionItem> {
+  const { data } = await client.post<SuggestionItem>(
+    `/api/suggestions/${suggestionId}/items/${itemId}/recalculate`,
   )
   return data
 }

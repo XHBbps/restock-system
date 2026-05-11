@@ -16,11 +16,13 @@ from app.core.exceptions import ConflictError, NotFound, ValidationFailed
 from app.core.permissions import HISTORY_DELETE, RESTOCK_OPERATE, RESTOCK_VIEW
 from app.core.query import escape_like
 from app.core.timezone import BEIJING, now_beijing
+from app.engine.step2_sale_days import run_step2
 from app.engine.step6_timing import (
     compute_restock_dates,
     has_urgent_sale_days,
     positive_qty_countries,
 )
+from app.engine.warnings import build_calculation_warnings
 from app.models.product_listing import ProductListing
 from app.models.sku import SkuConfig
 from app.models.suggestion import Suggestion, SuggestionItem
@@ -33,6 +35,7 @@ from app.schemas.suggestion import (
     SuggestionListOut,
     SuggestionOut,
 )
+from app.services.physical_item import load_physical_sku_resolver
 
 router = APIRouter(prefix="/api/suggestions", tags=["suggestion"])
 
@@ -49,6 +52,8 @@ class SuggestionItemUpdates(TypedDict, total=False):
     allocation_snapshot: None
     urgent: bool
     restock_dates: dict[str, str | None]
+    sale_days_snapshot: dict[str, Any]
+    calculation_warnings: list[dict[str, Any]]
 
 
 def _suggestion_status_sort_expr() -> ColumnElement[int]:
@@ -282,6 +287,12 @@ async def patch_item(
         updates["allocation_snapshot"] = None
     if patch.country_breakdown is not None:
         lead_time_days = await _resolve_effective_lead_time_days(db, parent, item)
+        base_date = _suggestion_base_date(parent)
+        added_countries = {
+            country
+            for country, qty in effective_country_breakdown.items()
+            if int(qty or 0) > 0 and int((item.country_breakdown or {}).get(country, 0) or 0) <= 0
+        }
         updates["urgent"] = has_urgent_sale_days(
             item.sale_days_snapshot or {},
             lead_time_days=lead_time_days,
@@ -291,13 +302,88 @@ async def patch_item(
             item.sale_days_snapshot or {},
             country_qty_for_sku=effective_country_breakdown,
             lead_time_days=lead_time_days,
-            today=now_beijing().date(),
+            today=base_date,
+        )
+        updates["calculation_warnings"] = build_calculation_warnings(
+            country_qty_for_sku=effective_country_breakdown,
+            sale_days_for_sku=item.sale_days_snapshot or {},
+            velocity_for_sku=item.velocity_snapshot or {},
+            added_countries=added_countries,
         )
 
     if updates:
         await db.execute(update(SuggestionItem).where(SuggestionItem.id == item_id).values(**updates))
         await db.refresh(item)
 
+    return await _enrich_item(db, item)
+
+
+@router.post("/{suggestion_id}/items/{item_id}/recalculate", response_model=SuggestionItemOut)
+async def recalculate_item(
+    suggestion_id: int = Path(..., ge=1),
+    item_id: int = Path(..., ge=1),
+    db: AsyncSession = Depends(db_session),
+    _: None = Depends(require_permission(RESTOCK_OPERATE)),
+) -> SuggestionItemOut:
+    parent = (
+        await db.execute(select(Suggestion).where(Suggestion.id == suggestion_id))
+    ).scalar_one_or_none()
+    if parent is None:
+        raise NotFound(f"建议单 {suggestion_id} 不存在")
+    if parent.status != "draft":
+        raise ValidationFailed("仅 draft 建议单允许重新计算条目")
+
+    item = (
+        await db.execute(
+            select(SuggestionItem).where(
+                SuggestionItem.id == item_id,
+                SuggestionItem.suggestion_id == suggestion_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if item is None:
+        raise NotFound(f"建议条目 {item_id} 不存在")
+
+    resolver = await load_physical_sku_resolver(db)
+    velocity_for_sku = item.velocity_snapshot or {}
+    sale_days, inventory = await run_step2(
+        db,
+        {item.commodity_sku: velocity_for_sku},
+        [item.commodity_sku],
+        sku_to_group_key=resolver.sku_to_group_key,
+        members_by_group_key=resolver.members_by_group_key,
+    )
+    recalculated_sale_days = sale_days.get(item.commodity_sku, {})
+    missing_inventory = {
+        country
+        for country, value in velocity_for_sku.items()
+        if _is_positive_number(value) and country not in inventory.get(item.commodity_sku, {})
+    }
+    lead_time_days = await _resolve_effective_lead_time_days(db, parent, item)
+    country_breakdown = item.country_breakdown or {}
+    base_date = _suggestion_base_date(parent)
+    updates: SuggestionItemUpdates = {
+        "sale_days_snapshot": recalculated_sale_days,
+        "urgent": has_urgent_sale_days(
+            recalculated_sale_days,
+            lead_time_days=lead_time_days,
+            countries=positive_qty_countries(country_breakdown),
+        ),
+        "restock_dates": compute_restock_dates(
+            recalculated_sale_days,
+            country_qty_for_sku=country_breakdown,
+            lead_time_days=lead_time_days,
+            today=base_date,
+        ),
+        "calculation_warnings": build_calculation_warnings(
+            country_qty_for_sku=country_breakdown,
+            sale_days_for_sku=recalculated_sale_days,
+            velocity_for_sku=velocity_for_sku,
+            missing_inventory_countries=missing_inventory,
+        ),
+    }
+    await db.execute(update(SuggestionItem).where(SuggestionItem.id == item_id).values(**updates))
+    await db.refresh(item)
     return await _enrich_item(db, item)
 
 
@@ -357,6 +443,26 @@ async def _resolve_effective_lead_time_days(
     if isinstance(snapshot_lead_time, (int, float)):
         return int(snapshot_lead_time)
     return 50
+
+
+def _suggestion_base_date(suggestion: Suggestion) -> date_type:
+    snapshot_at = (suggestion.global_config_snapshot or {}).get("snapshot_at")
+    if isinstance(snapshot_at, str) and snapshot_at.strip():
+        try:
+            return datetime.fromisoformat(snapshot_at).date()
+        except ValueError:
+            pass
+    created_at = getattr(suggestion, "created_at", None)
+    if isinstance(created_at, datetime):
+        return created_at.date()
+    return now_beijing().date()
+
+
+def _is_positive_number(value: Any) -> bool:
+    try:
+        return float(value) > 0
+    except (TypeError, ValueError):
+        return False
 
 
 async def _snapshot_counts_for_suggestion(

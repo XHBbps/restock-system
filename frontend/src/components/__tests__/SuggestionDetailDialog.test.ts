@@ -160,6 +160,7 @@ function makeSnapshotItem(index = 1, overrides: Partial<SnapshotItemOut> = {}): 
     urgent: false,
     velocity_snapshot: null,
     sale_days_snapshot: null,
+    calculation_warnings: [],
     ...overrides,
   }
 }

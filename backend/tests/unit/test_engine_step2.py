@@ -73,6 +73,15 @@ def test_compute_sale_days_does_not_create_inventory_only_country() -> None:
     assert sale_days == {"sku-A": {"US": 2.0}}
 
 
+def test_compute_sale_days_skips_missing_inventory_record() -> None:
+    sale_days = compute_sale_days(
+        velocity={"sku-A": {"US": 4.0}},
+        inventory={},
+    )
+
+    assert sale_days == {}
+
+
 def test_compute_sale_days_excludes_unknown_and_invalid_countries() -> None:
     sale_days = compute_sale_days(
         velocity={"sku-A": {"US": 4.0, "ZZ": 4.0, "": 4.0, "USA": 4.0}},

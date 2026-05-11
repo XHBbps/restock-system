@@ -234,11 +234,31 @@ async def _upsert_package_ship_order(
             raw.get("purchaseDate"),
             marketplace_id,
         )
+        if purchase_date is None:
+            logger.warning(
+                "package_ship_order_skipped_invalid_purchase_date",
+                shop_id=shop_id,
+                package_sn=package_sn,
+                amazon_order_id=amazon_order_id,
+                raw_purchase_date=order_meta.get("purchaseDate") or raw.get("purchaseDate"),
+            )
+            continue
         last_update_date = _parse_order_date(
             order_meta.get("lastUpdateDate") or raw.get("updateTime") or raw.get("lastUpdateDate"),
             raw.get("updateTime") or raw.get("lastUpdateDate") or order_meta.get("purchaseDate"),
             marketplace_id,
         )
+        if last_update_date is None:
+            logger.warning(
+                "package_ship_order_invalid_last_update_date_fallback_purchase_date",
+                shop_id=shop_id,
+                package_sn=package_sn,
+                amazon_order_id=amazon_order_id,
+                raw_last_update_date=(
+                    order_meta.get("lastUpdateDate") or raw.get("updateTime") or raw.get("lastUpdateDate")
+                ),
+            )
+            last_update_date = purchase_date
         header_values = {
             "shop_id": shop_id,
             "amazon_order_id": amazon_order_id,
@@ -306,8 +326,18 @@ async def _upsert_package_ship_order(
                 _clean_text(raw_item.get("orderItemId"))
                 or f"{package_sn}:{amazon_order_id}:{index}"
             )
-            seen_item_ids.append(order_item_id)
             quantity = _to_int(raw_item.get("quantityOrdered"))
+            if quantity is None:
+                logger.warning(
+                    "package_ship_item_skipped_invalid_quantity",
+                    shop_id=shop_id,
+                    package_sn=package_sn,
+                    amazon_order_id=amazon_order_id,
+                    item_index=index,
+                    raw_quantity=raw_item.get("quantityOrdered"),
+                )
+                continue
+            seen_item_ids.append(order_item_id)
             item_values.append(
                 {
                     "order_id": order_id,
@@ -479,12 +509,12 @@ def _resolve_package_country(
     return fallback, None
 
 
-def _parse_order_date(raw: Any, fallback: Any, marketplace_id: str) -> datetime:
+def _parse_order_date(raw: Any, fallback: Any, marketplace_id: str) -> datetime | None:
     parsed = parse_saihu_time(_clean_text(raw), marketplace_id)
     if parsed is not None:
         return parsed
     fallback_parsed = parse_saihu_time(_clean_text(fallback), marketplace_id)
-    return fallback_parsed or now_beijing()
+    return fallback_parsed
 
 
 def _clean_text(value: Any) -> str | None:
@@ -494,13 +524,13 @@ def _clean_text(value: Any) -> str | None:
     return text or None
 
 
-def _to_int(value: Any, default: int = 0) -> int:
+def _to_int(value: Any, default: int = 0) -> int | None:
     if value is None or value == "":
         return default
     try:
         return int(float(value))
     except (TypeError, ValueError):
-        return default
+        return None
 
 
 def _to_decimal(value: Any) -> Any:

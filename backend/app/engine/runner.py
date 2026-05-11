@@ -25,6 +25,7 @@ from app.engine.step5_warehouse_split import (
     load_zipcode_rules,
 )
 from app.engine.step6_timing import compute_urgency_for_sku
+from app.engine.warnings import build_calculation_warnings
 from app.models.global_config import GlobalConfig
 from app.models.sku import SkuConfig
 from app.models.suggestion import Suggestion, SuggestionItem
@@ -147,6 +148,11 @@ async def run_engine(
         await ctx.progress(current_step="Step 3: 计算各国补货量")
         country_qty_all = compute_country_qty(velocity, inventory, effective_target_days)
         country_qty = _filter_allowed_country_map(country_qty_all, allowed_countries)
+        missing_inventory_by_sku = _missing_inventory_countries_by_sku(
+            velocity,
+            inventory,
+            allowed_countries=allowed_countries,
+        )
 
         await ctx.progress(current_step="Step 4: 计算采购量")
         local_stock = await load_local_inventory(
@@ -206,12 +212,22 @@ async def run_engine(
                 if allocation.warehouse_breakdown:
                     warehouse_breakdown[country] = allocation.warehouse_breakdown
 
-            lead_time = sku_lead_time.get(sku) or config.lead_time_days
+            lead_time = (
+                sku_lead_time[sku]
+                if sku_lead_time.get(sku) is not None
+                else config.lead_time_days
+            )
             timing = compute_urgency_for_sku(
                 sale_days_for_sku=sale_days.get(sku, {}),
                 country_qty_for_sku=sku_country_qty,
                 lead_time_days=lead_time,
                 today=today,
+            )
+            calculation_warnings = build_calculation_warnings(
+                country_qty_for_sku=sku_country_qty,
+                sale_days_for_sku=sale_days.get(sku, {}),
+                velocity_for_sku=velocity.get(sku, {}),
+                missing_inventory_countries=missing_inventory_by_sku.get(sku, set()),
             )
 
             items_to_insert.append(
@@ -223,6 +239,7 @@ async def run_engine(
                     "allocation_snapshot": allocation_snapshot,
                     "velocity_snapshot": velocity.get(sku, {}),
                     "sale_days_snapshot": sale_days.get(sku, {}),
+                    "calculation_warnings": calculation_warnings,
                     "urgent": timing.urgent,
                     "purchase_qty": purchase_qty,
                     "restock_dates": timing.restock_dates or {},
@@ -260,6 +277,27 @@ def _config_snapshot(config: GlobalConfig, *, demand_date: date | None = None) -
     if demand_date is not None:
         snapshot["demand_date"] = demand_date.isoformat()
     return snapshot
+
+
+def _missing_inventory_countries_by_sku(
+    velocity: dict[str, dict[str, float]],
+    inventory: dict[str, dict[str, Any]],
+    *,
+    allowed_countries: set[str] | None,
+) -> dict[str, set[str]]:
+    result: dict[str, set[str]] = {}
+    for sku, country_map in velocity.items():
+        for country, daily_rate in country_map.items():
+            if daily_rate <= 0:
+                continue
+            if not is_reportable_country_code(country):
+                continue
+            if allowed_countries is not None and country not in allowed_countries:
+                continue
+            if country in inventory.get(sku, {}):
+                continue
+            result.setdefault(sku, set()).add(country)
+    return result
 
 
 async def _persist_suggestion(

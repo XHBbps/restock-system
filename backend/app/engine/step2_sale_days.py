@@ -125,7 +125,9 @@ def compute_sale_days(
             if v <= 0:
                 continue
             stock = inventory.get(sku, {}).get(country)
-            result[sku][country] = (stock.total if stock is not None else 0) / v
+            if stock is None:
+                continue
+            result[sku][country] = stock.total / v
     return dict(result)
 
 

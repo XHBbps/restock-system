@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { flushPromises, shallowMount } from '@vue/test-utils'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { SuggestionDetail, SuggestionItem } from '@/api/suggestion'
 
@@ -9,6 +9,8 @@ const mockCreateRestockSnapshot = vi.fn()
 const mockDownloadSnapshotBlob = vi.fn()
 const mockTriggerBlobDownload = vi.fn()
 const mockListWarehouses = vi.fn()
+const mockRecalculateSuggestionItem = vi.fn()
+const mockConfirm = vi.fn()
 
 vi.mock('@/api/config', async () => {
   const actual = await vi.importActual<typeof import('@/api/config')>('@/api/config')
@@ -23,6 +25,14 @@ vi.mock('@/api/snapshot', () => ({
   downloadSnapshotBlob: (...args: unknown[]) => mockDownloadSnapshotBlob(...args),
 }))
 
+vi.mock('@/api/suggestion', async () => {
+  const actual = await vi.importActual<typeof import('@/api/suggestion')>('@/api/suggestion')
+  return {
+    ...actual,
+    recalculateSuggestionItem: (...args: unknown[]) => mockRecalculateSuggestionItem(...args),
+  }
+})
+
 vi.mock('@/utils/download', () => ({
   triggerBlobDownload: (...args: unknown[]) => mockTriggerBlobDownload(...args),
 }))
@@ -32,6 +42,7 @@ vi.mock('element-plus', async () => {
   return {
     ...actual,
     ElMessage: { success: vi.fn(), error: vi.fn() },
+    ElMessageBox: { confirm: (...args: unknown[]) => mockConfirm(...args) },
   }
 })
 
@@ -48,6 +59,7 @@ function makeItem(id: number, overrides: Partial<SuggestionItem> = {}): Suggesti
     allocation_snapshot: null,
     velocity_snapshot: null,
     sale_days_snapshot: null,
+    calculation_warnings: [],
     urgent: false,
     purchase_qty: 10,
     procurement_export_status: 'pending',
@@ -88,6 +100,7 @@ const STUBS = {
   ElInput: true,
   ElButton: true,
   ElCheckbox: true,
+  ElTooltip: { template: '<span><slot /></span>' },
   ElTable: { template: '<div><slot /></div>' },
   ElTableColumn: true,
   ElTag: { template: '<span><slot /></span>' },
@@ -95,6 +108,10 @@ const STUBS = {
 }
 
 describe('RestockListView', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
   it('selects all restock rows across pages and exports the global selection', async () => {
     mockListWarehouses.mockResolvedValue([])
     mockCreateRestockSnapshot.mockResolvedValue({ id: 99 })
@@ -144,6 +161,7 @@ describe('RestockListView', () => {
 
     await vm.handleExport()
     expect(mockCreateRestockSnapshot).toHaveBeenCalledWith(1, [1, 2, 3])
+    expect(mockConfirm).not.toHaveBeenCalled()
   })
 
   it('limits select-all to filtered rows and drops hidden selections', async () => {
@@ -281,5 +299,70 @@ describe('RestockListView', () => {
       ['US', 10, [{ id: 'WH-1', qty: 10 }]],
       ['GB', 5, [{ id: 'WH-2', qty: 5 }]],
     ])
+  })
+
+  it('confirms before exporting rows with calculation warnings', async () => {
+    mockListWarehouses.mockResolvedValue([])
+    mockConfirm.mockResolvedValue('confirm')
+    mockCreateRestockSnapshot.mockResolvedValue({ id: 99 })
+    mockDownloadSnapshotBlob.mockResolvedValue({
+      blob: new Blob(['ok']),
+      filename: 'restock.xlsx',
+    })
+
+    const { default: View } = await import('../RestockListView.vue')
+    const wrapper = shallowMount(View, {
+      props: {
+        suggestion: makeSuggestion({ restock_item_count: 1 }),
+        items: [
+          makeItem(1, {
+            calculation_warnings: [
+              {
+                code: 'missing_velocity',
+                country: 'UK',
+                reason: 'missing_velocity',
+                message: '缺少该国家的销量速度',
+              },
+            ],
+          }),
+        ],
+      },
+      global: { stubs: STUBS },
+    })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      toggleSelectAll: (checked: boolean) => void
+      handleExport: () => Promise<void>
+    }
+    vm.toggleSelectAll(true)
+    await vm.handleExport()
+
+    expect(mockConfirm).toHaveBeenCalled()
+    expect(mockCreateRestockSnapshot).toHaveBeenCalledWith(1, [1])
+  })
+
+  it('recalculates one restock row and refreshes the parent', async () => {
+    mockListWarehouses.mockResolvedValue([])
+    mockRecalculateSuggestionItem.mockResolvedValue(makeItem(1))
+
+    const { default: View } = await import('../RestockListView.vue')
+    const wrapper = shallowMount(View, {
+      props: {
+        suggestion: makeSuggestion({ id: 5, restock_item_count: 1 }),
+        items: [makeItem(1)],
+      },
+      global: { stubs: STUBS },
+    })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      handleRecalculate: (item: SuggestionItem) => Promise<void>
+      filteredItems: SuggestionItem[]
+    }
+    await vm.handleRecalculate(vm.filteredItems[0])
+
+    expect(mockRecalculateSuggestionItem).toHaveBeenCalledWith(5, 1)
+    expect(wrapper.emitted('refresh')).toBeTruthy()
   })
 })

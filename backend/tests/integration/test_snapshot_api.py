@@ -50,6 +50,18 @@ async def seed_suggestion(db_session):
             urgent=(i % 2 == 0),
             velocity_snapshot={"US": 1.5, "GB": 0.8},
             sale_days_snapshot={"US": 20, "GB": 40},
+            calculation_warnings=(
+                [
+                    {
+                        "code": "missing_velocity",
+                        "country": "GB",
+                        "reason": "missing_velocity",
+                        "message": "缺少该国家的销量速度",
+                    }
+                ]
+                if i == 0
+                else []
+            ),
         )
         for i in range(3)
     ]
@@ -288,6 +300,7 @@ async def test_snapshot_detail(client, seed_suggestion, ensure_global_config, mo
     assert body["items"][0]["purchase_qty"] is not None
     assert "purchase_date" not in body["items"][0]
     assert body["items"][0]["restock_dates"]["US"] == "2026-04-21"
+    assert body["items"][0]["calculation_warnings"][0]["code"] == "missing_velocity"
 
 
 @pytest.mark.asyncio
@@ -313,6 +326,7 @@ async def test_restock_snapshot_freezes_restock_dates(
         )
     ).scalar_one()
     assert snapshot_item.restock_dates["US"] == "2026-04-21"
+    assert snapshot_item.calculation_warnings[0]["code"] == "missing_velocity"
 
 
 @pytest.mark.asyncio
