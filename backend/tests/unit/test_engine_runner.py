@@ -230,6 +230,47 @@ async def test_run_engine_marks_missing_inventory_record_warning() -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_engine_generates_restock_for_known_zero_composite_inventory() -> None:
+    config = _make_config(restock_regions=["US"])
+    db = _FakeDb([None, _ScalarResult(config), _ScalarResult([("SKU-001", 50)])])
+    captured: dict[str, Any] = {}
+
+    async def fake_persist(_db: Any, **kwargs: Any) -> int:
+        captured.update(kwargs)
+        return 123
+
+    with (
+        patch("app.engine.runner.async_session_factory", _FakeSessionFactory(db)),
+        patch("app.engine.runner.run_step1", AsyncMock(return_value={"SKU-001": {"US": 3.0}})),
+        patch(
+            "app.engine.runner.run_step2",
+            AsyncMock(
+                return_value=(
+                    {"SKU-001": {"US": 0.0}},
+                    {
+                        "SKU-001": {
+                            "US": InventoryStock(available=0, reserved=0, in_transit=0)
+                        }
+                    },
+                )
+            ),
+        ),
+        patch("app.engine.runner.load_local_inventory", AsyncMock(return_value={})),
+        patch("app.engine.runner.load_country_warehouses", AsyncMock(return_value={})),
+        patch("app.engine.runner.load_zipcode_rules", AsyncMock(return_value=[])),
+        patch("app.engine.runner.load_all_sku_country_orders", AsyncMock(return_value={})),
+        patch("app.engine.runner._persist_suggestion", fake_persist),
+    ):
+        result = await run_engine(_FakeContext(), demand_date=_today())  # type: ignore[arg-type]
+
+    assert result == 123
+    item = captured["items"][0]
+    assert item["country_breakdown"] == {"US": 180}
+    assert item["sale_days_snapshot"] == {"US": 0.0}
+    assert item["calculation_warnings"] == []
+
+
+@pytest.mark.asyncio
 async def test_run_engine_filters_unknown_countries_from_snapshots_and_breakdown() -> None:
     config = _make_config()
     db = _FakeDb([None, _ScalarResult(config), _ScalarResult([("SKU-001", 50)])])

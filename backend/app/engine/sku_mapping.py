@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.countries import is_reportable_country_code
 from app.models.in_transit import InTransitItem, InTransitRecord
 from app.models.inventory import InventorySnapshotLatest
 from app.models.sku_mapping import SkuMappingRule
@@ -327,26 +328,106 @@ def compute_mapped_stock_by_country(
         _country_weights_by_sku(velocity) if velocity is not None else {},
     )
     warehouse_ids = {warehouse_id for _, warehouse_id in component_stock}
+    country_by_warehouse: dict[str, str] = {}
+    component_keys = set(component_stock)
+    for (_component_sku, warehouse_id), stock in component_stock.items():
+        if stock.country and warehouse_id not in country_by_warehouse:
+            country_by_warehouse[warehouse_id] = stock.country
     for commodity_sku, groups in rules.items():
         for warehouse_id in warehouse_ids:
+            country = country_by_warehouse.get(warehouse_id)
+            if not country or not is_reportable_country_code(country):
+                continue
             for components in groups:
-                country: str | None = None
+                has_component_signal = any(
+                    (component.inventory_sku, warehouse_id) in component_keys
+                    for component in components
+                )
+                if not has_component_signal:
+                    continue
                 buildable: int | None = None
                 for component in components:
-                    stock = allocations.get((commodity_sku, component.inventory_sku, warehouse_id))
-                    if stock is None:
+                    allocated_stock = allocations.get(
+                        (commodity_sku, component.inventory_sku, warehouse_id)
+                    )
+                    if allocated_stock is None:
                         buildable = 0
                         break
-                    country = country or stock.country
-                    buildable_for_component = stock.total // component.quantity
+                    buildable_for_component = allocated_stock.total // component.quantity
                     buildable = (
                         buildable_for_component
                         if buildable is None
                         else min(buildable, buildable_for_component)
                     )
-                if country and buildable and buildable > 0:
+                if buildable is not None:
                     result[(commodity_sku, country)] += buildable
     return dict(result)
+
+
+async def load_in_transit_totals_by_country(
+    db: AsyncSession,
+    inventory_skus: list[str],
+    *,
+    sku_to_group_key: dict[str, str] | None = None,
+) -> dict[tuple[str, str], int]:
+    """Load component in-transit quantities that only have target countries."""
+    if not inventory_skus:
+        return {}
+    stmt = (
+        select(
+            InTransitItem.commodity_sku,
+            InTransitRecord.target_country,
+            func.sum(InTransitItem.goods).label("goods_total"),
+        )
+        .join(
+            InTransitRecord,
+            InTransitRecord.saihu_out_record_id == InTransitItem.saihu_out_record_id,
+        )
+        .where(InTransitRecord.is_in_transit.is_(True))
+        .where(InTransitRecord.target_warehouse_id.is_(None))
+        .where(InTransitRecord.target_country.is_not(None))
+        .where(InTransitItem.commodity_sku.in_(inventory_skus))
+        .group_by(InTransitItem.commodity_sku, InTransitRecord.target_country)
+    )
+    rows = (await db.execute(stmt)).all()
+    sku_groups = sku_to_group_key or {}
+    result: defaultdict[tuple[str, str], int] = defaultdict(int)
+    for sku, country, total in rows:
+        if not is_reportable_country_code(country):
+            continue
+        result[(sku_groups.get(sku, sku), country)] += int(total or 0)
+    return dict(result)
+
+
+def aggregate_component_stock_by_country(
+    warehouse_stock: dict[tuple[str, str], WarehouseStock],
+    country_stock: dict[tuple[str, str], int],
+) -> dict[tuple[str, str], WarehouseStock]:
+    """Collapse component stock into one synthetic warehouse per country."""
+    result: dict[tuple[str, str], WarehouseStock] = {}
+    for (sku, _warehouse_id), stock in warehouse_stock.items():
+        if not stock.country or not is_reportable_country_code(stock.country):
+            continue
+        key = (sku, _country_level_warehouse_id(stock.country))
+        current = result.get(key)
+        if current is None:
+            result[key] = WarehouseStock(country=stock.country, total=stock.total)
+        else:
+            result[key] = WarehouseStock(country=stock.country, total=current.total + stock.total)
+    for (sku, country), total in country_stock.items():
+        if not is_reportable_country_code(country):
+            continue
+        key = (sku, _country_level_warehouse_id(country))
+        current = result.get(key)
+        if current is None:
+            result[key] = WarehouseStock(country=country, total=int(total or 0))
+        else:
+            result[key] = WarehouseStock(country=country, total=current.total + int(total or 0))
+    return result
+
+
+def _country_level_warehouse_id(country: str) -> str:
+    return f"__country_pool__:{country}"
 
 
 def compute_mapped_stock_total_by_sku(

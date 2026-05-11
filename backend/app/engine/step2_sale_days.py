@@ -16,9 +16,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.countries import is_reportable_country_code
 from app.engine.context import InventoryMap, InventoryStock, SaleDaysMap, VelocityMap
 from app.engine.sku_mapping import (
+    aggregate_component_stock_by_country,
     component_skus_for_rules,
     compute_mapped_stock_by_country,
     load_active_mapping_rules,
+    load_in_transit_totals_by_country,
     load_in_transit_totals_by_warehouse,
     load_inventory_totals_by_warehouse,
     merge_warehouse_stock,
@@ -166,11 +168,36 @@ async def run_step2(
             exclude_warehouse_type=1,
             sku_to_group_key=sku_to_group_key,
         )
+        component_country_transit = await load_in_transit_totals_by_country(
+            db,
+            component_query_skus,
+            sku_to_group_key=sku_to_group_key,
+        )
+        warehouse_component_stock = merge_warehouse_stock(component_inventory, component_transit)
         mapped = compute_mapped_stock_by_country(
             rules,
-            merge_warehouse_stock(component_inventory, component_transit),
+            warehouse_component_stock,
             velocity=velocity,
         )
+        if component_country_transit:
+            country_component_stock = aggregate_component_stock_by_country(
+                warehouse_component_stock,
+                component_country_transit,
+            )
+            country_mapped = compute_mapped_stock_by_country(
+                rules,
+                country_component_stock,
+                velocity=velocity,
+            )
+            country_level_countries = {country for _, country in component_country_transit}
+            mapped = {
+                key: quantity
+                for key, quantity in mapped.items()
+                if key[1] not in country_level_countries
+            }
+            for key, quantity in country_mapped.items():
+                if key[1] in country_level_countries:
+                    mapped[key] = quantity
         for key, quantity in mapped.items():
             current = oversea.setdefault(key, {"available": 0, "reserved": 0})
             current["available"] += quantity

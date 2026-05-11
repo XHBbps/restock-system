@@ -3,6 +3,7 @@ import pytest
 from app.engine.sku_mapping import (
     MappingComponent,
     WarehouseStock,
+    aggregate_component_stock_by_country,
     compute_mapped_stock_by_country,
     compute_mapped_stock_total_by_sku,
     load_active_mapping_rules,
@@ -58,6 +59,24 @@ def test_multi_component_mapping_uses_min_per_warehouse() -> None:
     )
 
     assert result == {("A", "US"): 3}
+
+
+def test_multi_component_mapping_returns_known_zero_when_components_exist_but_cannot_assemble() -> None:
+    result = compute_mapped_stock_by_country(
+        {
+            "A": [
+                [
+                    MappingComponent(inventory_sku="B", quantity=1),
+                    MappingComponent(inventory_sku="C", quantity=1),
+                ]
+            ]
+        },
+        {
+            ("B", "WH-US-1"): WarehouseStock(country="US", total=5),
+        },
+    )
+
+    assert result == {("A", "US"): 0}
 
 
 def test_shared_overseas_components_are_allocated_by_country_velocity() -> None:
@@ -122,7 +141,32 @@ def test_components_cannot_be_combined_across_warehouses() -> None:
         },
     )
 
-    assert result == {}
+    assert result == {("A", "US"): 0}
+
+
+def test_country_level_component_transit_overrides_warehouse_pool_for_same_country() -> None:
+    result = compute_mapped_stock_by_country(
+        {
+            "A": [
+                [
+                    MappingComponent(inventory_sku="B", quantity=1),
+                    MappingComponent(inventory_sku="C", quantity=1),
+                ]
+            ]
+        },
+        aggregate_component_stock_by_country(
+            {
+                ("B", "WH-US-1"): WarehouseStock(country="US", total=5),
+                ("C", "WH-US-1"): WarehouseStock(country="US", total=5),
+            },
+            {
+                ("B", "US"): 5,
+                ("C", "US"): 5,
+            },
+        ),
+    )
+
+    assert result == {("A", "US"): 10}
 
 
 def test_local_mapping_does_not_require_country() -> None:

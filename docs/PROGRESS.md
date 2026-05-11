@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-05-11（结果准确性修复：缺库存不按 0 库存计算、计算诊断冻结、单条重算、导出确认与同步解析 fail-fast。）
+> 最近更新：2026-05-11（结果准确性修复：缺库存不按 0 库存计算、组合 SKU 已知 0 库存保留、国家级无仓在途参与折算、计算诊断冻结、单条重算、导出确认与同步解析 fail-fast。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -71,7 +71,7 @@
 - **并发保护**：`pg_advisory_xact_lock(7429001)` 事务级锁，阻止并发引擎覆盖彼此
 - **补货日期参与数量计算**：`POST /api/engine/run` 必填 `demand_date` 且不能早于北京时间今天；runner 按 `today=now_beijing().date()` 计算 `demand_days=max(demand_date - today, 0)`，再用 `target_days + demand_days` 作为 Step 3 有效目标库存天数；`restock_regions` 仍只决定哪些国家参与补货，`restock_dates` 继续保存用于追溯、导出和紧急程度判断，不再按日期过滤国家
 - **快照追溯**：`velocity_snapshot`、`sale_days_snapshot`、`global_config_snapshot` 存入 JSONB 字段；其中 `global_config_snapshot` 会记录 `restock_regions` 与本次补货日期 `demand_date`
-- **准确性诊断**：Step 2/3 区分“已知 0 库存”和“缺少库存记录”；有销量但没有库存/在途记录的 SKU+国家不会按 0 库存生成国家补货量，并在 `suggestion_item.calculation_warnings` 写入 `missing_inventory_record`。SKU 级 `lead_time_days=0` 是有效值，不再回退全局货期。
+- **准确性诊断**：Step 2/3 区分“已知 0 库存”和“缺少库存记录”；有销量但没有库存/在途记录的 SKU+国家不会按 0 库存生成国家补货量，并在 `suggestion_item.calculation_warnings` 写入 `missing_inventory_record`。组合 SKU 若已有同国家组件信号但可组装数为 0，按已知 0 库存参与补货；目标仓库为空的组件在途按国家汇总参与组合折算。SKU 级 `lead_time_days=0` 是有效值，不再回退全局货期。
 
 ### 2.4 补货建议管理
 - **采购/补货独立导出**：建议单分为采购 Tab 与补货 Tab，采购快照只要求 purchase_qty > 0，补货快照只要求国家补货量大于 0；两类快照按 snapshot_type 独立递增版本、独立更新条目导出状态。
@@ -116,9 +116,10 @@
 - **数据库迁移**：`backend/alembic/versions/20260511_1500_add_calculation_warnings.py` 为 `suggestion_item` 与 `suggestion_snapshot_item` 新增 `calculation_warnings JSONB NOT NULL DEFAULT '[]'`，用于冻结缺库存、缺 velocity、缺/非法 sale_days、手工新增国家和不可报表国家等诊断。
 - **同步解析 fail-fast**：`sync_order_list` 不再用当前时间兜底无法解析的核心订单日期；库存与在途数量空值按真实 0，非法数量跳过对应库存行或在途明细并记录结构化日志。
 - **引擎准确性**：`step2_sale_days` 与 `step3_country_qty` 不再把缺少库存/在途记录视为 0 库存；有销量但库存未知的国家不参与国家补货量计算，并在建议条目写入 `missing_inventory_record`。SKU 级 `lead_time_days=0` 按有效值参与紧急状态与补货日期计算。
+- **组合 SKU 口径**：组合 SKU 若同国家已有组件信号但最终可组装数为 0，`step2_sale_days` 仍会保留该国家的已知 0 库存记录，使 Step 3 按 0 库存生成补货量；目标仓库 ID 为空的组件在途会按国家汇总后参与组合折算，并覆盖同国家的仓内组合结果，不再重复计数或跨国家组合。
 - **建议单编辑与单条重算**：编辑补货国家后，`restock_dates` 使用建议单原始生成日期基准；新增 `POST /api/suggestions/{suggestion_id}/items/{item_id}/recalculate`，仅重算单条的 `sale_days_snapshot`、`urgent`、`restock_dates` 与 `calculation_warnings`，不重算补货量、采购量或仓库拆分。
 - **快照与前端确认**：补货快照生成前校验国家与数量拆分，`calculation_warnings` 冻结到快照和补货 Excel；补货列表展示“需确认”诊断标签和“重新计算”按钮，选中条目含诊断时导出前二次确认，后端不因诊断阻断导出。
-- **测试**：`pytest -p no:cacheprovider tests/unit/test_engine_step2.py tests/unit/test_engine_step3.py tests/unit/test_engine_step6.py tests/unit/test_engine_runner.py tests/unit/test_sync_order_list.py tests/unit/test_sync_order_list_eu.py tests/unit/test_sync_inventory.py tests/unit/test_sync_out_records_job.py tests/unit/test_suggestion_patch.py tests/unit/test_snapshot_validation.py tests/unit/test_suggestion_model.py tests/unit/test_suggestion_snapshot_model.py tests/unit/test_suggestion_snapshot_schemas.py tests/unit/test_excel_export_service.py tests/integration/test_snapshot_api.py` 通过（快照集成测试因本机未设置 `TEST_DATABASE_URL` 跳过）；`cmd /c npx vue-tsc --noEmit` 与相关 Vitest 通过。
+- **测试**：`pytest -p no:cacheprovider tests/unit/test_engine_sku_mapping.py tests/unit/test_engine_step2.py tests/unit/test_engine_step3.py tests/unit/test_engine_runner.py tests/unit/test_metrics_dashboard.py` 通过；随后 `pytest -p no:cacheprovider`、`ruff check app tests` 与 `python -m mypy app` 全量通过（集成测试因本机未设置 `TEST_DATABASE_URL` 跳过）。
 
 ### 3.115 运行稳定性修复（2026-05-11）
 - **同步业务锁**：`backend/app/sync/locks.py` 新增 PostgreSQL advisory lock；`sync_shop`、`sync_warehouse`、`sync_product_listing`、`sync_inventory`、`sync_out_records`、`sync_order_list` 执行前按 job 维度互斥，`sync_all` 会一次性持有全部子同步锁，避免全量同步内部步骤与单独子 job 并发。

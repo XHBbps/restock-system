@@ -1,9 +1,17 @@
 """Unit tests for Step 2 sale_days."""
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
 
 from app.engine.context import InventoryStock
-from app.engine.step2_sale_days import compute_sale_days, load_in_transit, merge_inventory
+from app.engine.sku_mapping import MappingComponent, WarehouseStock
+from app.engine.step2_sale_days import (
+    compute_sale_days,
+    load_in_transit,
+    merge_inventory,
+    run_step2,
+)
 
 
 class _RowsResult:
@@ -22,6 +30,91 @@ class _FakeDb:
     async def execute(self, stmt):
         self.statements.append(stmt)
         return _RowsResult(self.rows)
+
+
+@pytest.mark.asyncio
+async def test_run_step2_keeps_known_zero_inventory_records_for_composite_skus() -> None:
+    db = _FakeDb([])
+    velocity = {"A": {"US": 1.0}}
+
+    with (
+        patch("app.engine.step2_sale_days.load_oversea_inventory", AsyncMock(return_value={})),
+        patch("app.engine.step2_sale_days.load_in_transit", AsyncMock(return_value={})),
+        patch(
+            "app.engine.step2_sale_days.load_active_mapping_rules",
+            AsyncMock(
+                return_value={
+                    "A": [
+                        [
+                            MappingComponent(inventory_sku="B", quantity=1),
+                            MappingComponent(inventory_sku="C", quantity=1),
+                        ]
+                    ]
+                }
+            ),
+        ),
+        patch(
+            "app.engine.step2_sale_days.load_inventory_totals_by_warehouse",
+            AsyncMock(return_value={("B", "WH-US-1"): WarehouseStock(country="US", total=5)}),
+        ),
+        patch(
+            "app.engine.step2_sale_days.load_in_transit_totals_by_warehouse",
+            AsyncMock(return_value={}),
+        ),
+        patch(
+            "app.engine.step2_sale_days.load_in_transit_totals_by_country",
+            AsyncMock(return_value={}),
+        ),
+    ):
+        sale_days, inventory = await run_step2(db, velocity, ["A"])
+
+    assert inventory["A"]["US"].total == 0
+    assert sale_days["A"]["US"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_run_step2_uses_country_level_transit_without_double_counting_warehouse_stock() -> None:
+    db = _FakeDb([])
+    velocity = {"A": {"US": 1.0}}
+
+    with (
+        patch("app.engine.step2_sale_days.load_oversea_inventory", AsyncMock(return_value={})),
+        patch("app.engine.step2_sale_days.load_in_transit", AsyncMock(return_value={})),
+        patch(
+            "app.engine.step2_sale_days.load_active_mapping_rules",
+            AsyncMock(
+                return_value={
+                    "A": [
+                        [
+                            MappingComponent(inventory_sku="B", quantity=1),
+                            MappingComponent(inventory_sku="C", quantity=1),
+                        ]
+                    ]
+                }
+            ),
+        ),
+        patch(
+            "app.engine.step2_sale_days.load_inventory_totals_by_warehouse",
+            AsyncMock(
+                return_value={
+                    ("B", "WH-US-1"): WarehouseStock(country="US", total=5),
+                    ("C", "WH-US-1"): WarehouseStock(country="US", total=5),
+                }
+            ),
+        ),
+        patch(
+            "app.engine.step2_sale_days.load_in_transit_totals_by_warehouse",
+            AsyncMock(return_value={}),
+        ),
+        patch(
+            "app.engine.step2_sale_days.load_in_transit_totals_by_country",
+            AsyncMock(return_value={("B", "US"): 5, ("C", "US"): 5}),
+        ),
+    ):
+        sale_days, inventory = await run_step2(db, velocity, ["A"])
+
+    assert inventory["A"]["US"].total == 10
+    assert sale_days["A"]["US"] == 10.0
 
 
 def test_merge_inventory_keeps_zero_transit_by_default() -> None:
