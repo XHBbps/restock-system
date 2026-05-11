@@ -17,6 +17,7 @@ from app.models.inventory import InventorySnapshotLatest
 from app.models.warehouse import Warehouse
 from app.saihu.endpoints.inventory import list_inventory_items
 from app.sync.common import mark_sync_failed, mark_sync_running, mark_sync_success
+from app.sync.locks import sync_business_lock
 from app.tasks.jobs import JobContext, register
 
 logger = get_logger(__name__)
@@ -25,6 +26,11 @@ JOB_NAME = "sync_inventory"
 
 @register(JOB_NAME)
 async def sync_inventory_job(ctx: JobContext) -> None:
+    async with sync_business_lock(ctx, JOB_NAME):
+        await _sync_inventory_job_unlocked(ctx)
+
+
+async def _sync_inventory_job_unlocked(ctx: JobContext) -> None:
     await ctx.progress(current_step="同步库存明细", total_steps=1)
     async with async_session_factory() as db:
         started = await mark_sync_running(db, JOB_NAME)

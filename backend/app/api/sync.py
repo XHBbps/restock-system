@@ -121,6 +121,7 @@ async def run_engine_now(
         db,
         job_name="calc_engine",
         trigger_source="manual",
+        dedupe_key=f"calc_engine:{payload.demand_date.isoformat()}",
         payload={"triggered_by": "manual", "demand_date": payload.demand_date.isoformat()},
     )
     return {"task_id": task_id, "existing": existing}

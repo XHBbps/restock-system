@@ -207,7 +207,26 @@ docker compose -f deploy/docker-compose.yml exec db psql -U postgres -d replenis
    LIMIT 20;
    ```
 
-### 3.3.1 SKU 映射规则与计算结果异常
+### 3.3.1 同步业务锁冲突
+
+**症状**：某个同步 TaskRun 很快失败，`error_msg` 包含 `sync business lock is already held: <job_name>`；或手动触发单个同步时，正好有 `sync_all` 在运行。
+
+**含义**：这是预期保护。`sync_all` 会持有 `sync_shop`、`sync_warehouse`、`sync_product_listing`、`sync_inventory`、`sync_out_records`、`sync_order_list` 的业务锁；单独子同步任务也会持有自己的业务锁，避免重复拉取赛狐接口、并发清理旧订单或互相覆盖 `sync_state`。
+
+**排查**：
+```sql
+SELECT id, job_name, status, error_msg, created_at, started_at
+FROM task_run
+WHERE status IN ('pending', 'running', 'failed')
+  AND job_name IN ('sync_all', 'sync_shop', 'sync_warehouse', 'sync_product_listing',
+                   'sync_inventory', 'sync_out_records', 'sync_order_list')
+ORDER BY created_at DESC
+LIMIT 20;
+```
+
+处理方式：等待已有 `running` 的同步任务结束后重试。若没有活跃任务但仍持续报锁冲突，优先检查 worker 是否异常退出、数据库连接是否残留；PostgreSQL session 断开后 advisory lock 会自动释放。
+
+### 3.3.2 SKU 映射规则与计算结果异常
 
 **症状**：映射规则保存或导入失败，或补货建议中某个商品 SKU 的库存 / 补货量与预期不一致。
 
@@ -382,7 +401,8 @@ docker compose -f deploy/docker-compose.yml restart backend
 3. **查看自动重试状态**：
    - `queued`：等待自动重试；scheduler 每 5 分钟入队，从老到新执行
    - `resolved`：已通过精确重放成功解决，默认不再出现在失败列表
-   - `permanent`：非 `40019` 重试结果、其他异常，或第 5 次仍为 `40019`；需要人工排查赛狐限流、参数和业务状态
+   - `permanent`：赛狐业务错误、认证过期、其他不可分类 `SaihuAPIError`，或第 5 次仍未恢复；需要人工排查赛狐凭证、参数和业务状态
+   - `queued` 且 `auto_retry_attempts > 0`：自动重放遇到限流或网络错误后继续排队，等待下一轮 `retry_failed_api_calls`
    - `unsupported`：历史日志没有 `request_payload`，无法按原始请求精确重放
    - `retry_status IS NULL`：未进入后台自动队列，页面展示为“未入自动队列”或“即时重试日志”，重试次数显示 `-`；不要解读为后台重试 `0/5`
 4. **只读诊断 SQL**：
@@ -553,6 +573,7 @@ docker compose -f deploy/docker-compose.yml restart backend
 
 2. **确认是否为不同 IP 扫描**
    - `RateLimitMiddleware` 现在会周期性清理过期 IP，并在超过 `max_tracked_clients` 时驱逐最旧客户端
+   - 当前限流是单 backend 实例、单进程内存口径；重启会清空计数，多 backend 实例会让额度按实例倍增
    - 如果仍持续触顶，说明扫描规模已经超过当前进程内限流设计边界
 
 3. **短期处理**
@@ -560,7 +581,7 @@ docker compose -f deploy/docker-compose.yml restart backend
    - 必要时临时收紧 `max_requests` 或缩短 `window_seconds`
 
 4. **长期处理**
-   - 若未来演进到多实例部署，改为 Redis / 网关级集中限流，避免进程内口径不一致
+   - 若未来演进到多实例部署，必须先改为 Redis / 数据库共享限流或 Caddy / 网关级集中限流，避免进程内口径不一致
 
 ## 4. 监控端点速查
 
@@ -851,6 +872,21 @@ asyncio.run(main())
 **可能的异常**：
 - 看到通用的 "下载失败" 或后端 detail "文件已丢失"：`_decodeBlobErrorInPlace`（`frontend/src/api/snapshot.ts`）没正常解包 blob 错误，或后端 404→410 逻辑分支错了。
 - 看到 500：检查 docker exec python 脚本是否真的写入了 `file_purged_at`（用 `psql -c "SELECT file_purged_at FROM excel_export_log WHERE snapshot_id = ..."` 复核）。
+
+### 8.4 Excel 下载路径安全拒绝
+
+**症状**：快照状态为 `ready`，但下载返回 410，backend 日志出现 `snapshot_download_escaped_path`。
+
+**含义**：`suggestion_snapshot.file_path` 被写成了 `../...`、绝对路径或其他会逃逸 `EXPORT_STORAGE_DIR` 的值。下载端会对 `export_storage_dir + file_path` 做 `resolve()` 和目录包含校验，拒绝访问导出根目录外的文件。
+
+**排查**：
+```sql
+SELECT id, file_path, generation_status, file_size_bytes
+FROM suggestion_snapshot
+WHERE id = <snapshot_id>;
+```
+
+不要通过 SQL 把 `file_path` 改成任意绝对路径来“修复下载”。正确做法是重新生成快照，或把 Excel 文件恢复到 `EXPORT_STORAGE_DIR` 下的相对路径后再修正 `file_path`。
 
 ---
 

@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-05-11（同步控制台调度契约、在线产品 nullable 类型与历史文档口径修复。）
+> 最近更新：2026-05-11（运行稳定性修复：同步业务锁、补货计算按日期去重、快照导出事务边界、下载路径校验与赛狐重试分类。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -109,6 +109,14 @@
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`；移动端使用三列 grid 固定商品、国家、可售天数列宽，避免商品信息与国家列挤压
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.115 运行稳定性修复（2026-05-11）
+- **同步业务锁**：`backend/app/sync/locks.py` 新增 PostgreSQL advisory lock；`sync_shop`、`sync_warehouse`、`sync_product_listing`、`sync_inventory`、`sync_out_records`、`sync_order_list` 执行前按 job 维度互斥，`sync_all` 会一次性持有全部子同步锁，避免全量同步内部步骤与单独子 job 并发。
+- **补货计算入队去重**：`POST /api/engine/run` 的 `calc_engine` 入队改用 `calc_engine:{demand_date}` 作为 `dedupe_key`；同一补货日期复用活跃任务，不同补货日期可独立排队。
+- **快照导出与下载安全**：`backend/app/api/snapshot.py` 将快照头和条目冻结提交后，再在事务外生成 Excel 临时文件并原子替换；生成成功后用短事务标记 `ready` 和条目导出状态，失败时只标记 snapshot `failed`，条目保持 `pending`。下载时会对 `export_storage_dir + file_path` 做 `resolve()` 与目录包含校验，拒绝路径穿越。
+- **赛狐重试分类**：`retry_failed_api_calls` 重放 `40019` 原始请求时，将 `SaihuRateLimited` 与 `SaihuNetworkError` 继续按最多 5 次自动排队；`SaihuBizError`、`SaihuAuthExpired` 与其他 `SaihuAPIError` 标记 `permanent`。
+- **限流部署口径**：当前后端 IP 限流仍是单实例/单进程兜底能力；多 backend 实例部署前必须升级为 Caddy/网关级或 Redis/数据库共享限流。
+- **测试**：补充 `calc_engine` 日期去重、同步业务锁冲突、赛狐 retry 分类与快照下载路径穿越测试；相关后端单测定向通过，快照集成测试因本机未设置 `TEST_DATABASE_URL` 按配置跳过。
 
 ### 3.114 功能完整性契约收口（2026-05-11）
 - **同步控制台契约**：`frontend/src/api/sync.ts` 的 `SchedulerStatus` 与 `SchedulerControlPanel` 移除旧 `calc_cron` 字段和“自动计算”展示，页面改为明确展示“补货计算：手动生成”，与后端 `SchedulerStatusOut` 当前字段一致。

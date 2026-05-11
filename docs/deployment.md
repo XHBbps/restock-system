@@ -129,7 +129,7 @@ curl -sf http://localhost:8088/readyz
 | `worker`（任务执行 + 僵尸回收） | `true` | `true` | `false` |
 | `scheduler`（定时入队） | `false` | `false` | `true` |
 
-Scheduler 保持单例避免重复触发，Worker 可水平扩展。
+Scheduler 保持单例避免重复触发，Worker 可水平扩展。当前公网部署口径仍是单 `backend` API 实例：后端 IP 限流使用进程内内存窗口，只能作为单实例兜底防护。若未来扩展多个 `backend` 实例，必须先引入 Caddy / 网关级限流，或 Redis / 数据库共享限流，避免限流额度按实例倍增。
 
 ### 资源限制
 

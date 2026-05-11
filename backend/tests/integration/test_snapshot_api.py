@@ -377,6 +377,36 @@ async def test_snapshot_download_410_when_file_missing_without_purged_log(
 
 
 @pytest.mark.asyncio
+async def test_snapshot_download_rejects_path_traversal(
+    client, seed_suggestion, ensure_global_config, db_session, monkeypatch
+):
+    from sqlalchemy import update
+
+    from app.models.suggestion_snapshot import SuggestionSnapshot
+
+    _set_export_dir(monkeypatch)
+    sid = seed_suggestion["suggestion_id"]
+    item_ids = seed_suggestion["item_ids"]
+    created = (
+        await client.post(
+            f"/api/suggestions/{sid}/snapshots/restock",
+            json={"item_ids": item_ids[:1]},
+        )
+    ).json()
+    snap_id = created["id"]
+
+    await db_session.execute(
+        update(SuggestionSnapshot)
+        .where(SuggestionSnapshot.id == snap_id)
+        .values(file_path="../outside.xlsx")
+    )
+    await db_session.commit()
+
+    resp = await client.get(f"/api/snapshots/{snap_id}/download")
+    assert resp.status_code == 410
+
+
+@pytest.mark.asyncio
 async def test_snapshot_download_410_with_purged_log_shows_retention_message(
     client, seed_suggestion, ensure_global_config, db_session, monkeypatch
 ):

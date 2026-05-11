@@ -4,12 +4,20 @@ import pytest
 from sqlalchemy.dialects import postgresql
 
 from app.api.monitor import _can_retry
-from app.core.exceptions import SaihuAPIError, ValidationFailed
+from app.core.exceptions import (
+    SaihuAPIError,
+    SaihuAuthExpired,
+    SaihuBizError,
+    SaihuNetworkError,
+    SaihuRateLimited,
+    ValidationFailed,
+)
 from app.saihu.client import SaihuClient
 from app.tasks.jobs.api_call_retry import (
     MAX_AUTO_RETRY_ATTEMPTS,
     _format_retry_error,
     _is_retryable_row,
+    _is_transient_retry_error,
     _payload_call_ids,
     busy_job_names_for_endpoint,
     retry_interval_seconds,
@@ -83,6 +91,14 @@ def test_can_retry_requires_precise_original_40019_call() -> None:
 def test_format_retry_error_includes_code_and_request_id() -> None:
     error = SaihuAPIError("failed", code=40002, request_id="req-1")
     assert _format_retry_error(error) == "failed code=40002 request_id=req-1"
+
+
+def test_retry_error_classification_keeps_transient_errors_queued() -> None:
+    assert _is_transient_retry_error(SaihuRateLimited("limited")) is True
+    assert _is_transient_retry_error(SaihuNetworkError("timeout")) is True
+    assert _is_transient_retry_error(SaihuBizError("bad request")) is False
+    assert _is_transient_retry_error(SaihuAuthExpired("auth expired")) is False
+    assert _is_transient_retry_error(SaihuAPIError("unknown business error")) is False
 
 
 @pytest.mark.asyncio

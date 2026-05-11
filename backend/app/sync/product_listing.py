@@ -19,6 +19,7 @@ from app.models.sku import SkuConfig
 from app.saihu.endpoints.commodity import list_commodities
 from app.saihu.endpoints.product_listing import list_product_listings
 from app.sync.common import mark_sync_failed, mark_sync_running, mark_sync_success
+from app.sync.locks import sync_business_lock
 from app.tasks.jobs import JobContext, register
 
 logger = get_logger(__name__)
@@ -28,6 +29,11 @@ _UNMATCHED_LISTING_NULLABLE_COLUMNS = ("commodity_sku", "commodity_id")
 
 @register(JOB_NAME)
 async def sync_product_listing_job(ctx: JobContext) -> None:
+    async with sync_business_lock(ctx, JOB_NAME):
+        await _sync_product_listing_job_unlocked(ctx)
+
+
+async def _sync_product_listing_job_unlocked(ctx: JobContext) -> None:
     await ctx.progress(current_step="同步商品主数据", total_steps=2)
     async with async_session_factory() as db:
         started = await mark_sync_running(db, JOB_NAME)

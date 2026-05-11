@@ -5,6 +5,7 @@ from typing import Any
 class _FakeContext:
     def __init__(self) -> None:
         self.events: list[tuple[str | None, str | None, int | None]] = []
+        self.payload: dict[str, object] = {"_held_sync_business_locks": ["sync_order_list"]}
 
     async def progress(
         self,

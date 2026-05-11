@@ -150,6 +150,8 @@ async def sync_inventory_job(ctx: JobContext) -> None:
 
 **状态追踪**：店铺、仓库、商品、库存、订单、出库等同步 job 在 `sync_state` 表中维护最后运行时间、状态、错误信息；该表同时作为增量同步水位来源。`daily_archive`、`retry_failed_api_calls` 等不参与增量水位的系统后台任务不写 `sync_state`，其运行状态以 `task_run` 为准。
 
+**同步业务锁**：`backend/app/sync/locks.py` 使用 PostgreSQL session-level advisory lock 按同步 job 维度互斥。单独执行 `sync_shop`、`sync_warehouse`、`sync_product_listing`、`sync_inventory`、`sync_out_records`、`sync_order_list` 时各自持有业务锁；`sync_all` 执行期间一次性持有全部子同步锁，并在上下文中标记已持有，内部子步骤不重复加锁。若锁已被其他任务持有，当前 TaskRun 失败并在错误信息中记录冲突 job，避免重复拉取赛狐接口、并发清理或状态互相覆盖。
+
 **商品主数据同步**：`sync_product_listing` 是商品同步统一 job。它先通过 `backend/app/saihu/endpoints/commodity.py` 调用赛狐 SKU 主数据接口 `/api/commodity/pageList.json`，不传 `state` 或 `isGroup` 过滤，按 `sku` UPSERT 到 `commodity_master`；随后继续调用在线产品 listing 接口 `/api/order/api/product/pageList.json` 写入 `product_listing`，保留店铺、站点、sellerSku 与近 7/14/30 天销量用于商品页展开明细。同步过程中只为新发现 SKU 补建 `sku_config(enabled=true)`，不覆盖已有 `enabled`、`lead_time_days`，因此后续人工禁用不会被商品同步重新打开；商品状态 `state` 与 SKU 类型 `is_group` 仅作展示/筛选信息，不自动影响补货计算。商品概览通过 `SkuConfig.commodity_sku -> CommodityMaster.sku` 定位 SKU 主数据，再用同一个 SKU 查询 `ProductListing.commodity_sku` 关联在线产品。`run_engine` 仍只消费 `sku_config.enabled=true` 的 SKU。
 
 **EU 国家归一化与新国家发现**：同步层写入订单、商品、库存、出库在途数据时，会按 `global_config.eu_countries` 将成员国映射为字面值 `EU`，并在对应 `original_*` 字段保留原国家码。进入国家选项、成员国配置和补货区域配置的国家码先执行 `trim + uppercase + 两位字母校验 + 别名标准化`，当前 `UK` 统一标准化为 ISO 代码 `GB`。订单处理列表只读取响应顶层 `marketplace` 作为国家来源；该值缺失或无法识别时写内部哨兵 `ZZ` 并记录结构化日志，不再从地址、店铺名或平台名猜测国家；`ZZ` 不暴露为前端国家选项，也不进入补货计算或信息总览统计，空值与非法国家码同样被视为不可统计国家；有效国家码若属于 `eu_countries` 则归并为 `EU` 并在 `original_country_code` 保存原码。全局配置接口保存 `eu_countries` 且实际变化时，会在同一事务内调用 `backfill_eu_country_mapping()` 回填本地历史 `order_header`、`inventory_snapshot_latest`、`in_transit_record`：源国家优先取各表 `original_*` 字段，否则取当前国家字段，并先按同一别名表标准化；源国家属于当前 EU 集合时写映射后国家为 `EU` 且 `original_* = 标准化源国家`，否则恢复为标准化源国家并清空 `original_*`。该回填只改本地库，不调用赛狐 API。
@@ -228,9 +230,10 @@ CREATE INDEX ix_task_run_lease
 **自动调度规则**：`sync_shop` 每日 03:00 入队，`sync_warehouse` 每日 03:30 入队，`daily_archive` 每日 02:00 入队，`retention_purge` 每日 04:00 入队，`retry_failed_api_calls` 每 5 分钟入队；`sync_product_listing`、`sync_inventory`、`sync_out_records` 按 `global_config.sync_interval_minutes` 间隔入队，`sync_order_list` 按 `global_config.order_sync_interval_minutes` 间隔入队，默认 120 分钟。`GET /api/sync/scheduler` 由 API 进程提供状态，即使 API 进程本身不启动 APScheduler，也会基于 job trigger 推导下次执行时间；真正入队仍只发生在 `PROCESS_ENABLE_SCHEDULER=true` 的 scheduler 进程。
 
 **进度追踪**：`TaskRun.current_step / step_detail / total_steps / result_summary` 由 worker 在执行中写入，前端 `TaskProgress` 组件轮询 `/api/tasks/{id}`。`calc_engine` 在生成成功或无需求时写结构化 JSON 摘要（`generated`、`suggestion_id`、`demand_date`、可选 `reason`）；店铺、仓库、商品、库存、订单、出库等分页同步任务复用赛狐分页响应里的 `totalPage` 输出“第 P / N 页”进度，不额外发起预扫描请求。自 2026-04-20 起，worker 的 heartbeat、进度更新和 success/failed 终态回写都带 `status='running' + worker_id` 条件；若租约已被 reaper 回收，则抛 `TaskLeaseLostError` 并停止继续覆盖状态。
+**补货计算去重**：`POST /api/engine/run` 只作为手动补货计算入口，入队 `calc_engine` 时使用 `calc_engine:{demand_date}` 作为 `dedupe_key`。同一天重复提交会复用活跃任务，不同 `demand_date` 允许创建独立 TaskRun，避免复用旧补货日期的活跃计算。通用 `POST /api/tasks` 仍禁止直接创建 `calc_engine`。
 **同步日志聚合**：`GET /api/data/sync-state` 返回两类来源：同步任务读取 `sync_state`；系统后台任务 `daily_archive` / `retry_failed_api_calls` 从 `task_run` 聚合最近一条任务、最近成功任务和最近失败错误。`calc_engine` 是补货建议页手动生成入口，不进入同步日志或同步状态统计。
 **信息总览快照任务**：`refresh_dashboard_snapshot` 也是标准 TaskRun 任务，复用现有去重、轮询和失败回写机制；它在后台调用 `build_dashboard_payload()` 生成 `dashboard_snapshot` 单例缓存，页面刷新时优先消费该缓存而不是重复现算。
-**失败调用重试任务**：`retry_failed_api_calls` 是标准 TaskRun job，由 APScheduler 每 5 分钟入队，使用默认 `dedupe_key=job_name` 避免并发；它只消费 `api_call_log` 中可精确还原的赛狐 `40019` 失败日志，重试前检查相关同步任务是否活跃，活跃则跳过等待下一轮。
+**失败调用重试任务**：`retry_failed_api_calls` 是标准 TaskRun job，由 APScheduler 每 5 分钟入队，使用默认 `dedupe_key=job_name` 避免并发；它只消费 `api_call_log` 中可精确还原的赛狐 `40019` 失败日志，重试前检查相关同步任务是否活跃，活跃则跳过等待下一轮。重放时 `SaihuRateLimited` 与 `SaihuNetworkError` 继续保持 `queued` 直到达到 `MAX_AUTO_RETRY_ATTEMPTS=5`，`SaihuBizError`、`SaihuAuthExpired` 与其他 `SaihuAPIError` 标记为 `permanent`。
 **任务权限注册表**：`app/tasks/access.py` 统一维护 TaskRun 作业清单，以及查看/操作权限映射；通用 `POST /api/tasks` 只允许创建显式白名单里的任务。旧赛狐写入作业已随 §3.6 的导出快照子系统一同删除。
 
 ### 3.4 赛狐集成层（app/saihu）
@@ -283,6 +286,8 @@ _ENDPOINT_RATE_OVERRIDES = {}
 | **日志** | structlog + contextvars 绑定 `request_id`，dev ConsoleRenderer / prod JSONRenderer | `core/logging.py`, `core/middleware.py` |
 | **中间件** | `RequestLoggingMiddleware` 记录 method/path/status/duration_ms，注入 X-Request-Id 响应头 | `core/middleware.py` |
 | **应用限流** | 进程内 IP 滑动窗口限流，定期清理过期客户端并在超过容量上限时驱逐最旧 key | `core/rate_limit.py` |
+
+当前应用限流是单 backend 实例、单进程内存口径，适合作为公网部署的兜底防护。若未来部署多个 backend 实例，限流额度会按实例倍增且重启会清空计数；扩容前必须改为 Caddy/网关级限流或 Redis/数据库共享限流。
 | **时区** | 存储 UTC，展示北京时间；`parse_saihu_time` 按 marketplace_id 推断源时区再转换 | `core/timezone.py` |
 | **配置** | `pydantic-settings` 从环境变量/`.env` 加载，`get_settings()` 单例 | `config.py` |
 
@@ -316,10 +321,10 @@ _ENDPOINT_RATE_OVERRIDES = {}
 1. `SELECT ... FOR UPDATE` 锁定建议单、导出条目和 `global_config(id=1)`。
 2. 校验建议单仍为 `draft`，校验条目属于该建议单，按 `snapshot_type` 校验采购量或补货量。
 3. 按 `(suggestion_id, snapshot_type)` 独立计算下一版 `version`。
-4. INSERT `suggestion_snapshot(generation_status='generating')` 与 `suggestion_snapshot_item`。
-5. `excel_export.py` 根据类型生成不同工作簿：采购为“主数据 + 采购明细”，补货为“主数据 + SKU汇总 + SKU×国家 + SKU×国家×仓库”；“主数据”记录 `global_config_snapshot.demand_date` 对应的“补货日期”，采购/补货明细表不增加补货日期列；补货工作簿在国家与仓库明细中导出 `restock_dates` 对应的“补货日期”，前端当前补货视图不展示 `restock_dates`。
-6. 文件成功落盘后，才更新对应条目的 `{type}_export_status='exported'`、`{type}_exported_snapshot_id`、`{type}_exported_at`。
-7. 更新 `suggestion_snapshot.generation_status='ready'`、`file_path`、`file_size_bytes`。
+4. INSERT `suggestion_snapshot(generation_status='generating')` 与 `suggestion_snapshot_item`，构造导出上下文后提交事务，释放建议单与条目行锁。
+5. 事务外调用 `excel_export.py` 根据类型生成不同工作簿，并先写入临时文件再原子替换为最终 Excel 文件：采购为“主数据 + 采购明细”，补货为“主数据 + SKU汇总 + SKU×国家 + SKU×国家×仓库”；“主数据”记录 `global_config_snapshot.demand_date` 对应的“补货日期”，采购/补货明细表不增加补货日期列；补货工作簿在国家与仓库明细中导出 `restock_dates` 对应的“补货日期”，前端当前补货视图不展示 `restock_dates`。
+6. 文件成功落盘后，开启短事务更新 `suggestion_snapshot.generation_status='ready'`、`file_path`、`file_size_bytes`，并更新对应条目的 `{type}_export_status='exported'`、`{type}_exported_snapshot_id`、`{type}_exported_at`。
+7. 下载 `GET /api/snapshots/{snapshot_id}/download` 会对 `export_storage_dir` 和 `snapshot.file_path` 的拼接结果执行 `resolve()` 与目录包含校验；路径穿越或被篡改到根目录外时拒绝下载并记录 `snapshot_download_escaped_path` 日志。
 
 **失败补偿**：若 Excel 生成或文件落盘失败，则 snapshot 记为 `failed`，不修改任何条目的采购/补货导出状态，用户可直接重试同类型导出。
 
@@ -497,7 +502,7 @@ POST /api/engine/run { demand_date: "YYYY-MM-DD" }
   ↓
 api/sync.py: 校验补货日期不早于北京时间今天，enqueue_task("calc_engine", "manual")
   ↓
-task_run 表 INSERT status=pending, dedupe_key="calc_engine"
+task_run 表 INSERT status=pending, dedupe_key="calc_engine:{demand_date}"
   ↓
 worker 抢占任务 → calc_engine_job
   ↓
@@ -532,7 +537,9 @@ INSERT suggestion_snapshot(snapshot_type, generation_status='generating')
   ↓
 INSERT suggestion_snapshot_item[]，冻结采购字段或补货拆分字段
   ↓
-生成采购/补货专属 Excel 工作簿并落盘
+提交事务，释放 suggestion 与 item 行锁
+  ↓
+事务外生成采购/补货专属 Excel 临时文件并原子替换落盘
   ↓
 UPDATE suggestion_item SET procurement_* 或 restock_* 导出状态
   ↓
@@ -964,6 +971,7 @@ VITE_API_PROXY_TARGET=http://localhost:8000
 | 2026-05-05 | 订单处理列表明细数量只读取 `items.quantityOrdered`；Step 1 销量与 Step 5 分仓样本统一使用 `quantity_ordered` | PROGRESS.md §3.104 |
 | 2026-05-05 | 订单缺失国家继续以内部 `ZZ` 落库，但前端显示为 `-`，动态国家选项隐藏 `ZZ`，Step 1 / Step 5 固定排除 `ZZ` 订单 | PROGRESS.md §3.105 |
 | 2026-05-10 | 空值、非法国家码和内部 `ZZ` 统一视为不可统计国家，补货计算链路与信息总览快照/API 返回均过滤这些国家；信息总览移动端导航按钮和急需补货 SKU 三列布局修复 | PROGRESS.md §3.113 |
+| 2026-05-11 | 运行稳定性修复：同步业务锁、`calc_engine:{demand_date}` 去重、快照事务外生成 Excel 与下载路径 containment 校验、赛狐自动重试错误分类、单实例限流口径 | PROGRESS.md §3.115 |
 | 2026-05-04 | 订单处理列表自动同步改用独立 `order_sync_interval_minutes`，默认 120 分钟；商品、库存、出库仍使用 `sync_interval_minutes` | PROGRESS.md §3.101 |
 | 2026-05-04 | 订单处理列表明细 SKU 改为 `commoditySku || sellerSku`，保留 `seller_sku` 原值，只有两者都为空才跳过明细 | PROGRESS.md §3.100 |
 | 2026-05-04 | 订单列表新增平台筛选与 `GET /api/data/order-platforms` 动态选项接口；`order_header(order_platform, purchase_date)` 增加复合索引；映射规则页用户可见文案统一为“库存共用组” | PROGRESS.md §3.99 |

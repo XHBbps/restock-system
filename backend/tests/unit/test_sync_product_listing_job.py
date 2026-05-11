@@ -9,6 +9,9 @@ from app.core.exceptions import ValidationFailed
 class _FakeContext:
     def __init__(self) -> None:
         self.events: list[tuple[str | None, str | None, int | None]] = []
+        self.payload: dict[str, object] = {
+            "_held_sync_business_locks": ["sync_product_listing"]
+        }
 
     async def progress(
         self,

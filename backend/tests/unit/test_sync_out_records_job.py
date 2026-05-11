@@ -263,7 +263,7 @@ async def test_sync_out_records_job_runs_backfill_inside_main_flow(monkeypatch) 
     ctx = out_records_module.JobContext(
         task_id=1,
         job_name="sync_out_records",
-        payload={},
+        payload={"_held_sync_business_locks": ["sync_out_records"]},
         progress_setter=fake_progress,
     )
 

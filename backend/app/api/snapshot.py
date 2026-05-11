@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import UserContext, db_session, get_current_user, require_permission
 from app.config import get_settings
+from app.core.logging import get_logger
 from app.core.permissions import RESTOCK_EXPORT, RESTOCK_VIEW
 from app.core.timezone import now_beijing
 from app.models.excel_export_log import ExcelExportLog
@@ -33,6 +34,7 @@ from app.services.excel_export import (
 )
 
 router = APIRouter(prefix="/api", tags=["snapshot"])
+logger = get_logger(__name__)
 
 
 @router.post(
@@ -168,21 +170,22 @@ async def _create_snapshot(
     export_items: list[dict[str, Any]] = []
     for item in items:
         commodity_name, main_image_url = product_map.get(item.commodity_sku, (None, None))
-        snapshot_item = SuggestionSnapshotItem(
-            snapshot_id=snapshot.id,
-            commodity_sku=item.commodity_sku,
-            total_qty=item.total_qty,
-            country_breakdown=item.country_breakdown,
-            warehouse_breakdown=item.warehouse_breakdown,
-            restock_dates=item.restock_dates or {},
-            purchase_qty=item.purchase_qty if snapshot_type == "procurement" else None,
-            urgent=item.urgent,
-            velocity_snapshot=item.velocity_snapshot,
-            sale_days_snapshot=item.sale_days_snapshot,
-            commodity_name=commodity_name,
-            main_image_url=main_image_url,
+        db.add(
+            SuggestionSnapshotItem(
+                snapshot_id=snapshot.id,
+                commodity_sku=item.commodity_sku,
+                total_qty=item.total_qty,
+                country_breakdown=item.country_breakdown,
+                warehouse_breakdown=item.warehouse_breakdown,
+                restock_dates=item.restock_dates or {},
+                purchase_qty=item.purchase_qty if snapshot_type == "procurement" else None,
+                urgent=item.urgent,
+                velocity_snapshot=item.velocity_snapshot,
+                sale_days_snapshot=item.sale_days_snapshot,
+                commodity_name=commodity_name,
+                main_image_url=main_image_url,
+            )
         )
-        db.add(snapshot_item)
         export_items.append(
             {
                 "commodity_sku": item.commodity_sku,
@@ -210,13 +213,19 @@ async def _create_snapshot(
         global_config=suggestion.global_config_snapshot,
         items=export_items,
     )
+    filename = build_filename(suggestion_id, next_version, now, snapshot_type)
+    relative_path = str((Path(now.strftime("%Y/%m")) / filename).as_posix())
+    snapshot_id = snapshot.id
+
+    # Commit immutable snapshot rows before doing slow filesystem work.
+    await db.commit()
 
     settings = get_settings()
     storage_root = Path(settings.export_storage_dir).resolve()
     target_dir = storage_root / now.strftime("%Y/%m")
     target_dir.mkdir(parents=True, exist_ok=True)
-    filename = build_filename(suggestion_id, next_version, now, snapshot_type)
     target_path = target_dir / filename
+    tmp_path = target_dir / f".{filename}.{snapshot_id}.tmp.xlsx"
 
     try:
         workbook = (
@@ -224,34 +233,47 @@ async def _create_snapshot(
             if snapshot_type == "procurement"
             else build_restock_workbook(ctx)
         )
-        workbook.save(target_path)
-        snapshot.file_path = str((Path(now.strftime("%Y/%m")) / filename).as_posix())
-        snapshot.file_size_bytes = target_path.stat().st_size
-        snapshot.generation_status = "ready"
+        workbook.save(tmp_path)
+        tmp_path.replace(target_path)
+        file_size_bytes = target_path.stat().st_size
     except Exception as exc:
-        snapshot.generation_status = "failed"
-        snapshot.generation_error = str(exc)
+        if tmp_path.exists():
+            tmp_path.unlink()
+        await db.execute(
+            update(SuggestionSnapshot)
+            .where(SuggestionSnapshot.id == snapshot_id)
+            .values(generation_status="failed", generation_error=str(exc))
+        )
         await db.commit()
         raise HTTPException(status_code=500, detail=f"Excel 生成失败：{exc}") from exc
 
     update_values = (
         {
             "procurement_export_status": "exported",
-            "procurement_exported_snapshot_id": snapshot.id,
+            "procurement_exported_snapshot_id": snapshot_id,
             "procurement_exported_at": now,
         }
         if snapshot_type == "procurement"
         else {
             "restock_export_status": "exported",
-            "restock_exported_snapshot_id": snapshot.id,
+            "restock_exported_snapshot_id": snapshot_id,
             "restock_exported_at": now,
         }
     )
+    await db.execute(
+        update(SuggestionSnapshot)
+        .where(SuggestionSnapshot.id == snapshot_id)
+        .values(
+            generation_status="ready",
+            generation_error=None,
+            file_path=relative_path,
+            file_size_bytes=file_size_bytes,
+        )
+    )
     await db.execute(update(SuggestionItem).where(SuggestionItem.id.in_(body.item_ids)).values(**update_values))
-
     db.add(
         ExcelExportLog(
-            snapshot_id=snapshot.id,
+            snapshot_id=snapshot_id,
             action="generate",
             performed_by=user.id,
             performed_from_ip=request.client.host if request.client else None,
@@ -365,9 +387,12 @@ async def download_snapshot(
 
     settings = get_settings()
     storage_root = Path(settings.export_storage_dir).resolve()
-    file_abs = storage_root / (snapshot.file_path or "")
-    if not snapshot.file_path or not file_abs.exists():
-        # 若 retention 已标记 file_purged_at，返回更明确的 410 原因供前端展示
+    file_abs = _resolve_snapshot_file_path(
+        storage_root=storage_root,
+        snapshot_id=snapshot_id,
+        file_path=snapshot.file_path,
+    )
+    if file_abs is None or not file_abs.exists():
         purged_at = (
             await db.execute(
                 select(ExcelExportLog.file_purged_at)
@@ -403,6 +428,28 @@ async def download_snapshot(
 
     return FileResponse(
         path=file_abs,
-        filename=Path(snapshot.file_path).name,
+        filename=Path(snapshot.file_path or "").name,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+
+
+def _resolve_snapshot_file_path(
+    *,
+    storage_root: Path,
+    snapshot_id: int,
+    file_path: str | None,
+) -> Path | None:
+    if not file_path:
+        return None
+    file_abs = (storage_root / file_path).resolve()
+    try:
+        file_abs.relative_to(storage_root)
+    except ValueError:
+        logger.warning(
+            "snapshot_download_escaped_path",
+            snapshot_id=snapshot_id,
+            file_path=file_path,
+            storage_root=str(storage_root),
+        )
+        return None
+    return file_abs

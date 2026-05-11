@@ -7,7 +7,11 @@ from typing import Any
 
 from sqlalchemy import func, or_, select, update
 
-from app.core.exceptions import SaihuAPIError, SaihuRateLimited
+from app.core.exceptions import (
+    SaihuAPIError,
+    SaihuNetworkError,
+    SaihuRateLimited,
+)
 from app.core.logging import get_logger
 from app.core.timezone import now_beijing
 from app.db.session import async_session_factory
@@ -158,14 +162,19 @@ async def _retry_one(row: ApiCallLog) -> None:
             retry_source_log_id=row.id,
             queue_rate_limit_retry=False,
         )
-    except SaihuRateLimited as exc:
-        await _mark_retry_rate_limited(row, str(exc))
     except SaihuAPIError as exc:
+        if _is_transient_retry_error(exc):
+            await _mark_retry_transient(row, _format_retry_error(exc))
+            return
         await _mark_permanent(row, _format_retry_error(exc))
     except Exception as exc:
         await _mark_permanent(row, str(exc))
     else:
         await _mark_resolved(row)
+
+
+def _is_transient_retry_error(exc: SaihuAPIError) -> bool:
+    return isinstance(exc, (SaihuRateLimited, SaihuNetworkError))
 
 
 async def _mark_resolved(row: ApiCallLog) -> None:
@@ -184,7 +193,7 @@ async def _mark_resolved(row: ApiCallLog) -> None:
         await db.commit()
 
 
-async def _mark_retry_rate_limited(row: ApiCallLog, error: str) -> None:
+async def _mark_retry_transient(row: ApiCallLog, error: str) -> None:
     next_attempt = row.auto_retry_attempts + 1
     async with async_session_factory() as db:
         await db.execute(

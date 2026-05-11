@@ -17,6 +17,7 @@ from app.models.in_transit import InTransitItem, InTransitRecord
 from app.models.warehouse import Warehouse
 from app.saihu.endpoints.out_records import list_in_transit_records
 from app.sync.common import mark_sync_failed, mark_sync_running, mark_sync_success
+from app.sync.locks import sync_business_lock
 from app.tasks.jobs import JobContext, register
 
 logger = get_logger(__name__)
@@ -50,6 +51,11 @@ REMARK_COUNTRY_MAP: dict[str, str] = {
 
 @register(JOB_NAME)
 async def sync_out_records_job(ctx: JobContext) -> None:
+    async with sync_business_lock(ctx, JOB_NAME):
+        await _sync_out_records_job_unlocked(ctx)
+
+
+async def _sync_out_records_job_unlocked(ctx: JobContext) -> None:
     await ctx.progress(current_step="同步在途出库单", total_steps=3)
     async with async_session_factory() as db:
         sync_start_time = await mark_sync_running(db, JOB_NAME)

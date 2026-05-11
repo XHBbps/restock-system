@@ -1,6 +1,7 @@
 """Composite full-sync job."""
 
 from app.sync.inventory import sync_inventory_job
+from app.sync.locks import SYNC_BUSINESS_LOCK_JOBS, sync_business_locks
 from app.sync.order_list import sync_order_list_job
 from app.sync.out_records import sync_out_records_job
 from app.sync.product_listing import sync_product_listing_job
@@ -21,22 +22,31 @@ SYNC_ALL_STEPS: list[tuple[str, JobHandler]] = [
 @register("sync_all")
 async def sync_all_job(ctx: JobContext) -> None:
     total = len(SYNC_ALL_STEPS)
-    await ctx.progress(
-        current_step="全量同步",
-        step_detail=f"开始执行 {total} 个同步任务",
-        total_steps=total,
-    )
+    async with sync_business_locks(SYNC_BUSINESS_LOCK_JOBS) as held_locks:
+        previous_held_locks = ctx.payload.get("_held_sync_business_locks")
+        ctx.payload["_held_sync_business_locks"] = list(held_locks)
+        try:
+            await ctx.progress(
+                current_step="全量同步",
+                step_detail=f"开始执行 {total} 个同步任务",
+                total_steps=total,
+            )
 
-    for index, (label, handler) in enumerate(SYNC_ALL_STEPS, start=1):
-        await ctx.progress(
-            current_step=f"{index}/{total}",
-            step_detail=f"执行 {label}",
-            total_steps=total,
-        )
-        await handler(ctx)
+            for index, (label, handler) in enumerate(SYNC_ALL_STEPS, start=1):
+                await ctx.progress(
+                    current_step=f"{index}/{total}",
+                    step_detail=f"执行 {label}",
+                    total_steps=total,
+                )
+                await handler(ctx)
 
-    await ctx.progress(
-        current_step="完成",
-        step_detail=f"已串行完成 {total} 个同步任务",
-        total_steps=total,
-    )
+            await ctx.progress(
+                current_step="完成",
+                step_detail=f"已串行完成 {total} 个同步任务",
+                total_steps=total,
+            )
+        finally:
+            if previous_held_locks is None:
+                ctx.payload.pop("_held_sync_business_locks", None)
+            else:
+                ctx.payload["_held_sync_business_locks"] = previous_held_locks

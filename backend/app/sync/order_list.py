@@ -28,6 +28,7 @@ from app.models.order import (
 from app.models.shop import Shop
 from app.saihu.endpoints.package_ship import list_package_ship_orders
 from app.sync.common import mark_sync_failed, mark_sync_running, mark_sync_success
+from app.sync.locks import sync_business_lock
 from app.tasks.jobs import JobContext, register
 
 logger = get_logger(__name__)
@@ -58,6 +59,11 @@ MANUAL_EDIT_PROTECTED_FIELDS = frozenset(
 
 @register(JOB_NAME)
 async def sync_order_list_job(ctx: JobContext) -> None:
+    async with sync_business_lock(ctx, JOB_NAME):
+        await _sync_order_list_job_unlocked(ctx)
+
+
+async def _sync_order_list_job_unlocked(ctx: JobContext) -> None:
     await ctx.progress(current_step="同步包裹订单列表", total_steps=1)
     async with async_session_factory() as db:
         started = await mark_sync_running(db, JOB_NAME)
