@@ -16,7 +16,6 @@ describe('api/sync', () => {
         timezone: 'Asia/Hong_Kong',
         sync_interval_minutes: 60,
         order_sync_interval_minutes: 120,
-        calc_cron: '0 4 * * *',
         jobs: []
       }
     })
@@ -26,6 +25,7 @@ describe('api/sync', () => {
     expect(get).toHaveBeenCalledWith('/api/sync/scheduler')
     expect(result.enabled).toBe(true)
     expect(result.order_sync_interval_minutes).toBe(120)
+    expect(result).not.toHaveProperty('calc_cron')
   })
 
   it('posts scheduler toggle payload', async () => {

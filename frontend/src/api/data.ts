@@ -296,8 +296,8 @@ export async function listDataShops(): Promise<{ items: DataShop[]; total: numbe
 // ========== 在线产品信息 ==========
 export interface DataProductListing {
   id: number
-  commoditySku: string
-  commodityId: string
+  commoditySku: string | null
+  commodityId: string | null
   commodityName: string | null
   mainImage: string | null
   shopId: string

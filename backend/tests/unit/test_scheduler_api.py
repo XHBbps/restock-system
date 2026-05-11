@@ -69,6 +69,7 @@ async def test_scheduler_status_returns_stable_payload(monkeypatch) -> None:
     assert status.order_sync_interval_minutes == 120
     assert status.jobs[0].job_name == "sync_inventory"
     assert status.jobs[0].next_run_time is None
+    assert "calc_cron" not in status.model_dump()
 
 
 @pytest.mark.asyncio

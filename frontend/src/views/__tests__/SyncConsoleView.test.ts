@@ -86,7 +86,6 @@ function makeSchedulerStatus(overrides: Partial<SchedulerStatus> = {}): Schedule
     timezone: 'Asia/Shanghai',
     sync_interval_minutes: 60,
     order_sync_interval_minutes: 120,
-    calc_cron: '0 8 * * *',
     jobs: [
       { job_name: 'sync_inventory', next_run_time: '2026-04-30T10:45:00+08:00' },
       { job_name: 'sync_order_list', next_run_time: '2026-04-30T10:30:00+08:00' },

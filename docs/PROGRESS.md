@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-05-10（信息总览移动端导航、急需补货 SKU 布局与未知国家过滤修复。）
+> 最近更新：2026-05-11（同步控制台调度契约、在线产品 nullable 类型与历史文档口径修复。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -43,7 +43,7 @@
 
 - **调度器开关**：`GET/POST /api/sync/scheduler`，开关状态持久化到 `global_config.scheduler_enabled`
 - **调度参数实时生效**：`sync_interval_minutes`、`order_sync_interval_minutes`、`scheduler_enabled` 保存后立即 reload
-- **cron 校验**：非法表达式在保存前拦截
+- **调度参数校验**：同步间隔配置在保存前校验；补货计算不再通过 cron 自动调度。
 - **手动触发**：`POST /api/sync/shop` 及其他 sync 端点
 - **自动同步任务**（APScheduler 间隔触发）：
   - `sync_product_listing` / `sync_inventory` / `sync_out_records` 使用 `sync_interval_minutes`
@@ -109,6 +109,12 @@
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`；移动端使用三列 grid 固定商品、国家、可售天数列宽，避免商品信息与国家列挤压
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.114 功能完整性契约收口（2026-05-11）
+- **同步控制台契约**：`frontend/src/api/sync.ts` 的 `SchedulerStatus` 与 `SchedulerControlPanel` 移除旧 `calc_cron` 字段和“自动计算”展示，页面改为明确展示“补货计算：手动生成”，与后端 `SchedulerStatusOut` 当前字段一致。
+- **在线产品 nullable 类型**：`frontend/src/api/data.ts` 中 `/api/data/product-listings` 的 `DataProductListing.commoditySku` / `commodityId` 改为 `string | null`，对齐后端 `backend/app/schemas/data.py` 允许未匹配 listing 为空的契约。当前页面直接消费的是 `/api/data/sku-overview`，未发现直接渲染该类型的页面。
+- **文档口径**：当前状态文档明确补货计算只保留手动入口，`sync_order_detail` / `refetch_order_detail`、`partial` / `pushed`、`calc_cron` 等仅可在历史章节中作为当时实现记录出现，不代表现行能力。
+- **测试**：更新同步控制台前端单测 mock 与断言；补充后端契约测试，锁定 scheduler 响应不含 `calc_cron`，并覆盖在线产品 `commoditySku` / `commodityId` 可为 `null`。
 
 ### 3.113 信息总览移动端与未知国家过滤修复（2026-05-10）
 - **移动端导航**：`frontend/src/components/AppLayout.vue` 去掉移动端菜单按钮对桌面折叠按钮样式的 `@extend` 依赖，手机端只展示顶部菜单按钮，点击后通过 `el-drawer` 打开完整导航，订单页入口可正常跳转。

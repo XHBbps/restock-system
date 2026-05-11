@@ -187,10 +187,10 @@ docker compose -f deploy/docker-compose.yml exec db psql -U postgres -d replenis
 
 3. **全局配置检查**
    ```sql
-   SELECT scheduler_enabled, sync_interval_minutes, suggestion_generation_enabled, calc_cron
+   SELECT scheduler_enabled, sync_interval_minutes, order_sync_interval_minutes, suggestion_generation_enabled
    FROM global_config WHERE id = 1;
    ```
-   （`calc_enabled` 已在 Plan A 删除，由 `suggestion_generation_enabled` 负责控制是否产出建议）
+   （`calc_enabled` / `calc_cron` 已在 Plan A 删除，由 `suggestion_generation_enabled` 负责控制是否允许手动产出建议）
 
 4. **调度参数**：确认 `scheduler_enabled=true`，并检查 `sync_interval_minutes` / `order_sync_interval_minutes` 是否符合预期。
 

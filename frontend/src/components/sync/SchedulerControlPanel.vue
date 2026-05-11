@@ -3,12 +3,12 @@
     <div class="scheduler-main">
       <div class="scheduler-title">自动同步</div>
       <div class="scheduler-desc">
-        调度器统一托管自动同步任务。关闭后将暂停自动同步和定时补货计算，手动同步不受影响。
+        调度器统一托管自动同步任务。关闭后将暂停自动同步，手动同步和手动补货计算不受影响。
       </div>
       <div class="scheduler-meta">
         <span>常规同步：每 {{ status?.sync_interval_minutes ?? '-' }} 分钟</span>
         <span>订单处理列表：每 {{ status?.order_sync_interval_minutes ?? '-' }} 分钟</span>
-        <span>自动计算：{{ formatCron(status?.calc_cron) }}</span>
+        <span>补货计算：手动生成</span>
       </div>
     </div>
     <div class="scheduler-actions">
@@ -34,7 +34,6 @@ const props = defineProps<{
     timezone: string
     sync_interval_minutes: number
     order_sync_interval_minutes: number
-    calc_cron: string
   } | null
   refreshing: boolean
   toggleLoading: boolean
@@ -53,20 +52,6 @@ const statusMeta = computed(() => {
     ? { label: '调度器已开启', tagType: 'success' as const }
     : { label: '调度器已关闭', tagType: 'warning' as const }
 })
-
-const CRON_LABELS: Record<string, string> = {
-  '0 6 * * *': '每天 06:00',
-  '0 8 * * *': '每天 08:00',
-  '0 12 * * *': '每天 12:00',
-  '0 20 * * *': '每天 20:00',
-  '0 */12 * * *': '每 12 小时',
-  '0 */6 * * *': '每 6 小时',
-}
-
-function formatCron(cron?: string): string {
-  if (!cron) return '-'
-  return CRON_LABELS[cron] || cron
-}
 
 function onToggle(value: string | number | boolean): void {
   emit('toggle', Boolean(value))
