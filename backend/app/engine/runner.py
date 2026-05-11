@@ -89,10 +89,11 @@ async def run_engine(
             raise ValueError(f"GlobalConfig.target_days must be > 0, got {config.target_days}")
         if config.buffer_days < 0:
             raise ValueError(f"GlobalConfig.buffer_days must be >= 0, got {config.buffer_days}")
-        if config.lead_time_days < 0:
+        if config.lead_time_days is None or config.lead_time_days < 0:
             raise ValueError(
                 f"GlobalConfig.lead_time_days must be >= 0, got {config.lead_time_days}"
             )
+        global_lead_time_days = config.lead_time_days
         if config.safety_stock_days < 0:
             raise ValueError(
                 f"GlobalConfig.safety_stock_days must be >= 0, got {config.safety_stock_days}"
@@ -212,10 +213,11 @@ async def run_engine(
                 if allocation.warehouse_breakdown:
                     warehouse_breakdown[country] = allocation.warehouse_breakdown
 
+            sku_specific_lead_time = sku_lead_time.get(sku)
             lead_time = (
-                sku_lead_time[sku]
-                if sku_lead_time.get(sku) is not None
-                else config.lead_time_days
+                sku_specific_lead_time
+                if sku_specific_lead_time is not None
+                else global_lead_time_days
             )
             timing = compute_urgency_for_sku(
                 sale_days_for_sku=sale_days.get(sku, {}),

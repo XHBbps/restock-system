@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -299,7 +300,7 @@ async def _create_snapshot(
     )
 
 
-def _validate_restock_snapshot_items(items: list[SuggestionItem]) -> None:
+def _validate_restock_snapshot_items(items: Sequence[SuggestionItem]) -> None:
     errors: list[str] = []
     for item in items:
         country_breakdown = item.country_breakdown or {}
