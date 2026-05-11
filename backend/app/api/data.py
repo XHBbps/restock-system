@@ -31,7 +31,7 @@ from app.api.deps import (
 from app.core.exceptions import NotFound
 from app.core.permissions import DATA_BASE_VIEW, DATA_BIZ_EDIT, DATA_BIZ_VIEW, SYNC_VIEW
 from app.core.query import escape_like
-from app.core.timezone import BEIJING
+from app.core.timezone import BEIJING, order_display_timezone, to_order_display_time
 from app.models.commodity import CommodityMaster
 from app.models.in_transit import InTransitItem, InTransitRecord
 from app.models.inventory import InventorySnapshotLatest
@@ -179,6 +179,23 @@ def _order_status_sort_expr() -> ColumnElement[int]:
         ],
         else_=len(ORDER_STATUS_SORT_ORDER),
     )
+
+
+def _order_display_time_payload(header: OrderHeader) -> dict[str, object | None]:
+    timezone = order_display_timezone(header.marketplace_id, header.country_code)
+    return {
+        "purchase_date_local": to_order_display_time(
+            header.purchase_date,
+            header.marketplace_id,
+            header.country_code,
+        ),
+        "last_update_date_local": to_order_display_time(
+            header.last_update_date,
+            header.marketplace_id,
+            header.country_code,
+        ),
+        "display_timezone": getattr(timezone, "key", str(timezone)),
+    }
 
 
 def _apply_order_sort(stmt: Any, sort_by: str | None, sort_order: str) -> Any:
@@ -489,6 +506,7 @@ async def list_orders(
                     or bool(getattr(r, "postal_code", None))
                 ),
                 "item_count": item_count_map.get(r.id, 0),
+                **_order_display_time_payload(r),
             }
         )
         for r in rows
@@ -565,6 +583,7 @@ async def _data_order_detail_from_header(
                 )
             },
             "items": [DataOrderItem.model_validate(it) for it in item_rows],
+            **_order_display_time_payload(header),
             **detail_payload,
         }
     )

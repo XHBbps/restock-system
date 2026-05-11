@@ -113,6 +113,33 @@ def country_to_tz(country: str | None) -> ZoneInfo:
     return ZoneInfo(tz_name)
 
 
+def order_display_timezone(
+    marketplace_id: str | None,
+    country_code: str | None = None,
+) -> ZoneInfo:
+    """Return the display timezone for an order.
+
+    Marketplace id is more precise for EU-style aggregated countries; country code is
+    kept as a fallback for manually edited or non-Amazon orders.
+    """
+    country = marketplace_to_country(marketplace_id) if marketplace_id else None
+    if not country:
+        country = normalize_observed_country_code(country_code)
+    return country_to_tz(country)
+
+
+def to_order_display_time(
+    value: datetime | None,
+    marketplace_id: str | None,
+    country_code: str | None = None,
+) -> datetime | None:
+    """Convert a stored Beijing datetime to the order display timezone."""
+    if value is None:
+        return None
+    source = value if value.tzinfo is not None else value.replace(tzinfo=BEIJING)
+    return source.astimezone(order_display_timezone(marketplace_id, country_code))
+
+
 def parse_saihu_time(raw: str | None, marketplace_id: str | None = None) -> datetime | None:
     """把赛狐返回的时间字符串解析为带时区的 datetime。
 

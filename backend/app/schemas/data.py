@@ -58,7 +58,10 @@ class DataOrderSummary(SaihuLikeModel):
     order_total_amount: Decimal | None = None
     fulfillment_channel: str | None = None
     purchase_date: datetime
+    purchase_date_local: datetime | None = None
     last_update_date: datetime
+    last_update_date_local: datetime | None = None
+    display_timezone: str | None = None
     refund_status: str | None = None
     last_sync_at: datetime
     has_detail: bool = False
@@ -91,7 +94,10 @@ class DataOrderDetail(SaihuLikeModel):
     order_total_amount: Decimal | None = None
     fulfillment_channel: str | None = None
     purchase_date: datetime
+    purchase_date_local: datetime | None = None
     last_update_date: datetime
+    last_update_date_local: datetime | None = None
+    display_timezone: str | None = None
     refund_status: str | None = None
     is_buyer_requested_cancel: bool
     last_sync_at: datetime

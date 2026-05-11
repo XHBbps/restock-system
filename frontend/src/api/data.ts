@@ -18,7 +18,10 @@ export interface DataOrderSummary {
   orderTotalAmount: string | null
   fulfillmentChannel: string | null
   purchaseDate: string
+  purchaseDateLocal?: string | null
   lastUpdateDate: string
+  lastUpdateDateLocal?: string | null
+  displayTimezone?: string | null
   refundStatus: string | null
   lastSyncAt: string
   hasDetail: boolean

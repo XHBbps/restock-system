@@ -134,6 +134,10 @@ async def test_list_orders_applies_shop_filter_and_returns_paginated_payload() -
     assert not hasattr(result.items[0], "source")
     assert result.items[0].item_count == 3
     assert result.items[0].has_detail is True
+    assert result.items[0].display_timezone == "America/Los_Angeles"
+    assert result.items[0].purchase_date_local == datetime(
+        2026, 4, 15, 19, 0, tzinfo=ZoneInfo("America/Los_Angeles")
+    )
 
     compiled_sql = str(db.statements[0])
     assert "order_header.shop_id = :shop_id_1" in compiled_sql
@@ -295,6 +299,13 @@ async def test_get_order_detail_defaults_to_package_source_and_package_sn_lookup
     assert result.shop_id == "SHOP-1"
     assert result.items[0].commodity_sku == "SKU-1"
     assert result.detail_fetched_at == datetime(2026, 4, 16, 12, 0, tzinfo=BEIJING)
+    assert result.display_timezone == "America/Los_Angeles"
+    assert result.purchase_date_local == datetime(
+        2026, 4, 15, 19, 0, tzinfo=ZoneInfo("America/Los_Angeles")
+    )
+    assert result.last_update_date_local == datetime(
+        2026, 4, 15, 20, 0, tzinfo=ZoneInfo("America/Los_Angeles")
+    )
 
     compiled_params = dict(db.statements[0].compile().params)
     assert "订单处理" in compiled_params.values()

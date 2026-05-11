@@ -83,6 +83,16 @@ const STUBS = {
       </div>
     `
   },
+  MobileRecordList: {
+    props: ['items'],
+    template: `
+      <div class="mobile-record-list">
+        <div v-for="(item, index) in items" :key="index">
+          <slot :item="item" />
+        </div>
+      </div>
+    `
+  },
   ElInput: {
     props: ['modelValue', 'placeholder'],
     emits: ['update:modelValue', 'input', 'keyup.enter', 'clear'],
@@ -219,7 +229,8 @@ function setViewportWidth(width: number) {
 }
 
 function buildOrdersResponse(
-  overrides: Partial<{ total: number; page: number; pageSize: number }> = {}
+  overrides: Partial<{ total: number; page: number; pageSize: number }> = {},
+  itemOverrides: Record<string, unknown> = {}
 ) {
   return {
     items: [
@@ -242,7 +253,8 @@ function buildOrdersResponse(
         refundStatus: null,
         lastSyncAt: '2026-04-16T11:00:00+08:00',
         hasDetail: true,
-        itemCount: 2
+        itemCount: 2,
+        ...itemOverrides
       }
     ],
     total: 188,
@@ -344,6 +356,19 @@ describe('DataOrdersView', () => {
       sort_order: 'desc',
       status: undefined
     })
+  })
+
+  it('renders local purchase date in mobile order cards', async () => {
+    setViewportWidth(375)
+    mockListOrders.mockResolvedValue(
+      buildOrdersResponse({}, { purchaseDateLocal: '2026-04-15T19:00:00-07:00' })
+    )
+    const { default: View } = await import('../data/DataOrdersView.vue')
+    const wrapper = shallowMount(View, { global: GLOBAL_CONFIG })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('2026-04-15 19:00')
+    expect(wrapper.text()).not.toContain('2026-04-16 10:00')
   })
 
   it('requests a new backend page when pagination changes', async () => {
@@ -650,6 +675,37 @@ describe('DataOrdersView', () => {
     expect(wrapper.find('.kv-grid').exists()).toBe(true)
     expect(wrapper.find('.detail-items-table').exists()).toBe(true)
     expect(wrapper.text()).toContain('订单商品ID')
+  })
+
+  it('renders local order timestamps in detail dialog and falls back to legacy fields', async () => {
+    mockGetOrderDetail.mockResolvedValueOnce(
+      buildOrderDetail({
+        purchaseDateLocal: '2026-04-15T19:00:00-07:00',
+        lastUpdateDateLocal: '2026-04-15T20:00:00-07:00'
+      })
+    )
+    const { default: View } = await import('../data/DataOrdersView.vue')
+    const wrapper = shallowMount(View, { global: GLOBAL_CONFIG })
+    await flushPromises()
+
+    await (wrapper.vm as unknown as { openDetail: (row: unknown) => Promise<void> }).openDetail(
+      buildOrdersResponse().items[0]
+    )
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('2026-04-15 19:00')
+    expect(wrapper.text()).toContain('2026-04-15 20:00')
+    expect(wrapper.text()).not.toContain('2026-04-16 10:00')
+    expect(wrapper.text()).not.toContain('2026-04-16 11:00')
+
+    mockGetOrderDetail.mockResolvedValueOnce(buildOrderDetail())
+    await (wrapper.vm as unknown as { openDetail: (row: unknown) => Promise<void> }).openDetail(
+      buildOrdersResponse().items[0]
+    )
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('2026-04-16 10:00')
+    expect(wrapper.text()).toContain('2026-04-16 11:00')
   })
 
   it('uses custom file picker label and clears selected match file', async () => {

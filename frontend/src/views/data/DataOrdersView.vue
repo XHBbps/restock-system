@@ -257,7 +257,9 @@
       </el-table-column>
       <el-table-column label="下单时间" prop="purchaseDate" min-width="168" sortable="custom">
         <template #default="{ row }">
-          <span class="muted mono nowrap">{{ formatDateTime(row.purchaseDate) }}</span>
+          <span class="muted mono nowrap">
+            {{ formatOrderDisplayTime(displayPurchaseDate(row)) }}
+          </span>
         </template>
       </el-table-column>
       <el-table-column label="操作" width="112" align="center">
@@ -300,7 +302,7 @@
             </div>
             <div class="mobile-kv-grid__wide">
               <span>下单时间</span>
-              <strong class="mono">{{ formatDateTime(row.purchaseDate) }}</strong>
+              <strong class="mono">{{ formatOrderDisplayTime(displayPurchaseDate(row)) }}</strong>
             </div>
           </div>
           <div class="mobile-card-actions">
@@ -380,11 +382,11 @@
             </div>
             <div>
               <span class="label">下单时间</span>
-              <span class="mono">{{ formatDateTime(detail.purchaseDate) }}</span>
+              <span class="mono">{{ formatOrderDisplayTime(displayPurchaseDate(detail)) }}</span>
             </div>
             <div>
               <span class="label">最后更新时间</span>
-              <span class="mono">{{ formatDateTime(detail.lastUpdateDate) }}</span>
+              <span class="mono">{{ formatOrderDisplayTime(displayLastUpdateDate(detail)) }}</span>
             </div>
             <div>
               <span class="label">订单金额</span>
@@ -875,6 +877,20 @@ function buildChangedEditPayload(): DataOrderPatch {
     }
   }
   return payload
+}
+
+function displayPurchaseDate(order: DataOrderSummary | DataOrderDetail): string | null {
+  return order.purchaseDateLocal ?? order.purchaseDate
+}
+
+function displayLastUpdateDate(order: DataOrderDetail): string | null {
+  return order.lastUpdateDateLocal ?? order.lastUpdateDate
+}
+
+function formatOrderDisplayTime(value?: string | null): string {
+  if (!value) return formatDateTime(value)
+  const match = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})/.exec(value)
+  return match ? `${match[1]} ${match[2]}` : formatDateTime(value)
 }
 
 function openMatchDialog(): void {
