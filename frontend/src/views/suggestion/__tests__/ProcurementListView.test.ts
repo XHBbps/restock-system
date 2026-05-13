@@ -48,6 +48,7 @@ function makeItem(id: number, overrides: Partial<SuggestionItem> = {}): Suggesti
     allocation_snapshot: null,
     velocity_snapshot: null,
     sale_days_snapshot: null,
+    calculation_inputs_snapshot: null,
     calculation_warnings: [],
     urgent: false,
     purchase_qty: 10,
@@ -133,7 +134,7 @@ describe('ProcurementListView', () => {
     await flushPromises()
     expect(vm.selectedIds).toEqual([1, 2, 3])
     expect(vm.selectedCount).toBe(3)
-    expect(vm.exportButtonLabel).toBe('导出采购单 Excel (3项)')
+    expect(vm.exportButtonLabel).toBe('导出采购单 Excel（3项）')
 
     vm.page = 2
     await flushPromises()
@@ -228,6 +229,52 @@ describe('ProcurementListView', () => {
 
     const vm = wrapper.vm as unknown as { filteredItems: SuggestionItem[] }
     expect(vm.filteredItems.map((item) => item.id)).toEqual([3, 2])
+  })
+
+  it('shows calculation basis when snapshot exists', async () => {
+    const { default: View } = await import('../ProcurementListView.vue')
+    const wrapper = shallowMount(View, {
+      props: {
+        suggestion: makeSuggestion({ procurement_item_count: 1 }),
+        items: [
+          makeItem(1, {
+            purchase_qty: 220,
+            calculation_inputs_snapshot: {
+              version: 1,
+              generated_at: '2026-05-13T10:00:00+08:00',
+              demand_date: '2026-05-13',
+              target_days: 60,
+              demand_days: 0,
+              effective_target_days: 60,
+              safety_stock_days: 15,
+              purchase: {
+                country_restock_qty_total: 100,
+                country_restock_qty_by_country: { US: 100 },
+                daily_velocity_total: 10,
+                daily_velocity_by_country: { US: 10 },
+                safety_stock_qty: 150,
+                local_stock_available: 20,
+                local_stock_reserved: 10,
+                local_stock_total: 30,
+                raw_purchase_qty: 220,
+                final_purchase_qty: 220,
+              },
+              restock: { countries: {} },
+            },
+          }),
+        ],
+      },
+      global: { stubs: STUBS },
+    })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      isPurchaseAdjusted: (item: SuggestionItem) => boolean
+      filteredItems: SuggestionItem[]
+    }
+    const item = vm.filteredItems[0]
+    expect(vm.isPurchaseAdjusted(item)).toBe(false)
+    expect(vm.isPurchaseAdjusted({ ...item, purchase_qty: 200 })).toBe(true)
   })
 
   it('shows empty state when there is no procurement demand', async () => {

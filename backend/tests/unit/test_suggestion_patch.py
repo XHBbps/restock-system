@@ -84,6 +84,7 @@ class _FakeItem:
         self.velocity_snapshot: dict[str, float] | None = {"US": 1.0}
         self.sale_days_snapshot: dict[str, float] | None = {"US": 25.0}
         self.calculation_warnings: list[dict[str, Any]] = []
+        self.calculation_inputs_snapshot: dict[str, Any] | None = {"version": 1}
         self.purchase_qty = 0
         self.restock_dates: dict[str, str | None] = {}
         self.urgent = False
@@ -129,6 +130,7 @@ async def test_suggestion_patch_exported_item_still_editable(monkeypatch) -> Non
     update_stmt = db.executed_statements[-1]
     values = _normalize_update_values(update_stmt)
     assert values["purchase_qty"] == 50
+    assert "calculation_inputs_snapshot" not in values
 
 
 async def test_suggestion_patch_recomputes_total_qty_from_country_breakdown(monkeypatch) -> None:
@@ -301,6 +303,7 @@ async def test_recalculate_item_updates_only_timing_diagnostics(monkeypatch) -> 
         "restock_dates",
         "calculation_warnings",
     }
+    assert "calculation_inputs_snapshot" not in values
     assert values["sale_days_snapshot"] == {"US": 15.0}
     assert values["urgent"] is True
     assert values["calculation_warnings"][0]["code"] == "missing_inventory_record"

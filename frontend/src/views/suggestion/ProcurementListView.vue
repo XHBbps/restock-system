@@ -53,6 +53,11 @@
           />
         </template>
       </el-table-column>
+      <el-table-column type="expand" width="48">
+        <template #default="{ row }">
+          <ProcurementCalculationPanel :item="row" />
+        </template>
+      </el-table-column>
       <el-table-column label="商品信息" min-width="260">
         <template #default="{ row }">
           <SkuCard :sku="row.commodity_sku" :name="row.commodity_name" :image="row.main_image" />
@@ -119,6 +124,7 @@
               </el-tag>
             </div>
           </div>
+          <ProcurementCalculationPanel :item="row" compact />
         </div>
       </template>
     </MobileRecordList>
@@ -146,10 +152,11 @@ import SkuCard from '@/components/SkuCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
 import { useResponsive } from '@/composables/useResponsive'
 import { getActionErrorMessage } from '@/utils/apiError'
+import { getCountryLabel } from '@/utils/countries'
 import { triggerBlobDownload } from '@/utils/download'
 import { useCrossPageSelection } from '@/views/suggestion/useCrossPageSelection'
 import { ElMessage } from 'element-plus'
-import { computed, ref, watch } from 'vue'
+import { computed, defineComponent, h, ref, watch, type PropType } from 'vue'
 
 const props = defineProps<{
   suggestion: SuggestionDetail | null
@@ -213,7 +220,7 @@ const {
   resetKey: () => props.suggestion?.id,
 })
 
-const exportButtonLabel = computed(() => `导出采购单 Excel (${selectedCount.value}项)`)
+const exportButtonLabel = computed(() => `导出采购单 Excel（${selectedCount.value}项）`)
 
 function draftValue<T extends keyof SuggestionItemPatch>(
   itemId: number,
@@ -233,6 +240,81 @@ function updateDraft<T extends keyof SuggestionItemPatch>(
     [field]: value,
   }
 }
+
+function formatNumber(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '-'
+  return Number(value).toLocaleString('zh-CN', { maximumFractionDigits: 2 })
+}
+
+function isPurchaseAdjusted(item: SuggestionItem): boolean {
+  const generated = item.calculation_inputs_snapshot?.purchase.final_purchase_qty
+  return generated !== undefined && Number(generated) !== Number(item.purchase_qty)
+}
+
+function countryQtyText(values: Record<string, number> | undefined): string {
+  const entries = Object.entries(values || {}).filter(([, qty]) => Number(qty) > 0)
+  if (entries.length === 0) return '-'
+  return entries
+    .map(([country, qty]) => `${getCountryLabel(country)} ${formatNumber(qty)}`)
+    .join('，')
+}
+
+const ProcurementCalculationPanel = defineComponent({
+  name: 'ProcurementCalculationPanel',
+  props: {
+    item: { type: Object as PropType<SuggestionItem>, required: true },
+    compact: { type: Boolean, default: false },
+  },
+  setup(panelProps) {
+    return () => {
+      const snapshot = panelProps.item.calculation_inputs_snapshot
+      if (!snapshot) {
+        return h('div', { class: ['calculation-panel', { 'calculation-panel--mobile': panelProps.compact }] }, [
+          h('div', { class: 'calculation-empty' }, '历史建议缺少完整计算依据'),
+        ])
+      }
+      const purchase = snapshot.purchase
+      const detailRows = panelProps.compact
+        ? [
+            ['各国补货量合计', formatNumber(purchase.country_restock_qty_total)],
+            ['国内仓库存合计', formatNumber(purchase.local_stock_total)],
+            ['安全库存量', formatNumber(purchase.safety_stock_qty)],
+            ['生成时 / 当前', `${formatNumber(purchase.final_purchase_qty)} / ${formatNumber(panelProps.item.purchase_qty)}`],
+          ]
+        : [
+            ['各国补货量合计', formatNumber(purchase.country_restock_qty_total)],
+            [
+              '国内仓可用 / 占用 / 合计',
+              `${formatNumber(purchase.local_stock_available)} / ${formatNumber(purchase.local_stock_reserved)} / ${formatNumber(purchase.local_stock_total)}`,
+            ],
+            ['全国家销量合计', formatNumber(purchase.daily_velocity_total)],
+            ['安全库存天数 / 安全库存量', `${snapshot.safety_stock_days} 天 / ${formatNumber(purchase.safety_stock_qty)}`],
+            ['原始采购量', formatNumber(purchase.raw_purchase_qty)],
+            ['生成时采购量 / 当前采购量', `${formatNumber(purchase.final_purchase_qty)} / ${formatNumber(panelProps.item.purchase_qty)}`],
+          ]
+
+      return h('div', { class: ['calculation-panel', { 'calculation-panel--mobile': panelProps.compact }] }, [
+        h('div', { class: 'calculation-panel__header' }, [
+          h('span', { class: 'calculation-formula' }, '采购量 = max(0, 各国补货量合计 - 国内仓库存合计 + 安全库存量)'),
+          isPurchaseAdjusted(panelProps.item)
+            ? h('span', { class: 'calculation-adjusted' }, '当前已手工调整')
+            : null,
+        ]),
+        h(
+          'div',
+          { class: 'calculation-grid' },
+          detailRows.map(([label, value]) =>
+            h('div', { class: 'calculation-grid__item' }, [
+              h('span', label),
+              h('strong', value),
+            ]),
+          ),
+        ),
+        h('div', { class: 'calculation-country-line' }, `各国补货量：${countryQtyText(purchase.country_restock_qty_by_country)}`),
+      ])
+    }
+  },
+})
 
 async function saveDrafts(): Promise<void> {
   if (!props.suggestion) return
@@ -308,6 +390,72 @@ async function handleExport(): Promise<void> {
   align-items: center;
 }
 
+.calculation-panel {
+  margin: $space-3 $space-4;
+  padding: $space-3;
+  border: 1px solid $color-border-subtle;
+  border-radius: $radius-md;
+  background: $color-bg-subtle;
+}
+
+.calculation-panel__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: $space-2;
+  margin-bottom: $space-3;
+}
+
+.calculation-formula {
+  font-family: $font-family-mono;
+  font-size: $font-size-sm;
+  color: $color-text-primary;
+}
+
+.calculation-adjusted {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 $space-2;
+  border-radius: $radius-sm;
+  color: $color-warning;
+  background: $color-warning-soft;
+  font-size: $font-size-xs;
+}
+
+.calculation-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: $space-2;
+}
+
+.calculation-grid__item {
+  min-width: 0;
+  padding: $space-2;
+  border-radius: $radius-sm;
+  background: $color-bg-base;
+}
+
+.calculation-grid__item > span {
+  display: block;
+  margin-bottom: 2px;
+  color: $color-text-secondary;
+  font-size: $font-size-xs;
+}
+
+.calculation-grid__item > strong {
+  font-family: $font-family-mono;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+}
+
+.calculation-country-line,
+.calculation-empty {
+  margin-top: $space-3;
+  color: $color-text-secondary;
+  font-size: $font-size-sm;
+}
+
 @media (max-width: 767px) {
   .table-toolbar,
   .table-toolbar__filters,
@@ -360,6 +508,14 @@ async function handleExport(): Promise<void> {
   .mobile-field > span {
     color: $color-text-secondary;
     font-size: $font-size-xs;
+  }
+
+  .calculation-panel {
+    margin: 0;
+  }
+
+  .calculation-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 </style>

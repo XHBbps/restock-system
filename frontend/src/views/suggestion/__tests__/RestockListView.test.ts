@@ -59,6 +59,7 @@ function makeItem(id: number, overrides: Partial<SuggestionItem> = {}): Suggesti
     allocation_snapshot: null,
     velocity_snapshot: null,
     sale_days_snapshot: null,
+    calculation_inputs_snapshot: null,
     calculation_warnings: [],
     urgent: false,
     purchase_qty: 10,
@@ -101,10 +102,13 @@ const STUBS = {
   ElButton: true,
   ElCheckbox: true,
   ElTooltip: { template: '<span><slot /></span>' },
+  ElCollapse: { template: '<div><slot /></div>' },
+  ElCollapseItem: { template: '<div><slot /></div>' },
   ElTable: { template: '<div><slot /></div>' },
   ElTableColumn: true,
   ElTag: { template: '<span><slot /></span>' },
   SkuCard: true,
+  RestockCalculationBlock: true,
 }
 
 describe('RestockListView', () => {
@@ -153,7 +157,7 @@ describe('RestockListView', () => {
     await flushPromises()
     expect(vm.selectedIds).toEqual([1, 2, 3])
     expect(vm.selectedCount).toBe(3)
-    expect(vm.exportButtonLabel).toBe('导出补货单 Excel (3项)')
+    expect(vm.exportButtonLabel).toBe('导出补货单 Excel（3项）')
 
     vm.page = 2
     await flushPromises()
@@ -255,6 +259,72 @@ describe('RestockListView', () => {
     expect(vm.filteredItems.map((item) => item.id)).toEqual([1])
   })
 
+  it('shows calculation basis when snapshot exists', async () => {
+    mockListWarehouses.mockResolvedValue([])
+
+    const { default: View } = await import('../RestockListView.vue')
+    const wrapper = shallowMount(View, {
+      props: {
+        suggestion: makeSuggestion(),
+        items: [
+          makeItem(1, {
+            country_breakdown: { US: 10, GB: 5 },
+            calculation_inputs_snapshot: {
+              version: 1,
+              generated_at: '2026-05-13T10:00:00+08:00',
+              demand_date: '2026-05-13',
+              target_days: 60,
+              demand_days: 0,
+              effective_target_days: 60,
+              safety_stock_days: 15,
+              purchase: {
+                country_restock_qty_total: 15,
+                country_restock_qty_by_country: { US: 10, GB: 5 },
+                daily_velocity_total: 3,
+                daily_velocity_by_country: { US: 2, GB: 1 },
+                safety_stock_qty: 45,
+                local_stock_available: 0,
+                local_stock_reserved: 0,
+                local_stock_total: 0,
+                raw_purchase_qty: 60,
+                final_purchase_qty: 60,
+              },
+              restock: {
+                countries: {
+                  US: {
+                    effective_target_days: 60,
+                    daily_velocity: 2,
+                    overseas_available: 1,
+                    overseas_reserved: 2,
+                    in_transit: 3,
+                    overseas_stock_total: 6,
+                    target_stock_qty: 120,
+                    raw_restock_qty: 114,
+                    final_restock_qty: 10,
+                    sale_days: 3,
+                    restock_date: '2026-05-10',
+                  },
+                },
+              },
+            },
+          }),
+        ],
+      },
+      global: { stubs: STUBS },
+    })
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as {
+      restockCalculation: (item: SuggestionItem, country: string) => Record<string, unknown> | null
+      isRestockCountryAdjusted: (item: SuggestionItem, country: string) => boolean
+      filteredItems: SuggestionItem[]
+    }
+    const item = vm.filteredItems[0]
+    expect(vm.restockCalculation(item, 'US')).toBeTruthy()
+    expect(vm.isRestockCountryAdjusted(item, 'US')).toBe(false)
+    expect(vm.isRestockCountryAdjusted({ ...item, country_breakdown: { US: 12 } }, 'US')).toBe(true)
+  })
+
   it('shows empty state when there is no restock demand', async () => {
     mockListWarehouses.mockResolvedValue([])
 
@@ -321,7 +391,7 @@ describe('RestockListView', () => {
                 code: 'missing_velocity',
                 country: 'UK',
                 reason: 'missing_velocity',
-                message: '缺少该国家的销量速度',
+                message: '缺少该国家的销量',
               },
             ],
           }),

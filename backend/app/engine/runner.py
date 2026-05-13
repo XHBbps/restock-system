@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from datetime import date
 from typing import Any
 
@@ -58,6 +59,88 @@ def _filter_allowed_country_map(
     return {
         sku: {country: value for country, value in country_map.items() if country in allowed_countries}
         for sku, country_map in reportable.items()
+    }
+
+
+def _build_calculation_inputs_snapshot(
+    *,
+    generated_at: str,
+    demand_date: date,
+    target_days: int,
+    demand_days: int,
+    effective_target_days: int,
+    safety_stock_days: int,
+    country_qty_for_sku: dict[str, int],
+    velocity_for_sku: dict[str, float],
+    inventory_for_sku: dict[str, Any],
+    local_stock_for_sku: Any | None,
+    sale_days_for_sku: dict[str, float],
+    restock_dates_for_sku: dict[str, str | None],
+    purchase_qty: int,
+) -> dict[str, Any]:
+    country_restock_total = int(sum(int(qty or 0) for qty in country_qty_for_sku.values()))
+    velocity_total = float(sum(float(value or 0) for value in velocity_for_sku.values()))
+    safety_stock_qty = math.ceil(velocity_total * safety_stock_days)
+    local_available = int(getattr(local_stock_for_sku, "available", 0) or 0)
+    local_reserved = int(getattr(local_stock_for_sku, "reserved", 0) or 0)
+    local_total = local_available + local_reserved
+    raw_purchase_qty = country_restock_total - local_total + safety_stock_qty
+
+    restock_countries: dict[str, dict[str, Any]] = {}
+    for country, final_qty in sorted(country_qty_for_sku.items()):
+        final_restock_qty = int(final_qty or 0)
+        if final_restock_qty <= 0:
+            continue
+        daily_velocity = float(velocity_for_sku.get(country, 0) or 0)
+        stock = inventory_for_sku.get(country)
+        overseas_available = int(getattr(stock, "available", 0) or 0)
+        overseas_reserved = int(getattr(stock, "reserved", 0) or 0)
+        in_transit = int(getattr(stock, "in_transit", 0) or 0)
+        overseas_total = overseas_available + overseas_reserved + in_transit
+        target_stock_qty = math.ceil(effective_target_days * daily_velocity)
+        raw_restock_qty = target_stock_qty - overseas_total
+        sale_days = sale_days_for_sku.get(country)
+        restock_countries[country] = {
+            "effective_target_days": effective_target_days,
+            "daily_velocity": daily_velocity,
+            "overseas_available": overseas_available,
+            "overseas_reserved": overseas_reserved,
+            "in_transit": in_transit,
+            "overseas_stock_total": overseas_total,
+            "target_stock_qty": target_stock_qty,
+            "raw_restock_qty": raw_restock_qty,
+            "final_restock_qty": final_restock_qty,
+            "sale_days": float(sale_days) if sale_days is not None else None,
+            "restock_date": restock_dates_for_sku.get(country),
+        }
+
+    return {
+        "version": 1,
+        "generated_at": generated_at,
+        "demand_date": demand_date.isoformat(),
+        "target_days": target_days,
+        "demand_days": demand_days,
+        "effective_target_days": effective_target_days,
+        "safety_stock_days": safety_stock_days,
+        "purchase": {
+            "country_restock_qty_total": country_restock_total,
+            "country_restock_qty_by_country": {
+                country: int(qty or 0) for country, qty in sorted(country_qty_for_sku.items())
+            },
+            "daily_velocity_total": velocity_total,
+            "daily_velocity_by_country": {
+                country: float(value or 0) for country, value in sorted(velocity_for_sku.items())
+            },
+            "safety_stock_qty": safety_stock_qty,
+            "local_stock_available": local_available,
+            "local_stock_reserved": local_reserved,
+            "local_stock_total": local_total,
+            "raw_purchase_qty": raw_purchase_qty,
+            "final_purchase_qty": int(purchase_qty or 0),
+        },
+        "restock": {
+            "countries": restock_countries,
+        },
     }
 
 
@@ -175,6 +258,7 @@ async def run_engine(
         )
 
         items_to_insert: list[dict[str, Any]] = []
+        generated_at = now_beijing().isoformat()
         for sku in sku_list:
             sku_country_qty = country_qty.get(sku, {})
             restock_total = sum(sku_country_qty.values())
@@ -231,6 +315,21 @@ async def run_engine(
                 velocity_for_sku=velocity.get(sku, {}),
                 missing_inventory_countries=missing_inventory_by_sku.get(sku, set()),
             )
+            calculation_inputs_snapshot = _build_calculation_inputs_snapshot(
+                generated_at=generated_at,
+                demand_date=demand_date,
+                target_days=config.target_days,
+                demand_days=demand_days,
+                effective_target_days=effective_target_days,
+                safety_stock_days=config.safety_stock_days,
+                country_qty_for_sku=sku_country_qty,
+                velocity_for_sku=velocity.get(sku, {}),
+                inventory_for_sku=inventory.get(sku, {}),
+                local_stock_for_sku=local_stock.get(sku),
+                sale_days_for_sku=sale_days.get(sku, {}),
+                restock_dates_for_sku=timing.restock_dates or {},
+                purchase_qty=purchase_qty,
+            )
 
             items_to_insert.append(
                 {
@@ -242,6 +341,7 @@ async def run_engine(
                     "velocity_snapshot": velocity.get(sku, {}),
                     "sale_days_snapshot": sale_days.get(sku, {}),
                     "calculation_warnings": calculation_warnings,
+                    "calculation_inputs_snapshot": calculation_inputs_snapshot,
                     "urgent": timing.urgent,
                     "purchase_qty": purchase_qty,
                     "restock_dates": timing.restock_dates or {},

@@ -53,6 +53,7 @@ class SuggestionItemOut(BaseModel):
     velocity_snapshot: dict[str, Any] | None = None
     sale_days_snapshot: dict[str, Any] | None = None
     calculation_warnings: list[dict[str, Any]] = Field(default_factory=list)
+    calculation_inputs_snapshot: dict[str, Any] | None = None
     urgent: bool
     purchase_qty: int
     procurement_export_status: str

@@ -10,6 +10,46 @@ export interface AllocationExplanation {
   eligible_warehouses: string[]
 }
 
+export interface CalculationInputsSnapshot {
+  version: number
+  generated_at: string
+  demand_date: string
+  target_days: number
+  demand_days: number
+  effective_target_days: number
+  safety_stock_days: number
+  purchase: {
+    country_restock_qty_total: number
+    country_restock_qty_by_country: Record<string, number>
+    daily_velocity_total: number
+    daily_velocity_by_country: Record<string, number>
+    safety_stock_qty: number
+    local_stock_available: number
+    local_stock_reserved: number
+    local_stock_total: number
+    raw_purchase_qty: number
+    final_purchase_qty: number
+  }
+  restock: {
+    countries: Record<
+      string,
+      {
+        effective_target_days: number
+        daily_velocity: number
+        overseas_available: number
+        overseas_reserved: number
+        in_transit: number
+        overseas_stock_total: number
+        target_stock_qty: number
+        raw_restock_qty: number
+        final_restock_qty: number
+        sale_days: number | null
+        restock_date: string | null
+      }
+    >
+  }
+}
+
 export type SuggestionDisplayStatus = '未导出' | '已导出' | '已归档'
 // 机器可读 code（4 档），供 tag 色映射 / i18n；label 保留 3 档 UX 兼容
 export type SuggestionDisplayStatusCode = 'pending' | 'exported' | 'archived' | 'error'
@@ -45,6 +85,7 @@ export interface SuggestionItem {
   allocation_snapshot: Record<string, AllocationExplanation> | null
   velocity_snapshot: Record<string, number> | null
   sale_days_snapshot: Record<string, number> | null
+  calculation_inputs_snapshot: CalculationInputsSnapshot | null
   calculation_warnings: Array<{
     code: string
     country: string

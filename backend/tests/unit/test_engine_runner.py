@@ -169,6 +169,86 @@ async def test_run_engine_writes_purchase_fields_and_item_counts() -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_engine_writes_calculation_inputs_snapshot() -> None:
+    config = _make_config(
+        target_days=10,
+        lead_time_days=10,
+        safety_stock_days=5,
+        restock_regions=["US"],
+    )
+    db = _FakeDb([None, _ScalarResult(config), _ScalarResult([("SKU-001", 10)])])
+    captured: dict[str, Any] = {}
+
+    async def fake_persist(_db: Any, **kwargs: Any) -> int:
+        captured.update(kwargs)
+        return 123
+
+    with (
+        patch("app.engine.runner.async_session_factory", _FakeSessionFactory(db)),
+        patch("app.engine.runner.run_step1", AsyncMock(return_value={"SKU-001": {"US": 2.0}})),
+        patch(
+            "app.engine.runner.run_step2",
+            AsyncMock(
+                return_value=(
+                    {"SKU-001": {"US": 5.0}},
+                    {
+                        "SKU-001": {
+                            "US": InventoryStock(available=4, reserved=1, in_transit=5)
+                        }
+                    },
+                )
+            ),
+        ),
+        patch(
+            "app.engine.runner.load_local_inventory",
+            AsyncMock(return_value={"SKU-001": LocalStock(available=3, reserved=2)}),
+        ),
+        patch("app.engine.runner.load_country_warehouses", AsyncMock(return_value={})),
+        patch("app.engine.runner.load_zipcode_rules", AsyncMock(return_value=[])),
+        patch("app.engine.runner.load_all_sku_country_orders", AsyncMock(return_value={})),
+        patch("app.engine.runner._persist_suggestion", fake_persist),
+    ):
+        result = await run_engine(_FakeContext(), demand_date=_today())  # type: ignore[arg-type]
+
+    assert result == 123
+    item = captured["items"][0]
+    assert item["country_breakdown"] == {"US": 10}
+    assert item["purchase_qty"] == 15
+
+    snapshot = item["calculation_inputs_snapshot"]
+    assert snapshot["version"] == 1
+    assert snapshot["demand_date"] == _today().isoformat()
+    assert snapshot["target_days"] == 10
+    assert snapshot["demand_days"] == 0
+    assert snapshot["effective_target_days"] == 10
+    assert snapshot["purchase"] == {
+        "country_restock_qty_total": 10,
+        "country_restock_qty_by_country": {"US": 10},
+        "daily_velocity_total": 2.0,
+        "daily_velocity_by_country": {"US": 2.0},
+        "safety_stock_qty": 10,
+        "local_stock_available": 3,
+        "local_stock_reserved": 2,
+        "local_stock_total": 5,
+        "raw_purchase_qty": 15,
+        "final_purchase_qty": 15,
+    }
+    assert snapshot["restock"]["countries"]["US"] == {
+        "effective_target_days": 10,
+        "daily_velocity": 2.0,
+        "overseas_available": 4,
+        "overseas_reserved": 1,
+        "in_transit": 5,
+        "overseas_stock_total": 10,
+        "target_stock_qty": 20,
+        "raw_restock_qty": 10,
+        "final_restock_qty": 10,
+        "sale_days": 5.0,
+        "restock_date": (_today() - timedelta(days=5)).isoformat(),
+    }
+
+
+@pytest.mark.asyncio
 async def test_run_engine_respects_zero_sku_lead_time() -> None:
     config = _make_config(lead_time_days=50)
     db = _FakeDb([None, _ScalarResult(config), _ScalarResult([("SKU-001", 0)])])

@@ -1,6 +1,7 @@
 """Verify Suggestion / SuggestionItem model fields stay aligned."""
 
 from app.models.suggestion import Suggestion, SuggestionItem
+from app.schemas.suggestion import SuggestionItemOut
 
 
 def test_suggestion_has_new_archive_fields():
@@ -24,6 +25,7 @@ def test_suggestion_item_export_fields():
     assert "restock_exported_snapshot_id" in cols
     assert "restock_exported_at" in cols
     assert "calculation_warnings" in cols
+    assert "calculation_inputs_snapshot" in cols
     assert "push_status" not in cols
     assert "saihu_po_number" not in cols
     assert "commodity_id" not in cols
@@ -41,3 +43,21 @@ def test_suggestion_status_check_constraint():
     assert "error" in sql_text
     assert "partial" not in sql_text
     assert "pushed" not in sql_text
+
+
+def test_suggestion_item_out_allows_missing_calculation_inputs_snapshot():
+    out = SuggestionItemOut.model_validate(
+        {
+            "id": 1,
+            "commodity_sku": "SKU-1",
+            "total_qty": 0,
+            "country_breakdown": {},
+            "warehouse_breakdown": {},
+            "urgent": False,
+            "purchase_qty": 0,
+            "procurement_export_status": "pending",
+            "restock_export_status": "pending",
+        }
+    )
+
+    assert out.calculation_inputs_snapshot is None

@@ -127,6 +127,7 @@ class SuggestionItem(Base):
     calculation_warnings: Mapped[list[dict[str, Any]]] = mapped_column(
         JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
     )
+    calculation_inputs_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     urgent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 

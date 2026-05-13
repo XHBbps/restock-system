@@ -61,6 +61,7 @@
                 <th class="breakdown-col-country">国家</th>
                 <th class="breakdown-col-qty">补货量</th>
                 <th class="breakdown-col-warehouses">仓库分配</th>
+                <th class="breakdown-col-calculation">计算依据</th>
               </tr>
             </thead>
             <tbody>
@@ -83,12 +84,15 @@
                       size="small"
                       class="breakdown-warehouse-chip"
                     >
-                      {{ warehouseLabel(warehouse.id) }} · {{ warehouse.qty }}
+                      {{ warehouseLabel(warehouse.id) }}：{{ warehouse.qty }}
                     </el-tag>
                   </template>
                   <el-tag v-else type="warning" effect="plain" size="small">
                     未拆仓（{{ country.qty }} 件待分配）
                   </el-tag>
+                </td>
+                <td class="breakdown-col-calculation">
+                  <RestockCalculationBlock :item="row" :country="country.country" />
                 </td>
               </tr>
             </tbody>
@@ -189,30 +193,32 @@
             </el-tag>
           </div>
           <el-collapse v-if="countryRows(row).length > 0" class="mobile-detail-collapse">
-            <el-collapse-item title="仓库分配" name="breakdown">
-              <table class="breakdown-table mobile-breakdown-table">
-                <tbody>
-                  <tr v-for="country in countryRows(row)" :key="country.country" class="breakdown-row">
-                    <td class="breakdown-col-country">{{ getCountryLabel(country.country) }}</td>
-                    <td class="breakdown-col-qty">{{ country.qty }}</td>
-                    <td class="breakdown-col-warehouses">
-                      <template v-if="country.warehouses.length > 0">
-                        <el-tag
-                          v-for="warehouse in country.warehouses"
-                          :key="warehouse.id"
-                          size="small"
-                          class="breakdown-warehouse-chip"
-                        >
-                          {{ warehouseLabel(warehouse.id) }} · {{ warehouse.qty }}
-                        </el-tag>
-                      </template>
-                      <el-tag v-else type="warning" effect="plain" size="small">
-                        未拆仓（{{ country.qty }}）
-                      </el-tag>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+            <el-collapse-item title="仓库分配与计算依据" name="breakdown">
+              <div
+                v-for="country in countryRows(row)"
+                :key="country.country"
+                class="mobile-country-detail"
+              >
+                <div class="mobile-country-detail__title">
+                  {{ getCountryLabel(country.country) }}：{{ country.qty }}
+                </div>
+                <div class="mobile-warehouse-list">
+                  <template v-if="country.warehouses.length > 0">
+                    <el-tag
+                      v-for="warehouse in country.warehouses"
+                      :key="warehouse.id"
+                      size="small"
+                      class="breakdown-warehouse-chip"
+                    >
+                      {{ warehouseLabel(warehouse.id) }}：{{ warehouse.qty }}
+                    </el-tag>
+                  </template>
+                  <el-tag v-else type="warning" effect="plain" size="small">
+                    未拆仓（{{ country.qty }}）
+                  </el-tag>
+                </div>
+                <RestockCalculationBlock :item="row" :country="country.country" compact />
+              </div>
             </el-collapse-item>
           </el-collapse>
         </div>
@@ -242,7 +248,7 @@ import { getCountryLabel } from '@/utils/countries'
 import { triggerBlobDownload } from '@/utils/download'
 import { useCrossPageSelection } from '@/views/suggestion/useCrossPageSelection'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, defineComponent, h, onMounted, ref, watch, type PropType } from 'vue'
 
 interface CountryRow {
   country: string
@@ -318,6 +324,73 @@ function warningText(item: SuggestionItem): string {
     .join('；')
 }
 
+function formatNumber(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '-'
+  return Number(value).toLocaleString('zh-CN', { maximumFractionDigits: 2 })
+}
+
+function restockCalculation(item: SuggestionItem, country: string) {
+  return item.calculation_inputs_snapshot?.restock.countries?.[country] ?? null
+}
+
+function isRestockCountryAdjusted(item: SuggestionItem, country: string): boolean {
+  const generated = restockCalculation(item, country)?.final_restock_qty
+  const current = Number(item.country_breakdown?.[country] || 0)
+  return generated !== undefined && generated !== null && Number(generated) !== current
+}
+
+const RestockCalculationBlock = defineComponent({
+  name: 'RestockCalculationBlock',
+  props: {
+    item: { type: Object as PropType<SuggestionItem>, required: true },
+    country: { type: String, required: true },
+    compact: { type: Boolean, default: false },
+  },
+  setup(blockProps) {
+    return () => {
+      const calculation = restockCalculation(blockProps.item, blockProps.country)
+      if (!calculation) {
+        return h('div', { class: 'calculation-empty' }, '历史建议缺少完整计算依据')
+      }
+
+      const rows = [
+        ['有效目标天数', `${calculation.effective_target_days} 天`],
+        ['日均销量', formatNumber(calculation.daily_velocity)],
+        [
+          blockProps.compact ? '海外库存合计' : '海外可用 / 占用 / 在途 / 合计',
+          blockProps.compact
+            ? formatNumber(calculation.overseas_stock_total)
+            : `${formatNumber(calculation.overseas_available)} / ${formatNumber(calculation.overseas_reserved)} / ${formatNumber(calculation.in_transit)} / ${formatNumber(calculation.overseas_stock_total)}`,
+        ],
+        ['目标库存量', formatNumber(calculation.target_stock_qty)],
+        ['原始补货量', formatNumber(calculation.raw_restock_qty)],
+        ['生成时 / 当前', `${formatNumber(calculation.final_restock_qty)} / ${formatNumber(blockProps.item.country_breakdown?.[blockProps.country] || 0)}`],
+        ['可售天数', formatNumber(calculation.sale_days)],
+        ['补货日期', calculation.restock_date || '-'],
+      ]
+
+      return h('div', { class: 'calculation-block' }, [
+        h('div', { class: 'calculation-block__header' }, [
+          h('span', { class: 'calculation-formula' }, '补货量 = max(0, ceil(有效目标天数 × 日均销量 - 海外库存合计))'),
+          isRestockCountryAdjusted(blockProps.item, blockProps.country)
+            ? h('span', { class: 'calculation-adjusted' }, '当前已手工调整')
+            : null,
+        ]),
+        h(
+          'div',
+          { class: 'calculation-grid' },
+          rows.map(([label, value]) =>
+            h('div', { class: 'calculation-grid__item' }, [
+              h('span', label),
+              h('strong', value),
+            ]),
+          ),
+        ),
+      ])
+    }
+  },
+})
+
 const restockItems = computed(() =>
   props.items
     .filter((item) => restockTotal(item) > 0)
@@ -350,7 +423,7 @@ const {
   resetKey: () => props.suggestion?.id,
 })
 
-const exportButtonLabel = computed(() => `导出补货单 Excel (${selectedCount.value}项)`)
+const exportButtonLabel = computed(() => `导出补货单 Excel（${selectedCount.value}项）`)
 
 const selectedItems = computed(() => {
   const selected = new Set(selectedIds.value)
@@ -439,12 +512,7 @@ async function handleExport(): Promise<void> {
   align-items: center;
 }
 
-.country-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: $space-2;
-}
-
+.country-chips,
 .status-tags {
   display: flex;
   flex-wrap: wrap;
@@ -453,7 +521,7 @@ async function handleExport(): Promise<void> {
 }
 
 .breakdown-table {
-  width: 100%;
+  width: calc(100% - #{$space-8});
   margin: $space-3 $space-4;
   border-collapse: separate;
   border-spacing: 0;
@@ -466,7 +534,7 @@ async function handleExport(): Promise<void> {
   td {
     padding: $space-2 $space-3;
     text-align: left;
-    vertical-align: middle;
+    vertical-align: top;
   }
 
   thead th {
@@ -483,16 +551,20 @@ async function handleExport(): Promise<void> {
 }
 
 .breakdown-col-country {
-  width: 180px;
+  width: 140px;
 }
 
 .breakdown-col-qty {
-  width: 110px;
+  width: 100px;
   text-align: right !important;
 }
 
 .breakdown-col-warehouses {
-  min-width: 320px;
+  min-width: 260px;
+}
+
+.breakdown-col-calculation {
+  min-width: 420px;
 }
 
 .breakdown-country-label {
@@ -508,6 +580,62 @@ async function handleExport(): Promise<void> {
 
 .breakdown-warehouse-chip {
   margin: 2px 4px 2px 0;
+}
+
+.calculation-block__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: $space-2;
+  margin-bottom: $space-2;
+}
+
+.calculation-formula {
+  font-family: $font-family-mono;
+  font-size: $font-size-xs;
+  color: $color-text-primary;
+}
+
+.calculation-adjusted {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 $space-2;
+  border-radius: $radius-sm;
+  color: $color-warning;
+  background: $color-warning-soft;
+  font-size: $font-size-xs;
+}
+
+.calculation-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: $space-2;
+}
+
+.calculation-grid__item {
+  min-width: 0;
+  padding: $space-2;
+  border-radius: $radius-sm;
+  background: $color-bg-base;
+}
+
+.calculation-grid__item > span {
+  display: block;
+  margin-bottom: 2px;
+  color: $color-text-secondary;
+  font-size: $font-size-xs;
+}
+
+.calculation-grid__item > strong {
+  font-family: $font-family-mono;
+  font-weight: $font-weight-semibold;
+  color: $color-text-primary;
+}
+
+.calculation-empty {
+  color: $color-text-secondary;
+  font-size: $font-size-sm;
 }
 
 @media (max-width: 767px) {
@@ -586,19 +714,30 @@ async function handleExport(): Promise<void> {
     padding: 0;
   }
 
-  .mobile-breakdown-table {
-    display: block;
-    width: 100%;
-    margin: 0;
-    overflow-x: auto;
+  .mobile-country-detail {
+    display: flex;
+    flex-direction: column;
+    gap: $space-2;
+    padding: $space-2 0;
   }
 
-  .breakdown-col-country {
-    width: 96px;
+  .mobile-country-detail + .mobile-country-detail {
+    border-top: 1px dashed $color-border-subtle;
   }
 
-  .breakdown-col-warehouses {
-    min-width: 220px;
+  .mobile-country-detail__title {
+    font-weight: $font-weight-semibold;
+    color: $color-text-primary;
+  }
+
+  .mobile-warehouse-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: $space-2;
+  }
+
+  .calculation-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 </style>

@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-05-13（订单信息匹配确认导入已切换为 `order_info_match_apply` 后台 TaskRun 任务，接口立即返回任务 ID，弹窗内展示进度并支持重新打开恢复活跃任务。）
+> 最近更新：2026-05-13（当前采购建议与当前补货建议已展示生成时冻结的计算依据；新建议条目写入 `calculation_inputs_snapshot`，旧建议条目显示历史依据缺失提示。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -70,7 +70,7 @@
 - **补货区域过滤**：全局参数 `restock_regions` 支持按国家多选；为空数组时表示全部业务国家参与计算，配置后仅这些国家的订单会参与 `step1_velocity` 销量统计和 `step5_warehouse_split` 的国家订单分仓；空国家、非法国家码和内部哨兵 `ZZ` 始终排除
 - **并发保护**：`pg_advisory_xact_lock(7429001)` 事务级锁，阻止并发引擎覆盖彼此
 - **补货日期参与数量计算**：`POST /api/engine/run` 必填 `demand_date` 且不能早于北京时间今天；runner 按 `today=now_beijing().date()` 计算 `demand_days=max(demand_date - today, 0)`，再用 `target_days + demand_days` 作为 Step 3 有效目标库存天数；`restock_regions` 仍只决定哪些国家参与补货，`restock_dates` 继续保存用于追溯、导出和紧急程度判断，不再按日期过滤国家
-- **快照追溯**：`velocity_snapshot`、`sale_days_snapshot`、`global_config_snapshot` 存入 JSONB 字段；其中 `global_config_snapshot` 会记录 `restock_regions` 与本次补货日期 `demand_date`
+- **快照追溯**：`velocity_snapshot`、`sale_days_snapshot`、`global_config_snapshot` 存入 JSONB 字段；其中 `global_config_snapshot` 会记录 `restock_regions` 与本次补货日期 `demand_date`；新生成的 `suggestion_item.calculation_inputs_snapshot` 冻结采购量与国家补货量的公式输入、原始结果和最终结果，旧建议单为空时前端提示历史建议缺少完整计算依据
 - **准确性诊断**：Step 2/3 区分“已知 0 库存”和“缺少库存记录”；有销量但没有库存/在途记录的 SKU+国家不会按 0 库存生成国家补货量，并在 `suggestion_item.calculation_warnings` 写入 `missing_inventory_record`。组合 SKU 若已有同国家组件信号但可组装数为 0，按已知 0 库存参与补货；目标仓库为空的组件在途按国家汇总参与组合折算。SKU 级 `lead_time_days=0` 是有效值，不再回退全局货期。
 
 ### 2.4 补货建议管理
@@ -85,7 +85,7 @@
 - **Excel 导出**：业务人员在建议详情勾选 `export_status='pending'` 的条目，点击“导出 Excel”走一步式 `POST /api/suggestions/{id}/snapshots` + `GET /api/snapshots/{id}/download` blob 下载；服务端生成不可变 `suggestion_snapshot` + `suggestion_snapshot_item` JSONB 快照并同步落盘 Excel 文件，后续可反复下载；补货快照生成前严格校验国家可报表展示、国家补货量为正整数、仓库拆分合计等于国家补货量（允许未拆仓）；`calculation_warnings` 会冻结到快照并写入补货 Excel 的诊断列，后端不因诊断阻断导出，前端在选中条目存在诊断时二次确认；元信息页记录“补货日期”，采购/补货明细表不增加补货日期列；首次导出后 `global_config.suggestion_generation_enabled` 自动翻 OFF，业务人员在全局配置页翻回 ON 时会二次确认并归档全部 `draft` 建议单以开启下一周期
 
 ### 2.5 前端 Dashboard 体系
-- **嵌套路由与 Tab 视图**：当前建议、建议详情、历史记录均拆为 procurement / restock 子路由，`SuggestionTabBar` 统一切换；采购页默认按 `commodity_sku` 稳定排序，仅展示商品信息、采购量与导出状态，补货页支持国家与仓库下钻。
+- **嵌套路由与 Tab 视图**：当前建议、建议详情、历史记录均拆为 procurement / restock 子路由，`SuggestionTabBar` 统一切换；采购页默认按 `commodity_sku` 稳定排序，展示商品信息、采购量、导出状态和采购量计算依据；补货页支持国家与仓库下钻，并按国家展示补货量计算依据。
 
 - **统一页面容器**：所有列表页使用 `PageSectionCard`（`#title` + `#actions` slot）
 - **移动端增强基础设施**：`AppLayout.vue` 在窄屏改用顶部菜单按钮 + `el-drawer` 导航，且移动端菜单按钮与桌面侧栏折叠按钮样式解耦；`PageSectionCard` 的 actions 区在小屏自动纵向排列；`TablePaginationBar` 基于 `useResponsive()` 在手机端切换为紧凑分页；`element-overrides.scss` 统一补齐移动端 dialog、表单与表格横向滚动兜底。
@@ -111,6 +111,12 @@
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`；移动端使用三列 grid 固定商品、国家、可售天数列宽，避免商品信息与国家列挤压
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.122 采购/补货计算依据展示（2026-05-13）
+- **数据模型**：新增迁移 `backend/alembic/versions/20260513_1500_add_calculation_inputs_snapshot.py`，为 `suggestion_item` 增加 nullable JSONB 字段 `calculation_inputs_snapshot`；旧建议单不回填，避免用当前库存污染历史口径。
+- **引擎追溯**：`backend/app/engine/runner.py` 在生成建议条目时冻结采购量和国家补货量的计算输入与结果，包括 `demand_date`、`target_days`、`demand_days`、有效目标天数、销量、海外库存/在途、国内仓库存、安全库存量、原始量与最终量。
+- **接口与编辑**：`SuggestionItemOut` 和前端 `SuggestionItem` 返回 `calculation_inputs_snapshot`；PATCH 与单条重算仍只修改人工编辑字段、`sale_days_snapshot`、`urgent`、`restock_dates` 和 `calculation_warnings`，不覆盖生成时计算依据。
+- **前端展示**：当前采购建议页展开展示 `采购量 = max(0, 各国补货量合计 - 国内仓库存合计 + 安全库存量)` 的所有参与项；当前补货建议页按国家展示 `补货量 = max(0, ceil(有效目标天数 × 日均销量 - 海外库存合计))`、库存拆分、可售天数和补货日期。若当前数量已被手工调整，展示“当前已手工调整”；旧条目展示“历史建议缺少完整计算依据”。
 
 ### 3.121 订单信息匹配确认导入后台任务化（2026-05-13）
 - **数据库表**：新增 `order_info_match_import_file` 暂存上传 Excel 二进制、文件名、字段选择、创建人、过期时间、任务 ID 与消费时间，避免把文件内容写入 `task_run.payload`；`retention_purge` 会清理已消费或过期暂存行。
