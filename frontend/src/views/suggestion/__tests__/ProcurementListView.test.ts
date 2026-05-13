@@ -231,14 +231,14 @@ describe('ProcurementListView', () => {
     expect(vm.filteredItems.map((item) => item.id)).toEqual([3, 2])
   })
 
-  it('shows calculation basis when snapshot exists', async () => {
+  it('builds concise calculation basis text when snapshot exists', async () => {
     const { default: View } = await import('../ProcurementListView.vue')
     const wrapper = shallowMount(View, {
       props: {
         suggestion: makeSuggestion({ procurement_item_count: 1 }),
         items: [
           makeItem(1, {
-            purchase_qty: 220,
+            purchase_qty: 18,
             calculation_inputs_snapshot: {
               version: 1,
               generated_at: '2026-05-13T10:00:00+08:00',
@@ -248,16 +248,16 @@ describe('ProcurementListView', () => {
               effective_target_days: 60,
               safety_stock_days: 15,
               purchase: {
-                country_restock_qty_total: 100,
-                country_restock_qty_by_country: { US: 100 },
-                daily_velocity_total: 10,
-                daily_velocity_by_country: { US: 10 },
-                safety_stock_qty: 150,
-                local_stock_available: 20,
-                local_stock_reserved: 10,
-                local_stock_total: 30,
-                raw_purchase_qty: 220,
-                final_purchase_qty: 220,
+                country_restock_qty_total: 10,
+                country_restock_qty_by_country: { US: 10 },
+                daily_velocity_total: 1.33,
+                daily_velocity_by_country: { US: 1.33 },
+                safety_stock_qty: 20,
+                local_stock_available: 8,
+                local_stock_reserved: 4,
+                local_stock_total: 12,
+                raw_purchase_qty: 18,
+                final_purchase_qty: 18,
               },
               restock: { countries: {} },
             },
@@ -270,11 +270,34 @@ describe('ProcurementListView', () => {
 
     const vm = wrapper.vm as unknown as {
       isPurchaseAdjusted: (item: SuggestionItem) => boolean
+      purchaseCalculationDisplay: (item: SuggestionItem) => {
+        inputs: string[]
+        formula: string
+        generatedLine: string | null
+        adjusted: boolean
+      } | null
       filteredItems: SuggestionItem[]
     }
     const item = vm.filteredItems[0]
+    const display = vm.purchaseCalculationDisplay(item)
+    expect(display).toEqual({
+      inputs: [
+        '各国补货量合计 = 10',
+        '国内仓库存合计 = 12（可用 8，占用 4）',
+        '安全库存量 = 20（安全库存天数 15 天 × 全国家日均销量 1.33）',
+      ],
+      formula: '采购量 = 10 - 12 + 20 = 18',
+      generatedLine: null,
+      adjusted: false,
+    })
+    expect(display?.formula).not.toContain('max(')
     expect(vm.isPurchaseAdjusted(item)).toBe(false)
-    expect(vm.isPurchaseAdjusted({ ...item, purchase_qty: 200 })).toBe(true)
+    expect(vm.purchaseCalculationDisplay({ ...item, purchase_qty: 20 })).toMatchObject({
+      generatedLine: '生成时采购量 18，当前采购量 20',
+      adjusted: true,
+    })
+    expect(vm.isPurchaseAdjusted({ ...item, purchase_qty: 20 })).toBe(true)
+    expect(vm.purchaseCalculationDisplay(makeItem(99, { calculation_inputs_snapshot: null }))).toBeNull()
   })
 
   it('shows empty state when there is no procurement demand', async () => {

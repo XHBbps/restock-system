@@ -462,7 +462,7 @@ async function reload() {
 | `/restock/suggestions/:id` | `/restock/suggestions/:id/procurement` | `procurement` 建议单采购详情，`restock` 建议单补货详情 |
 | `/restock/history` | `/restock/history/procurement` | `procurement` 采购快照历史，`restock` 补货快照历史 |
 
-`SuggestionTabBar` 根据当前路径切换子路由；父容器负责加载建议单、生成开关、任务进度和公共 header，子视图只负责采购/补货数据展示与导出动作。当前采购建议页在行展开区展示 `采购量 = max(0, 各国补货量合计 - 国内仓库存合计 + 安全库存量)` 的生成时输入与结果；当前补货建议页在国家明细中展示 `补货量 = max(0, ceil(有效目标天数 × 日均销量 - 海外库存合计))` 的国家级输入与结果。若当前数量与 `calculation_inputs_snapshot` 的最终量不同，页面标记“当前已手工调整”；旧建议单缺少该字段时只提示“历史建议缺少完整计算依据”，不按当前库存重算。`authGuard` 在 `beforeEach` 中检查登录态与权限，失败时跳转 `/login?redirect=<origin>` 或 `/403`。
+`SuggestionTabBar` 根据当前路径切换子路由；父容器负责加载建议单、生成开关、任务进度和公共 header，子视图只负责采购/补货数据展示与导出动作。当前采购建议页在行展开区先解释生成时各国补货量合计、国内仓库存合计和安全库存量，再展示具体数字代入公式（如 `采购量 = 10 - 12 + 20 = 18`）；当前补货建议页在国家明细中先解释有效目标库存、海外库存合计、可售天数和补货日期，再展示具体数字代入公式（如 `补货量 = 120 - 6 = 114`）。若当前数量与 `calculation_inputs_snapshot` 的最终量不同，页面标记“当前已手工调整”并展示生成时/当前数量；旧建议单缺少该字段时只提示“历史建议缺少完整计算依据”，不按当前库存重算。`authGuard` 在 `beforeEach` 中检查登录态与权限，失败时跳转 `/login?redirect=<origin>` 或 `/403`。
 
 ### 4.7 共享组件模式
 

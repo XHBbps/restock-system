@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-05-13（当前采购建议与当前补货建议已展示生成时冻结的计算依据；新建议条目写入 `calculation_inputs_snapshot`，旧建议条目显示历史依据缺失提示。）
+> 最近更新：2026-05-13（当前采购建议与当前补货建议已按“数值说明 + 生成时代入公式”展示冻结计算依据；旧建议条目显示历史依据缺失提示。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -116,7 +116,7 @@
 - **数据模型**：新增迁移 `backend/alembic/versions/20260513_1500_add_calculation_inputs_snapshot.py`，为 `suggestion_item` 增加 nullable JSONB 字段 `calculation_inputs_snapshot`；旧建议单不回填，避免用当前库存污染历史口径。
 - **引擎追溯**：`backend/app/engine/runner.py` 在生成建议条目时冻结采购量和国家补货量的计算输入与结果，包括 `demand_date`、`target_days`、`demand_days`、有效目标天数、销量、海外库存/在途、国内仓库存、安全库存量、原始量与最终量。
 - **接口与编辑**：`SuggestionItemOut` 和前端 `SuggestionItem` 返回 `calculation_inputs_snapshot`；PATCH 与单条重算仍只修改人工编辑字段、`sale_days_snapshot`、`urgent`、`restock_dates` 和 `calculation_warnings`，不覆盖生成时计算依据。
-- **前端展示**：当前采购建议页展开展示 `采购量 = max(0, 各国补货量合计 - 国内仓库存合计 + 安全库存量)` 的所有参与项；当前补货建议页按国家展示 `补货量 = max(0, ceil(有效目标天数 × 日均销量 - 海外库存合计))`、库存拆分、可售天数和补货日期。若当前数量已被手工调整，展示“当前已手工调整”；旧条目展示“历史建议缺少完整计算依据”。
+- **前端展示**：当前采购建议页展开区先展示各国补货量合计、国内仓库存合计和安全库存量，再展示生成时具体代入公式，例如 `采购量 = 10 - 12 + 20 = 18`；当前补货建议页国家明细先展示有效目标库存、海外库存合计、可售天数和补货日期，再展示生成时具体代入公式，例如 `补货量 = 120 - 6 = 114`。若当前数量已被手工调整，展示“当前已手工调整”与生成时/当前数量；旧条目展示“历史建议缺少完整计算依据”。
 
 ### 3.121 订单信息匹配确认导入后台任务化（2026-05-13）
 - **数据库表**：新增 `order_info_match_import_file` 暂存上传 Excel 二进制、文件名、字段选择、创建人、过期时间、任务 ID 与消费时间，避免把文件内容写入 `task_run.payload`；`retention_purge` 会清理已消费或过期暂存行。

@@ -339,6 +339,37 @@ function isRestockCountryAdjusted(item: SuggestionItem, country: string): boolea
   return generated !== undefined && generated !== null && Number(generated) !== current
 }
 
+interface CalculationDisplay {
+  inputs: string[]
+  formula: string
+  generatedLine: string | null
+  adjusted: boolean
+}
+
+function restockCalculationDisplay(item: SuggestionItem, country: string): CalculationDisplay | null {
+  const calculation = restockCalculation(item, country)
+  if (!calculation) return null
+
+  const currentQty = Number(item.country_breakdown?.[country] || 0)
+  const adjusted = isRestockCountryAdjusted(item, country)
+  const generatedDiffersFromFormula =
+    Number(calculation.final_restock_qty) !== Number(calculation.raw_restock_qty)
+
+  return {
+    inputs: [
+      `有效目标库存 = ${formatNumber(calculation.effective_target_days)} 天 × 日均销量 ${formatNumber(calculation.daily_velocity)} = ${formatNumber(calculation.target_stock_qty)}`,
+      `海外库存合计 = ${formatNumber(calculation.overseas_stock_total)}（可用 ${formatNumber(calculation.overseas_available)}，占用 ${formatNumber(calculation.overseas_reserved)}，在途 ${formatNumber(calculation.in_transit)}）`,
+      `可售天数 = ${formatNumber(calculation.sale_days)}，补货日期 = ${calculation.restock_date || '-'}`,
+    ],
+    formula: `补货量 = ${formatNumber(calculation.target_stock_qty)} - ${formatNumber(calculation.overseas_stock_total)} = ${formatNumber(calculation.raw_restock_qty)}`,
+    generatedLine:
+      adjusted || generatedDiffersFromFormula
+        ? `生成时补货量 ${formatNumber(calculation.final_restock_qty)}，当前补货量 ${formatNumber(currentQty)}`
+        : null,
+    adjusted,
+  }
+}
+
 const RestockCalculationBlock = defineComponent({
   name: 'RestockCalculationBlock',
   props: {
@@ -348,44 +379,24 @@ const RestockCalculationBlock = defineComponent({
   },
   setup(blockProps) {
     return () => {
-      const calculation = restockCalculation(blockProps.item, blockProps.country)
-      if (!calculation) {
+      const display = restockCalculationDisplay(blockProps.item, blockProps.country)
+      if (!display) {
         return h('div', { class: 'calculation-empty' }, '历史建议缺少完整计算依据')
       }
 
-      const rows = [
-        ['有效目标天数', `${calculation.effective_target_days} 天`],
-        ['日均销量', formatNumber(calculation.daily_velocity)],
-        [
-          blockProps.compact ? '海外库存合计' : '海外可用 / 占用 / 在途 / 合计',
-          blockProps.compact
-            ? formatNumber(calculation.overseas_stock_total)
-            : `${formatNumber(calculation.overseas_available)} / ${formatNumber(calculation.overseas_reserved)} / ${formatNumber(calculation.in_transit)} / ${formatNumber(calculation.overseas_stock_total)}`,
-        ],
-        ['目标库存量', formatNumber(calculation.target_stock_qty)],
-        ['原始补货量', formatNumber(calculation.raw_restock_qty)],
-        ['生成时 / 当前', `${formatNumber(calculation.final_restock_qty)} / ${formatNumber(blockProps.item.country_breakdown?.[blockProps.country] || 0)}`],
-        ['可售天数', formatNumber(calculation.sale_days)],
-        ['补货日期', calculation.restock_date || '-'],
-      ]
-
       return h('div', { class: 'calculation-block' }, [
-        h('div', { class: 'calculation-block__header' }, [
-          h('span', { class: 'calculation-formula' }, '补货量 = max(0, ceil(有效目标天数 × 日均销量 - 海外库存合计))'),
-          isRestockCountryAdjusted(blockProps.item, blockProps.country)
+        h(
+          'div',
+          { class: 'calculation-lines' },
+          display.inputs.map((line) => h('div', { class: 'calculation-line' }, line)),
+        ),
+        h('div', { class: 'calculation-formula-row' }, [
+          h('span', { class: 'calculation-formula' }, display.formula),
+          display.adjusted
             ? h('span', { class: 'calculation-adjusted' }, '当前已手工调整')
             : null,
         ]),
-        h(
-          'div',
-          { class: 'calculation-grid' },
-          rows.map(([label, value]) =>
-            h('div', { class: 'calculation-grid__item' }, [
-              h('span', label),
-              h('strong', value),
-            ]),
-          ),
-        ),
+        display.generatedLine ? h('div', { class: 'calculation-result-line' }, display.generatedLine) : null,
       ])
     }
   },
@@ -582,11 +593,12 @@ async function handleExport(): Promise<void> {
   margin: 2px 4px 2px 0;
 }
 
-.calculation-block__header {
+.calculation-formula-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: $space-2;
+  margin-top: $space-2;
   margin-bottom: $space-2;
 }
 
@@ -607,35 +619,21 @@ async function handleExport(): Promise<void> {
   font-size: $font-size-xs;
 }
 
-.calculation-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: $space-2;
+.calculation-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.calculation-grid__item {
-  min-width: 0;
-  padding: $space-2;
-  border-radius: $radius-sm;
-  background: $color-bg-base;
-}
-
-.calculation-grid__item > span {
-  display: block;
-  margin-bottom: 2px;
-  color: $color-text-secondary;
-  font-size: $font-size-xs;
-}
-
-.calculation-grid__item > strong {
-  font-family: $font-family-mono;
-  font-weight: $font-weight-semibold;
-  color: $color-text-primary;
-}
-
+.calculation-line,
+.calculation-result-line,
 .calculation-empty {
   color: $color-text-secondary;
   font-size: $font-size-sm;
+}
+
+.calculation-result-line {
+  margin-top: $space-1;
 }
 
 @media (max-width: 767px) {
@@ -736,8 +734,5 @@ async function handleExport(): Promise<void> {
     gap: $space-2;
   }
 
-  .calculation-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 </style>

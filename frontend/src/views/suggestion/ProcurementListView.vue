@@ -152,7 +152,6 @@ import SkuCard from '@/components/SkuCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
 import { useResponsive } from '@/composables/useResponsive'
 import { getActionErrorMessage } from '@/utils/apiError'
-import { getCountryLabel } from '@/utils/countries'
 import { triggerBlobDownload } from '@/utils/download'
 import { useCrossPageSelection } from '@/views/suggestion/useCrossPageSelection'
 import { ElMessage } from 'element-plus'
@@ -251,12 +250,35 @@ function isPurchaseAdjusted(item: SuggestionItem): boolean {
   return generated !== undefined && Number(generated) !== Number(item.purchase_qty)
 }
 
-function countryQtyText(values: Record<string, number> | undefined): string {
-  const entries = Object.entries(values || {}).filter(([, qty]) => Number(qty) > 0)
-  if (entries.length === 0) return '-'
-  return entries
-    .map(([country, qty]) => `${getCountryLabel(country)} ${formatNumber(qty)}`)
-    .join('，')
+interface CalculationDisplay {
+  inputs: string[]
+  formula: string
+  generatedLine: string | null
+  adjusted: boolean
+}
+
+function purchaseCalculationDisplay(item: SuggestionItem): CalculationDisplay | null {
+  const snapshot = item.calculation_inputs_snapshot
+  if (!snapshot) return null
+
+  const purchase = snapshot.purchase
+  const adjusted = isPurchaseAdjusted(item)
+  const generatedDiffersFromFormula =
+    Number(purchase.final_purchase_qty) !== Number(purchase.raw_purchase_qty)
+
+  return {
+    inputs: [
+      `各国补货量合计 = ${formatNumber(purchase.country_restock_qty_total)}`,
+      `国内仓库存合计 = ${formatNumber(purchase.local_stock_total)}（可用 ${formatNumber(purchase.local_stock_available)}，占用 ${formatNumber(purchase.local_stock_reserved)}）`,
+      `安全库存量 = ${formatNumber(purchase.safety_stock_qty)}（安全库存天数 ${formatNumber(snapshot.safety_stock_days)} 天 × 全国家日均销量 ${formatNumber(purchase.daily_velocity_total)}）`,
+    ],
+    formula: `采购量 = ${formatNumber(purchase.country_restock_qty_total)} - ${formatNumber(purchase.local_stock_total)} + ${formatNumber(purchase.safety_stock_qty)} = ${formatNumber(purchase.raw_purchase_qty)}`,
+    generatedLine:
+      adjusted || generatedDiffersFromFormula
+        ? `生成时采购量 ${formatNumber(purchase.final_purchase_qty)}，当前采购量 ${formatNumber(item.purchase_qty)}`
+        : null,
+    adjusted,
+  }
 }
 
 const ProcurementCalculationPanel = defineComponent({
@@ -267,50 +289,26 @@ const ProcurementCalculationPanel = defineComponent({
   },
   setup(panelProps) {
     return () => {
-      const snapshot = panelProps.item.calculation_inputs_snapshot
-      if (!snapshot) {
+      const display = purchaseCalculationDisplay(panelProps.item)
+      if (!display) {
         return h('div', { class: ['calculation-panel', { 'calculation-panel--mobile': panelProps.compact }] }, [
           h('div', { class: 'calculation-empty' }, '历史建议缺少完整计算依据'),
         ])
       }
-      const purchase = snapshot.purchase
-      const detailRows = panelProps.compact
-        ? [
-            ['各国补货量合计', formatNumber(purchase.country_restock_qty_total)],
-            ['国内仓库存合计', formatNumber(purchase.local_stock_total)],
-            ['安全库存量', formatNumber(purchase.safety_stock_qty)],
-            ['生成时 / 当前', `${formatNumber(purchase.final_purchase_qty)} / ${formatNumber(panelProps.item.purchase_qty)}`],
-          ]
-        : [
-            ['各国补货量合计', formatNumber(purchase.country_restock_qty_total)],
-            [
-              '国内仓可用 / 占用 / 合计',
-              `${formatNumber(purchase.local_stock_available)} / ${formatNumber(purchase.local_stock_reserved)} / ${formatNumber(purchase.local_stock_total)}`,
-            ],
-            ['全国家销量合计', formatNumber(purchase.daily_velocity_total)],
-            ['安全库存天数 / 安全库存量', `${snapshot.safety_stock_days} 天 / ${formatNumber(purchase.safety_stock_qty)}`],
-            ['原始采购量', formatNumber(purchase.raw_purchase_qty)],
-            ['生成时采购量 / 当前采购量', `${formatNumber(purchase.final_purchase_qty)} / ${formatNumber(panelProps.item.purchase_qty)}`],
-          ]
 
       return h('div', { class: ['calculation-panel', { 'calculation-panel--mobile': panelProps.compact }] }, [
-        h('div', { class: 'calculation-panel__header' }, [
-          h('span', { class: 'calculation-formula' }, '采购量 = max(0, 各国补货量合计 - 国内仓库存合计 + 安全库存量)'),
-          isPurchaseAdjusted(panelProps.item)
+        h(
+          'div',
+          { class: 'calculation-lines' },
+          display.inputs.map((line) => h('div', { class: 'calculation-line' }, line)),
+        ),
+        h('div', { class: 'calculation-formula-row' }, [
+          h('span', { class: 'calculation-formula' }, display.formula),
+          display.adjusted
             ? h('span', { class: 'calculation-adjusted' }, '当前已手工调整')
             : null,
         ]),
-        h(
-          'div',
-          { class: 'calculation-grid' },
-          detailRows.map(([label, value]) =>
-            h('div', { class: 'calculation-grid__item' }, [
-              h('span', label),
-              h('strong', value),
-            ]),
-          ),
-        ),
-        h('div', { class: 'calculation-country-line' }, `各国补货量：${countryQtyText(purchase.country_restock_qty_by_country)}`),
+        display.generatedLine ? h('div', { class: 'calculation-result-line' }, display.generatedLine) : null,
       ])
     }
   },
@@ -398,12 +396,12 @@ async function handleExport(): Promise<void> {
   background: $color-bg-subtle;
 }
 
-.calculation-panel__header {
+.calculation-formula-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: $space-2;
-  margin-bottom: $space-3;
+  margin-top: $space-2;
 }
 
 .calculation-formula {
@@ -423,37 +421,21 @@ async function handleExport(): Promise<void> {
   font-size: $font-size-xs;
 }
 
-.calculation-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: $space-2;
+.calculation-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.calculation-grid__item {
-  min-width: 0;
-  padding: $space-2;
-  border-radius: $radius-sm;
-  background: $color-bg-base;
-}
-
-.calculation-grid__item > span {
-  display: block;
-  margin-bottom: 2px;
-  color: $color-text-secondary;
-  font-size: $font-size-xs;
-}
-
-.calculation-grid__item > strong {
-  font-family: $font-family-mono;
-  font-weight: $font-weight-semibold;
-  color: $color-text-primary;
-}
-
-.calculation-country-line,
+.calculation-line,
+.calculation-result-line,
 .calculation-empty {
-  margin-top: $space-3;
   color: $color-text-secondary;
   font-size: $font-size-sm;
+}
+
+.calculation-result-line {
+  margin-top: $space-2;
 }
 
 @media (max-width: 767px) {
@@ -514,8 +496,5 @@ async function handleExport(): Promise<void> {
     margin: 0;
   }
 
-  .calculation-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 </style>

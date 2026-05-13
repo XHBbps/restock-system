@@ -259,7 +259,7 @@ describe('RestockListView', () => {
     expect(vm.filteredItems.map((item) => item.id)).toEqual([1])
   })
 
-  it('shows calculation basis when snapshot exists', async () => {
+  it('builds concise country calculation basis text when snapshot exists', async () => {
     mockListWarehouses.mockResolvedValue([])
 
     const { default: View } = await import('../RestockListView.vue')
@@ -268,7 +268,7 @@ describe('RestockListView', () => {
         suggestion: makeSuggestion(),
         items: [
           makeItem(1, {
-            country_breakdown: { US: 10, GB: 5 },
+            country_breakdown: { US: 114, GB: 5 },
             calculation_inputs_snapshot: {
               version: 1,
               generated_at: '2026-05-13T10:00:00+08:00',
@@ -300,7 +300,7 @@ describe('RestockListView', () => {
                     overseas_stock_total: 6,
                     target_stock_qty: 120,
                     raw_restock_qty: 114,
-                    final_restock_qty: 10,
+                    final_restock_qty: 114,
                     sale_days: 3,
                     restock_date: '2026-05-10',
                   },
@@ -316,13 +316,37 @@ describe('RestockListView', () => {
 
     const vm = wrapper.vm as unknown as {
       restockCalculation: (item: SuggestionItem, country: string) => Record<string, unknown> | null
+      restockCalculationDisplay: (item: SuggestionItem, country: string) => {
+        inputs: string[]
+        formula: string
+        generatedLine: string | null
+        adjusted: boolean
+      } | null
       isRestockCountryAdjusted: (item: SuggestionItem, country: string) => boolean
       filteredItems: SuggestionItem[]
     }
     const item = vm.filteredItems[0]
     expect(vm.restockCalculation(item, 'US')).toBeTruthy()
+    const display = vm.restockCalculationDisplay(item, 'US')
+    expect(display).toEqual({
+      inputs: [
+        '有效目标库存 = 60 天 × 日均销量 2 = 120',
+        '海外库存合计 = 6（可用 1，占用 2，在途 3）',
+        '可售天数 = 3，补货日期 = 2026-05-10',
+      ],
+      formula: '补货量 = 120 - 6 = 114',
+      generatedLine: null,
+      adjusted: false,
+    })
+    expect(display?.formula).not.toContain('max(')
+    expect(display?.formula).not.toContain('ceil(')
     expect(vm.isRestockCountryAdjusted(item, 'US')).toBe(false)
-    expect(vm.isRestockCountryAdjusted({ ...item, country_breakdown: { US: 12 } }, 'US')).toBe(true)
+    expect(vm.restockCalculationDisplay({ ...item, country_breakdown: { US: 120 } }, 'US')).toMatchObject({
+      generatedLine: '生成时补货量 114，当前补货量 120',
+      adjusted: true,
+    })
+    expect(vm.isRestockCountryAdjusted({ ...item, country_breakdown: { US: 120 } }, 'US')).toBe(true)
+    expect(vm.restockCalculationDisplay(makeItem(99, { calculation_inputs_snapshot: null }), 'US')).toBeNull()
   })
 
   it('shows empty state when there is no restock demand', async () => {
