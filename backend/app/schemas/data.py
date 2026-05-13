@@ -139,6 +139,19 @@ class OrderInfoMatchApplyOut(OrderInfoMatchPreviewOut):
     updated_order_count: int = Field(alias="updatedOrderCount")
 
 
+class OrderInfoMatchApplyTaskOut(BaseModel):
+    task_id: int = Field(alias="taskId")
+    existing: bool = False
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class OrderInfoMatchActiveTaskOut(BaseModel):
+    task_id: int | None = Field(default=None, alias="taskId")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 # ==================== 库存明细 ====================
 class DataInventoryItem(SaihuLikeModel):
     commodity_sku: str

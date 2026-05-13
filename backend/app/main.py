@@ -39,6 +39,7 @@ from app.sync import warehouse as _job_wh  # noqa: F401
 from app.tasks.jobs import api_call_retry as _job_api_call_retry  # noqa: F401
 from app.tasks.jobs import daily_archive as _job_arch  # noqa: F401
 from app.tasks.jobs import dashboard_snapshot as _job_dashboard_snapshot  # noqa: F401
+from app.tasks.jobs import order_info_match as _job_order_info_match  # noqa: F401
 from app.tasks.jobs import retention as _job_retention  # noqa: F401
 from app.tasks.reaper import get_reaper
 from app.tasks.scheduler import reload_scheduler, scheduler_status, shutdown_scheduler

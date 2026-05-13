@@ -57,6 +57,13 @@ function parseProgressDetail(stepDetail: string | null | undefined): number | nu
     return normalizePercentage(current, total)
   }
 
+  const processedMatch = stepDetail.match(/已处理\s+(\d+)\s*\/\s*总数\s+(\d+)/)
+  if (processedMatch) {
+    const current = Number.parseInt(processedMatch[1], 10)
+    const total = Number.parseInt(processedMatch[2], 10)
+    return normalizePercentage(current, total)
+  }
+
   return null
 }
 

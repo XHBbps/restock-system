@@ -61,6 +61,8 @@ class _FakeSession:
         self.statements = []
         self.committed = False
         self.refreshed = []
+        self.added = []
+        self.flushed = False
 
     async def execute(self, statement):
         self.statements.append(statement)
@@ -71,6 +73,14 @@ class _FakeSession:
 
     async def refresh(self, value):
         self.refreshed.append(value)
+
+    def add(self, value):
+        self.added.append(value)
+
+    async def flush(self):
+        self.flushed = True
+        if self.added and getattr(self.added[-1], "id", None) is None:
+            self.added[-1].id = 44
 
 
 def _make_row(**overrides):
@@ -375,6 +385,78 @@ async def test_order_info_match_error_report_endpoint_streams_workbook(monkeypat
     assert response.headers["content-disposition"] == (
         "attachment; filename=order-info-match-error-report.xlsx"
     )
+
+
+@pytest.mark.asyncio
+async def test_order_info_match_apply_task_creates_file_and_enqueues(monkeypatch) -> None:
+    captured = {}
+
+    async def fake_enqueue(db, **kwargs):
+        captured.update(kwargs)
+        return 88, False
+
+    class FakeRequest:
+        def __init__(self) -> None:
+            self.headers = {"x-filename": "orders.xlsx"}
+
+        async def body(self):
+            return b"xlsx"
+
+    db = _FakeSession([_ScalarMaybeResult(None)])
+    monkeypatch.setattr(data_api, "enqueue_task", fake_enqueue)
+
+    result = await data_api.create_order_info_match_apply_task_endpoint(
+        request=FakeRequest(),
+        fields="country_code,postal_code",
+        db=db,
+        user=SimpleNamespace(id=7),
+        _=None,
+    )
+
+    assert result.task_id == 88
+    assert result.existing is False
+    assert db.flushed is True
+    assert db.added[0].filename == "orders.xlsx"
+    assert db.added[0].content == b"xlsx"
+    assert db.added[0].fields == ["country_code", "postal_code"]
+    assert db.added[0].created_by == 7
+    assert db.added[0].task_id == 88
+    assert captured["job_name"] == data_api.ORDER_INFO_MATCH_APPLY_JOB_NAME
+    assert captured["dedupe_key"] == data_api.ORDER_INFO_MATCH_DEDUPE_KEY
+    assert captured["payload"] == {"file_id": 44, "user_id": 7}
+
+
+@pytest.mark.asyncio
+async def test_order_info_match_apply_task_reuses_active_without_reading_body() -> None:
+    class FakeRequest:
+        def __init__(self) -> None:
+            self.headers = {}
+
+        async def body(self):
+            raise AssertionError("active task should skip upload body")
+
+    db = _FakeSession([_ScalarMaybeResult(SimpleNamespace(id=55))])
+
+    result = await data_api.create_order_info_match_apply_task_endpoint(
+        request=FakeRequest(),
+        fields="country_code",
+        db=db,
+        user=SimpleNamespace(id=7),
+        _=None,
+    )
+
+    assert result.task_id == 55
+    assert result.existing is True
+    assert db.added == []
+
+
+@pytest.mark.asyncio
+async def test_order_info_match_active_task_returns_recent_active_id() -> None:
+    db = _FakeSession([_ScalarMaybeResult(SimpleNamespace(id=66))])
+
+    result = await data_api.get_active_order_info_match_apply_task_endpoint(db=db, _=None)
+
+    assert result.task_id == 66
 
 
 @pytest.mark.asyncio

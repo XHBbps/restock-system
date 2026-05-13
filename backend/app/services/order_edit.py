@@ -161,7 +161,7 @@ async def preview_order_info_match(
     fields: list[EditableField],
     content: bytes,
 ) -> OrderInfoMatchPreviewOut:
-    parsed = await _parse_match_workbook(db, fields=fields, content=content)
+    parsed = await parse_order_info_match_workbook(db, fields=fields, content=content)
     return OrderInfoMatchPreviewOut(
         matched_order_count=parsed.matched_order_count,
         matched_order_ids=list(parsed.updates_by_order),
@@ -177,30 +177,8 @@ async def apply_order_info_match(
     content: bytes,
     user_id: int,
 ) -> OrderInfoMatchApplyOut:
-    parsed = await _parse_match_workbook(db, fields=fields, content=content)
-    if parsed.errors:
-        raise ValidationFailed(
-            "订单信息匹配校验失败",
-            detail={"errors": [error.model_dump() for error in parsed.errors]},
-        )
-    await _save_country_overrides(db, parsed.country_overrides)
-    updated = 0
-    order_ids = list(parsed.updates_by_order)
-    if order_ids:
-        result = await db.execute(
-            select(OrderHeader).where(
-                OrderHeader.amazon_order_id.in_(order_ids),
-                OrderHeader.source == ORDER_SOURCE_PACKAGE,
-            )
-        )
-        rows = result.scalars().all()
-        for row in rows:
-            updates = parsed.updates_by_order.get(row.amazon_order_id)
-            if updates is None:
-                continue
-            _apply_manual_updates(row, updates, user_id=user_id)
-            updated += 1
-    await db.commit()
+    parsed = await parse_order_info_match_workbook(db, fields=fields, content=content)
+    updated = await apply_parsed_order_info_match(db, parsed=parsed, user_id=user_id)
     return OrderInfoMatchApplyOut(
         matched_order_count=parsed.matched_order_count,
         matched_order_ids=list(parsed.updates_by_order),
@@ -208,6 +186,58 @@ async def apply_order_info_match(
         errors=[],
         updated_order_count=updated,
     )
+
+
+async def apply_parsed_order_info_match(
+    db: AsyncSession,
+    *,
+    parsed: ParsedWorkbook,
+    user_id: int,
+    progress_callback: Any | None = None,
+    batch_size: int = 500,
+) -> int:
+    """Apply a parsed order-info match workbook and optionally report row progress."""
+    if parsed.errors:
+        raise ValidationFailed(
+            _format_match_errors(parsed.errors),
+            detail={"errors": [error.model_dump() for error in parsed.errors]},
+        )
+    await _save_country_overrides(db, parsed.country_overrides)
+    updated = 0
+    order_ids = list(parsed.updates_by_order)
+    rows: list[OrderHeader] = []
+    if order_ids:
+        result = await db.execute(
+            select(OrderHeader).where(
+                OrderHeader.amazon_order_id.in_(order_ids),
+                OrderHeader.source == ORDER_SOURCE_PACKAGE,
+            )
+        )
+        rows = list(result.scalars().all())
+
+    total = len(rows)
+    if progress_callback is not None:
+        await progress_callback(0, total)
+
+    for row in rows:
+        updates = parsed.updates_by_order.get(row.amazon_order_id)
+        if updates is None:
+            continue
+        _apply_manual_updates(row, updates, user_id=user_id)
+        updated += 1
+        if progress_callback is not None and (updated % batch_size == 0 or updated == total):
+            await progress_callback(updated, total)
+
+    await db.commit()
+    return updated
+
+
+def _format_match_errors(errors: list[OrderInfoMatchError]) -> str:
+    if not errors:
+        return "订单信息匹配校验失败"
+    first = errors[0]
+    suffix = "" if len(errors) == 1 else f"等 {len(errors)} 个错误"
+    return f"订单信息匹配校验失败：第 {first.row} 行 {first.field}：{first.message}{suffix}"
 
 
 async def build_order_info_match_error_report(
@@ -224,7 +254,7 @@ async def build_order_info_match_error_report(
         raise ValidationFailed("无法读取 Excel 文件") from exc
 
     try:
-        parsed = await _parse_match_workbook(db, fields=fields, content=content)
+        parsed = await parse_order_info_match_workbook(db, fields=fields, content=content)
         errors = parsed.errors
     except ValidationFailed as exc:
         if exc.message != "表头必须严格等于：订单号 + 勾选字段":
@@ -344,6 +374,15 @@ async def _parse_match_workbook(
         update_fields=[field.label for field in fields],
         errors=errors,
     )
+
+
+async def parse_order_info_match_workbook(
+    db: AsyncSession,
+    *,
+    fields: list[EditableField],
+    content: bytes,
+) -> ParsedWorkbook:
+    return await _parse_match_workbook(db, fields=fields, content=content)
 
 
 def _append_error_reasons(workbook: Workbook, errors: list[OrderInfoMatchError]) -> None:

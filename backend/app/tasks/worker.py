@@ -207,6 +207,7 @@ class Worker:
             step_detail: str | None = None,
             total_steps: int | None = None,
             result_summary: str | None = None,
+            result_payload: dict[str, Any] | None = None,
         ) -> None:
             if lease_lost.is_set():
                 raise TaskLeaseLostError(f"task {task_id} lease lost before progress update")
@@ -219,6 +220,8 @@ class Worker:
                 values["total_steps"] = total_steps
             if result_summary is not None:
                 values["result_summary"] = result_summary
+            if result_payload is not None:
+                values["result_payload"] = result_payload
             if not values:
                 return
             async with async_session_factory() as db:

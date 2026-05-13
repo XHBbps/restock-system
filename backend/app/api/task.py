@@ -37,6 +37,7 @@ class TaskRunOut(BaseModel):
     attempt_count: int
     error_msg: str | None = None
     result_summary: str | None = None
+    result_payload: dict[str, Any] | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
     created_at: datetime

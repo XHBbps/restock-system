@@ -156,7 +156,7 @@ async def sync_inventory_job(ctx: JobContext) -> None:
 
 **EU 国家归一化与新国家发现**：同步层写入订单、商品、库存、出库在途数据时，会按 `global_config.eu_countries` 将成员国映射为字面值 `EU`，并在对应 `original_*` 字段保留原国家码。进入国家选项、成员国配置和补货区域配置的国家码先执行 `trim + uppercase + 两位字母校验 + 别名标准化`，当前 `UK` 统一标准化为 ISO 代码 `GB`。订单处理列表只读取响应顶层 `marketplace` 作为国家来源；该值缺失或无法识别时写内部哨兵 `ZZ` 并记录结构化日志，不再从地址、店铺名或平台名猜测国家；`ZZ` 不暴露为前端国家选项，也不进入补货计算或信息总览统计，空值与非法国家码同样被视为不可统计国家；有效国家码若属于 `eu_countries` 则归并为 `EU` 并在 `original_country_code` 保存原码。全局配置接口保存 `eu_countries` 且实际变化时，会在同一事务内调用 `backfill_eu_country_mapping()` 回填本地历史 `order_header`、`inventory_snapshot_latest`、`in_transit_record`：源国家优先取各表 `original_*` 字段，否则取当前国家字段，并先按同一别名表标准化；源国家属于当前 EU 集合时写映射后国家为 `EU` 且 `original_* = 标准化源国家`，否则恢复为标准化源国家并清空 `original_*`。该回填只改本地库，不调用赛狐 API。
 
-**订单信息匹配导入口径**：`backend/app/services/order_edit.py` 的信息匹配 `preview / apply / error-report` 共用同一套 Excel 解析逻辑，并在解析开始时读取一次当前 `global_config.eu_countries`。导入国家列只接受二字码；若标准化后的国家码属于当前 EU 成员集合，则 `apply` 写入 `order_header.country_code='EU'`，并在 `original_country_code` 保留原始成员国；非 EU 国家写入标准化二字码并清空 `original_country_code`；导入字面 `EU` 时保持 `country_code='EU'` 且不写原始成员国。`manual_edit_fields` 只记录业务可编辑字段 `country_code / postal_code`，不暴露 `original_country_code`。确认导入阶段按命中订单号集合一次性加载 `order_header`，再在内存中按订单号应用更新，避免大文件导入时逐订单查询。
+**订单信息匹配导入口径**：`backend/app/services/order_edit.py` 的信息匹配 `preview / apply / error-report` 共用同一套 Excel 解析逻辑，并在解析开始时读取一次当前 `global_config.eu_countries`。导入国家列只接受二字码；若标准化后的国家码属于当前 EU 成员集合，则确认导入写入 `order_header.country_code='EU'`，并在 `original_country_code` 保留原始成员国；非 EU 国家写入标准化二字码并清空 `original_country_code`；导入字面 `EU` 时保持 `country_code='EU'` 且不写原始成员国。`manual_edit_fields` 只记录业务可编辑字段 `country_code / postal_code`，不暴露 `original_country_code`。旧同步 `POST /api/data/order-info-match/apply` 保留兼容；前端确认导入走 `POST /api/data/order-info-match/apply-task`，先把 Excel 二进制保存到 `order_info_match_import_file`，再入队 `order_info_match_apply` TaskRun。后台任务按命中订单号集合一次性加载 `order_header`，在内存中应用更新，并用 `step_detail="已处理 N / 总数 M"` 输出写库进度；成功时写 `result_payload.updatedOrderCount`。`GET /api/data/order-info-match/apply-task/active` 返回最近 pending/running 任务供弹窗恢复，同一时间只允许一个活跃确认导入任务。
 
 **动态国家选项**：`GET /api/config/country-options` 汇总内置常见国家、`country_name_override` 人工国家名称覆盖与数据库已观测国家，观测来源包括订单 `country_code/original_country_code`、仓库 `country`、库存 `country/original_country`、出库 `target_country/original_target_country`。观测值会先走统一标准化，因此历史 `UK` 只会以 `GB` 输出；接口返回 `builtin`、`observed`、`can_be_eu_member` 与 `unknown_country_codes`，但会隐藏内部哨兵 `ZZ`，即使历史订单已观测到 `ZZ` 也不会出现在 `items` 或 `unknown_country_codes`；订单信息匹配或编辑输入 `XX - 中文名` 时会写入覆盖表，后续所有动态国家下拉展示该中文名；前端订单、库存、出库、仓库、邮编规则、补货区域和 EU 成员国配置均消费该接口；EU 成员国配置不允许 `EU` 与 `ZZ`。内置国家名包含 `GB - 英国`、`CZ - 捷克`、`RO - 罗马尼亚`，以及订单处理列表新观测到的 `AT - 奥地利`、`CH - 瑞士`、`CY - 塞浦路斯`、`DK - 丹麦`、`EE - 爱沙尼亚`、`FI - 芬兰`、`LT - 立陶宛`、`LV - 拉脱维亚`、`MT - 马耳他`、`SI - 斯洛文尼亚`。
 
@@ -192,7 +192,8 @@ CREATE TABLE task_run (
   step_detail TEXT,
   total_steps INT,
   error_msg TEXT,
-  result_summary TEXT
+  result_summary TEXT,
+  result_payload JSONB
 );
 
 -- 活跃任务去重（仅对 pending/running 生效）
@@ -233,7 +234,7 @@ CREATE INDEX ix_task_run_lease
 
 **自动调度规则**：`sync_shop` 每日 03:00 入队，`sync_warehouse` 每日 03:30 入队，`daily_archive` 每日 02:00 入队，`retention_purge` 每日 04:00 入队，`retry_failed_api_calls` 每 5 分钟入队；`sync_product_listing`、`sync_inventory`、`sync_out_records` 按 `global_config.sync_interval_minutes` 间隔入队，`sync_order_list` 按 `global_config.order_sync_interval_minutes` 间隔入队，默认 120 分钟。`GET /api/sync/scheduler` 由 API 进程提供状态，即使 API 进程本身不启动 APScheduler，也会基于 job trigger 推导下次执行时间；真正入队仍只发生在 `PROCESS_ENABLE_SCHEDULER=true` 的 scheduler 进程。
 
-**进度追踪**：`TaskRun.current_step / step_detail / total_steps / result_summary` 由 worker 在执行中写入，前端 `TaskProgress` 组件轮询 `/api/tasks/{id}`。`calc_engine` 在生成成功或无需求时写结构化 JSON 摘要（`generated`、`suggestion_id`、`demand_date`、可选 `reason`）；店铺、仓库、商品、库存、订单、出库等分页同步任务复用赛狐分页响应里的 `totalPage` 输出“第 P / N 页”进度，不额外发起预扫描请求。自 2026-04-20 起，worker 的 heartbeat、进度更新和 success/failed 终态回写都带 `status='running' + worker_id` 条件；若租约已被 reaper 回收，则抛 `TaskLeaseLostError` 并停止继续覆盖状态。
+**进度追踪**：`TaskRun.current_step / step_detail / total_steps / result_summary / result_payload` 由 worker 在执行中写入，前端 `TaskProgress` 组件轮询 `/api/tasks/{id}`。`calc_engine` 在生成成功或无需求时写结构化 JSON 摘要（`generated`、`suggestion_id`、`demand_date`、可选 `reason`）；店铺、仓库、商品、库存、订单、出库等分页同步任务复用赛狐分页响应里的 `totalPage` 输出“第 P / N 页”进度，不额外发起预扫描请求；`order_info_match_apply` 输出“已处理 N / 总数 M”，任务成功后前端从 `result_payload.updatedOrderCount` 展示更新数量。自 2026-04-20 起，worker 的 heartbeat、进度更新和 success/failed 终态回写都带 `status='running' + worker_id` 条件；若租约已被 reaper 回收，则抛 `TaskLeaseLostError` 并停止继续覆盖状态。
 **补货计算去重**：`POST /api/engine/run` 只作为手动补货计算入口，入队 `calc_engine` 时使用 `calc_engine:{demand_date}` 作为 `dedupe_key`。同一天重复提交会复用活跃任务，不同 `demand_date` 允许创建独立 TaskRun，避免复用旧补货日期的活跃计算。通用 `POST /api/tasks` 仍禁止直接创建 `calc_engine`。
 **同步日志聚合**：`GET /api/data/sync-state` 返回两类来源：同步任务读取 `sync_state`；系统后台任务 `daily_archive` / `retry_failed_api_calls` 从 `task_run` 聚合最近一条任务、最近成功任务和最近失败错误。`calc_engine` 是补货建议页手动生成入口，不进入同步日志或同步状态统计。
 **信息总览快照任务**：`refresh_dashboard_snapshot` 也是标准 TaskRun 任务，复用现有去重、轮询和失败回写机制；它在后台调用 `build_dashboard_payload()` 生成 `dashboard_snapshot` 单例缓存，页面刷新时优先消费该缓存而不是重复现算。
@@ -472,7 +473,7 @@ async function reload() {
 | `SkuCard` | 商品展示（图片 + 名称 + SKU + blocker 标签） | 商品、库存、订单、建议单 |
 | `StatusTag` | 状态标签（基于 StatusMeta 对象） | 所有状态展示 |
 | `TablePaginationBar` | 分页条，v-model 绑定 currentPage 和 pageSize；手机端自动切换为紧凑版 | 所有数据表格 |
-| `TaskProgress` | 长任务进度展示，自动轮询 `/api/tasks/{id}`；可解析按条数和按页数/步骤的确定型进度；任务读取权限按 `job_name` 映射到对应业务权限过滤 | 引擎生成、同步 |
+| `TaskProgress` | 长任务进度展示，自动轮询 `/api/tasks/{id}`；可解析按条数、按页数/步骤以及“已处理 N / 总数 M”的确定型进度；任务读取权限按 `job_name` 映射到对应业务权限过滤 | 引擎生成、同步、订单信息匹配导入 |
 
 **前端监控命名约定**：
 - `src/utils/monitoring.ts` 统一负责监控页的名称展示口径，包括赛狐接口 `endpoint`、性能监控 `request/resource` 名称中文化，以及 tooltip 中保留原始路径
@@ -595,6 +596,7 @@ UPDATE global_config SET suggestion_generation_enabled=true, generation_toggle_u
 | `suggestion_snapshot_item` | 导出快照条目副本 | FK `snapshot_id` ON DELETE CASCADE；冻结 `purchase_qty`、`restock_dates` 与补货拆分 JSONB |
 | `excel_export_log` | Excel 下载审计 | 记录 snapshot、操作者、IP、User-Agent、文件大小等 |
 | `task_run` | 后台任务队列 | `dedupe_key + active status` partial unique index |
+| `order_info_match_import_file` | 订单信息匹配导入文件暂存 | 保存 `apply-task` 上传的 Excel 二进制、字段选择、创建人、过期时间、任务 ID 与消费时间；任务结束后清空内容并由 `retention_purge` 清理 |
 | `dashboard_snapshot` | 信息总览缓存快照 | 单例缓存 dashboard payload、刷新状态与错误信息 |
 | `api_call_log` | 赛狐 API 调用日志与 40019 重试队列 | `request_payload` 保存原始请求；`retry_status` 区分 `queued/resolved/permanent/unsupported`；`retry_source_log_id` 关联自动重试子日志 |
 | `login_attempt` | 登录尝试与锁定状态 | `source_key` PK |

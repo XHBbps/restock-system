@@ -14,6 +14,7 @@ READ-ONLY。所有端点从本地同步落库的表查询,返回与赛狐接口
 
 from datetime import date, datetime, timedelta
 from typing import Any
+from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, Path, Query, Request
 from fastapi.responses import StreamingResponse
@@ -28,7 +29,7 @@ from app.api.deps import (
     get_current_user,
     require_permission,
 )
-from app.core.exceptions import NotFound
+from app.core.exceptions import NotFound, ValidationFailed
 from app.core.permissions import DATA_BASE_VIEW, DATA_BIZ_EDIT, DATA_BIZ_VIEW, SYNC_VIEW
 from app.core.query import escape_like
 from app.core.timezone import BEIJING, order_display_timezone, to_order_display_time
@@ -41,10 +42,12 @@ from app.models.order import (
     OrderHeader,
     OrderItem,
 )
+from app.models.order_info_match_import import OrderInfoMatchImportFile
 from app.models.product_listing import ProductListing
 from app.models.shop import Shop
 from app.models.sku import SkuConfig
 from app.models.sku_mapping import SkuMappingComponent
+from app.models.task_run import TaskRun
 from app.models.warehouse import Warehouse
 from app.schemas.data import (
     DataInventoryItem,
@@ -66,7 +69,9 @@ from app.schemas.data import (
     DataSyncStateRow,
     DataWarehouse,
     DataWarehouseListOut,
+    OrderInfoMatchActiveTaskOut,
     OrderInfoMatchApplyOut,
+    OrderInfoMatchApplyTaskOut,
     OrderInfoMatchPreviewOut,
     SkuOverviewListOut,
 )
@@ -78,6 +83,8 @@ from app.services.order_edit import (
     patch_order_header,
     preview_order_info_match,
 )
+from app.tasks.jobs.order_info_match import JOB_NAME as ORDER_INFO_MATCH_APPLY_JOB_NAME
+from app.tasks.queue import enqueue_task
 
 router = APIRouter(prefix="/api/data", tags=["data"])
 
@@ -90,6 +97,8 @@ SYNC_STATE_JOBS = (
     "sync_out_records",
 )
 TASK_RUN_SYNC_STATE_JOBS = ("daily_archive", "retry_failed_api_calls")
+ORDER_INFO_MATCH_DEDUPE_KEY = ORDER_INFO_MATCH_APPLY_JOB_NAME
+ORDER_INFO_MATCH_FILE_TTL_HOURS = 24
 
 
 def _disabled_order_detail_fields(detail: OrderDetail | None) -> dict[str, object | None]:
@@ -661,6 +670,70 @@ async def preview_order_info_match_endpoint(
     selected_fields = parse_requested_fields(fields)
     content = await request.body()
     return await preview_order_info_match(db, fields=selected_fields, content=content)
+
+
+async def _get_active_order_info_match_task(db: AsyncSession) -> TaskRun | None:
+    return (
+        await db.execute(
+            select(TaskRun)
+            .where(
+                TaskRun.job_name == ORDER_INFO_MATCH_APPLY_JOB_NAME,
+                TaskRun.status.in_(("pending", "running")),
+            )
+            .order_by(TaskRun.created_at.desc(), TaskRun.id.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+
+@router.post("/order-info-match/apply-task", response_model=OrderInfoMatchApplyTaskOut)
+async def create_order_info_match_apply_task_endpoint(
+    request: Request,
+    fields: str = Query(default=""),
+    db: AsyncSession = Depends(db_session),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(DATA_BIZ_EDIT)),
+) -> OrderInfoMatchApplyTaskOut:
+    selected_fields = parse_requested_fields(fields)
+    active = await _get_active_order_info_match_task(db)
+    if active is not None:
+        return OrderInfoMatchApplyTaskOut(task_id=active.id, existing=True)
+
+    content = await request.body()
+    if not content:
+        raise ValidationFailed("导入文件没有有效数据")
+
+    filename = unquote(request.headers.get("x-filename") or "order-info-match.xlsx")[:255]
+    now = datetime.now(tz=BEIJING)
+    import_file = OrderInfoMatchImportFile(
+        filename=filename,
+        content=content,
+        fields=[field.key for field in selected_fields],
+        created_by=user.id,
+        expires_at=now + timedelta(hours=ORDER_INFO_MATCH_FILE_TTL_HOURS),
+    )
+    db.add(import_file)
+    await db.flush()
+    task_id, existing = await enqueue_task(
+        db,
+        job_name=ORDER_INFO_MATCH_APPLY_JOB_NAME,
+        trigger_source="manual",
+        dedupe_key=ORDER_INFO_MATCH_DEDUPE_KEY,
+        payload={"file_id": import_file.id, "user_id": user.id},
+    )
+    if not existing:
+        import_file.task_id = task_id
+        await db.commit()
+    return OrderInfoMatchApplyTaskOut(task_id=task_id, existing=existing)
+
+
+@router.get("/order-info-match/apply-task/active", response_model=OrderInfoMatchActiveTaskOut)
+async def get_active_order_info_match_apply_task_endpoint(
+    db: AsyncSession = Depends(db_session_readonly),
+    _: None = Depends(require_permission(DATA_BIZ_EDIT)),
+) -> OrderInfoMatchActiveTaskOut:
+    active = await _get_active_order_info_match_task(db)
+    return OrderInfoMatchActiveTaskOut(task_id=active.id if active is not None else None)
 
 
 @router.post("/order-info-match/apply", response_model=OrderInfoMatchApplyOut)

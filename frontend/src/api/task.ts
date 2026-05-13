@@ -23,6 +23,7 @@ export interface TaskRun {
   attempt_count: number
   error_msg: string | null
   result_summary: string | null
+  result_payload?: Record<string, unknown> | null
   started_at: string | null
   finished_at: string | null
   created_at: string

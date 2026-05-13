@@ -112,6 +112,16 @@ describe('TaskProgress', () => {
     expect(progress.attributes('data-indeterminate')).toBe('false')
   })
 
+  it('renders determinate percentage for processed-total progress', () => {
+    task.step_detail = '已处理 30 / 总数 120'
+
+    const wrapper = mountComponent()
+    const progress = wrapper.get('.el-progress-stub')
+
+    expect(progress.attributes('data-percentage')).toBe('25')
+    expect(progress.attributes('data-indeterminate')).toBe('false')
+  })
+
   it('falls back to indeterminate progress for unparseable detail', () => {
     task.step_detail = '处理中'
 

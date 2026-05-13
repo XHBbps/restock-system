@@ -72,6 +72,15 @@ export interface OrderInfoMatchApply extends OrderInfoMatchPreview {
   updatedOrderCount: number
 }
 
+export interface OrderInfoMatchApplyTask {
+  taskId: number
+  existing: boolean
+}
+
+export interface OrderInfoMatchActiveTask {
+  taskId: number | null
+}
+
 const ORDER_INFO_MATCH_APPLY_TIMEOUT_MS = 300000
 
 export interface PageResult<T> {
@@ -176,6 +185,31 @@ export async function applyOrderInfoMatch(
       headers: { 'Content-Type': file.type || 'application/octet-stream' },
       timeout: ORDER_INFO_MATCH_APPLY_TIMEOUT_MS,
     }
+  )
+  return data
+}
+
+export async function createOrderInfoMatchApplyTask(
+  file: File,
+  fields: string[]
+): Promise<OrderInfoMatchApplyTask> {
+  const { data } = await client.post<OrderInfoMatchApplyTask>(
+    '/api/data/order-info-match/apply-task',
+    file,
+    {
+      params: { fields: fields.join(',') },
+      headers: {
+        'Content-Type': file.type || 'application/octet-stream',
+        'X-Filename': encodeURIComponent(file.name)
+      },
+    }
+  )
+  return data
+}
+
+export async function getActiveOrderInfoMatchApplyTask(): Promise<OrderInfoMatchActiveTask> {
+  const { data } = await client.get<OrderInfoMatchActiveTask>(
+    '/api/data/order-info-match/apply-task/active'
   )
   return data
 }

@@ -1,7 +1,13 @@
 """Task access registry shared by task APIs and queue entry points."""
 
 from app.core.exceptions import Forbidden
-from app.core.permissions import HOME_REFRESH, RESTOCK_OPERATE, SYNC_OPERATE, SYNC_VIEW
+from app.core.permissions import (
+    DATA_BIZ_EDIT,
+    HOME_REFRESH,
+    RESTOCK_OPERATE,
+    SYNC_OPERATE,
+    SYNC_VIEW,
+)
 
 TASK_VIEW_PERMISSIONS: dict[str, tuple[str, ...]] = {
     "sync_product_listing": (SYNC_VIEW, SYNC_OPERATE),
@@ -15,6 +21,7 @@ TASK_VIEW_PERMISSIONS: dict[str, tuple[str, ...]] = {
     "retry_failed_api_calls": (SYNC_VIEW, SYNC_OPERATE),
     "calc_engine": (RESTOCK_OPERATE,),
     "refresh_dashboard_snapshot": (HOME_REFRESH,),
+    "order_info_match_apply": (DATA_BIZ_EDIT,),
 }
 
 TASK_MANAGE_PERMISSIONS: dict[str, tuple[str, ...]] = {
@@ -29,11 +36,14 @@ TASK_MANAGE_PERMISSIONS: dict[str, tuple[str, ...]] = {
     "retry_failed_api_calls": (SYNC_OPERATE,),
     "calc_engine": (RESTOCK_OPERATE,),
     "refresh_dashboard_snapshot": (HOME_REFRESH,),
+    "order_info_match_apply": (DATA_BIZ_EDIT,),
 }
 
 ALL_TASK_JOB_NAMES = frozenset(TASK_VIEW_PERMISSIONS)
 MANUAL_ENQUEUE_JOB_NAMES = frozenset(
-    job_name for job_name in TASK_VIEW_PERMISSIONS if job_name != "calc_engine"
+    job_name
+    for job_name in TASK_VIEW_PERMISSIONS
+    if job_name not in {"calc_engine", "order_info_match_apply"}
 )
 
 

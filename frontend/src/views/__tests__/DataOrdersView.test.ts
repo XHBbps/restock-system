@@ -13,6 +13,8 @@ const mockDownloadTemplate = vi.fn()
 const mockDownloadErrorReport = vi.fn()
 const mockPreviewOrderInfoMatch = vi.fn()
 const mockApplyOrderInfoMatch = vi.fn()
+const mockCreateOrderInfoMatchApplyTask = vi.fn()
+const mockGetActiveOrderInfoMatchApplyTask = vi.fn()
 const mockGetCountryOptions = vi.fn()
 const mockHasPermission = vi.fn()
 const mockMessageError = vi.fn()
@@ -29,7 +31,9 @@ vi.mock('@/api/data', () => ({
   downloadOrderInfoMatchTemplate: (...args: unknown[]) => mockDownloadTemplate(...args),
   downloadOrderInfoMatchErrorReport: (...args: unknown[]) => mockDownloadErrorReport(...args),
   previewOrderInfoMatch: (...args: unknown[]) => mockPreviewOrderInfoMatch(...args),
-  applyOrderInfoMatch: (...args: unknown[]) => mockApplyOrderInfoMatch(...args)
+  applyOrderInfoMatch: (...args: unknown[]) => mockApplyOrderInfoMatch(...args),
+  createOrderInfoMatchApplyTask: (...args: unknown[]) => mockCreateOrderInfoMatchApplyTask(...args),
+  getActiveOrderInfoMatchApplyTask: (...args: unknown[]) => mockGetActiveOrderInfoMatchApplyTask(...args)
 }))
 
 vi.mock('@/api/config', () => ({
@@ -211,7 +215,12 @@ const STUBS = {
     template: '<label><input type="checkbox" :value="label" /> <slot /></label>'
   },
   ElAlert: true,
-  ElEmpty: true
+  ElEmpty: true,
+  TaskProgress: {
+    props: ['taskId'],
+    emits: ['terminal'],
+    template: '<div class="task-progress-stub">任务 {{ taskId }}</div>'
+  }
 }
 
 const GLOBAL_CONFIG = {
@@ -336,6 +345,8 @@ describe('DataOrdersView', () => {
       errors: [],
       updatedOrderCount: 1
     })
+    mockCreateOrderInfoMatchApplyTask.mockResolvedValue({ taskId: 9, existing: false })
+    mockGetActiveOrderInfoMatchApplyTask.mockResolvedValue({ taskId: null })
   })
 
   it('loads current page from backend and fetches filter options separately', async () => {
@@ -573,6 +584,74 @@ describe('DataOrdersView', () => {
     expect(
       wrapper.findAll('button').find((button) => button.text() === '确认导入')?.attributes('disabled')
     ).toBeUndefined()
+  })
+
+  it('submits apply as background task and shows progress', async () => {
+    mockHasPermission.mockReturnValue(true)
+    const { default: View } = await import('../data/DataOrdersView.vue')
+    const wrapper = shallowMount(View, { global: GLOBAL_CONFIG })
+    await flushPromises()
+
+    const file = new File(['x'], 'orders.xlsx', {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    })
+    const input = wrapper.find<HTMLInputElement>('input[type="file"]')
+    Object.defineProperty(input.element, 'files', {
+      value: [file],
+      configurable: true
+    })
+    await input.trigger('change')
+    await (wrapper.vm as unknown as { previewMatch: () => Promise<void> }).previewMatch()
+    await flushPromises()
+    await (wrapper.vm as unknown as { applyMatch: () => Promise<void> }).applyMatch()
+    await flushPromises()
+
+    expect(mockCreateOrderInfoMatchApplyTask).toHaveBeenCalledWith(file, [
+      'country_code',
+      'postal_code'
+    ])
+    expect(mockApplyOrderInfoMatch).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('任务 9')
+    expect(mockMessageSuccess).toHaveBeenCalledWith('导入任务已提交')
+  })
+
+  it('recovers active match apply task when opening dialog', async () => {
+    mockHasPermission.mockReturnValue(true)
+    mockGetActiveOrderInfoMatchApplyTask.mockResolvedValueOnce({ taskId: 77 })
+    const { default: View } = await import('../data/DataOrdersView.vue')
+    const wrapper = shallowMount(View, { global: GLOBAL_CONFIG })
+    await flushPromises()
+
+    await wrapper.findAll('button').find((button) => button.text() === '信息匹配')?.trigger('click')
+    await flushPromises()
+
+    expect(mockGetActiveOrderInfoMatchApplyTask).toHaveBeenCalled()
+    expect(wrapper.text()).toContain('任务 77')
+  })
+
+  it('reuses existing match apply task returned by backend', async () => {
+    mockHasPermission.mockReturnValue(true)
+    mockCreateOrderInfoMatchApplyTask.mockResolvedValueOnce({ taskId: 10, existing: true })
+    const { default: View } = await import('../data/DataOrdersView.vue')
+    const wrapper = shallowMount(View, { global: GLOBAL_CONFIG })
+    await flushPromises()
+
+    const file = new File(['x'], 'orders.xlsx', {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    })
+    const input = wrapper.find<HTMLInputElement>('input[type="file"]')
+    Object.defineProperty(input.element, 'files', {
+      value: [file],
+      configurable: true
+    })
+    await input.trigger('change')
+    await (wrapper.vm as unknown as { previewMatch: () => Promise<void> }).previewMatch()
+    await flushPromises()
+    await (wrapper.vm as unknown as { applyMatch: () => Promise<void> }).applyMatch()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('任务 10')
+    expect(mockMessageInfo).toHaveBeenCalledWith('已有导入任务运行中，当前显示已有任务进度')
   })
 
   it('renders failed match validation summary without row details and keeps apply disabled', async () => {

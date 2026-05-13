@@ -581,10 +581,18 @@
             </div>
           </div>
         </div>
+
+        <div v-if="matchApplyTaskId" class="detail-section">
+          <div class="section-title">导入进度</div>
+          <TaskProgress :task-id="matchApplyTaskId" @terminal="onMatchApplyTaskDone" />
+        </div>
       </div>
       <template #footer>
-        <el-button @click="matchDialogVisible = false">取消</el-button>
+        <el-button @click="matchDialogVisible = false">
+          {{ matchApplyTaskId ? '关闭' : '取消' }}
+        </el-button>
         <el-button
+          v-if="!matchApplyTaskId"
           type="primary"
           :disabled="!canApplyMatch"
           :loading="applyLoading"
@@ -600,9 +608,10 @@
 <script setup lang="ts">
 import { getCountryOptions, type CountryOption } from '@/api/config'
 import {
-  applyOrderInfoMatch,
+  createOrderInfoMatchApplyTask,
   downloadOrderInfoMatchErrorReport,
   downloadOrderInfoMatchTemplate,
+  getActiveOrderInfoMatchApplyTask,
   getOrderDetail,
   listDataShops,
   listOrderPlatforms,
@@ -614,9 +623,11 @@ import {
   type DataOrderSummary,
   type OrderInfoMatchPreview
 } from '@/api/data'
+import type { TaskRun } from '@/api/task'
 import MobileRecordList from '@/components/MobileRecordList.vue'
 import PageSectionCard from '@/components/PageSectionCard.vue'
 import TablePaginationBar from '@/components/TablePaginationBar.vue'
+import TaskProgress from '@/components/TaskProgress.vue'
 import { useResponsive } from '@/composables/useResponsive'
 import { useAuthStore } from '@/stores/auth'
 import { getActionErrorMessage } from '@/utils/apiError'
@@ -694,8 +705,13 @@ const templateDownloading = ref(false)
 const previewLoading = ref(false)
 const applyLoading = ref(false)
 const errorReportDownloading = ref(false)
+const matchApplyTaskId = ref<number | null>(null)
 const canApplyMatch = computed(
-  () => !!matchFile.value && !!matchPreview.value && matchPreview.value.errors.length === 0
+  () =>
+    !!matchFile.value &&
+    !!matchPreview.value &&
+    matchPreview.value.errors.length === 0 &&
+    matchApplyTaskId.value === null
 )
 const postalCodeSelected = computed(() => matchSelectedFields.value.includes('postal_code'))
 const displayedMatchedOrderIds = computed(
@@ -900,8 +916,16 @@ function formatOrderDisplayTime(value?: string | null): string {
   return match ? `${match[1]} ${match[2]}` : formatDateTime(value)
 }
 
-function openMatchDialog(): void {
+async function openMatchDialog(): Promise<void> {
   matchDialogVisible.value = true
+  try {
+    const active = await getActiveOrderInfoMatchApplyTask()
+    if (active.taskId) {
+      matchApplyTaskId.value = active.taskId
+    }
+  } catch {
+    // 弹窗可继续用于新文件校验；任务详情由轮询接口负责权限校验。
+  }
 }
 
 async function downloadTemplate(): Promise<void> {
@@ -921,6 +945,7 @@ function handleMatchFileChange(event: Event): void {
   const files = input.files
   matchFile.value = files?.[0] || null
   matchPreview.value = null
+  matchApplyTaskId.value = null
   input.value = ''
 }
 
@@ -931,6 +956,7 @@ function chooseMatchFile(): void {
 function clearMatchFile(): void {
   matchFile.value = null
   matchPreview.value = null
+  matchApplyTaskId.value = null
   if (matchFileInput.value) {
     matchFileInput.value.value = ''
   }
@@ -970,15 +996,26 @@ async function applyMatch(): Promise<void> {
   if (!matchFile.value) return
   applyLoading.value = true
   try {
-    const resp = await applyOrderInfoMatch(matchFile.value, matchSelectedFields.value)
-    ElMessage.success(`已更新 ${resp.updatedOrderCount} 条订单`)
-    matchDialogVisible.value = false
-    await loadCountryOptions()
-    await reload()
+    const resp = await createOrderInfoMatchApplyTask(matchFile.value, matchSelectedFields.value)
+    matchApplyTaskId.value = resp.taskId
+    if (resp.existing) {
+      ElMessage.info('已有导入任务运行中，当前显示已有任务进度')
+    } else {
+      ElMessage.success('导入任务已提交')
+    }
   } catch (err) {
     ElMessage.error(getActionErrorMessage(err, '导入失败'))
   } finally {
     applyLoading.value = false
+  }
+}
+
+async function onMatchApplyTaskDone(task: TaskRun): Promise<void> {
+  if (task.status === 'success') {
+    const count = Number(task.result_payload?.updatedOrderCount ?? 0)
+    ElMessage.success(`已更新 ${count} 条订单`)
+    await loadCountryOptions()
+    await reload()
   }
 }
 

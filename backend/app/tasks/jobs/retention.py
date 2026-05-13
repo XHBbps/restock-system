@@ -31,6 +31,7 @@ from app.core.timezone import now_beijing
 from app.db.session import async_session_factory
 from app.models.excel_export_log import ExcelExportLog
 from app.models.inventory import InventorySnapshotHistory
+from app.models.order_info_match_import import OrderInfoMatchImportFile
 from app.models.suggestion_snapshot import SuggestionSnapshot
 from app.models.task_run import TaskRun
 from app.tasks.jobs import JobContext, register
@@ -162,12 +163,24 @@ async def purge_stuck_generating(db: AsyncSession, hours: int) -> int:
     return int(result.rowcount or 0)  # type: ignore[attr-defined]
 
 
+async def purge_order_info_match_import_files(db: AsyncSession) -> int:
+    """清理已过期或已消费的订单信息匹配导入文件暂存行。"""
+    now = now_beijing()
+    result = await db.execute(
+        delete(OrderInfoMatchImportFile).where(
+            (OrderInfoMatchImportFile.expires_at < now)
+            | (OrderInfoMatchImportFile.consumed_at.is_not(None))
+        )
+    )
+    return int(result.rowcount or 0)  # type: ignore[attr-defined]
+
+
 @register("retention_purge")
 async def retention_purge_job(ctx: JobContext) -> None:
     """每天 04:00 Cron 清理 task_run / inventory_history / exports / stuck_generating。"""
     settings = get_settings()
     storage_root = Path(settings.export_storage_dir).resolve()
-    await ctx.progress(current_step="开始清理 task_run", total_steps=4)
+    await ctx.progress(current_step="开始清理 task_run", total_steps=5)
 
     async with async_session_factory() as db:
         deleted_task = await purge_task_run(db, settings.retention_task_run_days)
@@ -202,11 +215,21 @@ async def retention_purge_job(ctx: JobContext) -> None:
         )
         await db.commit()
     logger.info("retention_purge_stuck_generating", failed=stuck_failed)
+    await ctx.progress(
+        current_step="清理订单信息匹配导入文件",
+        step_detail=f"stuck_generating {stuck_failed}",
+    )
+
+    async with async_session_factory() as db:
+        deleted_import_files = await purge_order_info_match_import_files(db)
+        await db.commit()
+    logger.info("retention_purge_order_info_match_import_files", deleted=deleted_import_files)
 
     await ctx.progress(
         current_step="完成",
         step_detail=(
             f"task_run {deleted_task} / inventory_history {deleted_inv} / "
-            f"exports {purged_exports} / stuck_generating {stuck_failed}"
+            f"exports {purged_exports} / stuck_generating {stuck_failed} / "
+            f"order_info_match_import_file {deleted_import_files}"
         ),
     )

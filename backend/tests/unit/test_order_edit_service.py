@@ -9,7 +9,9 @@ from openpyxl import Workbook, load_workbook
 from app.core.exceptions import ValidationFailed
 from app.services.order_edit import (
     EditableField,
+    ParsedWorkbook,
     apply_order_info_match,
+    apply_parsed_order_info_match,
     build_order_info_match_error_report,
     build_template_workbook,
     parse_requested_fields,
@@ -360,3 +362,38 @@ async def test_apply_order_info_match_keeps_literal_eu_without_original_country(
     assert header.country_code == "EU"
     assert header.original_country_code is None
     assert header.manual_edit_fields == ["country_code"]
+
+
+@pytest.mark.asyncio
+async def test_apply_parsed_order_info_match_reports_batch_progress() -> None:
+    headers = [
+        SimpleNamespace(amazon_order_id="ORDER-1", manual_edit_fields=None),
+        SimpleNamespace(amazon_order_id="ORDER-2", manual_edit_fields=None),
+    ]
+    parsed = ParsedWorkbook(
+        updates_by_order={
+            "ORDER-1": {"country_code": "US", "original_country_code": None},
+            "ORDER-2": {"country_code": "CA", "original_country_code": None},
+        },
+        country_overrides={},
+        matched_order_count=2,
+        update_fields=["国家"],
+        errors=[],
+    )
+    db = _FakeSession([_RowsResult(headers)])
+    progress: list[tuple[int, int]] = []
+
+    async def report(done: int, total: int) -> None:
+        progress.append((done, total))
+
+    updated = await apply_parsed_order_info_match(
+        db,  # type: ignore[arg-type]
+        parsed=parsed,
+        user_id=7,
+        progress_callback=report,
+        batch_size=1,
+    )
+
+    assert updated == 2
+    assert progress == [(0, 2), (1, 2), (2, 2)]
+    assert db.committed is True
