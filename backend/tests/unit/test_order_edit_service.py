@@ -8,7 +8,9 @@ from openpyxl import Workbook, load_workbook
 
 from app.core.exceptions import ValidationFailed
 from app.services.order_edit import (
+    EditableField,
     apply_order_info_match,
+    build_order_info_match_error_report,
     build_template_workbook,
     parse_requested_fields,
     preview_order_info_match,
@@ -126,6 +128,63 @@ async def test_preview_order_info_match_reports_duplicate_and_missing_order() ->
     assert [error.row for error in result.errors] == [3, 4]
     assert "重复" in result.errors[0].message
     assert result.errors[1].message == "订单号不存在"
+
+
+@pytest.mark.asyncio
+async def test_order_info_match_error_report_preserves_content_and_appends_reasons() -> None:
+    content = _workbook_bytes(
+        ["订单号", "国家", "邮编"],
+        [
+            ["ORDER-1", "US", "90210"],
+            ["ORDER-404", "XX", "10001"],
+        ],
+    )
+    db = _FakeSession(_base_parse_responses())
+
+    report = await build_order_info_match_error_report(
+        db,  # type: ignore[arg-type]
+        fields=parse_requested_fields("country_code,postal_code"),
+        content=content,
+    )
+
+    sheet = load_workbook(report).active
+    assert [sheet.cell(row=1, column=column).value for column in range(1, 5)] == [
+        "订单号",
+        "国家",
+        "邮编",
+        "错误原因",
+    ]
+    assert [sheet.cell(row=3, column=column).value for column in range(1, 4)] == [
+        "ORDER-404",
+        "XX",
+        "10001",
+    ]
+    assert sheet.cell(row=2, column=4).value is None
+    reason_cell = sheet.cell(row=3, column=4)
+    assert reason_cell.value == "订单号：订单号不存在"
+    assert reason_cell.font.color is not None
+    assert reason_cell.font.color.rgb.endswith("FF0000")
+
+
+@pytest.mark.asyncio
+async def test_order_info_match_error_report_merges_multiple_errors_for_same_row() -> None:
+    amount_field = EditableField("amount", "金额", "order_total_amount", "decimal")
+    content = _workbook_bytes(
+        ["订单号", "国家", "金额"],
+        [["ORDER-1", "US - 美国", "not-a-number"]],
+    )
+    db = _FakeSession(_base_parse_responses())
+
+    report = await build_order_info_match_error_report(
+        db,  # type: ignore[arg-type]
+        fields=[*parse_requested_fields("country_code"), amount_field],
+        content=content,
+    )
+
+    sheet = load_workbook(report).active
+    assert sheet.cell(row=2, column=4).value == (
+        "国家：国家必须填写有效二字码；金额：订单金额必须是数值"
+    )
 
 
 @pytest.mark.asyncio

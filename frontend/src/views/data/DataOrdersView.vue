@@ -531,6 +531,16 @@
                 错误数量：{{ matchPreview.errors.length }}
               </span>
               <span v-else>命中 {{ matchPreview.matchedOrderCount }} 个订单</span>
+              <el-button
+                v-if="matchPreview.errors.length"
+                plain
+                size="small"
+                :disabled="!matchFile"
+                :loading="errorReportDownloading"
+                @click="downloadMatchErrorReport"
+              >
+                下载错误文件
+              </el-button>
             </div>
             <div v-if="matchPreview.errors.length === 0" class="match-result__content">
               <div class="match-result__row">
@@ -596,6 +606,7 @@
 import { getCountryOptions, type CountryOption } from '@/api/config'
 import {
   applyOrderInfoMatch,
+  downloadOrderInfoMatchErrorReport,
   downloadOrderInfoMatchTemplate,
   getOrderDetail,
   listDataShops,
@@ -687,6 +698,7 @@ const matchPreview = ref<OrderInfoMatchPreview | null>(null)
 const templateDownloading = ref(false)
 const previewLoading = ref(false)
 const applyLoading = ref(false)
+const errorReportDownloading = ref(false)
 const canApplyMatch = computed(
   () => !!matchFile.value && !!matchPreview.value && matchPreview.value.errors.length === 0
 )
@@ -943,6 +955,19 @@ async function previewMatch(): Promise<void> {
     ElMessage.error(getActionErrorMessage(err, '校验失败'))
   } finally {
     previewLoading.value = false
+  }
+}
+
+async function downloadMatchErrorReport(): Promise<void> {
+  if (!matchFile.value || !matchPreview.value?.errors.length) return
+  errorReportDownloading.value = true
+  try {
+    const blob = await downloadOrderInfoMatchErrorReport(matchFile.value, matchSelectedFields.value)
+    triggerBlobDownload(blob, '订单信息匹配错误原因.xlsx')
+  } catch (err) {
+    ElMessage.error(getActionErrorMessage(err, '错误文件下载失败'))
+  } finally {
+    errorReportDownloading.value = false
   }
 }
 

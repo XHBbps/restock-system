@@ -72,6 +72,7 @@ from app.schemas.data import (
 )
 from app.services.order_edit import (
     apply_order_info_match,
+    build_order_info_match_error_report,
     build_template_workbook,
     parse_requested_fields,
     patch_order_header,
@@ -677,6 +678,23 @@ async def apply_order_info_match_endpoint(
         fields=selected_fields,
         content=content,
         user_id=user.id,
+    )
+
+
+@router.post("/order-info-match/error-report")
+async def download_order_info_match_error_report_endpoint(
+    request: Request,
+    fields: str = Query(default=""),
+    db: AsyncSession = Depends(db_session_readonly),
+    _: None = Depends(require_permission(DATA_BIZ_EDIT)),
+) -> StreamingResponse:
+    selected_fields = parse_requested_fields(fields)
+    content = await request.body()
+    workbook = await build_order_info_match_error_report(db, fields=selected_fields, content=content)
+    return StreamingResponse(
+        workbook,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=order-info-match-error-report.xlsx"},
     )
 
 

@@ -10,6 +10,7 @@ const mockListOrderPlatforms = vi.fn()
 const mockGetOrderDetail = vi.fn()
 const mockUpdateOrderDetail = vi.fn()
 const mockDownloadTemplate = vi.fn()
+const mockDownloadErrorReport = vi.fn()
 const mockPreviewOrderInfoMatch = vi.fn()
 const mockApplyOrderInfoMatch = vi.fn()
 const mockGetCountryOptions = vi.fn()
@@ -26,6 +27,7 @@ vi.mock('@/api/data', () => ({
   getOrderDetail: (...args: unknown[]) => mockGetOrderDetail(...args),
   updateOrderDetail: (...args: unknown[]) => mockUpdateOrderDetail(...args),
   downloadOrderInfoMatchTemplate: (...args: unknown[]) => mockDownloadTemplate(...args),
+  downloadOrderInfoMatchErrorReport: (...args: unknown[]) => mockDownloadErrorReport(...args),
   previewOrderInfoMatch: (...args: unknown[]) => mockPreviewOrderInfoMatch(...args),
   applyOrderInfoMatch: (...args: unknown[]) => mockApplyOrderInfoMatch(...args)
 }))
@@ -320,6 +322,7 @@ describe('DataOrdersView', () => {
     mockGetOrderDetail.mockResolvedValue(buildOrderDetail())
     mockUpdateOrderDetail.mockResolvedValue({})
     mockDownloadTemplate.mockResolvedValue(new Blob(['x']))
+    mockDownloadErrorReport.mockResolvedValue(new Blob(['errors']))
     mockPreviewOrderInfoMatch.mockResolvedValue({
       matchedOrderCount: 1,
       matchedOrderIds: ['ORDER-1'],
@@ -566,6 +569,7 @@ describe('DataOrdersView', () => {
     expect(wrapper.text()).toContain('国家')
     expect(wrapper.text()).toContain('邮编')
     expect(wrapper.text()).toContain('邮编校验通过，空值将清空原邮编')
+    expect(wrapper.text()).not.toContain('下载错误文件')
     expect(
       wrapper.findAll('button').find((button) => button.text() === '确认导入')?.attributes('disabled')
     ).toBeUndefined()
@@ -599,7 +603,46 @@ describe('DataOrdersView', () => {
     expect(wrapper.text()).toContain('校验未通过')
     expect(wrapper.text()).toContain('错误数量：1')
     expect(wrapper.text()).toContain('订单号不存在')
+    expect(wrapper.text()).toContain('下载错误文件')
     expect(wrapper.text()).not.toContain('校验通过，可以确认导入')
+    expect(
+      wrapper.findAll('button').find((button) => button.text() === '确认导入')?.attributes('disabled')
+    ).toBeDefined()
+  })
+
+  it('downloads failed match error workbook with current file and field keys', async () => {
+    mockHasPermission.mockReturnValue(true)
+    mockPreviewOrderInfoMatch.mockReset()
+    mockPreviewOrderInfoMatch.mockResolvedValueOnce({
+      matchedOrderCount: 0,
+      matchedOrderIds: [],
+      updateFields: ['国家'],
+      errors: [{ row: 2, field: '订单号', message: '订单号不存在' }]
+    })
+    const { default: View } = await import('../data/DataOrdersView.vue')
+    const wrapper = shallowMount(View, { global: GLOBAL_CONFIG })
+    await flushPromises()
+
+    const file = new File(['x'], 'orders.xlsx', {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    })
+    const input = wrapper.find<HTMLInputElement>('input[type="file"]')
+    Object.defineProperty(input.element, 'files', {
+      value: [file],
+      configurable: true
+    })
+    await input.trigger('change')
+    await (wrapper.vm as unknown as { previewMatch: () => Promise<void> }).previewMatch()
+    await flushPromises()
+
+    await wrapper.findAll('button').find((button) => button.text() === '下载错误文件')?.trigger('click')
+    await flushPromises()
+
+    expect(mockDownloadErrorReport).toHaveBeenCalledWith(file, ['country_code', 'postal_code'])
+    expect(mockTriggerBlobDownload).toHaveBeenCalledWith(
+      expect.any(Blob),
+      '订单信息匹配错误原因.xlsx'
+    )
     expect(
       wrapper.findAll('button').find((button) => button.text() === '确认导入')?.attributes('disabled')
     ).toBeDefined()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
+from io import BytesIO
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
@@ -340,6 +341,40 @@ def test_order_info_match_preview_serializes_matched_order_ids() -> None:
 
     assert payload["matchedOrderIds"] == ["ORDER-1"]
     assert payload["matchedOrderCount"] == 1
+
+
+@pytest.mark.asyncio
+async def test_order_info_match_error_report_endpoint_streams_workbook(monkeypatch) -> None:
+    captured = {}
+
+    async def fake_report(db, *, fields, content):
+        captured["db"] = db
+        captured["fields"] = [field.key for field in fields]
+        captured["content"] = content
+        return BytesIO(b"xlsx")
+
+    class FakeRequest:
+        async def body(self):
+            return b"source-xlsx"
+
+    monkeypatch.setattr(data_api, "build_order_info_match_error_report", fake_report)
+
+    response = await data_api.download_order_info_match_error_report_endpoint(
+        request=FakeRequest(),
+        fields="country_code,postal_code",
+        db="db",
+        _=None,
+    )
+
+    assert captured == {
+        "db": "db",
+        "fields": ["country_code", "postal_code"],
+        "content": b"source-xlsx",
+    }
+    assert response.media_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    assert response.headers["content-disposition"] == (
+        "attachment; filename=order-info-match-error-report.xlsx"
+    )
 
 
 @pytest.mark.asyncio

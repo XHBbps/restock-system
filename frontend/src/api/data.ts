@@ -150,6 +150,18 @@ export async function previewOrderInfoMatch(
   return data
 }
 
+export async function downloadOrderInfoMatchErrorReport(
+  file: File,
+  fields: string[]
+): Promise<Blob> {
+  const { data } = await client.post('/api/data/order-info-match/error-report', file, {
+    params: { fields: fields.join(',') },
+    headers: { 'Content-Type': file.type || 'application/octet-stream' },
+    responseType: 'blob',
+  })
+  return data
+}
+
 export async function applyOrderInfoMatch(
   file: File,
   fields: string[]

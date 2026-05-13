@@ -418,7 +418,7 @@ async function reload() {
 ```
 
 当前已按该模式迁移：
-- `DataOrdersView.vue`：订单列表按页返回，并仅对当前页补查 `item_count` / `has_detail`；筛选支持 SKU / 订单号、国家、店铺、平台和包裹状态，平台选项由 `GET /api/data/order-platforms` 基于已落库订单平台去重返回；页面不展示来源和包裹号，也不按包裹号搜索；平台以标签展示，店铺仅显示名称；详情接口默认限定 `source='订单处理'`，前端仅保留 `package_sn` 作为内部精确定位参数；具备 `data_biz:edit` 时显示「编辑」和「信息匹配」，分别调用单条订单 PATCH 与 Excel 模板 / 预览 / 确认导入接口
+- `DataOrdersView.vue`：订单列表按页返回，并仅对当前页补查 `item_count` / `has_detail`；筛选支持 SKU / 订单号、国家、店铺、平台和包裹状态，平台选项由 `GET /api/data/order-platforms` 基于已落库订单平台去重返回；页面不展示来源和包裹号，也不按包裹号搜索；平台以标签展示，店铺仅显示名称；详情接口默认限定 `source='订单处理'`，前端仅保留 `package_sn` 作为内部精确定位参数；具备 `data_biz:edit` 时显示「编辑」和「信息匹配」，分别调用单条订单 PATCH 与 Excel 模板 / 预览 / 确认导入 / 错误文件下载接口
 - `HistoryView.vue`：建议单历史页直接消费 `GET /api/suggestions` 的 `items/total/page/page_size`；状态列使用 `getSuggestionDisplayStatusMeta(status, snapshot_count)` 派生 4 档显示标签（`未提交 / 已导出 / 已归档 / 异常`），状态下拉对应后端 `display_status=pending|exported|archived|error`，由后端统一按 `snapshot_count` 派生过滤，避免前端只过滤当前页造成 `items` 与 `total` 错位；`canDelete(row)` 规则为 `row.snapshot_count === 0`。派生逻辑定义在 `frontend/src/utils/status.ts::deriveSuggestionDisplayStatus`，`SuggestionListView` 与 `SuggestionDetailView` 的状态 tag 共用该函数，避免多处硬编码映射。
 - `DataProductsView.vue`：商品页通过 `listSkuOverview()` 下推 SKU、商品名、启用状态、SKU 类型和分页参数；`/api/data/sku-overview` 以 `commodity_master + sku_config` 为主，商品名、图片、状态、SKU 类型、采购周期优先取商品主数据。SKU 类型展示口径为 `commodity_master.is_group=true` 显示「组合 SKU」、`false` 显示「单品 SKU」、缺少主数据时显示 `-`；筛选项为「全部 / 单品 SKU / 组合 SKU」，接口参数仍使用 `is_group`。listing 仅作为展开明细和销量参考，无 listing 的 SKU 仍可展示
 - `DataInventoryView.vue`：库存页通过 `GET /api/data/inventory/warehouse-groups` 做仓库分组分页，保持仓库展开明细交互；库存明细的 `is_package` 由“是否存在商品主数据 SKU、在线 listing 商品 SKU 或 SKU 映射组件库存 SKU”实时派生，前端按“全部 / 未匹配 / 已匹配”展示筛选
@@ -970,6 +970,7 @@ VITE_API_PROXY_TARGET=http://localhost:8000
 
 | 日期 | 变更 | 相关 PROGRESS 章节 |
 |---|---|---|
+| 2026-05-13 | 订单信息匹配新增错误文件下载接口：校验失败时基于原 Excel 追加「错误原因」列，不写库、不落临时文件 | PROGRESS.md §3.118 |
 | 2026-05-11 | 组合 SKU 补货计算修复：同国家组件信号可组装为 0 时保留已知 0 库存记录；目标仓库为空的组件在途按国家级池参与折算并覆盖同国家仓内结果 | PROGRESS.md §3.116 |
 | 2026-05-11 | 结果准确性修复：`calculation_warnings` 冻结语义、缺库存不按 0 库存计算、单条重算 API、补货快照严格校验和导出诊断列 | PROGRESS.md §3.116 |
 | 2026-05-05 | 商品页新增「SKU类型」筛选与展示；`GET /api/data/sku-overview` 支持按 `commodity_master.is_group` 过滤，并明确 SKU 主数据与在线产品 listing 的关联口径 | PROGRESS.md §3.106 |

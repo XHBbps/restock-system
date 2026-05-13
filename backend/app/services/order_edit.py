@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from copy import copy
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
@@ -10,6 +11,7 @@ from io import BytesIO
 from typing import Any
 
 from openpyxl import Workbook, load_workbook  # type: ignore[import-untyped]
+from openpyxl.styles import Font  # type: ignore[import-untyped]
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +30,8 @@ from app.schemas.data import (
 )
 
 ORDER_NUMBER_HEADER = "订单号"
+ERROR_REASON_HEADER = "错误原因"
+ERROR_REASON_FONT_COLOR = "FF0000"
 DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 NEW_COUNTRY_RE = re.compile(r"^([A-Za-z]{2})\s*-\s*(.+)$")
 
@@ -206,6 +210,37 @@ async def apply_order_info_match(
     )
 
 
+async def build_order_info_match_error_report(
+    db: AsyncSession,
+    *,
+    fields: list[EditableField],
+    content: bytes,
+) -> BytesIO:
+    if not content:
+        raise ValidationFailed("导入文件没有有效数据")
+    try:
+        workbook = load_workbook(BytesIO(content))
+    except Exception as exc:  # pragma: no cover - openpyxl exception types vary
+        raise ValidationFailed("无法读取 Excel 文件") from exc
+
+    try:
+        parsed = await _parse_match_workbook(db, fields=fields, content=content)
+        errors = parsed.errors
+    except ValidationFailed as exc:
+        if exc.message != "表头必须严格等于：订单号 + 勾选字段":
+            raise
+        errors = [OrderInfoMatchError(row=1, field="表头", message=exc.message)]
+
+    if not errors:
+        raise ValidationFailed("当前文件没有匹配错误")
+
+    _append_error_reasons(workbook, errors)
+    stream = BytesIO()
+    workbook.save(stream)
+    stream.seek(0)
+    return stream
+
+
 async def _parse_match_workbook(
     db: AsyncSession,
     *,
@@ -307,6 +342,43 @@ async def _parse_match_workbook(
         update_fields=[field.label for field in fields],
         errors=errors,
     )
+
+
+def _append_error_reasons(workbook: Workbook, errors: list[OrderInfoMatchError]) -> None:
+    sheet = workbook.active
+    error_column = sheet.max_column + 1
+    header_cell = sheet.cell(row=1, column=error_column)
+
+    grouped_errors = _group_error_reasons_by_row(errors)
+    header_error = grouped_errors.pop(1, None)
+    if header_error is None:
+        header_cell.value = ERROR_REASON_HEADER
+        _copy_cell_style(sheet.cell(row=1, column=error_column - 1), header_cell)
+    else:
+        header_cell.value = f"{ERROR_REASON_HEADER}：{header_error}"
+        header_cell.font = Font(color=ERROR_REASON_FONT_COLOR)
+
+    for row_number, reason in sorted(grouped_errors.items()):
+        if row_number < 1:
+            continue
+        cell = sheet.cell(row=row_number, column=error_column)
+        cell.value = reason
+        cell.font = Font(color=ERROR_REASON_FONT_COLOR)
+
+
+def _group_error_reasons_by_row(errors: list[OrderInfoMatchError]) -> dict[int, str]:
+    grouped: dict[int, list[str]] = {}
+    for error in errors:
+        grouped.setdefault(error.row, []).append(f"{error.field}：{error.message}")
+    return {row: "；".join(messages) for row, messages in grouped.items()}
+
+
+def _copy_cell_style(source: Any, target: Any) -> None:
+    if not source.has_style:
+        return
+    target._style = copy(source._style)
+    if source.number_format:
+        target.number_format = source.number_format
 
 
 def _normalize_update_values(

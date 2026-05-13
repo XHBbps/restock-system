@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-05-11（订单页站点本地时间展示：列表和详情新增本地展示时间字段，前端优先显示站点本地下单时间，不改变排序、筛选或补货计算口径。）
+> 最近更新：2026-05-13（订单信息匹配错误文件导出：校验失败后可下载保留原表内容并追加「错误原因」列的 Excel，不改变确认导入规则。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -104,13 +104,19 @@
 - **商品页主数据口径**：`DataProductsView.vue` 通过 `/api/data/sku-overview` 展示 `commodity_master + sku_config`，商品名、图片、状态、SKU 类型、采购周期优先取主数据；SKU 类型按 `commodity_master.is_group` 展示为「单品 SKU / 组合 SKU」，并支持「全部 / 单品 SKU / 组合 SKU」筛选。listing 仅作为展开明细和销量参考，无 listing 的商品 SKU 也会显示。
 - **筛选控件高度统一**：`PageSectionCard` 的 `section-actions` 强制所有控件 32px 高度
 - **订单处理列表展示**：`DataOrdersView.vue` 展示包裹状态、店铺名称、平台、国家、邮编与本地订单明细；`countryCode='ZZ'` 统一显示为 `-`；“下单时间”和详情“最后更新时间”优先使用后端按站点 / 国家时区派生的展示字段，避免美国等站点订单在北京时间口径下显示成未来日期。筛选支持 SKU / 订单号、国家、店铺、平台和包裹状态，其中平台选项来自 `GET /api/data/order-platforms` 返回的已落库订单平台。移动端仅在顶部保留 SKU / 订单号搜索、筛选入口和信息匹配入口，国家、店铺、平台、包裹状态和日期范围收纳到筛选抽屉，并使用底部固定分页栏。来源和包裹号不再作为页面展示或搜索字段，平台字段改为标签样式，店铺仅显示名称，订单明细中的商品 SKU 使用后端落库后的 `commodity_sku`。
-- **订单信息匹配与编辑**：具备 `data_biz:edit` 权限时，订单页提供「编辑」入口和「信息匹配」Excel 导入弹窗，当前仅允许更新国家和邮编；编辑保存只提交实际变更字段，未修改时提示「没有修改内容」且不调用接口；导入国家使用二字码（如 `US`），邮编无格式校验，允许 `11` 等普通文本，也允许留空以清空原值；导入校验通过时展示命中订单号、更新字段和邮编清空提示；人工编辑后的订单由 `manual_edit_locked` 保护，后续同步不覆盖这些字段。店铺、平台、金额、币种、履约渠道、下单时间、最后更新时间等字段仅保留只读展示，不再允许通过订单编辑或信息匹配导入修改。
+- **订单信息匹配与编辑**：具备 `data_biz:edit` 权限时，订单页提供「编辑」入口和「信息匹配」Excel 导入弹窗，当前仅允许更新国家和邮编；编辑保存只提交实际变更字段，未修改时提示「没有修改内容」且不调用接口；导入国家使用二字码（如 `US`），邮编无格式校验，允许 `11` 等普通文本，也允许留空以清空原值；导入校验通过时展示命中订单号、更新字段和邮编清空提示；导入校验失败时保留错误表格，并可通过 `POST /api/data/order-info-match/error-report` 基于原文件下载追加「错误原因」列的 Excel；人工编辑后的订单由 `manual_edit_locked` 保护，后续同步不覆盖这些字段。店铺、平台、金额、币种、履约渠道、下单时间、最后更新时间等字段仅保留只读展示，不再允许通过订单编辑或信息匹配导入修改。
 - **全局参数页补货区域配置**：`GlobalConfigView.vue` 的“补货区域”多选已接入动态国家选项，保存前变更检测与配置变更提示已纳入 `restock_regions`
 - **动态国家选项**：`GET /api/config/country-options` 返回内置国家与订单、仓库、库存、出库在途中已观测国家的并集，并在输出前统一标准化 ISO 二字码别名；内部哨兵 `ZZ` 不会出现在 `items` 或 `unknown_country_codes`。订单、库存、出库、仓库、邮编规则、补货区域和 EU 成员国配置均改用该接口，接口不可用时前端降级使用内置选项。
 - **人工国家名称**：订单编辑输入新国家时可使用 `XX - 中文名`，后端写入 `country_name_override`，后续 `GET /api/config/country-options` 对该国家统一展示人工中文名；信息匹配导入国家只接受二字码。
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`；移动端使用三列 grid 固定商品、国家、可售天数列宽，避免商品信息与国家列挤压
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.118 订单信息匹配错误文件导出（2026-05-13）
+- **后端接口**：`backend/app/api/data.py` 新增 `POST /api/data/order-info-match/error-report?fields=...`，请求体沿用原 Excel 文件；后端复用 `backend/app/services/order_edit.py` 的信息匹配校验逻辑，只生成下载流，不写入数据库、不保存临时文件。
+- **Excel 生成规则**：错误文件保留原 active sheet 的既有内容和样式，在最右侧追加「错误原因」列；行级错误写入对应原始行，同一行多条错误用 `；` 合并，错误原因单元格使用红色字体；空文件或无法读取的非 Excel 文件仍返回普通校验错误。
+- **前端交互**：`frontend/src/views/data/DataOrdersView.vue` 在校验失败结果中新增「下载错误文件」按钮，调用 `frontend/src/api/data.ts` 的 `downloadOrderInfoMatchErrorReport()` 并通过 `triggerBlobDownload()` 下载 `订单信息匹配错误原因.xlsx`；校验成功时不显示该按钮。
+- **测试**：补充 `backend/tests/unit/test_order_edit_service.py`、`backend/tests/unit/test_data_orders_api.py` 与 `frontend/src/views/__tests__/DataOrdersView.test.ts`，覆盖错误 workbook 内容、红色字体、同一行多错误合并、错误报告 endpoint 与前端下载调用。
 
 ### 3.117 订单页站点本地时间展示（2026-05-11）
 - **后端展示字段**：`backend/app/api/data.py` 在订单列表和详情响应中新增 `purchaseDateLocal`、`lastUpdateDateLocal` 与 `displayTimezone`，由 `backend/app/core/timezone.py` 按 `marketplace_id` 优先、`country_code` 兜底推断展示时区；原始 `purchaseDate` / `lastUpdateDate` 继续保持北京时间存储与业务计算口径。
