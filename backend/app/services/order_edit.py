@@ -185,20 +185,19 @@ async def apply_order_info_match(
         )
     await _save_country_overrides(db, parsed.country_overrides)
     updated = 0
-    for amazon_order_id, updates in parsed.updates_by_order.items():
-        rows = (
-            (
-                await db.execute(
-                    select(OrderHeader).where(
-                        OrderHeader.amazon_order_id == amazon_order_id,
-                        OrderHeader.source == ORDER_SOURCE_PACKAGE,
-                    )
-                )
+    order_ids = list(parsed.updates_by_order)
+    if order_ids:
+        result = await db.execute(
+            select(OrderHeader).where(
+                OrderHeader.amazon_order_id.in_(order_ids),
+                OrderHeader.source == ORDER_SOURCE_PACKAGE,
             )
-            .scalars()
-            .all()
         )
+        rows = result.scalars().all()
         for row in rows:
+            updates = parsed.updates_by_order.get(row.amazon_order_id)
+            if updates is None:
+                continue
             _apply_manual_updates(row, updates, user_id=user_id)
             updated += 1
     await db.commit()

@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-05-13（订单信息匹配导入：校验失败态不再展示错误明细表，仅保留错误数量与错误文件下载；国家列按当前 EU 成员配置自动归并为 `EU` 并保留原始成员国审计字段。）
+> 最近更新：2026-05-13（订单信息匹配确认导入：后端改为批量加载命中订单头，前端确认导入请求 timeout 放宽到 5 分钟，避免大文件导入在写库阶段被 30 秒默认超时中断。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -111,6 +111,10 @@
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`；移动端使用三列 grid 固定商品、国家、可售天数列宽，避免商品信息与国家列挤压
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.120 订单信息匹配确认导入超时修复（2026-05-13）
+- **后端性能**：`backend/app/services/order_edit.py` 的 `apply_order_info_match()` 不再按订单号逐条查询订单头，改为一次性按命中订单号集合加载 `order_header`，再在内存中按订单号应用国家 / 邮编更新，减少大文件确认导入时的 N+1 查询。
+- **前端超时**：`frontend/src/api/data.ts` 对 `POST /api/data/order-info-match/apply` 单独设置 5 分钟 timeout，避免数千订单写库期间触发全局 30 秒 Axios timeout 并显示“后端服务不可用”。
 
 ### 3.119 订单信息匹配失败态简化与 EU 导入归并（2026-05-13）
 - **前端交互**：`frontend/src/views/data/DataOrdersView.vue` 的「信息匹配」校验失败态不再渲染行号 / 字段 / 原因明细表，只保留「校验未通过」、错误数量和「下载错误文件」按钮；逐行原因继续通过错误 Excel 查看，成功态的命中订单、更新字段和确认导入逻辑保持不变。

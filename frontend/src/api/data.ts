@@ -72,6 +72,8 @@ export interface OrderInfoMatchApply extends OrderInfoMatchPreview {
   updatedOrderCount: number
 }
 
+const ORDER_INFO_MATCH_APPLY_TIMEOUT_MS = 300000
+
 export interface PageResult<T> {
   items: T[]
   total: number
@@ -172,6 +174,7 @@ export async function applyOrderInfoMatch(
     {
       params: { fields: fields.join(',') },
       headers: { 'Content-Type': file.type || 'application/octet-stream' },
+      timeout: ORDER_INFO_MATCH_APPLY_TIMEOUT_MS,
     }
   )
   return data

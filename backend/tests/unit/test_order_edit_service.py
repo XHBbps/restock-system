@@ -254,8 +254,8 @@ async def test_preview_order_info_match_maps_eu_member_country_from_config() -> 
 
 @pytest.mark.asyncio
 async def test_apply_order_info_match_updates_all_packages_and_sets_manual_lock() -> None:
-    header_1 = SimpleNamespace(manual_edit_fields=None)
-    header_2 = SimpleNamespace(manual_edit_fields=["postal_code"])
+    header_1 = SimpleNamespace(amazon_order_id="ORDER-1", manual_edit_fields=None)
+    header_2 = SimpleNamespace(amazon_order_id="ORDER-1", manual_edit_fields=["postal_code"])
     content = _workbook_bytes(
         ["订单号", "国家", "邮编"],
         [["ORDER-1", "US", "10001"]],
@@ -283,7 +283,7 @@ async def test_apply_order_info_match_updates_all_packages_and_sets_manual_lock(
 
 @pytest.mark.asyncio
 async def test_apply_order_info_match_maps_eu_member_and_keeps_original_country() -> None:
-    header = SimpleNamespace(manual_edit_fields=None)
+    header = SimpleNamespace(amazon_order_id="ORDER-1", manual_edit_fields=None)
     content = _workbook_bytes(
         ["订单号", "国家"],
         [["ORDER-1", "DE"]],
@@ -308,7 +308,11 @@ async def test_apply_order_info_match_maps_eu_member_and_keeps_original_country(
 
 @pytest.mark.asyncio
 async def test_apply_order_info_match_clears_original_country_for_non_eu_country() -> None:
-    header = SimpleNamespace(manual_edit_fields=["country_code"], original_country_code="DE")
+    header = SimpleNamespace(
+        amazon_order_id="ORDER-1",
+        manual_edit_fields=["country_code"],
+        original_country_code="DE",
+    )
     content = _workbook_bytes(
         ["订单号", "国家"],
         [["ORDER-1", "US"]],
@@ -332,7 +336,11 @@ async def test_apply_order_info_match_clears_original_country_for_non_eu_country
 
 @pytest.mark.asyncio
 async def test_apply_order_info_match_keeps_literal_eu_without_original_country() -> None:
-    header = SimpleNamespace(manual_edit_fields=None, original_country_code="DE")
+    header = SimpleNamespace(
+        amazon_order_id="ORDER-1",
+        manual_edit_fields=None,
+        original_country_code="DE",
+    )
     content = _workbook_bytes(
         ["订单号", "国家"],
         [["ORDER-1", "EU"]],
