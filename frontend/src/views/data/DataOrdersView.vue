@@ -580,11 +580,6 @@
               </div>
             </div>
           </div>
-          <el-table v-if="matchPreview?.errors.length" :data="matchPreview.errors" size="small">
-            <el-table-column label="行号" prop="row" width="80" />
-            <el-table-column label="字段" prop="field" width="140" />
-            <el-table-column label="原因" prop="message" min-width="260" show-overflow-tooltip />
-          </el-table>
         </div>
       </div>
       <template #footer>

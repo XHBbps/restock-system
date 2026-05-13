@@ -575,7 +575,7 @@ describe('DataOrdersView', () => {
     ).toBeUndefined()
   })
 
-  it('renders failed match validation result and keeps apply disabled', async () => {
+  it('renders failed match validation summary without row details and keeps apply disabled', async () => {
     mockHasPermission.mockReturnValue(true)
     mockPreviewOrderInfoMatch.mockReset()
     mockPreviewOrderInfoMatch.mockResolvedValueOnce({
@@ -602,8 +602,10 @@ describe('DataOrdersView', () => {
 
     expect(wrapper.text()).toContain('校验未通过')
     expect(wrapper.text()).toContain('错误数量：1')
-    expect(wrapper.text()).toContain('订单号不存在')
     expect(wrapper.text()).toContain('下载错误文件')
+    expect(wrapper.text()).not.toContain('订单号不存在')
+    expect(wrapper.text()).not.toContain('行号')
+    expect(wrapper.text()).not.toContain('原因')
     expect(wrapper.text()).not.toContain('校验通过，可以确认导入')
     expect(
       wrapper.findAll('button').find((button) => button.text() === '确认导入')?.attributes('disabled')

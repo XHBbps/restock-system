@@ -156,6 +156,8 @@ async def sync_inventory_job(ctx: JobContext) -> None:
 
 **EU 国家归一化与新国家发现**：同步层写入订单、商品、库存、出库在途数据时，会按 `global_config.eu_countries` 将成员国映射为字面值 `EU`，并在对应 `original_*` 字段保留原国家码。进入国家选项、成员国配置和补货区域配置的国家码先执行 `trim + uppercase + 两位字母校验 + 别名标准化`，当前 `UK` 统一标准化为 ISO 代码 `GB`。订单处理列表只读取响应顶层 `marketplace` 作为国家来源；该值缺失或无法识别时写内部哨兵 `ZZ` 并记录结构化日志，不再从地址、店铺名或平台名猜测国家；`ZZ` 不暴露为前端国家选项，也不进入补货计算或信息总览统计，空值与非法国家码同样被视为不可统计国家；有效国家码若属于 `eu_countries` 则归并为 `EU` 并在 `original_country_code` 保存原码。全局配置接口保存 `eu_countries` 且实际变化时，会在同一事务内调用 `backfill_eu_country_mapping()` 回填本地历史 `order_header`、`inventory_snapshot_latest`、`in_transit_record`：源国家优先取各表 `original_*` 字段，否则取当前国家字段，并先按同一别名表标准化；源国家属于当前 EU 集合时写映射后国家为 `EU` 且 `original_* = 标准化源国家`，否则恢复为标准化源国家并清空 `original_*`。该回填只改本地库，不调用赛狐 API。
 
+**订单信息匹配导入国家口径**：`backend/app/services/order_edit.py` 的信息匹配 `preview / apply / error-report` 共用同一套 Excel 解析逻辑，并在解析开始时读取一次当前 `global_config.eu_countries`。导入国家列只接受二字码；若标准化后的国家码属于当前 EU 成员集合，则 `apply` 写入 `order_header.country_code='EU'`，并在 `original_country_code` 保留原始成员国；非 EU 国家写入标准化二字码并清空 `original_country_code`；导入字面 `EU` 时保持 `country_code='EU'` 且不写原始成员国。`manual_edit_fields` 只记录业务可编辑字段 `country_code / postal_code`，不暴露 `original_country_code`。
+
 **动态国家选项**：`GET /api/config/country-options` 汇总内置常见国家、`country_name_override` 人工国家名称覆盖与数据库已观测国家，观测来源包括订单 `country_code/original_country_code`、仓库 `country`、库存 `country/original_country`、出库 `target_country/original_target_country`。观测值会先走统一标准化，因此历史 `UK` 只会以 `GB` 输出；接口返回 `builtin`、`observed`、`can_be_eu_member` 与 `unknown_country_codes`，但会隐藏内部哨兵 `ZZ`，即使历史订单已观测到 `ZZ` 也不会出现在 `items` 或 `unknown_country_codes`；订单信息匹配或编辑输入 `XX - 中文名` 时会写入覆盖表，后续所有动态国家下拉展示该中文名；前端订单、库存、出库、仓库、邮编规则、补货区域和 EU 成员国配置均消费该接口；EU 成员国配置不允许 `EU` 与 `ZZ`。内置国家名包含 `GB - 英国`、`CZ - 捷克`、`RO - 罗马尼亚`，以及订单处理列表新观测到的 `AT - 奥地利`、`CH - 瑞士`、`CY - 塞浦路斯`、`DK - 丹麦`、`EE - 爱沙尼亚`、`FI - 芬兰`、`LT - 立陶宛`、`LV - 拉脱维亚`、`MT - 马耳他`、`SI - 斯洛文尼亚`。
 
 **国家时区约束**：`backend/app/core/timezone.py` 的 `country_to_tz()` 会先执行同一国家码别名标准化，因此 `UK` 使用 `GB` 的 `Europe/London`。除 `EU`、`ZZ` 这类非真实国家外，`BUILTIN_COUNTRY_NAMES` 的所有内置国家必须在 `COUNTRY_TO_TIMEZONE` 中配置 IANA 时区；对应单元测试作为防漏 tripwire。仍只是观测到但未内置的未知二字码会回退北京时间，并记录结构化 warning。
@@ -418,7 +420,7 @@ async function reload() {
 ```
 
 当前已按该模式迁移：
-- `DataOrdersView.vue`：订单列表按页返回，并仅对当前页补查 `item_count` / `has_detail`；筛选支持 SKU / 订单号、国家、店铺、平台和包裹状态，平台选项由 `GET /api/data/order-platforms` 基于已落库订单平台去重返回；页面不展示来源和包裹号，也不按包裹号搜索；平台以标签展示，店铺仅显示名称；详情接口默认限定 `source='订单处理'`，前端仅保留 `package_sn` 作为内部精确定位参数；具备 `data_biz:edit` 时显示「编辑」和「信息匹配」，分别调用单条订单 PATCH 与 Excel 模板 / 预览 / 确认导入 / 错误文件下载接口
+- `DataOrdersView.vue`：订单列表按页返回，并仅对当前页补查 `item_count` / `has_detail`；筛选支持 SKU / 订单号、国家、店铺、平台和包裹状态，平台选项由 `GET /api/data/order-platforms` 基于已落库订单平台去重返回；页面不展示来源和包裹号，也不按包裹号搜索；平台以标签展示，店铺仅显示名称；详情接口默认限定 `source='订单处理'`，前端仅保留 `package_sn` 作为内部精确定位参数；具备 `data_biz:edit` 时显示「编辑」和「信息匹配」，分别调用单条订单 PATCH 与 Excel 模板 / 预览 / 确认导入 / 错误文件下载接口；信息匹配校验失败时只展示错误数量和下载按钮，不在弹窗内渲染逐行错误明细
 - `HistoryView.vue`：建议单历史页直接消费 `GET /api/suggestions` 的 `items/total/page/page_size`；状态列使用 `getSuggestionDisplayStatusMeta(status, snapshot_count)` 派生 4 档显示标签（`未提交 / 已导出 / 已归档 / 异常`），状态下拉对应后端 `display_status=pending|exported|archived|error`，由后端统一按 `snapshot_count` 派生过滤，避免前端只过滤当前页造成 `items` 与 `total` 错位；`canDelete(row)` 规则为 `row.snapshot_count === 0`。派生逻辑定义在 `frontend/src/utils/status.ts::deriveSuggestionDisplayStatus`，`SuggestionListView` 与 `SuggestionDetailView` 的状态 tag 共用该函数，避免多处硬编码映射。
 - `DataProductsView.vue`：商品页通过 `listSkuOverview()` 下推 SKU、商品名、启用状态、SKU 类型和分页参数；`/api/data/sku-overview` 以 `commodity_master + sku_config` 为主，商品名、图片、状态、SKU 类型、采购周期优先取商品主数据。SKU 类型展示口径为 `commodity_master.is_group=true` 显示「组合 SKU」、`false` 显示「单品 SKU」、缺少主数据时显示 `-`；筛选项为「全部 / 单品 SKU / 组合 SKU」，接口参数仍使用 `is_group`。listing 仅作为展开明细和销量参考，无 listing 的 SKU 仍可展示
 - `DataInventoryView.vue`：库存页通过 `GET /api/data/inventory/warehouse-groups` 做仓库分组分页，保持仓库展开明细交互；库存明细的 `is_package` 由“是否存在商品主数据 SKU、在线 listing 商品 SKU 或 SKU 映射组件库存 SKU”实时派生，前端按“全部 / 未匹配 / 已匹配”展示筛选
@@ -970,6 +972,7 @@ VITE_API_PROXY_TARGET=http://localhost:8000
 
 | 日期 | 变更 | 相关 PROGRESS 章节 |
 |---|---|---|
+| 2026-05-13 | 订单信息匹配失败态不再展示逐行错误表；Excel 导入国家列按当前 EU 成员配置归并为 `EU`，并维护 `original_country_code` 审计字段 | PROGRESS.md §3.119 |
 | 2026-05-13 | 订单信息匹配新增错误文件下载接口：校验失败时基于原 Excel 追加「错误原因」列，不写库、不落临时文件 | PROGRESS.md §3.118 |
 | 2026-05-11 | 组合 SKU 补货计算修复：同国家组件信号可组装为 0 时保留已知 0 库存记录；目标仓库为空的组件在途按国家级池参与折算并覆盖同国家仓内结果 | PROGRESS.md §3.116 |
 | 2026-05-11 | 结果准确性修复：`calculation_warnings` 冻结语义、缺库存不按 0 库存计算、单条重算 API、补货快照严格校验和导出诊断列 | PROGRESS.md §3.116 |

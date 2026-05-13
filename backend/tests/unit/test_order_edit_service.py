@@ -37,10 +37,16 @@ class _RowsResult:
 
 
 class _FakeSession:
-    def __init__(self, responses):
+    def __init__(self, responses, *, eu_countries=None):
         self.responses = list(responses)
+        self.eu_countries = eu_countries
         self.committed = False
         self.statements = []
+
+    async def get(self, model, identity):
+        if self.eu_countries is None:
+            return None
+        return SimpleNamespace(eu_countries=self.eu_countries)
 
     async def execute(self, statement):
         self.statements.append(statement)
@@ -228,6 +234,25 @@ async def test_preview_order_info_match_allows_blank_postal_code_to_clear() -> N
 
 
 @pytest.mark.asyncio
+async def test_preview_order_info_match_maps_eu_member_country_from_config() -> None:
+    content = _workbook_bytes(
+        ["订单号", "国家"],
+        [["ORDER-1", "DE"]],
+    )
+    db = _FakeSession(_base_parse_responses(), eu_countries=["DE", "FR"])
+
+    result = await preview_order_info_match(
+        db,  # type: ignore[arg-type]
+        fields=parse_requested_fields("country_code"),
+        content=content,
+    )
+
+    assert result.matched_order_count == 1
+    assert result.matched_order_ids == ["ORDER-1"]
+    assert result.errors == []
+
+
+@pytest.mark.asyncio
 async def test_apply_order_info_match_updates_all_packages_and_sets_manual_lock() -> None:
     header_1 = SimpleNamespace(manual_edit_fields=None)
     header_2 = SimpleNamespace(manual_edit_fields=["postal_code"])
@@ -251,5 +276,79 @@ async def test_apply_order_info_match_updates_all_packages_and_sets_manual_lock(
         assert header.manual_edit_locked is True
         assert header.manual_edited_by == 7
         assert header.country_code == "US"
+        assert header.original_country_code is None
         assert header.postal_code == "10001"
     assert header_2.manual_edit_fields == ["country_code", "postal_code"]
+
+
+@pytest.mark.asyncio
+async def test_apply_order_info_match_maps_eu_member_and_keeps_original_country() -> None:
+    header = SimpleNamespace(manual_edit_fields=None)
+    content = _workbook_bytes(
+        ["订单号", "国家"],
+        [["ORDER-1", "DE"]],
+    )
+    db = _FakeSession(
+        _base_parse_responses(extra=[_RowsResult([header])]),
+        eu_countries=["DE", "FR"],
+    )
+
+    result = await apply_order_info_match(
+        db,  # type: ignore[arg-type]
+        fields=parse_requested_fields("country_code"),
+        content=content,
+        user_id=7,
+    )
+
+    assert result.updated_order_count == 1
+    assert header.country_code == "EU"
+    assert header.original_country_code == "DE"
+    assert header.manual_edit_fields == ["country_code"]
+
+
+@pytest.mark.asyncio
+async def test_apply_order_info_match_clears_original_country_for_non_eu_country() -> None:
+    header = SimpleNamespace(manual_edit_fields=["country_code"], original_country_code="DE")
+    content = _workbook_bytes(
+        ["订单号", "国家"],
+        [["ORDER-1", "US"]],
+    )
+    db = _FakeSession(
+        _base_parse_responses(extra=[_RowsResult([header])]),
+        eu_countries=["DE", "FR"],
+    )
+
+    await apply_order_info_match(
+        db,  # type: ignore[arg-type]
+        fields=parse_requested_fields("country_code"),
+        content=content,
+        user_id=7,
+    )
+
+    assert header.country_code == "US"
+    assert header.original_country_code is None
+    assert header.manual_edit_fields == ["country_code"]
+
+
+@pytest.mark.asyncio
+async def test_apply_order_info_match_keeps_literal_eu_without_original_country() -> None:
+    header = SimpleNamespace(manual_edit_fields=None, original_country_code="DE")
+    content = _workbook_bytes(
+        ["订单号", "国家"],
+        [["ORDER-1", "EU"]],
+    )
+    db = _FakeSession(
+        _base_parse_responses(extra=[_RowsResult([header])]),
+        eu_countries=["DE", "FR"],
+    )
+
+    await apply_order_info_match(
+        db,  # type: ignore[arg-type]
+        fields=parse_requested_fields("country_code"),
+        content=content,
+        user_id=7,
+    )
+
+    assert header.country_code == "EU"
+    assert header.original_country_code is None
+    assert header.manual_edit_fields == ["country_code"]

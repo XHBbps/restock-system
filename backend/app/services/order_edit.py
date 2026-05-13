@@ -17,6 +17,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.countries import BUILTIN_COUNTRY_NAMES, country_label, normalize_observed_country_code
+from app.core.country_mapping import apply_eu_mapping, load_eu_countries
 from app.core.exceptions import NotFound, ValidationFailed
 from app.core.timezone import BEIJING, now_beijing
 from app.models.country import CountryNameOverride
@@ -274,6 +275,7 @@ async def _parse_match_workbook(
         )
 
     country_options = await _load_country_options(db)
+    eu_countries = await load_eu_countries(db)
     all_order_ids = set(
         (
             await db.execute(
@@ -327,6 +329,7 @@ async def _parse_match_workbook(
             fields=fields,
             row_number=row_number,
             country_options=country_options,
+            eu_countries=eu_countries,
             require_non_empty=True,
             country_code_only=True,
         )
@@ -389,6 +392,7 @@ def _normalize_update_values(
     country_options: dict[str, str],
     require_non_empty: bool,
     country_code_only: bool,
+    eu_countries: set[str] | None = None,
 ) -> tuple[dict[str, Any], dict[str, str], list[OrderInfoMatchError]]:
     normalized: dict[str, Any] = {}
     country_overrides: dict[str, str] = {}
@@ -409,10 +413,14 @@ def _normalize_update_values(
             if field.kind == "country":
                 if country_code_only:
                     code = _normalize_country_code_value(text_value)
+                    code, original_code = _apply_import_country_mapping(code, eu_countries or set())
                     name = None
                 else:
                     code, name = _normalize_country_value(text_value, country_options)
+                    original_code = None
                 normalized[field.model_field] = code
+                if country_code_only:
+                    normalized["original_country_code"] = original_code
                 if name is not None:
                     country_overrides[code] = name
                     country_options[code] = country_label(code, {code: name})
@@ -432,6 +440,12 @@ def _normalize_country_code_value(value: str) -> str:
     if code is None:
         raise ValueError("国家必须填写有效二字码")
     return code
+
+
+def _apply_import_country_mapping(code: str, eu_countries: set[str]) -> tuple[str, str | None]:
+    mapped = apply_eu_mapping(code, eu_countries) or code
+    original_code = code if mapped == "EU" and code != "EU" else None
+    return mapped, original_code
 
 
 def _normalize_country_value(value: str, options: dict[str, str]) -> tuple[str, str | None]:
@@ -551,7 +565,7 @@ def _apply_manual_updates(header: OrderHeader, updates: dict[str, Any], *, user_
     for field, value in updates.items():
         setattr(header, field, value)
     existing_fields = set(header.manual_edit_fields or [])
-    existing_fields.update(updates)
+    existing_fields.update(field for field in updates if field in FIELD_BY_MODEL)
     header.manual_edit_locked = True
     header.manual_edited_at = now_beijing()
     header.manual_edited_by = user_id
