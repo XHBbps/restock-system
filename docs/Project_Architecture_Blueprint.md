@@ -108,12 +108,12 @@
 |---|---|---|---|---|
 | 1 | `step1_velocity.py` | 近 30 天订单处理列表订单 | `velocity[sku][country]` | 加权日均销量：7日×0.5 + 14日×0.3 + 30日×0.2；仅消费 `source='订单处理'`、`package_status!='has_canceled'` 且国家码可统计的包裹订单；有效数量为 `max(quantity_ordered, 0)`；若 `global_config.restock_regions` 非空，仅这些国家参与补货国家维度计算 |
 | 2 | `step2_sale_days.py` | 库存 + 在途 + velocity + SKU 映射规则 | `sale_days[sku][country]` | `(available + reserved + in_transit) / velocity`；启用映射规则会先将库存组件 SKU 解析到共享组身份，再在同仓库、同组件维度按该国家 velocity 分配共享库存，最后按组合短板换算商品 SKU 视角库存，跨组合替代方案求和；组合 SKU 若已有同国家组件信号但可组装数为 0，仍保留该商品 SKU + 国家已知 0 库存记录；目标仓库 ID 为空的组件在途按国家汇总参与组合折算，并覆盖同国家同仓组合结果；velocity≤0、国家码不可统计或完全缺少库存/在途记录时跳过，缺记录不按 0 库存计算 |
-| 3 | `step3_country_qty.py` | velocity + 库存 + 有效目标库存天数 | `country_qty[sku][country]` | `effective_target_days = target_days + max(demand_date - today, 0)`；仅对可统计且有库存/在途记录的国家输出 `max(0, ceil(effective_target_days × velocity - (available + reserved + in_transit)))`；已知库存记录数量为 0 时可按 0 计算，缺记录视为未知并跳过；runner 会把有效目标天数、国家销量、海外可用/占用/在途/合计、目标库存量、原始补货量、最终补货量、可售天数和补货日期冻结到 `suggestion_item.calculation_inputs_snapshot` |
+| 3 | `step3_country_qty.py` | velocity + 库存 + 有效目标库存天数 | `country_qty[sku][country]` | `effective_target_days = target_days + max(demand_date - today, 0)`；仅对可统计且有库存/在途记录的国家输出 `max(0, ceil(effective_target_days × velocity - (available + reserved + in_transit)))`；已知库存记录数量为 0 时可按 0 计算，缺记录视为未知并跳过；runner 会把有效目标天数、国家销量、海外可用/占用/在途/合计、目标库存量、原始补货量、最终补货量、可售天数和 `demand_date` 口径补货日期冻结到 `suggestion_item.calculation_inputs_snapshot` |
 | 4 | `step4_total.py` | country_qty + velocity + 国内库存 + safety_stock_days | `purchase_qty[sku]` | `max(0, Σcountry_qty − (local.available + local.reserved) + ceil(Σvelocity × safety_stock_days))`；`Σcountry_qty` 使用 Step 3 的补货日期口径，`Σvelocity` 覆盖所有国家，不受 `restock_regions` 限制；`buffer_days` 不参与采购量；runner 会把各国补货量合计、全国家销量合计、安全库存量、国内仓可用/占用/合计、原始采购量和最终采购量冻结到 `suggestion_item.calculation_inputs_snapshot` |
 | 5 | `step5_warehouse_split.py` | country_qty + 有效包裹订单 + 订单头邮编 + 邮编规则 + 国家规则仓映射 | `warehouse_breakdown[country][wh_id]` | 样本来自 `source='订单处理'`、`package_status!='has_canceled'` 且国家码可统计的包裹订单，样本数量为 `max(quantity_ordered, 0)`；邮编优先读取 `order_header.postal_code`；按邮编规则分配到具体仓库，已知部分按命中比例分配，未知部分按该国家已配置邮编规则的仓均分；仅规则仓参与分仓与均分兜底；若无规则仓则该国家不分仓；若配置 `restock_regions`，仅消费这些国家的订单作为分仓依据；同优先级 tied 均分；整数分配使用 floor + 最大余数法，保证仓内合计等于国家补货量 |
-| 6 | `step6_timing.py` | sale_days + lead_time + country_qty | `urgent` + `restock_dates` | `urgent` 仍按任一正补货国家 `sale_days <= lead_time_days`；`restock_date[sku][country] = today + int(sale_days[sku][country]) − lead_time_days`，仅对正补货国家输出，缺少 sale_days 时记为 `null` 并由 `calculation_warnings` 解释原因 |
+| 6 | `step6_timing.py` | sale_days + lead_time + country_qty | `urgent` | `urgent` 按任一正补货国家 `sale_days <= lead_time_days` 判定；Step 6 不再生成用户可见补货日期，`restock_dates` 由 runner / 编辑 / 重算统一写入建议单 `global_config_snapshot.demand_date` |
 
-**运行上下文**：`EngineContext` 包含 `target_days`、`buffer_days`、`lead_time_days`、`safety_stock_days`、`restock_regions`、`eu_countries` 和本次请求的补货日期 `demand_date`。runner 会计算 `demand_days=max(demand_date - today, 0)` 并传给 Step 3 形成有效目标库存天数；`buffer_days` 作为全局配置快照保留，但当前仅用于追溯，不参与 `purchase_qty` 或 `restock_dates` 计算；`restock_regions` 保存前会走统一国家码标准化，`UK` 等别名按 ISO 代码去重为 `GB`；`global_config.eu_countries` 由同步层消费，保存该配置且实际变化时会同步回填历史订单、库存与在途国家码，`global_config_snapshot` 会冻结这些全局参数与 `demand_date` 以便追溯。
+**运行上下文**：`EngineContext` 包含 `target_days`、`buffer_days`、`lead_time_days`、`safety_stock_days`、`restock_regions`、`eu_countries` 和本次请求的补货日期 `demand_date`。runner 会计算 `demand_days=max(demand_date - today, 0)` 并传给 Step 3 形成有效目标库存天数；`demand_date` 同时是唯一用户可见“补货日期”，新建议的 `restock_dates` 与 `calculation_inputs_snapshot.restock.countries[*].restock_date` 均写该值；`buffer_days` 作为全局配置快照保留，但当前仅用于追溯，不参与 `purchase_qty`、`restock_dates` 或紧急程度计算；`restock_regions` 保存前会走统一国家码标准化，`UK` 等别名按 ISO 代码去重为 `GB`；`global_config.eu_countries` 由同步层消费，保存该配置且实际变化时会同步回填历史订单、库存与在途国家码，`global_config_snapshot` 会冻结这些全局参数与 `demand_date` 以便追溯。
 
 **可统计国家边界**：`backend/app/core/countries.py` 统一定义可统计国家，空值、非法国家码和内部哨兵 `ZZ` 均不可进入补货计算与信息总览统计。runner 会在 Step 1/2/3 结果和 Step 5 输入后再次过滤，保证新生成建议单的 `velocity_snapshot`、`sale_days_snapshot`、`country_breakdown`、`warehouse_breakdown`、`allocation_snapshot` 与 `restock_dates` 不包含 `ZZ` 或空/非法国家。
 
@@ -123,7 +123,7 @@
 
 **持久化**：一次完整计算在事务内执行，受 `pg_advisory_xact_lock(7429001)` 保护；runner 不再按 `restock_dates[country] <= demand_date` 过滤补货国家，补货国家是否进入本次建议只由 Step 3 的正补货量与 `restock_regions` 白名单决定。若 `purchase_qty <= 0` 且国家补货合计为 0，则跳过该 SKU；若仅安全库存触发采购但无国家补货量，仍保留为采购-only 条目，并保持 `country_breakdown` / `warehouse_breakdown` / `allocation_snapshot` / `restock_dates` 为空、`total_qty=0`、`urgent=false`；有销量但缺少库存/在途记录的国家不进入 `country_breakdown`，但会在保留的采购或补货条目中写入 `calculation_warnings` 诊断；若无条目则返回 `None`，不归档旧 `draft`、不关闭生成开关、不生成空建议单；成功生成非空建议单后才归档旧 `draft`，写入 `suggestion` / `suggestion_item`，统计 `procurement_item_count`、`restock_item_count`，并由 `calc_engine_job` 将 `global_config.suggestion_generation_enabled` 自动翻 OFF。SKU 级 `lead_time_days=0` 是有效值，runner 使用 `is not None` 判断是否覆盖全局货期。
 
-**快照字段**：`velocity_snapshot`、`sale_days_snapshot`、`allocation_snapshot`、`global_config_snapshot`、`calculation_inputs_snapshot` 均以 JSONB 保存；其中 `velocity_snapshot` / `sale_days_snapshot` 保留已通过可统计国家过滤的 SKU 追溯数据，`global_config_snapshot.demand_date` 记录业务补货日期；`suggestion_item.calculation_inputs_snapshot` 记录 `version=1`、`generated_at`、`demand_date`、`target_days`、`demand_days`、有效目标天数、安全库存天数，以及采购/补货公式输入、原始结果和最终结果；旧建议单该字段允许为空，前端只提示历史建议缺少完整计算依据，不用当前库存补算。`suggestion_item.purchase_qty` 用于采购视图，`country_breakdown` / `warehouse_breakdown` 用于补货视图，`restock_dates` 用于追溯、紧急程度判断与 Excel 导出；`suggestion_item.calculation_warnings` 保存非阻断诊断（`missing_inventory_record`、`country_added_after_generation`、`missing_velocity`、`invalid_sale_days`、`non_reportable_country`），补货快照会把该字段冻结到 `suggestion_snapshot_item.calculation_warnings`。
+**快照字段**：`velocity_snapshot`、`sale_days_snapshot`、`allocation_snapshot`、`global_config_snapshot`、`calculation_inputs_snapshot` 均以 JSONB 保存；其中 `velocity_snapshot` / `sale_days_snapshot` 保留已通过可统计国家过滤的 SKU 追溯数据，`global_config_snapshot.demand_date` 记录业务补货日期；`suggestion_item.calculation_inputs_snapshot` 记录 `version=1`、`generated_at`、`demand_date`、`target_days`、`demand_days`、有效目标天数、安全库存天数，以及采购/补货公式输入、原始结果和最终结果，补货明细中的 `restock_date` 与顶层 `demand_date` 同口径；旧建议单该字段允许为空，前端只提示历史建议缺少完整计算依据，不用当前库存补算。`suggestion_item.purchase_qty` 用于采购视图，`country_breakdown` / `warehouse_breakdown` 用于补货视图，`restock_dates` 用于追溯与 Excel 导出，用户可见值统一为 `demand_date`；`suggestion_item.calculation_warnings` 保存非阻断诊断（`missing_inventory_record`、`country_added_after_generation`、`missing_velocity`、`invalid_sale_days`、`non_reportable_country`），补货快照会把该字段冻结到 `suggestion_snapshot_item.calculation_warnings`。
 
 ### 3.2 数据同步层（app/sync）
 
@@ -308,7 +308,7 @@ _ENDPOINT_RATE_OVERRIDES = {}
 |---|---|---|
 | `suggestion_snapshot` | 一次导出即一个 snapshot；冻结 `snapshot_type`、`version`、`exported_by`、`exported_from_ip`、`global_config_snapshot`、`item_count`、`generation_status`、`file_path`、`file_size_bytes`、`download_count` | FK `suggestion_id`，`UNIQUE(suggestion_id, snapshot_type, version)` |
 | `suggestion_snapshot_item` | snapshot 冻结的条目副本；采购快照保存 `purchase_qty`，补货快照保存 `total_qty` / `country_breakdown` / `warehouse_breakdown` / `restock_dates` / `calculation_warnings` | FK `snapshot_id` ON DELETE CASCADE |
-| `suggestion_item` | 当前 draft 可编辑条目；采购导出状态与补货导出状态独立 | `purchase_qty` 供采购视图；`country_breakdown` / `warehouse_breakdown` 供补货视图；`calculation_inputs_snapshot` 冻结生成时采购量/补货量的公式输入与结果且 PATCH/单条重算不覆盖；`restock_dates` 供追溯、紧急程度判断与 Excel 导出；`calculation_warnings` 供结果诊断与导出确认；`procurement_export_status` / `procurement_exported_snapshot_id` / `procurement_exported_at`，`restock_*` 同构 |
+| `suggestion_item` | 当前 draft 可编辑条目；采购导出状态与补货导出状态独立 | `purchase_qty` 供采购视图；`country_breakdown` / `warehouse_breakdown` 供补货视图；`calculation_inputs_snapshot` 冻结生成时采购量/补货量的公式输入与结果且 PATCH/单条重算不覆盖；`restock_dates` 供追溯与 Excel 导出，用户可见值统一为 `global_config_snapshot.demand_date`；`calculation_warnings` 供结果诊断与导出确认；`procurement_export_status` / `procurement_exported_snapshot_id` / `procurement_exported_at`，`restock_*` 同构 |
 
 **API 端点**：
 
@@ -321,7 +321,7 @@ _ENDPOINT_RATE_OVERRIDES = {}
 | `GET /api/snapshots/{snapshot_id}` | 读取快照详情与冻结条目 |
 | `GET /api/snapshots/{snapshot_id}/download` | 下载 Excel，同时增加下载计数 |
 
-建议单条目另有 `POST /api/suggestions/{suggestion_id}/items/{item_id}/recalculate`，仅允许 `draft` 建议单使用；该端点用当前库存/在途数据和建议单原始 velocity 重算单条 `sale_days_snapshot`、`urgent`、`restock_dates` 与 `calculation_warnings`，不修改 `country_breakdown`、`warehouse_breakdown` 或 `purchase_qty`。
+建议单条目另有 `POST /api/suggestions/{suggestion_id}/items/{item_id}/recalculate`，仅允许 `draft` 建议单使用；该端点用当前库存/在途数据和建议单原始 velocity 重算单条 `sale_days_snapshot`、`urgent`、`restock_dates` 与 `calculation_warnings`，不修改 `country_breakdown`、`warehouse_breakdown` 或 `purchase_qty`。其中 `restock_dates` 只按正补货国家回写建议单 `global_config_snapshot.demand_date`，历史建议缺少 `demand_date` 时保持空值。
 
 **导出流程**：
 
@@ -329,7 +329,7 @@ _ENDPOINT_RATE_OVERRIDES = {}
 2. 校验建议单仍为 `draft`，校验条目属于该建议单，按 `snapshot_type` 校验采购量或补货量；补货快照还会校验国家可报表展示、国家补货量为正整数、仓库拆分为正整数且同国家合计等于国家补货量，允许未拆仓。
 3. 按 `(suggestion_id, snapshot_type)` 独立计算下一版 `version`。
 4. INSERT `suggestion_snapshot(generation_status='generating')` 与 `suggestion_snapshot_item`，构造导出上下文后提交事务，释放建议单与条目行锁。
-5. 事务外调用 `excel_export.py` 根据类型生成不同工作簿，并先写入临时文件再原子替换为最终 Excel 文件：采购为“主数据 + 采购明细”，补货为“主数据 + SKU汇总 + SKU×国家 + SKU×国家×仓库”；“主数据”记录 `global_config_snapshot.demand_date` 对应的“补货日期”，采购/补货明细表不增加补货日期列；补货工作簿在国家与仓库明细中导出 `restock_dates` 对应的“补货日期”，并在 SKU、国家和仓库明细中导出 `calculation_warnings` 诊断文本。
+5. 事务外调用 `excel_export.py` 根据类型生成不同工作簿，并先写入临时文件再原子替换为最终 Excel 文件：采购为“主数据 + 采购明细”，补货为“主数据 + SKU汇总 + SKU×国家 + SKU×国家×仓库”；“主数据”记录 `global_config_snapshot.demand_date` 对应的“补货日期”，采购明细不增加补货日期列；补货工作簿在国家与仓库明细中导出同一个 `demand_date` 对应的“补货日期”，并在 SKU、国家和仓库明细中导出 `calculation_warnings` 诊断文本。
 6. 文件成功落盘后，开启短事务更新 `suggestion_snapshot.generation_status='ready'`、`file_path`、`file_size_bytes`，并更新对应条目的 `{type}_export_status='exported'`、`{type}_exported_snapshot_id`、`{type}_exported_at`。
 7. 下载 `GET /api/snapshots/{snapshot_id}/download` 会对 `export_storage_dir` 和 `snapshot.file_path` 的拼接结果执行 `resolve()` 与目录包含校验；路径穿越或被篡改到根目录外时拒绝下载并记录 `snapshot_download_escaped_path` 日志。
 
@@ -462,7 +462,7 @@ async function reload() {
 | `/restock/suggestions/:id` | `/restock/suggestions/:id/procurement` | `procurement` 建议单采购详情，`restock` 建议单补货详情 |
 | `/restock/history` | `/restock/history/procurement` | `procurement` 采购快照历史，`restock` 补货快照历史 |
 
-`SuggestionTabBar` 根据当前路径切换子路由；父容器负责加载建议单、生成开关、任务进度和公共 header，子视图只负责采购/补货数据展示与导出动作。当前采购建议页在行展开区先解释生成时各国补货量合计、国内仓库存合计和安全库存量，再展示具体数字代入公式（如 `采购量 = 10 - 12 + 20 = 18`）；当前补货建议页在国家明细中先解释有效目标库存、海外库存合计、可售天数和补货日期，再展示具体数字代入公式（如 `补货量 = 120 - 6 = 114`）。若当前数量与 `calculation_inputs_snapshot` 的最终量不同，页面标记“当前已手工调整”并展示生成时/当前数量；旧建议单缺少该字段时只提示“历史建议缺少完整计算依据”，不按当前库存重算。`authGuard` 在 `beforeEach` 中检查登录态与权限，失败时跳转 `/login?redirect=<origin>` 或 `/403`。
+`SuggestionTabBar` 根据当前路径切换子路由；父容器负责加载建议单、生成开关、任务进度和公共 header，子视图只负责采购/补货数据展示与导出动作。当前采购建议页在行展开区先解释生成时各国补货量合计、国内仓库存合计和安全库存量，再展示具体数字代入公式（如 `采购量 = 10 - 12 + 20 = 18`）；当前补货建议页在国家明细中先解释有效目标库存、海外库存合计、可售天数和补货日期，再展示具体数字代入公式（如 `补货量 = 120 - 6 = 114`）。其中“补货日期”优先读取 `calculation_inputs_snapshot.demand_date`，国家明细 `restock_date` 仅作为同口径兼容字段。若当前数量与 `calculation_inputs_snapshot` 的最终量不同，页面标记“当前已手工调整”并展示生成时/当前数量；旧建议单缺少该字段时只提示“历史建议缺少完整计算依据”，不按当前库存重算。`authGuard` 在 `beforeEach` 中检查登录态与权限，失败时跳转 `/login?redirect=<origin>` 或 `/403`。
 
 ### 4.7 共享组件模式
 
@@ -517,7 +517,7 @@ run_engine 读取 global_config：target_days / buffer_days / lead_time_days / s
   ↓
 pg_advisory_xact_lock(7429001)
   ↓
-6 步流水线：velocity → sale_days → country_qty（使用 target_days + demand_days）→ purchase_qty → warehouse_split → urgent/restock_dates
+6 步流水线：velocity → sale_days → country_qty（使用 target_days + demand_days）→ purchase_qty → warehouse_split → urgent；restock_dates 统一写入 demand_date
   ↓
 按正补货量与采购量生成 suggestion_item；若无补货量且无采购量则返回 no_suggestion_needed
   ↓
@@ -591,9 +591,9 @@ UPDATE global_config SET suggestion_generation_enabled=true, generation_toggle_u
 | `inventory_snapshot_latest` | SKU × 仓库最新库存 | `country` 保存映射后国家，`original_country` 保存 EU 合并前国家；`warehouse_id + commodity_sku` 唯一 |
 | `in_transit_record` / `in_transit_item` | 出库 / 在途记录与明细 | `target_country` 保存映射后国家，`original_target_country` 保存 EU 合并前国家 |
 | `suggestion` | 建议单头 | `status IN ('draft','archived','error')`；`procurement_item_count` / `restock_item_count` 分别统计采购与补货需求 SKU 数 |
-| `suggestion_item` | 当前建议条目 | `purchase_qty` 供采购视图；`country_breakdown` / `warehouse_breakdown` 供补货视图；`calculation_inputs_snapshot` 冻结生成时计算依据，可为空以兼容旧建议；`restock_dates` 供追溯、紧急程度判断与 Excel 导出；采购与补货各自拥有 `*_export_status`、`*_exported_snapshot_id`、`*_exported_at` |
+| `suggestion_item` | 当前建议条目 | `purchase_qty` 供采购视图；`country_breakdown` / `warehouse_breakdown` 供补货视图；`calculation_inputs_snapshot` 冻结生成时计算依据，可为空以兼容旧建议；`restock_dates` 供追溯与 Excel 导出，用户可见值统一为 `demand_date`；采购与补货各自拥有 `*_export_status`、`*_exported_snapshot_id`、`*_exported_at` |
 | `suggestion_snapshot` | 导出快照头（§3.6） | `snapshot_type IN ('procurement','restock')`；`UNIQUE(suggestion_id, snapshot_type, version)`；`generation_status IN ('generating','ready','failed')` |
-| `suggestion_snapshot_item` | 导出快照条目副本 | FK `snapshot_id` ON DELETE CASCADE；冻结 `purchase_qty`、`restock_dates` 与补货拆分 JSONB |
+| `suggestion_snapshot_item` | 导出快照条目副本 | FK `snapshot_id` ON DELETE CASCADE；冻结 `purchase_qty`、`restock_dates`（新补货快照为 `demand_date`）与补货拆分 JSONB |
 | `excel_export_log` | Excel 下载审计 | 记录 snapshot、操作者、IP、User-Agent、文件大小等 |
 | `task_run` | 后台任务队列 | `dedupe_key + active status` partial unique index |
 | `order_info_match_import_file` | 订单信息匹配导入文件暂存 | 保存 `apply-task` 上传的 Excel 二进制、字段选择、创建人、过期时间、任务 ID 与消费时间；任务结束后清空内容并由 `retention_purge` 清理 |
@@ -974,6 +974,7 @@ VITE_API_PROXY_TARGET=http://localhost:8000
 
 | 日期 | 变更 | 相关 PROGRESS 章节 |
 |---|---|---|
+| 2026-05-13 | 用户可见“补货日期”统一为生成建议时选择的 `demand_date`；Step 6 仅保留 `urgent` 判定，编辑、重算、快照和 Excel 同步使用该日期 | PROGRESS.md §3.123 |
 | 2026-05-13 | 当前采购建议与当前补货建议展示生成时冻结的计算依据；`suggestion_item.calculation_inputs_snapshot` 新增为 nullable JSONB，runner 写入采购/补货公式输入与结果，PATCH 和单条重算不覆盖 | PROGRESS.md §3.122 |
 | 2026-05-13 | 订单信息匹配失败态不再展示逐行错误表；Excel 导入国家列按当前 EU 成员配置归并为 `EU`，并维护 `original_country_code` 审计字段 | PROGRESS.md §3.119 |
 | 2026-05-13 | 订单信息匹配新增错误文件下载接口：校验失败时基于原 Excel 追加「错误原因」列，不写库、不落临时文件 | PROGRESS.md §3.118 |
@@ -1010,7 +1011,7 @@ VITE_API_PROXY_TARGET=http://localhost:8000
 | 2026-04-24 | 安全库存采购-only 项保留到采购建议：无补货国家命中但 `purchase_qty > 0` 时保留 SKU，补货字段清空且采购/补货计数继续独立 | §3.63 |
 | 2026-04-24 | 前端当前补货页与历史详情弹窗不再展示补货日期；`restock_dates` 仍保留在后端、快照与补货 Excel 导出中 | §3.62 |
 | 2026-04-24 | 旧 `demand_date` 日期筛选：runner 曾按 `restock_dates[country] <= demand_date` 保留补货国家；该口径已由 2026-04-26 的补货日期数量计算取代 | §3.61 / §3.71 |
-| 2026-04-24 | 移除采购日期 `purchase_date`：step6 仅输出 `urgent` / `restock_dates`，采购快照与采购 Excel 不再保存或展示采购日期，采购页同步删除“仅显示紧急（≤30天）”筛选 | §3.59 |
+| 2026-04-24 | 移除采购日期 `purchase_date`：当时 step6 仍输出 `urgent` / `restock_dates`，采购快照与采购 Excel 不再保存或展示采购日期；当前 `restock_dates` 口径已由 2026-05-13 的 `demand_date` 统一取代 | §3.59 / §3.123 |
 | 2026-04-23 | 引擎采购口径调整：`buffer_days` 作为国内仓备货时间参与 `purchase_date`，不再参与 `purchase_qty`；采购量只叠加安全库存天数 | §3.54 |
 | 2026-04-22 | Audit Stage 3 P0 闪电修：engine step4 clamp `purchase_qty >= 0` + DB CheckConstraint；`docs_enabled()` production 硬关忽略 env；CI 加 postgres service 让 integration tests 真跑；`.gitignore` 补 `*.exe` / `*.lnk` 防误 commit | PROGRESS.md 最近更新 |
 | 2026-04-21 | 采购/补货分拆 + 安全库存 + EU 合并 + 嵌套 Tab 视图 | §3.53 |

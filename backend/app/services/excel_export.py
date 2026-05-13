@@ -80,6 +80,11 @@ def _build_meta_sheet(wb: Workbook, ctx: SnapshotExportContext) -> None:
     _autosize(ws)
 
 
+def _ctx_restock_date(ctx: SnapshotExportContext) -> str:
+    value = ctx.global_config.get("demand_date")
+    return value if isinstance(value, str) else ""
+
+
 def build_procurement_workbook(ctx: SnapshotExportContext) -> Workbook:
     wb = Workbook()
     wb.remove(wb.active)
@@ -137,6 +142,7 @@ def build_restock_workbook(ctx: SnapshotExportContext) -> Workbook:
     _autosize(sku_ws)
 
     country_ws = wb.create_sheet("SKU×国家")
+    restock_date = _ctx_restock_date(ctx)
     _apply_header(country_ws, 1, ["SKU", "国家", "补货量", "补货日期", "计算诊断"])
     for item in ctx.items:
         for country, qty in (item.get("country_breakdown") or {}).items():
@@ -145,7 +151,7 @@ def build_restock_workbook(ctx: SnapshotExportContext) -> Workbook:
                     item["commodity_sku"],
                     country,
                     qty,
-                    (item.get("restock_dates") or {}).get(country) or "",
+                    restock_date,
                     _format_warnings(item.get("calculation_warnings") or [], country=country),
                 ]
             )
@@ -162,7 +168,7 @@ def build_restock_workbook(ctx: SnapshotExportContext) -> Workbook:
                         country,
                         warehouse_id,
                         qty,
-                        (item.get("restock_dates") or {}).get(country) or "",
+                        restock_date,
                         _format_warnings(item.get("calculation_warnings") or [], country=country),
                     ]
                 )

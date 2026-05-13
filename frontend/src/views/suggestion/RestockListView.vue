@@ -333,6 +333,11 @@ function restockCalculation(item: SuggestionItem, country: string) {
   return item.calculation_inputs_snapshot?.restock.countries?.[country] ?? null
 }
 
+function restockDateForCalculation(item: SuggestionItem, country: string): string | null {
+  const calculation = restockCalculation(item, country)
+  return item.calculation_inputs_snapshot?.demand_date || calculation?.restock_date || null
+}
+
 function isRestockCountryAdjusted(item: SuggestionItem, country: string): boolean {
   const generated = restockCalculation(item, country)?.final_restock_qty
   const current = Number(item.country_breakdown?.[country] || 0)
@@ -359,7 +364,7 @@ function restockCalculationDisplay(item: SuggestionItem, country: string): Calcu
     inputs: [
       `有效目标库存 = ${formatNumber(calculation.effective_target_days)} 天 × 日均销量 ${formatNumber(calculation.daily_velocity)} = ${formatNumber(calculation.target_stock_qty)}`,
       `海外库存合计 = ${formatNumber(calculation.overseas_stock_total)}（可用 ${formatNumber(calculation.overseas_available)}，占用 ${formatNumber(calculation.overseas_reserved)}，在途 ${formatNumber(calculation.in_transit)}）`,
-      `可售天数 = ${formatNumber(calculation.sale_days)}，补货日期 = ${calculation.restock_date || '-'}`,
+      `可售天数 = ${formatNumber(calculation.sale_days)}，补货日期 = ${restockDateForCalculation(item, country) || '-'}`,
     ],
     formula: `补货量 = ${formatNumber(calculation.target_stock_qty)} - ${formatNumber(calculation.overseas_stock_total)} = ${formatNumber(calculation.raw_restock_qty)}`,
     generatedLine:

@@ -63,7 +63,7 @@ class _FakeSuggestion:
     def __init__(self, status: str = "draft") -> None:
         self.id = 1
         self.status = status
-        self.global_config_snapshot = {"lead_time_days": 20}
+        self.global_config_snapshot = {"lead_time_days": 20, "demand_date": "2026-04-30"}
 
 
 class _FakeItem:
@@ -183,8 +183,7 @@ async def test_suggestion_patch_recomputes_urgent_from_sale_days_and_lead_time(m
     update_stmt = db.executed_statements[-1]
     normalized_values = _normalize_update_values(update_stmt)
     assert normalized_values["urgent"] is True
-    assert normalized_values["restock_dates"]["US"] is not None
-    assert normalized_values["restock_dates"]["UK"] is not None
+    assert normalized_values["restock_dates"] == {"US": "2026-04-30", "UK": "2026-04-30"}
 
 
 async def test_suggestion_patch_ignores_missing_sale_days_when_recomputing_urgent(monkeypatch) -> None:
@@ -211,11 +210,10 @@ async def test_suggestion_patch_ignores_missing_sale_days_when_recomputing_urgen
     update_stmt = db.executed_statements[-1]
     normalized_values = _normalize_update_values(update_stmt)
     assert normalized_values["urgent"] is False
-    assert normalized_values["restock_dates"]["US"] is not None
-    assert normalized_values["restock_dates"]["UK"] is None
+    assert normalized_values["restock_dates"] == {"US": "2026-04-30", "UK": "2026-04-30"}
 
 
-async def test_suggestion_patch_uses_original_snapshot_date(monkeypatch) -> None:
+async def test_suggestion_patch_uses_demand_date(monkeypatch) -> None:
     import app.api.suggestion as suggestion_module
 
     async def _fake_enrich_item(*_args: Any, **_kwargs: Any) -> None:
@@ -228,6 +226,7 @@ async def test_suggestion_patch_uses_original_snapshot_date(monkeypatch) -> None
     suggestion.global_config_snapshot = {
         "lead_time_days": 20,
         "snapshot_at": "2026-04-01T10:00:00+08:00",
+        "demand_date": "2026-05-30",
     }
     item = _FakeItem()
     item.sale_days_snapshot = {"US": 20.0}
@@ -239,7 +238,29 @@ async def test_suggestion_patch_uses_original_snapshot_date(monkeypatch) -> None
     await patch_item(patch=patch, suggestion_id=1, item_id=10, db=db, _={})  # type: ignore[arg-type]
 
     values = _normalize_update_values(db.executed_statements[-1])
-    assert values["restock_dates"] == {"US": "2026-04-01"}
+    assert values["restock_dates"] == {"US": "2026-05-30"}
+
+
+async def test_suggestion_patch_keeps_empty_date_when_demand_date_missing(monkeypatch) -> None:
+    import app.api.suggestion as suggestion_module
+
+    async def _fake_enrich_item(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    async def _fake_lead_time(*_args: Any, **_kwargs: Any) -> int:
+        return 20
+
+    suggestion = _FakeSuggestion()
+    suggestion.global_config_snapshot = {"lead_time_days": 20}
+    db = _FakeSession([suggestion, _FakeItem(), None])
+    patch = SuggestionItemPatch(country_breakdown={"US": 1})
+    monkeypatch.setattr(suggestion_module, "_enrich_item", _fake_enrich_item)
+    monkeypatch.setattr(suggestion_module, "_resolve_effective_lead_time_days", _fake_lead_time)
+
+    await patch_item(patch=patch, suggestion_id=1, item_id=10, db=db, _={})  # type: ignore[arg-type]
+
+    values = _normalize_update_values(db.executed_statements[-1])
+    assert values["restock_dates"] == {"US": None}
 
 
 async def test_suggestion_patch_marks_added_country_warning(monkeypatch) -> None:
@@ -306,6 +327,7 @@ async def test_recalculate_item_updates_only_timing_diagnostics(monkeypatch) -> 
     assert "calculation_inputs_snapshot" not in values
     assert values["sale_days_snapshot"] == {"US": 15.0}
     assert values["urgent"] is True
+    assert values["restock_dates"] == {"US": "2026-04-30", "GB": "2026-04-30"}
     assert values["calculation_warnings"][0]["code"] == "missing_inventory_record"
     assert values["calculation_warnings"][0]["country"] == "GB"
 

@@ -15,6 +15,7 @@ from app.core.logging import get_logger
 from app.core.restock_regions import resolve_allowed_restock_regions
 from app.core.timezone import now_beijing
 from app.db.session import async_session_factory
+from app.engine.restock_dates import demand_restock_dates
 from app.engine.step1_velocity import run_step1
 from app.engine.step2_sale_days import run_step2
 from app.engine.step3_country_qty import compute_country_qty
@@ -309,6 +310,7 @@ async def run_engine(
                 lead_time_days=lead_time,
                 today=today,
             )
+            restock_dates = demand_restock_dates(sku_country_qty, demand_date)
             calculation_warnings = build_calculation_warnings(
                 country_qty_for_sku=sku_country_qty,
                 sale_days_for_sku=sale_days.get(sku, {}),
@@ -327,7 +329,7 @@ async def run_engine(
                 inventory_for_sku=inventory.get(sku, {}),
                 local_stock_for_sku=local_stock.get(sku),
                 sale_days_for_sku=sale_days.get(sku, {}),
-                restock_dates_for_sku=timing.restock_dates or {},
+                restock_dates_for_sku=restock_dates,
                 purchase_qty=purchase_qty,
             )
 
@@ -344,7 +346,7 @@ async def run_engine(
                     "calculation_inputs_snapshot": calculation_inputs_snapshot,
                     "urgent": timing.urgent,
                     "purchase_qty": purchase_qty,
-                    "restock_dates": timing.restock_dates or {},
+                    "restock_dates": restock_dates,
                 }
             )
 

@@ -17,6 +17,7 @@ from app.core.countries import is_reportable_country_code
 from app.core.logging import get_logger
 from app.core.permissions import RESTOCK_EXPORT, RESTOCK_VIEW
 from app.core.timezone import now_beijing
+from app.engine.restock_dates import demand_restock_dates
 from app.models.excel_export_log import ExcelExportLog
 from app.models.product_listing import ProductListing
 from app.models.suggestion import Suggestion, SuggestionItem
@@ -170,6 +171,10 @@ async def _create_snapshot(
     export_items: list[dict[str, Any]] = []
     for item in items:
         commodity_name, main_image_url = product_map.get(item.commodity_sku, (None, None))
+        restock_dates = demand_restock_dates(
+            item.country_breakdown or {},
+            (suggestion.global_config_snapshot or {}).get("demand_date"),
+        )
         db.add(
             SuggestionSnapshotItem(
                 snapshot_id=snapshot.id,
@@ -177,7 +182,7 @@ async def _create_snapshot(
                 total_qty=item.total_qty,
                 country_breakdown=item.country_breakdown,
                 warehouse_breakdown=item.warehouse_breakdown,
-                restock_dates=item.restock_dates or {},
+                restock_dates=restock_dates,
                 purchase_qty=item.purchase_qty if snapshot_type == "procurement" else None,
                 urgent=item.urgent,
                 velocity_snapshot=item.velocity_snapshot,
@@ -195,7 +200,7 @@ async def _create_snapshot(
                 "total_qty": item.total_qty,
                 "country_breakdown": item.country_breakdown,
                 "warehouse_breakdown": item.warehouse_breakdown,
-                "restock_dates": item.restock_dates or {},
+                "restock_dates": restock_dates,
                 "purchase_qty": item.purchase_qty,
                 "urgent": item.urgent,
                 "velocity_snapshot": item.velocity_snapshot,

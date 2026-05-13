@@ -16,9 +16,9 @@ from app.core.exceptions import ConflictError, NotFound, ValidationFailed
 from app.core.permissions import HISTORY_DELETE, RESTOCK_OPERATE, RESTOCK_VIEW
 from app.core.query import escape_like
 from app.core.timezone import BEIJING, now_beijing
+from app.engine.restock_dates import demand_restock_dates
 from app.engine.step2_sale_days import run_step2
 from app.engine.step6_timing import (
-    compute_restock_dates,
     has_urgent_sale_days,
     positive_qty_countries,
 )
@@ -287,7 +287,6 @@ async def patch_item(
         updates["allocation_snapshot"] = None
     if patch.country_breakdown is not None:
         lead_time_days = await _resolve_effective_lead_time_days(db, parent, item)
-        base_date = _suggestion_base_date(parent)
         added_countries = {
             country
             for country, qty in effective_country_breakdown.items()
@@ -298,11 +297,9 @@ async def patch_item(
             lead_time_days=lead_time_days,
             countries=positive_qty_countries(effective_country_breakdown),
         )
-        updates["restock_dates"] = compute_restock_dates(
-            item.sale_days_snapshot or {},
-            country_qty_for_sku=effective_country_breakdown,
-            lead_time_days=lead_time_days,
-            today=base_date,
+        updates["restock_dates"] = demand_restock_dates(
+            effective_country_breakdown,
+            _suggestion_demand_date(parent),
         )
         updates["calculation_warnings"] = build_calculation_warnings(
             country_qty_for_sku=effective_country_breakdown,
@@ -361,7 +358,6 @@ async def recalculate_item(
     }
     lead_time_days = await _resolve_effective_lead_time_days(db, parent, item)
     country_breakdown = item.country_breakdown or {}
-    base_date = _suggestion_base_date(parent)
     updates: SuggestionItemUpdates = {
         "sale_days_snapshot": recalculated_sale_days,
         "urgent": has_urgent_sale_days(
@@ -369,11 +365,9 @@ async def recalculate_item(
             lead_time_days=lead_time_days,
             countries=positive_qty_countries(country_breakdown),
         ),
-        "restock_dates": compute_restock_dates(
-            recalculated_sale_days,
-            country_qty_for_sku=country_breakdown,
-            lead_time_days=lead_time_days,
-            today=base_date,
+        "restock_dates": demand_restock_dates(
+            country_breakdown,
+            _suggestion_demand_date(parent),
         ),
         "calculation_warnings": build_calculation_warnings(
             country_qty_for_sku=country_breakdown,
@@ -445,17 +439,9 @@ async def _resolve_effective_lead_time_days(
     return 50
 
 
-def _suggestion_base_date(suggestion: Suggestion) -> date_type:
-    snapshot_at = (suggestion.global_config_snapshot or {}).get("snapshot_at")
-    if isinstance(snapshot_at, str) and snapshot_at.strip():
-        try:
-            return datetime.fromisoformat(snapshot_at).date()
-        except ValueError:
-            pass
-    created_at = getattr(suggestion, "created_at", None)
-    if isinstance(created_at, datetime):
-        return created_at.date()
-    return now_beijing().date()
+def _suggestion_demand_date(suggestion: Suggestion) -> str | None:
+    demand_date = (suggestion.global_config_snapshot or {}).get("demand_date")
+    return demand_date.strip() if isinstance(demand_date, str) and demand_date.strip() else None
 
 
 def _is_positive_number(value: Any) -> bool:

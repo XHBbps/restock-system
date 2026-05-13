@@ -131,8 +131,8 @@ def test_restock_country_and_warehouse_rows(restock_context):
     assert country_ws.max_column == 5
     assert warehouse_ws.max_row == 4
     assert warehouse_ws.max_column == 6
-    assert country_ws.cell(row=2, column=4).value == "2026-04-24"
-    assert warehouse_ws.cell(row=2, column=5).value == "2026-04-24"
+    assert country_ws.cell(row=2, column=4).value == "2026-04-30"
+    assert warehouse_ws.cell(row=2, column=5).value == "2026-04-30"
     assert country_ws.cell(row=3, column=5).value == "GB: 缺少该国家的销量速度"
 
 

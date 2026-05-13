@@ -165,7 +165,7 @@ async def test_run_engine_writes_purchase_fields_and_item_counts() -> None:
     item = captured["items"][0]
     assert item["total_qty"] == 100
     assert item["purchase_qty"] == 145
-    assert item["restock_dates"] == {"US": (_today() - timedelta(days=20)).isoformat()}
+    assert item["restock_dates"] == {"US": demand_date.isoformat()}
 
 
 @pytest.mark.asyncio
@@ -244,7 +244,7 @@ async def test_run_engine_writes_calculation_inputs_snapshot() -> None:
         "raw_restock_qty": 10,
         "final_restock_qty": 10,
         "sale_days": 5.0,
-        "restock_date": (_today() - timedelta(days=5)).isoformat(),
+        "restock_date": _today().isoformat(),
     }
 
 
@@ -277,7 +277,7 @@ async def test_run_engine_respects_zero_sku_lead_time() -> None:
     assert result == 123
     item = captured["items"][0]
     assert item["urgent"] is False
-    assert item["restock_dates"] == {"US": (_today() + timedelta(days=5)).isoformat()}
+    assert item["restock_dates"] == {"US": _today().isoformat()}
 
 
 @pytest.mark.asyncio
@@ -395,7 +395,7 @@ async def test_run_engine_filters_unknown_countries_from_snapshots_and_breakdown
     assert item["country_breakdown"] == {"US": 100}
     assert item["sale_days_snapshot"] == {"US": 30.0}
     assert item["velocity_snapshot"] == {"US": 3.0}
-    assert item["restock_dates"] == {"US": (_today() - timedelta(days=20)).isoformat()}
+    assert item["restock_dates"] == {"US": _today().isoformat()}
 
 
 @pytest.mark.asyncio
@@ -462,7 +462,7 @@ async def test_run_engine_velocity_unaffected_by_restock_regions() -> None:
     # purchase_qty = 180 - 0 + (3+2)*15 = 255
     # 关键：Σvelocity 含 JP 的 2/天，否则会少算 2*15=30，结果变 225
     assert item["purchase_qty"] == 255, "purchase_qty 应覆盖所有国家动销；若仅算白名单则为 225"
-    assert item["restock_dates"] == {"US": (_today() - timedelta(days=20)).isoformat()}
+    assert item["restock_dates"] == {"US": demand_date.isoformat()}
 
 
 @pytest.mark.asyncio
@@ -678,7 +678,7 @@ async def test_run_engine_keeps_countries_after_restock_date() -> None:
     assert result == 123
     item = captured["items"][0]
     assert item["country_breakdown"] == {"US": 60, "GB": 120}
-    assert item["restock_dates"]["GB"] == (_today() + timedelta(days=50)).isoformat()
+    assert item["restock_dates"]["GB"] == _today().isoformat()
     assert item["total_qty"] == 180
     assert item["purchase_qty"] == 225
 

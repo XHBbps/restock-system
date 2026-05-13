@@ -30,6 +30,7 @@ async def seed_suggestion(db_session):
             "buffer_days": 7,
             "lead_time_days": 14,
             "safety_stock_days": 15,
+            "demand_date": "2026-04-30",
         },
         total_items=3,
         procurement_item_count=3,
@@ -299,7 +300,7 @@ async def test_snapshot_detail(client, seed_suggestion, ensure_global_config, mo
     assert len(body["items"]) == 2
     assert body["items"][0]["purchase_qty"] is not None
     assert "purchase_date" not in body["items"][0]
-    assert body["items"][0]["restock_dates"]["US"] == "2026-04-21"
+    assert body["items"][0]["restock_dates"]["US"] == "2026-04-30"
     assert body["items"][0]["calculation_warnings"][0]["code"] == "missing_velocity"
 
 
@@ -325,7 +326,7 @@ async def test_restock_snapshot_freezes_restock_dates(
             select(SuggestionSnapshotItem).where(SuggestionSnapshotItem.snapshot_id == created["id"])
         )
     ).scalar_one()
-    assert snapshot_item.restock_dates["US"] == "2026-04-21"
+    assert snapshot_item.restock_dates["US"] == "2026-04-30"
     assert snapshot_item.calculation_warnings[0]["code"] == "missing_velocity"
 
 
