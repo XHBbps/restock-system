@@ -9,9 +9,11 @@ from app.engine.sku_mapping import MappingComponent, WarehouseStock
 from app.engine.step2_sale_days import (
     compute_sale_days,
     load_in_transit,
+    load_oversea_inventory,
     merge_inventory,
     run_step2,
 )
+from app.engine.warehouse_scope import LOCAL_WAREHOUSE_TYPES
 
 
 class _RowsResult:
@@ -30,6 +32,30 @@ class _FakeDb:
     async def execute(self, stmt):
         self.statements.append(stmt)
         return _RowsResult(self.rows)
+
+
+def _compiled_params(stmt):
+    return stmt.compile().params
+
+
+def _has_type_param(params, values: tuple[int, ...]) -> bool:
+    expected = sorted(values)
+    return any(
+        isinstance(value, (list, tuple)) and sorted(value) == expected
+        for value in params.values()
+    )
+
+
+@pytest.mark.asyncio
+async def test_load_oversea_inventory_excludes_default_and_domestic_warehouses() -> None:
+    db = _FakeDb([])
+
+    result = await load_oversea_inventory(db, ["sku-A"])
+
+    assert result == {}
+    compiled_sql = str(db.statements[0])
+    assert "warehouse.type NOT IN" in compiled_sql
+    assert _has_type_param(_compiled_params(db.statements[0]), LOCAL_WAREHOUSE_TYPES)
 
 
 @pytest.mark.asyncio
@@ -70,6 +96,41 @@ async def test_run_step2_keeps_known_zero_inventory_records_for_composite_skus()
 
     assert inventory["A"]["US"].total == 0
     assert sale_days["A"]["US"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_run_step2_excludes_default_and_domestic_component_warehouse_stock() -> None:
+    db = _FakeDb([])
+    velocity = {"A": {"US": 1.0}}
+    inventory_loader = AsyncMock(return_value={})
+    warehouse_transit_loader = AsyncMock(return_value={})
+
+    with (
+        patch("app.engine.step2_sale_days.load_oversea_inventory", AsyncMock(return_value={})),
+        patch("app.engine.step2_sale_days.load_in_transit", AsyncMock(return_value={})),
+        patch(
+            "app.engine.step2_sale_days.load_active_mapping_rules",
+            AsyncMock(
+                return_value={"A": [[MappingComponent(inventory_sku="B", quantity=1)]]}
+            ),
+        ),
+        patch("app.engine.step2_sale_days.load_inventory_totals_by_warehouse", inventory_loader),
+        patch(
+            "app.engine.step2_sale_days.load_in_transit_totals_by_warehouse",
+            warehouse_transit_loader,
+        ),
+        patch(
+            "app.engine.step2_sale_days.load_in_transit_totals_by_country",
+            AsyncMock(return_value={}),
+        ),
+    ):
+        await run_step2(db, velocity, ["A"])
+
+    assert inventory_loader.await_args.kwargs["exclude_warehouse_types"] == LOCAL_WAREHOUSE_TYPES
+    assert (
+        warehouse_transit_loader.await_args.kwargs["exclude_warehouse_types"]
+        == LOCAL_WAREHOUSE_TYPES
+    )
 
 
 @pytest.mark.asyncio
@@ -211,4 +272,7 @@ async def test_load_in_transit_reads_synced_tables_and_aggregates_goods() -> Non
     compiled_sql = str(db.statements[0])
     assert "in_transit_item" in compiled_sql
     assert "in_transit_record" in compiled_sql
+    assert "warehouse" in compiled_sql
+    assert "warehouse.type NOT IN" in compiled_sql
+    assert _has_type_param(_compiled_params(db.statements[0]), LOCAL_WAREHOUSE_TYPES)
     assert "suggestion_item" not in compiled_sql

@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.countries import is_reportable_country_code
 from app.core.timezone import BEIJING
+from app.engine.warehouse_scope import LOCAL_WAREHOUSE_TYPES
 from app.engine.zipcode_matcher import ZipcodeRule, match_warehouses
 from app.models.order import ORDER_SOURCE_PACKAGE, OrderHeader, OrderItem
 from app.models.warehouse import Warehouse
@@ -42,7 +43,7 @@ async def load_country_warehouses(
     """加载每个国家可参与 Step 5 的规则仓。
 
     只有同时满足以下条件的仓才参与分仓：
-    - 海外仓（`type != 1`）
+    - 海外仓（排除默认仓和国内仓，即 `type not in (0, 1)`）
     - 仓库已配置国家
     - 该国家下至少存在一条邮编规则指向该仓
     """
@@ -50,7 +51,7 @@ async def load_country_warehouses(
         await db.execute(
             select(ZipcodeRuleModel.country, ZipcodeRuleModel.warehouse_id)
             .join(Warehouse, Warehouse.id == ZipcodeRuleModel.warehouse_id)
-            .where(Warehouse.type != 1)
+            .where(~Warehouse.type.in_(LOCAL_WAREHOUSE_TYPES))
             .where(Warehouse.country.is_not(None))
             .where(Warehouse.country == ZipcodeRuleModel.country)
             .distinct()

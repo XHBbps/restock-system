@@ -15,6 +15,7 @@ from app.engine.sku_mapping import (
     load_active_mapping_rules,
     load_inventory_totals_by_warehouse,
 )
+from app.engine.warehouse_scope import LOCAL_WAREHOUSE_TYPES
 from app.models.inventory import InventorySnapshotLatest
 from app.models.warehouse import Warehouse
 
@@ -35,7 +36,7 @@ async def load_local_inventory(
             func.sum(InventorySnapshotLatest.reserved).label("reserv"),
         )
         .join(Warehouse, Warehouse.id == InventorySnapshotLatest.warehouse_id)
-        .where(Warehouse.type == 1)
+        .where(Warehouse.type.in_(LOCAL_WAREHOUSE_TYPES))
         .group_by(InventorySnapshotLatest.commodity_sku)
     )
     if commodity_skus is not None:
@@ -70,7 +71,7 @@ async def load_local_inventory(
         component_inventory = await load_inventory_totals_by_warehouse(
             db,
             component_query_skus,
-            warehouse_type=1,
+            warehouse_types=LOCAL_WAREHOUSE_TYPES,
             sku_to_group_key=sku_to_group_key,
         )
         mapped_totals = compute_mapped_stock_total_by_sku(

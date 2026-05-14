@@ -34,7 +34,7 @@ InventoryMap: TypeAlias = dict[str, dict[str, InventoryStock]]  # sku → countr
 
 @dataclass(frozen=True, slots=True)
 class LocalStock:
-    """本地主仓（type=1）库存快照。
+    """国内侧仓库（type in 0/1）库存快照。
 
     替换原 step4 ``load_local_inventory`` 的 ``dict[str, int]`` with keys
     ``{"available","reserved"}``。本地仓不含 in_transit（in_transit 属于

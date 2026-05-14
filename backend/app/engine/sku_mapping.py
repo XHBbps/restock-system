@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Collection
 from dataclasses import dataclass
 from math import floor
 
@@ -32,6 +33,18 @@ ComponentConsumers = dict[str, list[str]]
 class WarehouseStock:
     country: str | None
     total: int
+
+
+def _type_filter_values(
+    single_type: int | None,
+    type_set: Collection[int] | None,
+) -> tuple[int, ...]:
+    values: list[int] = []
+    if single_type is not None:
+        values.append(single_type)
+    if type_set is not None:
+        values.extend(type_set)
+    return tuple(dict.fromkeys(values))
 
 
 def mapping_component_consumers(rules: MappingRules) -> ComponentConsumers:
@@ -200,7 +213,9 @@ async def load_inventory_totals_by_warehouse(
     inventory_skus: list[str],
     *,
     warehouse_type: int | None = None,
+    warehouse_types: Collection[int] | None = None,
     exclude_warehouse_type: int | None = None,
+    exclude_warehouse_types: Collection[int] | None = None,
     sku_to_group_key: dict[str, str] | None = None,
 ) -> dict[tuple[str, str], WarehouseStock]:
     if not inventory_skus:
@@ -222,10 +237,12 @@ async def load_inventory_totals_by_warehouse(
             InventorySnapshotLatest.country,
         )
     )
-    if warehouse_type is not None:
-        stmt = stmt.where(Warehouse.type == warehouse_type)
-    if exclude_warehouse_type is not None:
-        stmt = stmt.where(Warehouse.type != exclude_warehouse_type)
+    included_types = _type_filter_values(warehouse_type, warehouse_types)
+    excluded_types = _type_filter_values(exclude_warehouse_type, exclude_warehouse_types)
+    if included_types:
+        stmt = stmt.where(Warehouse.type.in_(included_types))
+    if excluded_types:
+        stmt = stmt.where(~Warehouse.type.in_(excluded_types))
     rows = (await db.execute(stmt)).all()
     sku_groups = sku_to_group_key or {}
     result: dict[tuple[str, str], WarehouseStock] = {}
@@ -247,7 +264,9 @@ async def load_in_transit_totals_by_warehouse(
     inventory_skus: list[str],
     *,
     warehouse_type: int | None = None,
+    warehouse_types: Collection[int] | None = None,
     exclude_warehouse_type: int | None = None,
+    exclude_warehouse_types: Collection[int] | None = None,
     sku_to_group_key: dict[str, str] | None = None,
 ) -> dict[tuple[str, str], WarehouseStock]:
     """Load component in-transit quantities that have target warehouse IDs."""
@@ -275,10 +294,12 @@ async def load_in_transit_totals_by_warehouse(
             InTransitRecord.target_country,
         )
     )
-    if warehouse_type is not None:
-        stmt = stmt.where(Warehouse.type == warehouse_type)
-    if exclude_warehouse_type is not None:
-        stmt = stmt.where(Warehouse.type != exclude_warehouse_type)
+    included_types = _type_filter_values(warehouse_type, warehouse_types)
+    excluded_types = _type_filter_values(exclude_warehouse_type, exclude_warehouse_types)
+    if included_types:
+        stmt = stmt.where(Warehouse.type.in_(included_types))
+    if excluded_types:
+        stmt = stmt.where(~Warehouse.type.in_(excluded_types))
     rows = (await db.execute(stmt)).all()
     sku_groups = sku_to_group_key or {}
     result: dict[tuple[str, str], WarehouseStock] = {}

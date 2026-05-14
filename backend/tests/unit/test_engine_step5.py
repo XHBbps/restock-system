@@ -11,6 +11,7 @@ from app.engine.step5_warehouse_split import (
     load_country_warehouses,
     split_country_qty,
 )
+from app.engine.warehouse_scope import LOCAL_WAREHOUSE_TYPES
 from app.engine.zipcode_matcher import ZipcodeRule
 
 
@@ -543,3 +544,9 @@ async def test_load_country_warehouses_only_keeps_rule_warehouses_and_deduplicat
         "JP": ["WH-A", "WH-B"],
         "US": ["WH-Z"],
     }
+    compiled_sql = str(db.executed[0])
+    assert "warehouse.type NOT IN" in compiled_sql
+    assert any(
+        isinstance(value, (list, tuple)) and sorted(value) == sorted(LOCAL_WAREHOUSE_TYPES)
+        for value in db.executed[0].compile().params.values()
+    )

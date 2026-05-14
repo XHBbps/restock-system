@@ -10,7 +10,7 @@ Current business rule:
 
 from collections import defaultdict
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.countries import is_reportable_country_code
@@ -25,6 +25,7 @@ from app.engine.sku_mapping import (
     load_inventory_totals_by_warehouse,
     merge_warehouse_stock,
 )
+from app.engine.warehouse_scope import LOCAL_WAREHOUSE_TYPES
 from app.models.in_transit import InTransitItem, InTransitRecord
 from app.models.inventory import InventorySnapshotLatest
 from app.models.warehouse import Warehouse
@@ -43,7 +44,7 @@ async def load_oversea_inventory(
             func.sum(InventorySnapshotLatest.reserved).label("reserv"),
         )
         .join(Warehouse, Warehouse.id == InventorySnapshotLatest.warehouse_id)
-        .where(Warehouse.type != 1)
+        .where(~Warehouse.type.in_(LOCAL_WAREHOUSE_TYPES))
         .where(InventorySnapshotLatest.country.is_not(None))
         .group_by(InventorySnapshotLatest.commodity_sku, InventorySnapshotLatest.country)
     )
@@ -76,8 +77,15 @@ async def load_in_transit(
             InTransitRecord,
             InTransitRecord.saihu_out_record_id == InTransitItem.saihu_out_record_id,
         )
+        .outerjoin(Warehouse, Warehouse.id == InTransitRecord.target_warehouse_id)
         .where(InTransitRecord.is_in_transit.is_(True))
         .where(InTransitRecord.target_country.is_not(None))
+        .where(
+            or_(
+                InTransitRecord.target_warehouse_id.is_(None),
+                ~Warehouse.type.in_(LOCAL_WAREHOUSE_TYPES),
+            )
+        )
         .group_by(InTransitItem.commodity_sku, InTransitRecord.target_country)
     )
     if commodity_skus is not None:
@@ -159,13 +167,13 @@ async def run_step2(
         component_inventory = await load_inventory_totals_by_warehouse(
             db,
             component_query_skus,
-            exclude_warehouse_type=1,
+            exclude_warehouse_types=LOCAL_WAREHOUSE_TYPES,
             sku_to_group_key=sku_to_group_key,
         )
         component_transit = await load_in_transit_totals_by_warehouse(
             db,
             component_query_skus,
-            exclude_warehouse_type=1,
+            exclude_warehouse_types=LOCAL_WAREHOUSE_TYPES,
             sku_to_group_key=sku_to_group_key,
         )
         component_country_transit = await load_in_transit_totals_by_country(

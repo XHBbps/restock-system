@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-05-13（用户可见“补货日期”已统一为生成建议时选择的 `demand_date`；Step 6 仅保留紧急标志判定。）
+> 最近更新：2026-05-14（默认仓 `type=0` 已纳入国内侧库存扣减，并从海外库存与补货分仓口径排除。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -62,12 +62,13 @@
 
 - **6 步流水线**（`backend/app/engine/runner.py`）：
   1. `step1_velocity` — 加权日均销量（7日×0.5 + 14日×0.3 + 30日×0.2）
-  2. `step2_sale_days` — 可售天数 + 库存聚合（含在途）
+  2. `step2_sale_days` — 可售天数 + 海外库存聚合（排除默认仓和国内仓，含在途）
   3. `step3_country_qty` — 各国补货量（`target_days + (demand_date - today)` 作为有效目标库存天数）
-  4. `step4_total` — 总采购量（基于新的 Σcountry_qty − 本地库存 + ceil(Σvelocity × safety_stock_days)，clamp 到 0；`buffer_days` 不参与采购量）
+  4. `step4_total` — 总采购量（基于新的 Σcountry_qty − 国内侧库存（默认仓 + 国内仓）+ ceil(Σvelocity × safety_stock_days)，clamp 到 0；`buffer_days` 不参与采购量）
   5. `step5_warehouse_split` — 按邮编规则分配到具体仓库；订单样本来自 `source='订单处理'`、`package_status!='has_canceled'` 且 `country_code!='ZZ'` 的包裹订单，以 `quantity_ordered` 为样本数量，优先使用 `order_header.postal_code`，已知邮编命中部分按真实比例分配，未知部分按该国家已配置邮编规则的仓均分
   6. `step6_timing` — 紧急标志（任一正补货国家 `sale_days <= lead_time_days` 即为紧急；不再生成用户可见补货日期）
 - **补货区域过滤**：全局参数 `restock_regions` 支持按国家多选；为空数组时表示全部业务国家参与计算，配置后仅这些国家的订单会参与 `step1_velocity` 销量统计和 `step5_warehouse_split` 的国家订单分仓；空国家、非法国家码和内部哨兵 `ZZ` 始终排除
+- **仓库类型口径**：默认仓 `type=0` 与国内仓 `type=1` 统一作为国内侧库存参与 Step 4 采购扣减；Step 2 海外库存、直接商品有目标仓在途、SKU 映射组件海外库存 / 有目标仓在途，以及 Step 5 可分仓仓库均排除 `type in (0, 1)`，避免默认仓库存重复作为海外库存参与补货。
 - **并发保护**：`pg_advisory_xact_lock(7429001)` 事务级锁，阻止并发引擎覆盖彼此
 - **补货日期参与数量计算与展示**：`POST /api/engine/run` 必填 `demand_date` 且不能早于北京时间今天；runner 按 `today=now_beijing().date()` 计算 `demand_days=max(demand_date - today, 0)`，再用 `target_days + demand_days` 作为 Step 3 有效目标库存天数；`restock_regions` 仍只决定哪些国家参与补货；新生成建议单的 `restock_dates` 与 `calculation_inputs_snapshot.restock.countries[*].restock_date` 统一写入 `demand_date`
 - **快照追溯**：`velocity_snapshot`、`sale_days_snapshot`、`global_config_snapshot` 存入 JSONB 字段；其中 `global_config_snapshot` 会记录 `restock_regions` 与本次补货日期 `demand_date`；新生成的 `suggestion_item.calculation_inputs_snapshot` 冻结采购量与国家补货量的公式输入、原始结果和最终结果，旧建议单为空时前端提示历史建议缺少完整计算依据
@@ -112,6 +113,13 @@
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`；移动端使用三列 grid 固定商品、国家、可售天数列宽，避免商品信息与国家列挤压
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
 
+### 3.124 默认仓纳入国内侧库存口径（2026-05-14）
+- **Step 4 采购扣减**：`backend/app/engine/step4_total.py` 读取本地库存时使用 `Warehouse.type in (0, 1)`，直接商品 SKU 与 SKU 映射组件库存都会把默认仓和国内仓合计为 `local_stock_*`。
+- **Step 2 海外库存**：`backend/app/engine/step2_sale_days.py` 的海外库存、直接商品有目标仓在途、组件库存和有目标仓的组件在途均排除 `type in (0, 1)`；默认仓不会降低国家补货量或可售天数。
+- **Step 5 分仓范围**：`backend/app/engine/step5_warehouse_split.py` 的规则仓同样排除默认仓和国内仓，默认仓不会进入国家补货量的仓内拆分。
+- **公共口径**：新增 `backend/app/engine/warehouse_scope.py` 定义 `LOCAL_WAREHOUSE_TYPES = (0, 1)`，并扩展 `backend/app/engine/sku_mapping.py` 的仓库类型集合过滤参数，避免 Step 2 / Step 4 重复硬编码。
+- **历史兼容**：已生成建议单和已导出快照不回写；重新生成建议单后，`calculation_inputs_snapshot.purchase.local_stock_*` 才会按默认仓 + 国内仓合计冻结。
+
 ### 3.123 统一用户可见补货日期为 `demand_date`（2026-05-13）
 - **引擎口径**：`demand_date` 继续参与 Step 3 补货量计算，`effective_target_days = target_days + max(demand_date - today, 0)`；Step 6 不再生成 `today + sale_days - lead_time_days` 形式的用户可见补货日期，仅保留 `urgent` 判定。
 - **持久化与计算依据**：新生成建议条目的 `suggestion_item.restock_dates[country]` 与 `calculation_inputs_snapshot.restock.countries[country].restock_date` 统一写入本次选择的 `demand_date`；采购-only 条目继续保持 `restock_dates={}`。
@@ -121,9 +129,9 @@
 
 ### 3.122 采购/补货计算依据展示（2026-05-13）
 - **数据模型**：新增迁移 `backend/alembic/versions/20260513_1500_add_calculation_inputs_snapshot.py`，为 `suggestion_item` 增加 nullable JSONB 字段 `calculation_inputs_snapshot`；旧建议单不回填，避免用当前库存污染历史口径。
-- **引擎追溯**：`backend/app/engine/runner.py` 在生成建议条目时冻结采购量和国家补货量的计算输入与结果，包括 `demand_date`、`target_days`、`demand_days`、有效目标天数、销量、海外库存/在途、国内仓库存、安全库存量、原始量与最终量。
+- **引擎追溯**：`backend/app/engine/runner.py` 在生成建议条目时冻结采购量和国家补货量的计算输入与结果，包括 `demand_date`、`target_days`、`demand_days`、有效目标天数、销量、海外库存/在途、国内/默认仓库存、安全库存量、原始量与最终量。
 - **接口与编辑**：`SuggestionItemOut` 和前端 `SuggestionItem` 返回 `calculation_inputs_snapshot`；PATCH 与单条重算仍只修改人工编辑字段、`sale_days_snapshot`、`urgent`、`restock_dates` 和 `calculation_warnings`，不覆盖生成时计算依据。
-- **前端展示**：当前采购建议页展开区先展示各国补货量合计、国内仓库存合计和安全库存量，再展示生成时具体代入公式，例如 `采购量 = 10 - 12 + 20 = 18`；当前补货建议页国家明细先展示有效目标库存、海外库存合计、可售天数和补货日期，再展示生成时具体代入公式，例如 `补货量 = 120 - 6 = 114`。若当前数量已被手工调整，展示“当前已手工调整”与生成时/当前数量；旧条目展示“历史建议缺少完整计算依据”。
+- **前端展示**：当前采购建议页展开区先展示各国补货量合计、国内/默认仓库存合计和安全库存量，再展示生成时具体代入公式，例如 `采购量 = 10 - 12 + 20 = 18`；当前补货建议页国家明细先展示有效目标库存、海外库存合计、可售天数和补货日期，再展示生成时具体代入公式，例如 `补货量 = 120 - 6 = 114`。若当前数量已被手工调整，展示“当前已手工调整”与生成时/当前数量；旧条目展示“历史建议缺少完整计算依据”。
 
 ### 3.121 订单信息匹配确认导入后台任务化（2026-05-13）
 - **数据库表**：新增 `order_info_match_import_file` 暂存上传 Excel 二进制、文件名、字段选择、创建人、过期时间、任务 ID 与消费时间，避免把文件内容写入 `task_run.payload`；`retention_purge` 会清理已消费或过期暂存行。
@@ -454,7 +462,7 @@
 
 ### 3.71 补货日期参与数量计算（2026-04-26）
 - **引擎口径**：`backend/app/engine/runner.py` 不再调用旧的持久化前日期过滤逻辑；`demand_date` 只作为补货目标日期参与数量计算，公式为 `国家补货量=max(ceil((target_days + demand_days) × 国家日均销量 - 国家库存覆盖量), 0)`，其中 `demand_days=max(demand_date - today, 0)`。
-- **采购联动**：Step 4 继续使用 `compute_total()`，但输入的 `country_qty` 已是补货日期扩展后的国家补货量，因此采购量会随更远补货日期同步增加；公式保持 `max(Σcountry_qty - 国内仓库存 + ceil(Σvelocity × safety_stock_days), 0)`。
+- **采购联动**：Step 4 继续使用 `compute_total()`，但输入的 `country_qty` 已是补货日期扩展后的国家补货量，因此采购量会随更远补货日期同步增加；公式保持 `max(Σcountry_qty - 国内/默认仓库存 + ceil(Σvelocity × safety_stock_days), 0)`。
 - **保留字段**：API 字段名继续为 `demand_date`；`restock_dates` 继续保存用于追溯与 Excel 明细，但自 §3.123 起其用户可见值统一写入 `demand_date`，不再由 `sale_days - lead_time_days` 推导，也不再参与紧急程度判断。
 - **信息总览**：`backend/app/api/metrics.py` 的“需补货SKU / 无需补货SKU”统计读取当前最新 `draft` 建议单的 `global_config_snapshot.demand_date` 计算同一口径；无当前建议单时按 `demand_days=0` 统计。
 - **展示与导出**：`frontend/src/views/SuggestionListView.vue`、`frontend/src/components/SuggestionDetailDialog.vue` 与 `backend/app/services/excel_export.py` 的用户可见文案统一为“补货日期”，接口契约不变。

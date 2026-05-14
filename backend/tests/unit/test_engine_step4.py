@@ -1,5 +1,37 @@
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
 from app.engine.context import EngineContext, LocalStock
-from app.engine.step4_total import compute_total, step4_total
+from app.engine.sku_mapping import MappingComponent
+from app.engine.step4_total import compute_total, load_local_inventory, step4_total
+from app.engine.warehouse_scope import LOCAL_WAREHOUSE_TYPES
+
+
+class _RowsResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def all(self):
+        return list(self._rows)
+
+
+class _FakeDb:
+    def __init__(self, rows):
+        self.rows = rows
+        self.statements = []
+
+    async def execute(self, stmt):
+        self.statements.append(stmt)
+        return _RowsResult(self.rows)
+
+
+def _has_type_param(params, values: tuple[int, ...]) -> bool:
+    expected = sorted(values)
+    return any(
+        isinstance(value, (list, tuple)) and sorted(value) == expected
+        for value in params.values()
+    )
 
 
 def test_step4_new_purchase_formula() -> None:
@@ -65,3 +97,35 @@ def test_step4_buffer_days_does_not_affect_purchase_qty() -> None:
 
     assert without_buffer == 150
     assert with_buffer == without_buffer
+
+
+@pytest.mark.asyncio
+async def test_load_local_inventory_includes_default_and_domestic_warehouses() -> None:
+    db = _FakeDb([("sku1", 7, 3)])
+
+    with patch("app.engine.step4_total.load_active_mapping_rules", AsyncMock(return_value={})):
+        result = await load_local_inventory(db, ["sku1"])
+
+    assert result == {"sku1": LocalStock(available=7, reserved=3)}
+    compiled_sql = str(db.statements[0])
+    assert "warehouse.type IN" in compiled_sql
+    assert _has_type_param(db.statements[0].compile().params, LOCAL_WAREHOUSE_TYPES)
+
+
+@pytest.mark.asyncio
+async def test_load_local_inventory_uses_default_and_domestic_component_stock() -> None:
+    db = _FakeDb([])
+    inventory_loader = AsyncMock(return_value={})
+
+    with (
+        patch(
+            "app.engine.step4_total.load_active_mapping_rules",
+            AsyncMock(
+                return_value={"sku1": [[MappingComponent(inventory_sku="component", quantity=1)]]}
+            ),
+        ),
+        patch("app.engine.step4_total.load_inventory_totals_by_warehouse", inventory_loader),
+    ):
+        await load_local_inventory(db, ["sku1"])
+
+    assert inventory_loader.await_args.kwargs["warehouse_types"] == LOCAL_WAREHOUSE_TYPES
