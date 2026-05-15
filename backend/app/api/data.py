@@ -18,7 +18,7 @@ from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, Path, Query, Request
 from fastapi.responses import StreamingResponse
-from sqlalchemy import Float, case, delete, func, or_, select, tuple_
+from sqlalchemy import Float, case, func, or_, select, tuple_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
@@ -1479,11 +1479,12 @@ async def delete_third_party_warehouse(
     ).scalar_one()
     if current_count or history_count:
         raise ConflictError("三方仓存在当前库存或导入历史，不能删除")
-    result = await db.execute(
-        delete(ThirdPartyWarehouse).where(ThirdPartyWarehouse.id == warehouse_id)
-    )
-    if result.rowcount == 0:
+    warehouse = (
+        await db.execute(select(ThirdPartyWarehouse).where(ThirdPartyWarehouse.id == warehouse_id))
+    ).scalar_one_or_none()
+    if warehouse is None:
         raise NotFound("三方仓不存在")
+    await db.delete(warehouse)
     await db.commit()
 
 

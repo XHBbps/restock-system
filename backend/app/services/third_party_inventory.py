@@ -167,23 +167,22 @@ async def create_import_preview(
     db.add(batch)
     await db.flush()
 
-    db.add_all(
-        [
+    import_items: list[ThirdPartyInventoryImportItem] = []
+    for row in parsed_rows:
+        warehouse = warehouse_by_name.get(row.warehouse_name)
+        import_items.append(
             ThirdPartyInventoryImportItem(
                 batch_id=batch.id,
                 warehouse_name_raw=row.warehouse_name,
-                warehouse_id=warehouse_by_name.get(row.warehouse_name).id
-                if row.warehouse_name in warehouse_by_name
-                else None,
+                warehouse_id=warehouse.id if warehouse is not None else None,
                 commodity_sku=row.commodity_sku,
                 available=row.available,
                 reserved=row.reserved,
                 source_row_no=row.source_row_no,
                 error_message=row.error_message,
             )
-            for row in parsed_rows
-        ]
-    )
+        )
+    db.add_all(import_items)
     await db.commit()
     await db.refresh(batch)
     return batch
@@ -370,11 +369,14 @@ async def patch_current_item(
 
 
 async def delete_current_item(db: AsyncSession, item_id: int) -> None:
-    result = await db.execute(
-        delete(ThirdPartyInventoryCurrent).where(ThirdPartyInventoryCurrent.id == item_id)
-    )
-    if result.rowcount == 0:
+    item = (
+        await db.execute(
+            select(ThirdPartyInventoryCurrent).where(ThirdPartyInventoryCurrent.id == item_id)
+        )
+    ).scalar_one_or_none()
+    if item is None:
         raise NotFound("三方库存明细不存在")
+    await db.delete(item)
     await db.commit()
 
 
