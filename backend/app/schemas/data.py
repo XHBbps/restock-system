@@ -12,7 +12,7 @@
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic.alias_generators import to_camel
 
 
@@ -247,6 +247,188 @@ class DataWarehouseListOut(BaseModel):
     page_size: int = 500
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+
+# ==================== 三方仓与三方仓库存 ====================
+class ThirdPartyWarehouseIn(SaihuLikeModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    country: str | None = Field(default=None, max_length=2)
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("仓库名称不能为空")
+        return text
+
+    @field_validator("country")
+    @classmethod
+    def normalize_country(cls, value: str | None) -> str | None:
+        text = (value or "").strip().upper()
+        return text or None
+
+
+class ThirdPartyWarehousePatch(SaihuLikeModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    country: str | None = Field(default=None, max_length=2)
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        text = value.strip()
+        if not text:
+            raise ValueError("仓库名称不能为空")
+        return text
+
+    @field_validator("country")
+    @classmethod
+    def normalize_country(cls, value: str | None) -> str | None:
+        text = (value or "").strip().upper()
+        return text or None
+
+
+class ThirdPartyWarehouseOut(SaihuLikeModel):
+    id: int
+    name: str
+    country: str | None = None
+    current_sku_count: int = 0
+    current_total_available: int = 0
+    current_total_reserved: int = 0
+    import_item_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+
+class ThirdPartyWarehouseListOut(BaseModel):
+    items: list[ThirdPartyWarehouseOut]
+    total: int
+    page: int
+    page_size: int
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+
+class ThirdPartyInventoryCurrentIn(SaihuLikeModel):
+    warehouse_id: int
+    commodity_sku: str = Field(..., min_length=1, max_length=100)
+    available: int = Field(default=0, ge=0)
+    reserved: int = Field(default=0, ge=0)
+
+    @field_validator("commodity_sku")
+    @classmethod
+    def normalize_sku(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("SKU 不能为空")
+        return text
+
+
+class ThirdPartyInventoryCurrentPatch(SaihuLikeModel):
+    warehouse_id: int | None = None
+    commodity_sku: str | None = Field(default=None, min_length=1, max_length=100)
+    available: int | None = Field(default=None, ge=0)
+    reserved: int | None = Field(default=None, ge=0)
+
+    @field_validator("commodity_sku")
+    @classmethod
+    def normalize_sku(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        text = value.strip()
+        if not text:
+            raise ValueError("SKU 不能为空")
+        return text
+
+
+class ThirdPartyInventoryItemOut(SaihuLikeModel):
+    id: int
+    warehouse_id: int
+    warehouse_name: str
+    country: str | None = None
+    participates: bool
+    commodity_sku: str
+    available: int
+    reserved: int
+    source_batch_id: int | None = None
+    last_operation: str
+    updated_at: datetime
+
+
+class ThirdPartyInventoryWarehouseGroup(SaihuLikeModel):
+    warehouse_id: int
+    warehouse_name: str
+    country: str | None = None
+    participates: bool
+    sku_count: int
+    total_available: int
+    total_reserved: int
+    items: list[ThirdPartyInventoryItemOut]
+
+
+class ThirdPartyInventoryWarehouseGroupListOut(BaseModel):
+    items: list[ThirdPartyInventoryWarehouseGroup]
+    total: int
+    page: int
+    page_size: int
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+
+class ThirdPartyInventoryImportIssue(SaihuLikeModel):
+    row: int
+    warehouse_name: str | None = None
+    commodity_sku: str | None = None
+    message: str
+
+
+class ThirdPartyInventoryImportBatchOut(SaihuLikeModel):
+    id: int
+    filename: str
+    status: str
+    row_count: int
+    valid_row_count: int
+    skipped_row_count: int
+    new_warehouse_count: int
+    unmaintained_warehouse_count: int = 0
+    created_by: str | None = None
+    confirmed_by: str | None = None
+    created_at: datetime
+    confirmed_at: datetime | None = None
+    summary: dict[str, object] = Field(default_factory=dict)
+
+
+class ThirdPartyInventoryImportBatchListOut(BaseModel):
+    items: list[ThirdPartyInventoryImportBatchOut]
+    total: int
+    page: int
+    page_size: int
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+
+class ThirdPartyInventoryImportItemOut(SaihuLikeModel):
+    id: int
+    warehouse_name_raw: str
+    warehouse_id: int | None = None
+    commodity_sku: str | None = None
+    available: int | None = None
+    reserved: int | None = None
+    source_row_no: int
+    error_message: str | None = None
+
+
+class ThirdPartyInventoryImportBatchDetailOut(ThirdPartyInventoryImportBatchOut):
+    items: list[ThirdPartyInventoryImportItemOut]
+    item_total: int
+
+
+class ThirdPartyInventoryPreviewOut(ThirdPartyInventoryImportBatchOut):
+    new_warehouses: list[str] = Field(default_factory=list)
+    unmaintained_warehouses: list[str] = Field(default_factory=list)
+    issues: list[ThirdPartyInventoryImportIssue] = Field(default_factory=list)
 
 
 # ==================== 店铺列表 ====================

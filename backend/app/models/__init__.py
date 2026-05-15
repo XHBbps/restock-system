@@ -28,6 +28,12 @@ from app.models.suggestion_snapshot import SuggestionSnapshot, SuggestionSnapsho
 from app.models.sync_state import SyncState
 from app.models.sys_user import SysUser
 from app.models.task_run import TaskRun
+from app.models.third_party_inventory import (
+    ThirdPartyInventoryCurrent,
+    ThirdPartyInventoryImportBatch,
+    ThirdPartyInventoryImportItem,
+    ThirdPartyWarehouse,
+)
 from app.models.warehouse import Warehouse
 from app.models.zipcode_rule import ZipcodeRule
 
@@ -66,6 +72,10 @@ __all__ = [
     "SyncState",
     "SysUser",
     "TaskRun",
+    "ThirdPartyInventoryCurrent",
+    "ThirdPartyInventoryImportBatch",
+    "ThirdPartyInventoryImportItem",
+    "ThirdPartyWarehouse",
     "Warehouse",
     "ZipcodeRule",
 ]

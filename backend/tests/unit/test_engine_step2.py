@@ -10,7 +10,9 @@ from app.engine.step2_sale_days import (
     compute_sale_days,
     load_in_transit,
     load_oversea_inventory,
+    load_third_party_inventory,
     merge_inventory,
+    merge_stock_totals,
     run_step2,
 )
 from app.engine.warehouse_scope import LOCAL_WAREHOUSE_TYPES
@@ -56,6 +58,39 @@ async def test_load_oversea_inventory_excludes_default_and_domestic_warehouses()
     compiled_sql = str(db.statements[0])
     assert "warehouse.type NOT IN" in compiled_sql
     assert _has_type_param(_compiled_params(db.statements[0]), LOCAL_WAREHOUSE_TYPES)
+
+
+@pytest.mark.asyncio
+async def test_load_third_party_inventory_reads_only_country_warehouses() -> None:
+    db = _FakeDb(
+        [
+            ("sku-A", "US", 7, 2),
+            ("sku-A", None, 100, 0),
+            ("sku-B", "ZZ", 100, 0),
+        ]
+    )
+
+    result = await load_third_party_inventory(db, ["sku-A", "sku-B"])
+
+    assert result == {("sku-A", "US"): {"available": 7, "reserved": 2}}
+    compiled_sql = str(db.statements[0])
+    assert "third_party_inventory_current" in compiled_sql
+    assert "third_party_warehouse.country IS NOT NULL" in compiled_sql
+
+
+def test_merge_stock_totals_adds_third_party_stock_to_oversea_stock() -> None:
+    merged = merge_stock_totals(
+        {("sku-A", "US"): {"available": 10, "reserved": 1}},
+        {
+            ("sku-A", "US"): {"available": 5, "reserved": 2},
+            ("sku-B", "JP"): {"available": 3, "reserved": 0},
+        },
+    )
+
+    assert merged == {
+        ("sku-A", "US"): {"available": 15, "reserved": 3},
+        ("sku-B", "JP"): {"available": 3, "reserved": 0},
+    }
 
 
 @pytest.mark.asyncio

@@ -142,6 +142,16 @@ export const appPages: AppPageDefinition[] = [
     component: () => import('@/views/data/DataWarehousesView.vue'),
   },
   {
+    name: 'data-third-party-warehouses',
+    path: 'data/third-party-warehouses',
+    title: '三方仓',
+    section: 'DATA',
+    permission: 'data_base:view',
+    icon: Warehouse,
+    navCategory: 'data-base',
+    component: () => import('@/views/data/DataThirdPartyWarehousesView.vue'),
+  },
+  {
     name: 'data-products',
     path: 'data/products',
     title: '商品',
@@ -170,6 +180,16 @@ export const appPages: AppPageDefinition[] = [
     icon: Boxes,
     navCategory: 'data-biz',
     component: () => import('@/views/data/DataInventoryView.vue'),
+  },
+  {
+    name: 'data-third-party-inventory',
+    path: 'data/third-party-inventory',
+    title: '三方仓库存',
+    section: 'DATA',
+    permission: 'data_biz:view',
+    icon: Boxes,
+    navCategory: 'data-biz',
+    component: () => import('@/views/data/DataThirdPartyInventoryView.vue'),
   },
   {
     name: 'data-out-records',

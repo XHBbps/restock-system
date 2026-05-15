@@ -266,6 +266,161 @@ export async function listInventoryWarehouseGroups(params: {
   return data
 }
 
+// ========== 三方仓库存 ==========
+export interface ThirdPartyInventoryItem {
+  id: number
+  warehouseId: number
+  warehouseName: string
+  country: string | null
+  participates: boolean
+  commoditySku: string
+  available: number
+  reserved: number
+  sourceBatchId: number | null
+  lastOperation: string
+  updatedAt: string
+}
+
+export interface ThirdPartyInventoryWarehouseGroup {
+  warehouseId: number
+  warehouseName: string
+  country: string | null
+  participates: boolean
+  skuCount: number
+  totalAvailable: number
+  totalReserved: number
+  items: ThirdPartyInventoryItem[]
+}
+
+export interface ThirdPartyInventoryItemInput {
+  warehouseId: number
+  commoditySku: string
+  available: number
+  reserved: number
+}
+
+export interface ThirdPartyInventoryImportIssue {
+  row: number
+  warehouseName: string | null
+  commoditySku: string | null
+  message: string
+}
+
+export interface ThirdPartyInventoryImportBatch {
+  id: number
+  filename: string
+  status: string
+  rowCount: number
+  validRowCount: number
+  skippedRowCount: number
+  newWarehouseCount: number
+  unmaintainedWarehouseCount: number
+  createdBy: string | null
+  confirmedBy: string | null
+  createdAt: string
+  confirmedAt: string | null
+  summary: Record<string, unknown>
+}
+
+export interface ThirdPartyInventoryPreview extends ThirdPartyInventoryImportBatch {
+  newWarehouses: string[]
+  unmaintainedWarehouses: string[]
+  issues: ThirdPartyInventoryImportIssue[]
+}
+
+export interface ThirdPartyInventoryImportItem {
+  id: number
+  warehouseNameRaw: string
+  warehouseId: number | null
+  commoditySku: string | null
+  available: number | null
+  reserved: number | null
+  sourceRowNo: number
+  errorMessage: string | null
+}
+
+export interface ThirdPartyInventoryBatchDetail extends ThirdPartyInventoryImportBatch {
+  items: ThirdPartyInventoryImportItem[]
+  itemTotal: number
+}
+
+export async function listThirdPartyInventoryWarehouseGroups(params: {
+  warehouse_keyword?: string
+  sku?: string
+  country?: string
+  only_missing_country?: boolean
+  only_participating?: boolean
+  only_nonzero?: boolean
+  page?: number
+  page_size?: number
+}): Promise<PageResult<ThirdPartyInventoryWarehouseGroup>> {
+  const { data } = await client.get('/api/data/third-party-inventory/warehouse-groups', { params })
+  return data
+}
+
+export async function previewThirdPartyInventoryImport(file: File): Promise<ThirdPartyInventoryPreview> {
+  const { data } = await client.post<ThirdPartyInventoryPreview>(
+    '/api/data/third-party-inventory/import/preview',
+    file,
+    {
+      headers: {
+        'Content-Type': file.type || 'application/octet-stream',
+        'X-Filename': encodeURIComponent(file.name),
+      },
+    },
+  )
+  return data
+}
+
+export async function confirmThirdPartyInventoryImport(batchId: number): Promise<ThirdPartyInventoryImportBatch> {
+  const { data } = await client.post<ThirdPartyInventoryImportBatch>(
+    `/api/data/third-party-inventory/import/${batchId}/confirm`,
+  )
+  return data
+}
+
+export async function cancelThirdPartyInventoryImport(batchId: number): Promise<ThirdPartyInventoryImportBatch> {
+  const { data } = await client.post<ThirdPartyInventoryImportBatch>(
+    `/api/data/third-party-inventory/import/${batchId}/cancel`,
+  )
+  return data
+}
+
+export async function listThirdPartyInventoryBatches(params: {
+  page?: number
+  page_size?: number
+}): Promise<PageResult<ThirdPartyInventoryImportBatch>> {
+  const { data } = await client.get('/api/data/third-party-inventory/batches', { params })
+  return data
+}
+
+export async function getThirdPartyInventoryBatch(
+  batchId: number,
+  params: { only_errors?: boolean; page?: number; page_size?: number },
+): Promise<ThirdPartyInventoryBatchDetail> {
+  const { data } = await client.get(`/api/data/third-party-inventory/batches/${batchId}`, { params })
+  return data
+}
+
+export async function createThirdPartyInventoryItem(
+  payload: ThirdPartyInventoryItemInput,
+): Promise<ThirdPartyInventoryItem> {
+  const { data } = await client.post('/api/data/third-party-inventory/items', payload)
+  return data
+}
+
+export async function updateThirdPartyInventoryItem(
+  id: number,
+  payload: Partial<ThirdPartyInventoryItemInput>,
+): Promise<ThirdPartyInventoryItem> {
+  const { data } = await client.patch(`/api/data/third-party-inventory/items/${id}`, payload)
+  return data
+}
+
+export async function deleteThirdPartyInventoryItem(id: number): Promise<void> {
+  await client.delete(`/api/data/third-party-inventory/items/${id}`)
+}
+
 // ========== 其他出库 ==========
 export interface DataOutRecordItem {
   commodityId: string | null
@@ -325,6 +480,54 @@ export interface DataWarehouse {
 export async function listDataWarehouses(): Promise<{ items: DataWarehouse[]; total: number }> {
   const { data } = await client.get('/api/data/warehouses')
   return data
+}
+
+// ========== 三方仓 ==========
+export interface ThirdPartyWarehouse {
+  id: number
+  name: string
+  country: string | null
+  currentSkuCount: number
+  currentTotalAvailable: number
+  currentTotalReserved: number
+  importItemCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ThirdPartyWarehouseInput {
+  name: string
+  country?: string | null
+}
+
+export async function listThirdPartyWarehouses(params?: {
+  keyword?: string
+  country?: string
+  only_missing_country?: boolean
+  page?: number
+  page_size?: number
+}): Promise<PageResult<ThirdPartyWarehouse>> {
+  const { data } = await client.get('/api/data/third-party-warehouses', { params })
+  return data
+}
+
+export async function createThirdPartyWarehouse(
+  payload: ThirdPartyWarehouseInput,
+): Promise<ThirdPartyWarehouse> {
+  const { data } = await client.post('/api/data/third-party-warehouses', payload)
+  return data
+}
+
+export async function updateThirdPartyWarehouse(
+  id: number,
+  payload: Partial<ThirdPartyWarehouseInput>,
+): Promise<ThirdPartyWarehouse> {
+  const { data } = await client.patch(`/api/data/third-party-warehouses/${id}`, payload)
+  return data
+}
+
+export async function deleteThirdPartyWarehouse(id: number): Promise<void> {
+  await client.delete(`/api/data/third-party-warehouses/${id}`)
 }
 
 // ========== 店铺 ==========

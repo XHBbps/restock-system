@@ -18,7 +18,8 @@ from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, Path, Query, Request
 from fastapi.responses import StreamingResponse
-from sqlalchemy import Float, case, func, or_, select, tuple_
+from sqlalchemy import Float, case, delete, func, or_, select, tuple_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -29,8 +30,15 @@ from app.api.deps import (
     get_current_user,
     require_permission,
 )
-from app.core.exceptions import NotFound, ValidationFailed
-from app.core.permissions import DATA_BASE_VIEW, DATA_BIZ_EDIT, DATA_BIZ_VIEW, SYNC_VIEW
+from app.core.countries import normalize_reportable_country_code
+from app.core.exceptions import ConflictError, NotFound, ValidationFailed
+from app.core.permissions import (
+    DATA_BASE_EDIT,
+    DATA_BASE_VIEW,
+    DATA_BIZ_EDIT,
+    DATA_BIZ_VIEW,
+    SYNC_VIEW,
+)
 from app.core.query import escape_like
 from app.core.timezone import BEIJING, order_display_timezone, to_order_display_time
 from app.models.commodity import CommodityMaster
@@ -48,6 +56,12 @@ from app.models.shop import Shop
 from app.models.sku import SkuConfig
 from app.models.sku_mapping import SkuMappingComponent
 from app.models.task_run import TaskRun
+from app.models.third_party_inventory import (
+    ThirdPartyInventoryCurrent,
+    ThirdPartyInventoryImportBatch,
+    ThirdPartyInventoryImportItem,
+    ThirdPartyWarehouse,
+)
 from app.models.warehouse import Warehouse
 from app.schemas.data import (
     DataInventoryItem,
@@ -74,6 +88,21 @@ from app.schemas.data import (
     OrderInfoMatchApplyTaskOut,
     OrderInfoMatchPreviewOut,
     SkuOverviewListOut,
+    ThirdPartyInventoryCurrentIn,
+    ThirdPartyInventoryCurrentPatch,
+    ThirdPartyInventoryImportBatchDetailOut,
+    ThirdPartyInventoryImportBatchListOut,
+    ThirdPartyInventoryImportBatchOut,
+    ThirdPartyInventoryImportIssue,
+    ThirdPartyInventoryImportItemOut,
+    ThirdPartyInventoryItemOut,
+    ThirdPartyInventoryPreviewOut,
+    ThirdPartyInventoryWarehouseGroup,
+    ThirdPartyInventoryWarehouseGroupListOut,
+    ThirdPartyWarehouseIn,
+    ThirdPartyWarehouseListOut,
+    ThirdPartyWarehouseOut,
+    ThirdPartyWarehousePatch,
 )
 from app.services.order_edit import (
     apply_order_info_match,
@@ -82,6 +111,15 @@ from app.services.order_edit import (
     parse_requested_fields,
     patch_order_header,
     preview_order_info_match,
+)
+from app.services.third_party_inventory import (
+    confirm_import_batch,
+    create_import_preview,
+    delete_current_item,
+    expire_pending_batch,
+    patch_current_item,
+    sync_import_items_warehouse_id,
+    upsert_current_item,
 )
 from app.tasks.jobs.order_info_match import JOB_NAME as ORDER_INFO_MATCH_APPLY_JOB_NAME
 from app.tasks.queue import enqueue_task
@@ -1206,6 +1244,548 @@ async def list_data_warehouses(
 # ============================================================
 # 5. 店铺列表
 # ============================================================
+def _normalize_third_party_country(country: str | None) -> str | None:
+    if country is None:
+        return None
+    normalized = normalize_reportable_country_code(country)
+    if normalized is None:
+        raise ValidationFailed("国家代码无效")
+    return normalized
+
+
+def _third_party_batch_out(batch: ThirdPartyInventoryImportBatch) -> ThirdPartyInventoryImportBatchOut:
+    summary = batch.summary or {}
+    unmaintained = summary.get("unmaintained_warehouses") or []
+    return ThirdPartyInventoryImportBatchOut.model_validate(
+        {
+            "id": batch.id,
+            "filename": batch.filename,
+            "status": batch.status,
+            "row_count": batch.row_count,
+            "valid_row_count": batch.valid_row_count,
+            "skipped_row_count": batch.skipped_row_count,
+            "new_warehouse_count": batch.new_warehouse_count,
+            "unmaintained_warehouse_count": (
+                len(unmaintained) if isinstance(unmaintained, list) else 0
+            ),
+            "created_by": batch.created_by,
+            "confirmed_by": batch.confirmed_by,
+            "created_at": batch.created_at,
+            "confirmed_at": batch.confirmed_at,
+            "summary": summary,
+        }
+    )
+
+
+def _third_party_preview_out(batch: ThirdPartyInventoryImportBatch) -> ThirdPartyInventoryPreviewOut:
+    summary = batch.summary or {}
+    issues = [
+        ThirdPartyInventoryImportIssue.model_validate(issue)
+        for issue in summary.get("issues", [])
+        if isinstance(issue, dict)
+    ]
+    payload = _third_party_batch_out(batch).model_dump()
+    payload.update(
+        {
+            "new_warehouses": summary.get("new_warehouses") or [],
+            "unmaintained_warehouses": summary.get("unmaintained_warehouses") or [],
+            "issues": issues,
+        }
+    )
+    return ThirdPartyInventoryPreviewOut.model_validate(payload)
+
+
+def _third_party_inventory_item_out(
+    item: ThirdPartyInventoryCurrent,
+    warehouse_name: str,
+    country: str | None,
+) -> ThirdPartyInventoryItemOut:
+    return ThirdPartyInventoryItemOut.model_validate(
+        {
+            "id": item.id,
+            "warehouse_id": item.warehouse_id,
+            "warehouse_name": warehouse_name,
+            "country": country,
+            "participates": country is not None,
+            "commodity_sku": item.commodity_sku,
+            "available": item.available,
+            "reserved": item.reserved,
+            "source_batch_id": item.source_batch_id,
+            "last_operation": item.last_operation,
+            "updated_at": item.updated_at,
+        }
+    )
+
+
+@router.get("/third-party-warehouses", response_model=ThirdPartyWarehouseListOut)
+async def list_third_party_warehouses(
+    keyword: str | None = Query(default=None),
+    country: str | None = Query(default=None),
+    only_missing_country: bool = Query(default=False),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+    db: AsyncSession = Depends(db_session_readonly),
+    _: None = Depends(require_permission(DATA_BASE_VIEW)),
+) -> ThirdPartyWarehouseListOut:
+    current_subquery = (
+        select(
+            ThirdPartyInventoryCurrent.warehouse_id.label("warehouse_id"),
+            func.count(ThirdPartyInventoryCurrent.id).label("sku_count"),
+            func.coalesce(func.sum(ThirdPartyInventoryCurrent.available), 0).label(
+                "total_available"
+            ),
+            func.coalesce(func.sum(ThirdPartyInventoryCurrent.reserved), 0).label(
+                "total_reserved"
+            ),
+        )
+        .group_by(ThirdPartyInventoryCurrent.warehouse_id)
+        .subquery()
+    )
+    import_subquery = (
+        select(
+            ThirdPartyInventoryImportItem.warehouse_id.label("warehouse_id"),
+            func.count(ThirdPartyInventoryImportItem.id).label("import_item_count"),
+        )
+        .where(ThirdPartyInventoryImportItem.warehouse_id.is_not(None))
+        .group_by(ThirdPartyInventoryImportItem.warehouse_id)
+        .subquery()
+    )
+    base = (
+        select(
+            ThirdPartyWarehouse,
+            func.coalesce(current_subquery.c.sku_count, 0).label("sku_count"),
+            func.coalesce(current_subquery.c.total_available, 0).label("total_available"),
+            func.coalesce(current_subquery.c.total_reserved, 0).label("total_reserved"),
+            func.coalesce(import_subquery.c.import_item_count, 0).label("import_item_count"),
+        )
+        .outerjoin(current_subquery, current_subquery.c.warehouse_id == ThirdPartyWarehouse.id)
+        .outerjoin(import_subquery, import_subquery.c.warehouse_id == ThirdPartyWarehouse.id)
+    )
+    if keyword:
+        base = base.where(ThirdPartyWarehouse.name.ilike(f"%{escape_like(keyword)}%", escape="\\"))
+    if country:
+        base = base.where(ThirdPartyWarehouse.country == country.upper())
+    if only_missing_country:
+        base = base.where(ThirdPartyWarehouse.country.is_(None))
+
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
+    rows = (
+        await db.execute(
+            base.order_by(ThirdPartyWarehouse.name.asc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+    ).all()
+    items = [
+        ThirdPartyWarehouseOut.model_validate(
+            {
+                "id": warehouse.id,
+                "name": warehouse.name,
+                "country": warehouse.country,
+                "current_sku_count": int(sku_count or 0),
+                "current_total_available": int(total_available or 0),
+                "current_total_reserved": int(total_reserved or 0),
+                "import_item_count": int(import_item_count or 0),
+                "created_at": warehouse.created_at,
+                "updated_at": warehouse.updated_at,
+            }
+        )
+        for warehouse, sku_count, total_available, total_reserved, import_item_count in rows
+    ]
+    return ThirdPartyWarehouseListOut(
+        items=items, total=int(total or 0), page=page, page_size=page_size
+    )
+
+
+@router.post("/third-party-warehouses", response_model=ThirdPartyWarehouseOut)
+async def create_third_party_warehouse(
+    body: ThirdPartyWarehouseIn,
+    db: AsyncSession = Depends(db_session),
+    _: None = Depends(require_permission(DATA_BASE_EDIT)),
+) -> ThirdPartyWarehouseOut:
+    warehouse = ThirdPartyWarehouse(
+        name=body.name,
+        country=_normalize_third_party_country(body.country),
+    )
+    db.add(warehouse)
+    try:
+        await db.flush()
+        await sync_import_items_warehouse_id(db, warehouse)
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise ConflictError("三方仓名称已存在") from exc
+    await db.refresh(warehouse)
+    return ThirdPartyWarehouseOut.model_validate(
+        {
+            "id": warehouse.id,
+            "name": warehouse.name,
+            "country": warehouse.country,
+            "created_at": warehouse.created_at,
+            "updated_at": warehouse.updated_at,
+        }
+    )
+
+
+@router.patch("/third-party-warehouses/{warehouse_id}", response_model=ThirdPartyWarehouseOut)
+async def patch_third_party_warehouse(
+    body: ThirdPartyWarehousePatch,
+    warehouse_id: int = Path(..., ge=1),
+    db: AsyncSession = Depends(db_session),
+    _: None = Depends(require_permission(DATA_BASE_EDIT)),
+) -> ThirdPartyWarehouseOut:
+    warehouse = (
+        await db.execute(select(ThirdPartyWarehouse).where(ThirdPartyWarehouse.id == warehouse_id))
+    ).scalar_one_or_none()
+    if warehouse is None:
+        raise NotFound("三方仓不存在")
+    if body.name is not None:
+        warehouse.name = body.name
+    if "country" in body.model_fields_set:
+        warehouse.country = _normalize_third_party_country(body.country)
+    try:
+        await sync_import_items_warehouse_id(db, warehouse)
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise ConflictError("三方仓名称已存在") from exc
+    await db.refresh(warehouse)
+    return ThirdPartyWarehouseOut.model_validate(
+        {
+            "id": warehouse.id,
+            "name": warehouse.name,
+            "country": warehouse.country,
+            "created_at": warehouse.created_at,
+            "updated_at": warehouse.updated_at,
+        }
+    )
+
+
+@router.delete("/third-party-warehouses/{warehouse_id}", status_code=204)
+async def delete_third_party_warehouse(
+    warehouse_id: int = Path(..., ge=1),
+    db: AsyncSession = Depends(db_session),
+    _: None = Depends(require_permission(DATA_BASE_EDIT)),
+) -> None:
+    current_count = (
+        await db.execute(
+            select(func.count()).where(ThirdPartyInventoryCurrent.warehouse_id == warehouse_id)
+        )
+    ).scalar_one()
+    history_count = (
+        await db.execute(
+            select(func.count()).where(ThirdPartyInventoryImportItem.warehouse_id == warehouse_id)
+        )
+    ).scalar_one()
+    if current_count or history_count:
+        raise ConflictError("三方仓存在当前库存或导入历史，不能删除")
+    result = await db.execute(
+        delete(ThirdPartyWarehouse).where(ThirdPartyWarehouse.id == warehouse_id)
+    )
+    if result.rowcount == 0:
+        raise NotFound("三方仓不存在")
+    await db.commit()
+
+
+@router.post("/third-party-inventory/import/preview", response_model=ThirdPartyInventoryPreviewOut)
+async def preview_third_party_inventory_import(
+    request: Request,
+    db: AsyncSession = Depends(db_session),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(DATA_BIZ_EDIT)),
+) -> ThirdPartyInventoryPreviewOut:
+    filename = unquote(request.headers.get("x-filename", "third-party-inventory.xlsx"))
+    batch = await create_import_preview(
+        db,
+        filename=filename,
+        content=await request.body(),
+        created_by=user.username,
+    )
+    return _third_party_preview_out(batch)
+
+
+@router.post(
+    "/third-party-inventory/import/{batch_id}/confirm",
+    response_model=ThirdPartyInventoryImportBatchOut,
+)
+async def confirm_third_party_inventory_import(
+    batch_id: int = Path(..., ge=1),
+    db: AsyncSession = Depends(db_session),
+    user: UserContext = Depends(get_current_user),
+    _: None = Depends(require_permission(DATA_BIZ_EDIT)),
+) -> ThirdPartyInventoryImportBatchOut:
+    return _third_party_batch_out(
+        await confirm_import_batch(db, batch_id=batch_id, confirmed_by=user.username)
+    )
+
+
+@router.post(
+    "/third-party-inventory/import/{batch_id}/cancel",
+    response_model=ThirdPartyInventoryImportBatchOut,
+)
+async def cancel_third_party_inventory_import(
+    batch_id: int = Path(..., ge=1),
+    db: AsyncSession = Depends(db_session),
+    _: None = Depends(require_permission(DATA_BIZ_EDIT)),
+) -> ThirdPartyInventoryImportBatchOut:
+    return _third_party_batch_out(await expire_pending_batch(db, batch_id))
+
+
+@router.get("/third-party-inventory/batches", response_model=ThirdPartyInventoryImportBatchListOut)
+async def list_third_party_inventory_batches(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=200),
+    db: AsyncSession = Depends(db_session_readonly),
+    _: None = Depends(require_permission(DATA_BIZ_VIEW)),
+) -> ThirdPartyInventoryImportBatchListOut:
+    base = select(ThirdPartyInventoryImportBatch).order_by(
+        ThirdPartyInventoryImportBatch.created_at.desc(),
+        ThirdPartyInventoryImportBatch.id.desc(),
+    )
+    total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
+    rows = (
+        await db.execute(base.offset((page - 1) * page_size).limit(page_size))
+    ).scalars().all()
+    return ThirdPartyInventoryImportBatchListOut(
+        items=[_third_party_batch_out(row) for row in rows],
+        total=int(total or 0),
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get(
+    "/third-party-inventory/batches/{batch_id}",
+    response_model=ThirdPartyInventoryImportBatchDetailOut,
+)
+async def get_third_party_inventory_batch(
+    batch_id: int = Path(..., ge=1),
+    only_errors: bool = Query(default=False),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+    db: AsyncSession = Depends(db_session_readonly),
+    _: None = Depends(require_permission(DATA_BIZ_VIEW)),
+) -> ThirdPartyInventoryImportBatchDetailOut:
+    batch = (
+        await db.execute(
+            select(ThirdPartyInventoryImportBatch).where(
+                ThirdPartyInventoryImportBatch.id == batch_id
+            )
+        )
+    ).scalar_one_or_none()
+    if batch is None:
+        raise NotFound("导入批次不存在")
+    item_base = select(ThirdPartyInventoryImportItem).where(
+        ThirdPartyInventoryImportItem.batch_id == batch_id
+    )
+    if only_errors:
+        item_base = item_base.where(ThirdPartyInventoryImportItem.error_message.is_not(None))
+    item_total = (
+        await db.execute(select(func.count()).select_from(item_base.subquery()))
+    ).scalar_one()
+    rows = (
+        await db.execute(
+            item_base.order_by(ThirdPartyInventoryImportItem.source_row_no.asc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+    ).scalars().all()
+    payload = _third_party_batch_out(batch).model_dump()
+    payload.update(
+        {
+            "items": [ThirdPartyInventoryImportItemOut.model_validate(row) for row in rows],
+            "item_total": int(item_total or 0),
+        }
+    )
+    return ThirdPartyInventoryImportBatchDetailOut.model_validate(payload)
+
+
+def _apply_third_party_inventory_filters(
+    stmt: Any,
+    *,
+    warehouse_keyword: str | None,
+    sku: str | None,
+    country: str | None,
+    only_missing_country: bool,
+    only_participating: bool | None,
+    only_nonzero: bool,
+) -> Any:
+    if warehouse_keyword:
+        stmt = stmt.where(
+            ThirdPartyWarehouse.name.ilike(f"%{escape_like(warehouse_keyword)}%", escape="\\")
+        )
+    if sku:
+        stmt = stmt.where(
+            ThirdPartyInventoryCurrent.commodity_sku.ilike(
+                f"%{escape_like(sku)}%", escape="\\"
+            )
+        )
+    if country:
+        stmt = stmt.where(ThirdPartyWarehouse.country == country.upper())
+    if only_missing_country:
+        stmt = stmt.where(ThirdPartyWarehouse.country.is_(None))
+    if only_participating is not None:
+        stmt = stmt.where(
+            ThirdPartyWarehouse.country.is_not(None)
+            if only_participating
+            else ThirdPartyWarehouse.country.is_(None)
+        )
+    if only_nonzero:
+        stmt = stmt.where(
+            (ThirdPartyInventoryCurrent.available > 0)
+            | (ThirdPartyInventoryCurrent.reserved > 0)
+        )
+    return stmt
+
+
+@router.get(
+    "/third-party-inventory/warehouse-groups",
+    response_model=ThirdPartyInventoryWarehouseGroupListOut,
+)
+async def list_third_party_inventory_warehouse_groups(
+    warehouse_keyword: str | None = Query(default=None),
+    sku: str | None = Query(default=None),
+    country: str | None = Query(default=None),
+    only_missing_country: bool = Query(default=False),
+    only_participating: bool | None = Query(default=None),
+    only_nonzero: bool = Query(default=False),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=200),
+    db: AsyncSession = Depends(db_session_readonly),
+    _: None = Depends(require_permission(DATA_BIZ_VIEW)),
+) -> ThirdPartyInventoryWarehouseGroupListOut:
+    group_stmt = (
+        select(
+            ThirdPartyInventoryCurrent.warehouse_id.label("warehouse_id"),
+            ThirdPartyWarehouse.name.label("warehouse_name"),
+            ThirdPartyWarehouse.country.label("country"),
+            func.count(ThirdPartyInventoryCurrent.id).label("sku_count"),
+            func.coalesce(func.sum(ThirdPartyInventoryCurrent.available), 0).label(
+                "total_available"
+            ),
+            func.coalesce(func.sum(ThirdPartyInventoryCurrent.reserved), 0).label(
+                "total_reserved"
+            ),
+        )
+        .join(ThirdPartyWarehouse, ThirdPartyWarehouse.id == ThirdPartyInventoryCurrent.warehouse_id)
+        .group_by(
+            ThirdPartyInventoryCurrent.warehouse_id,
+            ThirdPartyWarehouse.name,
+            ThirdPartyWarehouse.country,
+        )
+        .order_by(ThirdPartyWarehouse.name.asc(), ThirdPartyInventoryCurrent.warehouse_id.asc())
+    )
+    group_stmt = _apply_third_party_inventory_filters(
+        group_stmt,
+        warehouse_keyword=warehouse_keyword,
+        sku=sku,
+        country=country,
+        only_missing_country=only_missing_country,
+        only_participating=only_participating,
+        only_nonzero=only_nonzero,
+    )
+    total = (
+        await db.execute(select(func.count()).select_from(group_stmt.order_by(None).subquery()))
+    ).scalar_one()
+    group_rows = (
+        await db.execute(group_stmt.offset((page - 1) * page_size).limit(page_size))
+    ).all()
+    warehouse_ids = [row.warehouse_id for row in group_rows]
+    if not warehouse_ids:
+        return ThirdPartyInventoryWarehouseGroupListOut(
+            items=[], total=int(total or 0), page=page, page_size=page_size
+        )
+
+    item_stmt = (
+        select(ThirdPartyInventoryCurrent, ThirdPartyWarehouse.name, ThirdPartyWarehouse.country)
+        .join(ThirdPartyWarehouse, ThirdPartyWarehouse.id == ThirdPartyInventoryCurrent.warehouse_id)
+        .where(ThirdPartyInventoryCurrent.warehouse_id.in_(warehouse_ids))
+        .order_by(ThirdPartyWarehouse.name.asc(), ThirdPartyInventoryCurrent.commodity_sku.asc())
+    )
+    item_stmt = _apply_third_party_inventory_filters(
+        item_stmt,
+        warehouse_keyword=warehouse_keyword,
+        sku=sku,
+        country=country,
+        only_missing_country=only_missing_country,
+        only_participating=only_participating,
+        only_nonzero=only_nonzero,
+    )
+    item_rows = (await db.execute(item_stmt)).all()
+    items_by_warehouse: dict[int, list[ThirdPartyInventoryItemOut]] = {
+        warehouse_id: [] for warehouse_id in warehouse_ids
+    }
+    for item, warehouse_name, row_country in item_rows:
+        items_by_warehouse.setdefault(item.warehouse_id, []).append(
+            _third_party_inventory_item_out(item, warehouse_name, row_country)
+        )
+
+    groups = [
+        ThirdPartyInventoryWarehouseGroup.model_validate(
+            {
+                "warehouse_id": row.warehouse_id,
+                "warehouse_name": row.warehouse_name,
+                "country": row.country,
+                "participates": row.country is not None,
+                "sku_count": int(row.sku_count or 0),
+                "total_available": int(row.total_available or 0),
+                "total_reserved": int(row.total_reserved or 0),
+                "items": items_by_warehouse.get(row.warehouse_id, []),
+            }
+        )
+        for row in group_rows
+    ]
+    return ThirdPartyInventoryWarehouseGroupListOut(
+        items=groups, total=int(total or 0), page=page, page_size=page_size
+    )
+
+
+@router.post("/third-party-inventory/items", response_model=ThirdPartyInventoryItemOut)
+async def create_third_party_inventory_item(
+    body: ThirdPartyInventoryCurrentIn,
+    db: AsyncSession = Depends(db_session),
+    _: None = Depends(require_permission(DATA_BIZ_EDIT)),
+) -> ThirdPartyInventoryItemOut:
+    item = await upsert_current_item(
+        db,
+        warehouse_id=body.warehouse_id,
+        commodity_sku=body.commodity_sku,
+        available=body.available,
+        reserved=body.reserved,
+    )
+    warehouse = (
+        await db.execute(select(ThirdPartyWarehouse).where(ThirdPartyWarehouse.id == item.warehouse_id))
+    ).scalar_one()
+    return _third_party_inventory_item_out(item, warehouse.name, warehouse.country)
+
+
+@router.patch("/third-party-inventory/items/{item_id}", response_model=ThirdPartyInventoryItemOut)
+async def update_third_party_inventory_item(
+    body: ThirdPartyInventoryCurrentPatch,
+    item_id: int = Path(..., ge=1),
+    db: AsyncSession = Depends(db_session),
+    _: None = Depends(require_permission(DATA_BIZ_EDIT)),
+) -> ThirdPartyInventoryItemOut:
+    item = await patch_current_item(
+        db,
+        item_id=item_id,
+        values=body.model_dump(exclude_unset=True),
+    )
+    warehouse = (
+        await db.execute(select(ThirdPartyWarehouse).where(ThirdPartyWarehouse.id == item.warehouse_id))
+    ).scalar_one()
+    return _third_party_inventory_item_out(item, warehouse.name, warehouse.country)
+
+
+@router.delete("/third-party-inventory/items/{item_id}", status_code=204)
+async def remove_third_party_inventory_item(
+    item_id: int = Path(..., ge=1),
+    db: AsyncSession = Depends(db_session),
+    _: None = Depends(require_permission(DATA_BIZ_EDIT)),
+) -> None:
+    await delete_current_item(db, item_id)
+
+
 @router.get("/shops", response_model=DataShopListOut)
 async def list_data_shops(
     page: int = Query(default=1, ge=1),

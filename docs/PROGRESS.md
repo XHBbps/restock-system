@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-05-14（默认仓 `type=0` 已纳入国内侧库存扣减，并从海外库存与补货分仓口径排除。）
+> 最近更新：2026-05-15（三方仓、三方仓库存导入与当前库存维护已交付；有国家的当前三方库存会并入 Step 2 海外库存。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -62,7 +62,7 @@
 
 - **6 步流水线**（`backend/app/engine/runner.py`）：
   1. `step1_velocity` — 加权日均销量（7日×0.5 + 14日×0.3 + 30日×0.2）
-  2. `step2_sale_days` — 可售天数 + 海外库存聚合（排除默认仓和国内仓，含在途）
+  2. `step2_sale_days` — 可售天数 + 海外库存聚合（赛狐海外库存 + 有国家的当前三方仓库存，排除默认仓和国内仓，含在途）
   3. `step3_country_qty` — 各国补货量（`target_days + (demand_date - today)` 作为有效目标库存天数）
   4. `step4_total` — 总采购量（基于新的 Σcountry_qty − 国内侧库存（默认仓 + 国内仓）+ ceil(Σvelocity × safety_stock_days)，clamp 到 0；`buffer_days` 不参与采购量）
   5. `step5_warehouse_split` — 按邮编规则分配到具体仓库；订单样本来自 `source='订单处理'`、`package_status!='has_canceled'` 且 `country_code!='ZZ'` 的包裹订单，以 `quantity_ordered` 为样本数量，优先使用 `order_header.postal_code`，已知邮编命中部分按真实比例分配，未知部分按该国家已配置邮编规则的仓均分
@@ -102,6 +102,7 @@
   - `DashboardPageHeader` / `DashboardStatCard` / `DashboardSection` / `DashboardChartCard` / `DataTableCard`
   - `BaseChart`（ECharts 封装）
 - **数据加载模式**：订单页、历史记录页、商品页、库存页、出库记录页使用“后端分页 + 后端筛选”；仓库、店铺等低增长基础页仍保留轻量分页
+- **三方仓与三方仓库存页**：新增“基础数据 > 三方仓”和“业务数据 > 三方仓库存”。三方仓独立于赛狐 `warehouse` 主数据，可维护国家；三方仓库存支持 Excel 预览、确认整批替换当前库存、导入历史详情查询，以及当前库存单条新增、编辑、删除。
 - **商品页主数据口径**：`DataProductsView.vue` 通过 `/api/data/sku-overview` 展示 `commodity_master + sku_config`，商品名、图片、状态、SKU 类型、采购周期优先取主数据；SKU 类型按 `commodity_master.is_group` 展示为「单品 SKU / 组合 SKU」，并支持「全部 / 单品 SKU / 组合 SKU」筛选。listing 仅作为展开明细和销量参考，无 listing 的商品 SKU 也会显示。
 - **筛选控件高度统一**：`PageSectionCard` 的 `section-actions` 强制所有控件 32px 高度
 - **订单处理列表展示**：`DataOrdersView.vue` 展示包裹状态、店铺名称、平台、国家、邮编与本地订单明细；`countryCode='ZZ'` 统一显示为 `-`；“下单时间”和详情“最后更新时间”优先使用后端按站点 / 国家时区派生的展示字段，避免美国等站点订单在北京时间口径下显示成未来日期。筛选支持 SKU / 订单号、国家、店铺、平台和包裹状态，其中平台选项来自 `GET /api/data/order-platforms` 返回的已落库订单平台。移动端仅在顶部保留 SKU / 订单号搜索、筛选入口和信息匹配入口，国家、店铺、平台、包裹状态和日期范围收纳到筛选抽屉，并使用底部固定分页栏。来源和包裹号不再作为页面展示或搜索字段，平台字段改为标签样式，店铺仅显示名称，订单明细中的商品 SKU 使用后端落库后的 `commodity_sku`。
@@ -112,6 +113,14 @@
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`；移动端使用三列 grid 固定商品、国家、可售天数列宽，避免商品信息与国家列挤压
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.125 三方仓库存参与海外库存口径（2026-05-15）
+- **数据模型**：新增 `third_party_warehouse`、`third_party_inventory_current`、`third_party_inventory_import_batch`、`third_party_inventory_import_item`。三方仓独立于赛狐仓库表；导入批次和明细保留历史，当前库存单独维护，手工新增/编辑/删除不回写历史。
+- **三方仓 API**：新增 `GET/POST/PATCH/DELETE /api/data/third-party-warehouses`。删除采用保护策略，存在当前库存或导入历史关联时拒绝删除；国家为空表示该仓库存暂不参与计算。
+- **三方库存 API**：新增导入预览、确认、取消、批次列表/详情、当前库存分组列表和明细 CRUD。预览阶段写入 `pending` 批次和暂存明细，不影响当前库存；确认导入会自动创建新三方仓并整批替换 `third_party_inventory_current`。
+- **Excel 导入口径**：必要列为 `仓库`、`SKU`、`可用数`、`待出库`；空仓库、空 SKU、非法数量行只进入问题行，不进入当前库存；同一仓库 + SKU 在确认时聚合数量。
+- **引擎 Step 2**：`backend/app/engine/step2_sale_days.py` 额外读取 `third_party_inventory_current JOIN third_party_warehouse`，仅消费 `country is not null` 且国家码可统计的库存，并按 `commodity_sku + country` 汇总后并入海外库存。Step 4 国内/默认仓库存不读取三方库存。
+- **前端页面**：新增 `DataThirdPartyWarehousesView.vue` 和 `DataThirdPartyInventoryView.vue`，分别挂载到“基础数据 > 三方仓”和“业务数据 > 三方仓库存”，使用 `PageSectionCard`、`TablePaginationBar` 和动态国家选项。
 
 ### 3.124 默认仓纳入国内侧库存口径（2026-05-14）
 - **Step 4 采购扣减**：`backend/app/engine/step4_total.py` 读取本地库存时使用 `Warehouse.type in (0, 1)`，直接商品 SKU 与 SKU 映射组件库存都会把默认仓和国内仓合计为 `local_stock_*`。
