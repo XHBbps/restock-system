@@ -4,7 +4,7 @@ Formula (FR-030):
     sale_days[country] = (available + reserved + in_transit) / velocity[country]
 
 Current business rule:
-- available + reserved still come from overseas warehouse inventory
+- available + reserved come from current overseas inventory maintained in the UI
 - in_transit comes from synced active out-records aggregated by ``(sku, country)``
 """
 
@@ -22,45 +22,12 @@ from app.engine.sku_mapping import (
     load_active_mapping_rules,
     load_in_transit_totals_by_country,
     load_in_transit_totals_by_warehouse,
-    load_inventory_totals_by_warehouse,
     merge_warehouse_stock,
 )
 from app.engine.warehouse_scope import LOCAL_WAREHOUSE_TYPES
 from app.models.in_transit import InTransitItem, InTransitRecord
-from app.models.inventory import InventorySnapshotLatest
 from app.models.third_party_inventory import ThirdPartyInventoryCurrent, ThirdPartyWarehouse
 from app.models.warehouse import Warehouse
-
-
-async def load_oversea_inventory(
-    db: AsyncSession,
-    commodity_skus: list[str] | None,
-) -> dict[tuple[str, str], dict[str, int]]:
-    """Load overseas inventory aggregated by ``(sku, country)``."""
-    stmt = (
-        select(
-            InventorySnapshotLatest.commodity_sku,
-            InventorySnapshotLatest.country,
-            func.sum(InventorySnapshotLatest.available).label("avail"),
-            func.sum(InventorySnapshotLatest.reserved).label("reserv"),
-        )
-        .join(Warehouse, Warehouse.id == InventorySnapshotLatest.warehouse_id)
-        .where(~Warehouse.type.in_(LOCAL_WAREHOUSE_TYPES))
-        .where(InventorySnapshotLatest.country.is_not(None))
-        .group_by(InventorySnapshotLatest.commodity_sku, InventorySnapshotLatest.country)
-    )
-    if commodity_skus is not None:
-        stmt = stmt.where(InventorySnapshotLatest.commodity_sku.in_(commodity_skus))
-    rows = (await db.execute(stmt)).all()
-    result: dict[tuple[str, str], dict[str, int]] = {}
-    for sku, country, avail, reserv in rows:
-        if not is_reportable_country_code(country):
-            continue
-        key = (sku, country)
-        current = result.setdefault(key, {"available": 0, "reserved": 0})
-        current["available"] += int(avail or 0)
-        current["reserved"] += int(reserv or 0)
-    return result
 
 
 async def load_third_party_inventory(
@@ -90,17 +57,6 @@ async def load_third_party_inventory(
         current["available"] += int(avail or 0)
         current["reserved"] += int(reserv or 0)
     return result
-
-
-def merge_stock_totals(
-    base: dict[tuple[str, str], dict[str, int]],
-    extra: dict[tuple[str, str], dict[str, int]],
-) -> dict[tuple[str, str], dict[str, int]]:
-    for key, values in extra.items():
-        current = base.setdefault(key, {"available": 0, "reserved": 0})
-        current["available"] += int(values.get("available", 0))
-        current["reserved"] += int(values.get("reserved", 0))
-    return base
 
 
 async def load_in_transit(
@@ -189,9 +145,7 @@ async def run_step2(
     sku_to_group_key: dict[str, str] | None = None,
     members_by_group_key: dict[str, list[str]] | None = None,
 ) -> tuple[SaleDaysMap, InventoryMap]:
-    oversea = await load_oversea_inventory(db, commodity_skus)
-    third_party = await load_third_party_inventory(db, commodity_skus)
-    merge_stock_totals(oversea, third_party)
+    oversea = await load_third_party_inventory(db, commodity_skus)
     in_transit = await load_in_transit(db, commodity_skus)
     rules = await load_active_mapping_rules(db, commodity_skus, sku_to_group_key=sku_to_group_key)
     component_skus = component_skus_for_rules(rules)
@@ -207,12 +161,6 @@ async def run_step2(
                 )
             }
         )
-        component_inventory = await load_inventory_totals_by_warehouse(
-            db,
-            component_query_skus,
-            exclude_warehouse_types=LOCAL_WAREHOUSE_TYPES,
-            sku_to_group_key=sku_to_group_key,
-        )
         component_transit = await load_in_transit_totals_by_warehouse(
             db,
             component_query_skus,
@@ -224,7 +172,7 @@ async def run_step2(
             component_query_skus,
             sku_to_group_key=sku_to_group_key,
         )
-        warehouse_component_stock = merge_warehouse_stock(component_inventory, component_transit)
+        warehouse_component_stock = merge_warehouse_stock(component_transit)
         mapped = compute_mapped_stock_by_country(
             rules,
             warehouse_component_stock,

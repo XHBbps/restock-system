@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-05-15（用户可见命名已收敛为国内仓 / 国内库存 / 海外仓 / 海外库存；国内仓与国内库存页面仅展示赛狐默认仓 `type=0`。）
+> 最近更新：2026-05-15（补货计算中的海外现货库存已收敛为仅取海外库存页面数据；赛狐同步出库记录仍作为在途库存参与计算。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -62,13 +62,13 @@
 
 - **6 步流水线**（`backend/app/engine/runner.py`）：
   1. `step1_velocity` — 加权日均销量（7日×0.5 + 14日×0.3 + 30日×0.2）
-  2. `step2_sale_days` — 可售天数 + 海外库存聚合（赛狐海外库存 + 有国家的当前海外库存〔内部 `third_party_*`〕，排除默认仓和国内仓，含在途）
+  2. `step2_sale_days` — 可售天数 + 海外库存聚合（海外现货仅取有国家的当前海外库存〔内部 `third_party_*`〕，赛狐同步出库记录仍作为在途库存参与计算）
   3. `step3_country_qty` — 各国补货量（`target_days + (demand_date - today)` 作为有效目标库存天数）
   4. `step4_total` — 总采购量（基于新的 Σcountry_qty − 国内侧库存（默认仓 + 国内仓）+ ceil(Σvelocity × safety_stock_days)，clamp 到 0；`buffer_days` 不参与采购量）
   5. `step5_warehouse_split` — 按邮编规则分配到具体仓库；订单样本来自 `source='订单处理'`、`package_status!='has_canceled'` 且 `country_code!='ZZ'` 的包裹订单，以 `quantity_ordered` 为样本数量，优先使用 `order_header.postal_code`，已知邮编命中部分按真实比例分配，未知部分按该国家已配置邮编规则的仓均分
   6. `step6_timing` — 紧急标志（任一正补货国家 `sale_days <= lead_time_days` 即为紧急；不再生成用户可见补货日期）
 - **补货区域过滤**：全局参数 `restock_regions` 支持按国家多选；为空数组时表示全部业务国家参与计算，配置后仅这些国家的订单会参与 `step1_velocity` 销量统计和 `step5_warehouse_split` 的国家订单分仓；空国家、非法国家码和内部哨兵 `ZZ` 始终排除
-- **仓库类型口径**：默认仓 `type=0` 与国内仓 `type=1` 统一作为国内侧库存参与 Step 4 采购扣减；Step 2 海外库存、直接商品有目标仓在途、SKU 映射组件海外库存 / 有目标仓在途，以及 Step 5 可分仓仓库均排除 `type in (0, 1)`，避免默认仓库存重复作为海外库存参与补货。
+- **仓库类型口径**：默认仓 `type=0` 与国内仓 `type=1` 统一作为国内侧库存参与 Step 4 采购扣减；Step 2 不再读取赛狐同步库存作为海外现货，直接商品有目标仓在途、SKU 映射组件有目标仓在途，以及 Step 5 可分仓仓库均排除 `type in (0, 1)`，避免默认仓或国内仓记录重复参与补货。
 - **并发保护**：`pg_advisory_xact_lock(7429001)` 事务级锁，阻止并发引擎覆盖彼此
 - **补货日期参与数量计算与展示**：`POST /api/engine/run` 必填 `demand_date` 且不能早于北京时间今天；runner 按 `today=now_beijing().date()` 计算 `demand_days=max(demand_date - today, 0)`，再用 `target_days + demand_days` 作为 Step 3 有效目标库存天数；`restock_regions` 仍只决定哪些国家参与补货；新生成建议单的 `restock_dates` 与 `calculation_inputs_snapshot.restock.countries[*].restock_date` 统一写入 `demand_date`
 - **快照追溯**：`velocity_snapshot`、`sale_days_snapshot`、`global_config_snapshot` 存入 JSONB 字段；其中 `global_config_snapshot` 会记录 `restock_regions` 与本次补货日期 `demand_date`；新生成的 `suggestion_item.calculation_inputs_snapshot` 冻结采购量与国家补货量的公式输入、原始结果和最终结果，旧建议单为空时前端提示历史建议缺少完整计算依据
@@ -115,6 +115,12 @@
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`；移动端使用三列 grid 固定商品、国家、可售天数列宽，避免商品信息与国家列挤压
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
 
+### 3.127 海外现货库存计算来源收敛（2026-05-15）
+- **引擎 Step 2**：`backend/app/engine/step2_sale_days.py` 不再读取 `inventory_snapshot_latest` 中赛狐非国内仓库存作为海外现货；`available/reserved` 仅来自 `third_party_inventory_current JOIN third_party_warehouse` 中已维护有效国家的海外库存页面数据。
+- **在途口径保留**：赛狐同步的出库 / 在途记录仍通过 `in_transit_record` 与 `in_transit_item` 参与 `in_transit`，直接商品与 SKU 映射组件有目标仓在途继续排除 `warehouse.type in (0, 1)`。
+- **组件映射口径**：Step 2 的 SKU 映射不再通过赛狐非国内仓现货库存折算海外现货；仅在途组件信号可按原有组合规则折算为商品 SKU 的在途库存。
+- **测试覆盖**：`backend/tests/unit/test_engine_step2.py` 覆盖海外库存页面数据参与计算、赛狐在途继续参与、组件映射不再消费赛狐非国内仓现货库存。
+
 ### 3.126 国内/海外仓命名与页面口径收敛（2026-05-15）
 - **展示命名**：前端导航和页面标题统一改为“国内仓 / 国内库存 / 海外仓 / 海外库存”；原“默认仓”在用户可见仓库类型标签中展示为“国内仓”。
 - **国内页面范围**：`backend/app/api/data.py` 的 `/api/data/warehouses`、`/api/data/inventory`、`/api/data/inventory/warehouse-groups` 统一限定 `Warehouse.type == 0`，只展示赛狐默认仓；国内仓页移除类型筛选，避免把 `type=1` 国内仓混入该页面。
@@ -126,12 +132,12 @@
 - **三方仓 API**：新增 `GET/POST/PATCH/DELETE /api/data/third-party-warehouses`。删除采用保护策略，存在当前库存或导入历史关联时拒绝删除；国家为空表示该仓库存暂不参与计算。
 - **三方库存 API**：新增导入预览、确认、取消、批次列表/详情、当前库存分组列表和明细 CRUD。预览阶段写入 `pending` 批次和暂存明细，不影响当前库存；确认导入会自动创建新三方仓并整批替换 `third_party_inventory_current`。
 - **Excel 导入口径**：必要列为 `仓库`、`SKU`、`可用数`、`待出库`；空仓库、空 SKU、非法数量行只进入问题行，不进入当前库存；同一仓库 + SKU 在确认时聚合数量。
-- **引擎 Step 2**：`backend/app/engine/step2_sale_days.py` 额外读取 `third_party_inventory_current JOIN third_party_warehouse`，仅消费 `country is not null` 且国家码可统计的库存，并按 `commodity_sku + country` 汇总后并入海外库存。Step 4 国内/默认仓库存不读取三方库存。
+- **引擎 Step 2**：`backend/app/engine/step2_sale_days.py` 读取 `third_party_inventory_current JOIN third_party_warehouse`，仅消费 `country is not null` 且国家码可统计的库存，并按 `commodity_sku + country` 汇总为海外现货库存。Step 4 国内/默认仓库存不读取三方库存。
 - **前端页面**：新增 `DataThirdPartyWarehousesView.vue` 和 `DataThirdPartyInventoryView.vue`；产品展示层当前命名为“基础数据 > 海外仓”和“业务数据 > 海外库存”，使用 `PageSectionCard`、`TablePaginationBar` 和动态国家选项。
 
 ### 3.124 默认仓纳入国内侧库存口径（2026-05-14）
 - **Step 4 采购扣减**：`backend/app/engine/step4_total.py` 读取本地库存时使用 `Warehouse.type in (0, 1)`，直接商品 SKU 与 SKU 映射组件库存都会把默认仓和国内仓合计为 `local_stock_*`。
-- **Step 2 海外库存**：`backend/app/engine/step2_sale_days.py` 的海外库存、直接商品有目标仓在途、组件库存和有目标仓的组件在途均排除 `type in (0, 1)`；默认仓不会降低国家补货量或可售天数。
+- **Step 2 海外库存**：`backend/app/engine/step2_sale_days.py` 的直接商品有目标仓在途和有目标仓的组件在途均排除 `type in (0, 1)`；海外现货库存当前仅取海外库存页面数据，默认仓不会降低国家补货量或可售天数。
 - **Step 5 分仓范围**：`backend/app/engine/step5_warehouse_split.py` 的规则仓同样排除默认仓和国内仓，默认仓不会进入国家补货量的仓内拆分。
 - **公共口径**：新增 `backend/app/engine/warehouse_scope.py` 定义 `LOCAL_WAREHOUSE_TYPES = (0, 1)`，并扩展 `backend/app/engine/sku_mapping.py` 的仓库类型集合过滤参数，避免 Step 2 / Step 4 重复硬编码。
 - **历史兼容**：已生成建议单和已导出快照不回写；重新生成建议单后，`calculation_inputs_snapshot.purchase.local_stock_*` 才会按默认仓 + 国内仓合计冻结。
