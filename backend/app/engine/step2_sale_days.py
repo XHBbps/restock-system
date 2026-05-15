@@ -14,6 +14,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.countries import is_reportable_country_code
+from app.core.country_mapping import apply_eu_mapping, load_eu_countries
 from app.engine.context import InventoryMap, InventoryStock, SaleDaysMap, VelocityMap
 from app.engine.sku_mapping import (
     WarehouseStock,
@@ -36,6 +37,8 @@ THIRD_PARTY_WAREHOUSE_KEY_PREFIX = "third_party"
 async def load_third_party_inventory(
     db: AsyncSession,
     commodity_skus: list[str] | None,
+    *,
+    eu_countries: set[str] | None = None,
 ) -> dict[tuple[str, str], dict[str, int]]:
     """Load current third-party inventory aggregated by ``(sku, country)``."""
     stmt = (
@@ -56,9 +59,10 @@ async def load_third_party_inventory(
     rows = (await db.execute(stmt)).all()
     result: dict[tuple[str, str], dict[str, int]] = {}
     for sku, country, avail, reserv in rows:
-        if not is_reportable_country_code(country):
+        mapped_country = apply_eu_mapping(country, eu_countries or set())
+        if mapped_country is None or not is_reportable_country_code(mapped_country):
             continue
-        current = result.setdefault((sku, country), {"available": 0, "reserved": 0})
+        current = result.setdefault((sku, mapped_country), {"available": 0, "reserved": 0})
         current["available"] += int(avail or 0)
         current["reserved"] += int(reserv or 0)
     return result
@@ -73,6 +77,7 @@ async def load_third_party_component_inventory_by_warehouse(
     inventory_skus: list[str],
     *,
     sku_to_group_key: dict[str, str] | None = None,
+    eu_countries: set[str] | None = None,
 ) -> dict[tuple[str, str], WarehouseStock]:
     """Load current third-party component inventory by overseas warehouse.
 
@@ -105,15 +110,16 @@ async def load_third_party_component_inventory_by_warehouse(
     sku_groups = sku_to_group_key or {}
     result: dict[tuple[str, str], WarehouseStock] = {}
     for sku, warehouse_id, country, total in rows:
-        if not is_reportable_country_code(country):
+        mapped_country = apply_eu_mapping(country, eu_countries or set())
+        if mapped_country is None or not is_reportable_country_code(mapped_country):
             continue
         key = (sku_groups.get(sku, sku), _third_party_warehouse_key(int(warehouse_id)))
         current = result.get(key)
         if current is None:
-            result[key] = WarehouseStock(country=country, total=int(total or 0))
+            result[key] = WarehouseStock(country=mapped_country, total=int(total or 0))
         else:
             result[key] = WarehouseStock(
-                country=current.country or country,
+                country=current.country or mapped_country,
                 total=current.total + int(total or 0),
             )
     return result
@@ -205,7 +211,12 @@ async def run_step2(
     sku_to_group_key: dict[str, str] | None = None,
     members_by_group_key: dict[str, list[str]] | None = None,
 ) -> tuple[SaleDaysMap, InventoryMap]:
-    oversea = await load_third_party_inventory(db, commodity_skus)
+    eu_countries = await load_eu_countries(db)
+    oversea = await load_third_party_inventory(
+        db,
+        commodity_skus,
+        eu_countries=eu_countries,
+    )
     in_transit = await load_in_transit(db, commodity_skus)
     rules = await load_active_mapping_rules(db, commodity_skus, sku_to_group_key=sku_to_group_key)
     component_skus = component_skus_for_rules(rules)
@@ -225,6 +236,7 @@ async def run_step2(
             db,
             component_query_skus,
             sku_to_group_key=sku_to_group_key,
+            eu_countries=eu_countries,
         )
         component_transit = await load_in_transit_totals_by_warehouse(
             db,

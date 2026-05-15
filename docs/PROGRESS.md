@@ -1,6 +1,6 @@
 # Restock System 项目进度
 
-> 最近更新：2026-05-15（海外库存页面中的组件 SKU 已接入现有 SKU 映射规则，可按同海外仓口径折算为商品 SKU 海外现货参与补货计算。）
+> 最近更新：2026-05-15（海外仓真实国家在 Step 2 计算读取时按 `eu_countries` 归并为 `EU`，海外仓主数据仍保留真实国家码。）
 > 本文档记录已交付能力和近期重大变更。架构细节见 [`Project_Architecture_Blueprint.md`](Project_Architecture_Blueprint.md)。
 
 ---
@@ -62,7 +62,7 @@
 
 - **6 步流水线**（`backend/app/engine/runner.py`）：
   1. `step1_velocity` — 加权日均销量（7日×0.5 + 14日×0.3 + 30日×0.2）
-  2. `step2_sale_days` — 可售天数 + 海外库存聚合（海外现货仅取有国家的当前海外库存〔内部 `third_party_*`〕；海外库存页面中的组件 SKU 可按同海外仓 SKU 映射规则折算为商品 SKU，赛狐同步出库记录仍作为在途库存参与计算）
+  2. `step2_sale_days` — 可售天数 + 海外库存聚合（海外现货仅取有国家的当前海外库存〔内部 `third_party_*`〕；海外仓真实国家读取时按 `eu_countries` 映射为 `EU` 后参与计算；海外库存页面中的组件 SKU 可按同海外仓 SKU 映射规则折算为商品 SKU，赛狐同步出库记录仍作为在途库存参与计算）
   3. `step3_country_qty` — 各国补货量（`target_days + (demand_date - today)` 作为有效目标库存天数）
   4. `step4_total` — 总采购量（基于新的 Σcountry_qty − 国内侧库存（默认仓 + 国内仓）+ ceil(Σvelocity × safety_stock_days)，clamp 到 0；`buffer_days` 不参与采购量）
   5. `step5_warehouse_split` — 按邮编规则分配到具体仓库；订单样本来自 `source='订单处理'`、`package_status!='has_canceled'` 且 `country_code!='ZZ'` 的包裹订单，以 `quantity_ordered` 为样本数量，优先使用 `order_header.postal_code`，已知邮编命中部分按真实比例分配，未知部分按该国家已配置邮编规则的仓均分
@@ -114,6 +114,13 @@
 - **信息总览风险图与首行卡片**：`WorkspaceView.vue` 左侧图表使用“各国缺货风险分布”分组柱状图，按实时 `sale_days` 把各国 SKU 分为“紧急 / 临近补货 / 安全”三类并列展示；首行卡片则改为“需补货SKU / 无需补货SKU / 覆盖国家”，其中 `需补货SKU` 基于当前系统补货计算口径统计 `total_qty > 0` 的启用 SKU 数，`无需补货SKU` 为剩余启用 SKU 数，右侧“补货量国家分布”继续基于当前建议单全部条目的 `country_breakdown` 汇总
 - **急需补货SKU口径**：信息总览中的“急需补货SKU”按“商品信息 / 国家 / 可售天数”逐行展示；仅展示存在有效国家级 `sale_days` 且低于等于提前期的行；其中可售天数直接取当前建议单 `sale_days_snapshot` 中该国家对应 SKU 的值，小于 1 天统一显示为 `<1天`；移动端使用三列 grid 固定商品、国家、可售天数列宽，避免商品信息与国家列挤压
 - **信息总览快照模式**：`WorkspaceView.vue` 优先读取 `/api/metrics/dashboard` 返回的 `dashboard_snapshot` 缓存，页面头部展示快照状态和同步时间；无缓存或旧快照时返回 `snapshot_status="missing"`，不自动触发刷新，页面仅在具备 `home:refresh` 时展示“刷新快照”按钮与任务进度轮询
+
+### 3.129 海外仓国家按 EU 配置参与计算（2026-05-15）
+- **引擎 Step 2**：`backend/app/engine/step2_sale_days.py` 在读取海外库存页面当前库存时，先读取一次 `global_config.eu_countries`，再通过 `apply_eu_mapping()` 将海外仓真实国家映射为计算国家；属于 EU 成员配置的 `DE`、`FR` 等会在计算视图中归并为 `EU`。
+- **直接商品口径**：直接商品海外现货按 `commodity_sku + mapped_country` 汇总，非 EU 国家保持原国家码；空国家、非法国家和内部哨兵 `ZZ` 仍不参与 Step 2/3。
+- **组件 SKU 口径**：海外库存页面组件现货写入 `WarehouseStock.country` 时使用映射后的国家，但仓库计算键仍为 `third_party:{id}`，所以同为 `EU` 的不同海外仓组件不会跨海外仓组合。
+- **保持不变**：`third_party_warehouse.country` 仍保存人工维护的真实国家码，不回填为 `EU`；赛狐同步库存非国内仓现货仍不参与 Step 2；Step 4 国内侧采购扣减不读取海外库存页面数据。
+- **测试覆盖**：`backend/tests/unit/test_engine_step2.py` 覆盖直接商品 EU 汇总、组件 SKU EU 折算、同海外仓约束、非 EU 国家保留，以及空国家 / `ZZ` / 非法国家过滤。
 
 ### 3.128 海外库存组件 SKU 接入映射折算（2026-05-15）
 - **引擎 Step 2**：`backend/app/engine/step2_sale_days.py` 新增按海外仓加载 `third_party_inventory_current` 组件 SKU 的逻辑，并复用 `compute_mapped_stock_by_country()` 将海外库存页面组件现货折算为商品 SKU 海外现货。
