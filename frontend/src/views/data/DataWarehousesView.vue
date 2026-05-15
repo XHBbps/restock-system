@@ -1,16 +1,9 @@
 ﻿<template>
   <div class="data-warehouses-view">
-    <PageSectionCard title="仓库" description="查看仓库主数据、补货站点和当前总库存。">
+    <PageSectionCard title="国内仓">
       <template #actions>
-        <el-input v-model="filters.keyword" placeholder="搜索仓库名/ID" clearable style="width: 180px" />
-        <el-select v-model="filters.type" placeholder="类型" clearable style="width: 120px">
-          <el-option label="国内仓" :value="1" />
-          <el-option label="FBA 仓" :value="2" />
-          <el-option label="海外仓" :value="3" />
-          <el-option label="默认仓" :value="0" />
-          <el-option label="虚拟仓" :value="-1" />
-        </el-select>
-        <el-button v-if="auth.hasPermission('sync:operate')" :loading="refreshing" @click="refresh">刷新仓库</el-button>
+        <el-input v-model="filters.keyword" placeholder="搜索国内仓名/ID" clearable style="width: 180px" />
+        <el-button v-if="auth.hasPermission('sync:operate')" :loading="refreshing" @click="refresh">刷新国内仓</el-button>
       </template>
 
       <el-table
@@ -19,18 +12,18 @@
         table-layout="auto"
         style="width: 100%"
         :scrollbar-always-on="true"
-        empty-text="暂无仓库数据"
+        empty-text="暂无国内仓数据"
         @sort-change="handleSortChange"
       >
         <el-table-column
-          label="仓库名称"
+          label="国内仓名称"
           prop="name"
           min-width="200"
           sortable="custom"
           show-overflow-tooltip
         />
         <el-table-column
-          label="仓库 ID"
+          label="国内仓 ID"
           prop="id"
           width="120"
           sortable="custom"
@@ -140,7 +133,6 @@ const pageSize = ref(10)
 const sortState = ref<SortState>({})
 const filters = reactive({
   keyword: '',
-  type: undefined as number | undefined,
 })
 
 const countryOptions = ref<CountryOption[]>(
@@ -175,13 +167,10 @@ const filteredRows = computed(() => {
     const q = filters.keyword.toLowerCase()
     result = result.filter((r) => r.name.toLowerCase().includes(q) || r.id.toLowerCase().includes(q))
   }
-  if (filters.type !== undefined) {
-    result = result.filter((r) => r.type === filters.type)
-  }
   return result
 })
 
-watch(() => [filters.keyword, filters.type], () => { page.value = 1 })
+watch(() => filters.keyword, () => { page.value = 1 })
 
 const sortedRows = computed(() =>
   applyLocalSort(
@@ -216,7 +205,7 @@ async function reload(): Promise<void> {
     const resp = await listDataWarehouses()
     rows.value = resp.items
   } catch (err) {
-    ElMessage.error(getActionErrorMessage(err, '加载仓库列表失败'))
+    ElMessage.error(getActionErrorMessage(err, '加载国内仓列表失败'))
   } finally {
     loading.value = false
   }
@@ -236,9 +225,9 @@ async function refresh(): Promise<void> {
   try {
     const resp = await refreshWarehouses()
     refreshTaskId.value = resp.task_id
-    ElMessage.success('仓库同步任务已入队')
+    ElMessage.success('国内仓同步任务已入队')
   } catch (err) {
-    ElMessage.error(getActionErrorMessage(err, '仓库同步触发失败'))
+    ElMessage.error(getActionErrorMessage(err, '国内仓同步触发失败'))
   } finally {
     refreshing.value = false
   }
@@ -247,7 +236,7 @@ async function refresh(): Promise<void> {
 async function onRefreshDone(): Promise<void> {
   refreshTaskId.value = null
   await reload()
-  ElMessage.success('仓库数据已刷新')
+  ElMessage.success('国内仓数据已刷新')
 }
 
 async function saveCountry(row: DataWarehouse, value: string): Promise<void> {
@@ -255,7 +244,7 @@ async function saveCountry(row: DataWarehouse, value: string): Promise<void> {
     await patchWarehouseCountry(row.id, value || null)
     ElMessage.success(value ? `${row.name} 已更新为 ${value}` : `${row.name} 已清除国家`)
     ElMessage.warning({
-      message: '仓库国家已变更，建议重新生成补货建议单以确保数据准确。',
+      message: '国内仓国家已变更，建议重新生成补货建议单以确保数据准确。',
       duration: 5000,
     })
   } catch (err) {

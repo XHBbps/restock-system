@@ -107,7 +107,7 @@
 | Step | 文件 | 输入 | 输出 | 规则 |
 |---|---|---|---|---|
 | 1 | `step1_velocity.py` | 近 30 天订单处理列表订单 | `velocity[sku][country]` | 加权日均销量：7日×0.5 + 14日×0.3 + 30日×0.2；仅消费 `source='订单处理'`、`package_status!='has_canceled'` 且国家码可统计的包裹订单；有效数量为 `max(quantity_ordered, 0)`；若 `global_config.restock_regions` 非空，仅这些国家参与补货国家维度计算 |
-| 2 | `step2_sale_days.py` | 库存 + 在途 + velocity + SKU 映射规则 | `sale_days[sku][country]` | `(available + reserved + in_transit) / velocity`；直接海外库存 = 赛狐海外库存 + 有国家的当前三方仓库存，均按 `SKU + 国家` 汇总；赛狐直接海外库存、直接商品有目标仓在途、映射组件库存和有目标仓库 ID 的组件在途均排除默认仓 / 国内仓（`warehouse.type not in (0, 1)`）；三方仓 `country is null` 时保存但不参与计算；启用映射规则会先将库存组件 SKU 解析到共享组身份，再在同仓库、同组件维度按该国家 velocity 分配共享库存，最后按组合短板换算商品 SKU 视角库存，跨组合替代方案求和；组合 SKU 若已有同国家组件信号但可组装数为 0，仍保留该商品 SKU + 国家已知 0 库存记录；目标仓库 ID 为空的组件在途按国家汇总参与组合折算，并覆盖同国家同仓组合结果；velocity≤0、国家码不可统计或完全缺少库存/在途记录时跳过，缺记录不按 0 库存计算 |
+| 2 | `step2_sale_days.py` | 库存 + 在途 + velocity + SKU 映射规则 | `sale_days[sku][country]` | `(available + reserved + in_transit) / velocity`；直接海外库存 = 赛狐海外库存 + 有国家的当前海外库存（内部仍存于 `third_party_*` 表），均按 `SKU + 国家` 汇总；赛狐直接海外库存、直接商品有目标仓在途、映射组件库存和有目标仓库 ID 的组件在途均排除默认仓 / 国内仓（`warehouse.type not in (0, 1)`）；内部海外仓 `country is null` 时保存但不参与计算；启用映射规则会先将库存组件 SKU 解析到共享组身份，再在同仓库、同组件维度按该国家 velocity 分配共享库存，最后按组合短板换算商品 SKU 视角库存，跨组合替代方案求和；组合 SKU 若已有同国家组件信号但可组装数为 0，仍保留该商品 SKU + 国家已知 0 库存记录；目标仓库 ID 为空的组件在途按国家汇总参与组合折算，并覆盖同国家同仓组合结果；velocity≤0、国家码不可统计或完全缺少库存/在途记录时跳过，缺记录不按 0 库存计算 |
 | 3 | `step3_country_qty.py` | velocity + 库存 + 有效目标库存天数 | `country_qty[sku][country]` | `effective_target_days = target_days + max(demand_date - today, 0)`；仅对可统计且有库存/在途记录的国家输出 `max(0, ceil(effective_target_days × velocity - (available + reserved + in_transit)))`；已知库存记录数量为 0 时可按 0 计算，缺记录视为未知并跳过；runner 会把有效目标天数、国家销量、海外可用/占用/在途/合计、目标库存量、原始补货量、最终补货量、可售天数和 `demand_date` 口径补货日期冻结到 `suggestion_item.calculation_inputs_snapshot` |
 | 4 | `step4_total.py` | country_qty + velocity + 国内侧库存 + safety_stock_days | `purchase_qty[sku]` | `max(0, Σcountry_qty − (local.available + local.reserved) + ceil(Σvelocity × safety_stock_days))`；国内侧库存为默认仓 `type=0` + 国内仓 `type=1` 的直接商品 SKU 库存和映射组件折算库存；`Σcountry_qty` 使用 Step 3 的补货日期口径，`Σvelocity` 覆盖所有国家，不受 `restock_regions` 限制；`buffer_days` 不参与采购量；runner 会把各国补货量合计、全国家销量合计、安全库存量、国内/默认仓可用/占用/合计、原始采购量和最终采购量冻结到 `suggestion_item.calculation_inputs_snapshot` |
 | 5 | `step5_warehouse_split.py` | country_qty + 有效包裹订单 + 订单头邮编 + 邮编规则 + 国家规则仓映射 | `warehouse_breakdown[country][wh_id]` | 样本来自 `source='订单处理'`、`package_status!='has_canceled'` 且国家码可统计的包裹订单，样本数量为 `max(quantity_ordered, 0)`；邮编优先读取 `order_header.postal_code`；按邮编规则分配到具体仓库，已知部分按命中比例分配，未知部分按该国家已配置邮编规则的仓均分；仅排除默认仓 / 国内仓（`warehouse.type not in (0, 1)`）后的规则仓参与分仓与均分兜底；若无规则仓则该国家不分仓；若配置 `restock_regions`，仅消费这些国家的订单作为分仓依据；同优先级 tied 均分；整数分配使用 floor + 最大余数法，保证仓内合计等于国家补货量 |
@@ -121,7 +121,7 @@
 
 **库存 SKU 共享组**：`backend/app/services/physical_item.py` 提供 `sku_to_group_key` / `members_by_group_key`，只在库存组件侧解析共享组身份；`physical_item_group` 代表一组完全等价的库存组件 SKU，组表不再保存主 SKU。runner 保持商品 SKU 原样进入 Step 1 / Step 5 与建议展示，只把共享组解析应用于 Step 2 / Step 4 的组件库存汇总，避免共享组件重复计入；商品 SKU 不参与共享组归一。
 
-**三方仓库存数据源**：三方仓库存不写入 `inventory_snapshot_latest`，也不污染赛狐 `warehouse` 主数据。`third_party_warehouse.country` 为空时库存仅保存和展示，不进入 Step 2；维护国家后，`third_party_inventory_current` 会在下一次补货建议生成时按 `commodity_sku + country` 并入海外库存。三方库存当前需求明确使用商品 SKU，因此暂不走 SKU 映射组件折算；Step 4 国内侧库存不读取三方库存。导入历史由 `third_party_inventory_import_batch` / `third_party_inventory_import_item` 保留，手工维护只修改 `third_party_inventory_current`。
+**海外库存数据源（内部 `third_party_*`）**：产品展示层把原“三方仓 / 三方仓库存”命名为“海外仓 / 海外库存”，但内部表、API 和 TypeScript 类型仍保留 `third_party_*` / `third-party-*`。这部分库存不写入 `inventory_snapshot_latest`，也不污染赛狐 `warehouse` 主数据。`third_party_warehouse.country` 为空时库存仅保存和展示，不进入 Step 2；维护国家后，`third_party_inventory_current` 会在下一次补货建议生成时按 `commodity_sku + country` 并入海外库存。海外库存当前需求明确使用商品 SKU，因此暂不走 SKU 映射组件折算；Step 4 国内侧库存不读取该数据源。导入历史由 `third_party_inventory_import_batch` / `third_party_inventory_import_item` 保留，手工维护只修改 `third_party_inventory_current`。
 
 **持久化**：一次完整计算在事务内执行，受 `pg_advisory_xact_lock(7429001)` 保护；runner 不再按 `restock_dates[country] <= demand_date` 过滤补货国家，补货国家是否进入本次建议只由 Step 3 的正补货量与 `restock_regions` 白名单决定。若 `purchase_qty <= 0` 且国家补货合计为 0，则跳过该 SKU；若仅安全库存触发采购但无国家补货量，仍保留为采购-only 条目，并保持 `country_breakdown` / `warehouse_breakdown` / `allocation_snapshot` / `restock_dates` 为空、`total_qty=0`、`urgent=false`；有销量但缺少库存/在途记录的国家不进入 `country_breakdown`，但会在保留的采购或补货条目中写入 `calculation_warnings` 诊断；若无条目则返回 `None`，不归档旧 `draft`、不关闭生成开关、不生成空建议单；成功生成非空建议单后才归档旧 `draft`，写入 `suggestion` / `suggestion_item`，统计 `procurement_item_count`、`restock_item_count`，并由 `calc_engine_job` 将 `global_config.suggestion_generation_enabled` 自动翻 OFF。SKU 级 `lead_time_days=0` 是有效值，runner 使用 `is not None` 判断是否覆盖全局货期。
 
@@ -396,7 +396,7 @@ src/
 | `suggestion.ts` | 建议单列表、当前建议、详情、条目 PATCH、单条重算、删除；`Suggestion` 携带 `procurement_item_count` / `restock_item_count` / `procurement_snapshot_count` / `restock_snapshot_count`，`SuggestionItem` 携带 `purchase_qty`、`calculation_inputs_snapshot`、`calculation_warnings` 与两组导出状态 |
 | `snapshot.ts` | `createProcurementSnapshot()`、`createRestockSnapshot()`、`listSnapshots(id, type?)`、详情与下载；`SnapshotOut.snapshot_type` 为 `procurement` / `restock`，`SnapshotItemOut` 冻结 `calculation_warnings` |
 | `config.ts` | `GlobalConfig` 暴露 `safety_stock_days`、`eu_countries`、`restock_regions` 等现行字段；`CountryOptionsResponse` 封装 `GET /api/config/country-options` 的动态国家选项；`GenerationToggle` 暴露 `can_enable` / `can_enable_reason` |
-| `data.ts` | 赛狐同步数据观测接口，以及三方仓、三方仓库存、导入预览/确认、导入历史和当前库存 CRUD 的 TypeScript DTO 与客户端函数 |
+| `data.ts` | 赛狐同步数据观测接口，以及产品展示为“海外仓 / 海外库存”的 `third-party-*` 资源、导入预览/确认、导入历史和当前库存 CRUD 的 TypeScript DTO 与客户端函数 |
 | `engine.ts` / `task.ts` | 手动触发必填补货日期字段 `demand_date` 的 `POST /api/engine/run`；`task.ts` 同时封装 `getTask()` 与 `listTasks()`，当前建议页会分别查询 `calc_engine` 的 `pending` / `running` 任务以复用进度 |
 
 所有 API 客户端继续通过 `api/client.ts` 注入 Bearer token，并复用统一错误处理与 401 跳转逻辑。
@@ -427,9 +427,10 @@ async function reload() {
 - `DataOrdersView.vue`：订单列表按页返回，并仅对当前页补查 `item_count` / `has_detail`；筛选支持 SKU / 订单号、国家、店铺、平台和包裹状态，平台选项由 `GET /api/data/order-platforms` 基于已落库订单平台去重返回；页面不展示来源和包裹号，也不按包裹号搜索；平台以标签展示，店铺仅显示名称；详情接口默认限定 `source='订单处理'`，前端仅保留 `package_sn` 作为内部精确定位参数；具备 `data_biz:edit` 时显示「编辑」和「信息匹配」，分别调用单条订单 PATCH 与 Excel 模板 / 预览 / 确认导入 / 错误文件下载接口；信息匹配校验失败时只展示错误数量和下载按钮，不在弹窗内渲染逐行错误明细
 - `HistoryView.vue`：建议单历史页直接消费 `GET /api/suggestions` 的 `items/total/page/page_size`；状态列使用 `getSuggestionDisplayStatusMeta(status, snapshot_count)` 派生 4 档显示标签（`未提交 / 已导出 / 已归档 / 异常`），状态下拉对应后端 `display_status=pending|exported|archived|error`，由后端统一按 `snapshot_count` 派生过滤，避免前端只过滤当前页造成 `items` 与 `total` 错位；`canDelete(row)` 规则为 `row.snapshot_count === 0`。派生逻辑定义在 `frontend/src/utils/status.ts::deriveSuggestionDisplayStatus`，`SuggestionListView` 与 `SuggestionDetailView` 的状态 tag 共用该函数，避免多处硬编码映射。
 - `DataProductsView.vue`：商品页通过 `listSkuOverview()` 下推 SKU、商品名、启用状态、SKU 类型和分页参数；`/api/data/sku-overview` 以 `commodity_master + sku_config` 为主，商品名、图片、状态、SKU 类型、采购周期优先取商品主数据。SKU 类型展示口径为 `commodity_master.is_group=true` 显示「组合 SKU」、`false` 显示「单品 SKU」、缺少主数据时显示 `-`；筛选项为「全部 / 单品 SKU / 组合 SKU」，接口参数仍使用 `is_group`。listing 仅作为展开明细和销量参考，无 listing 的 SKU 仍可展示
-- `DataInventoryView.vue`：库存页通过 `GET /api/data/inventory/warehouse-groups` 做仓库分组分页，保持仓库展开明细交互；库存明细的 `is_package` 由“是否存在商品主数据 SKU、在线 listing 商品 SKU 或 SKU 映射组件库存 SKU”实时派生，前端按“全部 / 未匹配 / 已匹配”展示筛选
-- `DataThirdPartyWarehousesView.vue`：基础数据下的三方仓维护页，通过 `GET/POST/PATCH/DELETE /api/data/third-party-warehouses` 服务端分页、搜索、国家筛选和未维护国家筛选；国家为空时对应库存不参与 Step 2
-- `DataThirdPartyInventoryView.vue`：业务数据下的三方仓库存页，导入区调用 `preview/confirm/cancel` 批次接口，历史区查询批次和明细，库存区通过 `GET /api/data/third-party-inventory/warehouse-groups` 做仓库分组分页，并支持当前库存单条新增、编辑、删除
+- `DataWarehousesView.vue`：产品展示名为“国内仓”，通过 `GET /api/data/warehouses` 只展示赛狐默认仓 `warehouse.type=0`；页面不再提供仓库类型筛选
+- `DataInventoryView.vue`：产品展示名为“国内库存”，通过 `GET /api/data/inventory/warehouse-groups` 只展示默认仓 `warehouse.type=0` 的库存分组分页，保持仓库展开明细交互；库存明细的 `is_package` 由“是否存在商品主数据 SKU、在线 listing 商品 SKU 或 SKU 映射组件库存 SKU”实时派生，前端按“全部 / 未匹配 / 已匹配”展示筛选
+- `DataThirdPartyWarehousesView.vue`：基础数据下产品展示名为“海外仓”的维护页，通过 `GET/POST/PATCH/DELETE /api/data/third-party-warehouses` 服务端分页、搜索、国家筛选和未维护国家筛选；国家为空时对应库存不参与 Step 2
+- `DataThirdPartyInventoryView.vue`：业务数据下产品展示名为“海外库存”的页面，导入区调用 `preview/confirm/cancel` 批次接口，历史区查询批次和明细，库存区通过 `GET /api/data/third-party-inventory/warehouse-groups` 做仓库分组分页，并支持当前库存单条新增、编辑、删除
 - `DataOutRecordsView.vue`：出库记录页将 SKU、仓库单号、国家、类型、在途状态、排序和分页下推到后端
 
 **订单页排序示例**：
@@ -588,10 +589,10 @@ UPDATE global_config SET suggestion_generation_enabled=true, generation_toggle_u
 | `sku_mapping_rule` | 商品 SKU 到库存包裹 SKU 的映射规则 | `commodity_sku` 唯一；`enabled=false` 时规则保留但不参与引擎 |
 | `sku_mapping_component` | 映射规则组件行 | `rule_id + inventory_sku` 唯一；允许不同商品规则共享同一 `inventory_sku`；`group_no > 0`；`quantity > 0`；同一 `group_no` 内多行表示 AND 组合，不同 `group_no` 表示 OR 替代方案 |
 | `physical_item_group` / `physical_item_sku_alias` | 库存 SKU 共享组与成员表 | 组表已移除 `primary_sku`；成员 SKU 全局唯一；`enabled=false` 时共享组解析层不参与库存合并 |
-| `warehouse` | 默认仓/国内仓/海外仓基础资料 | `type=0` 默认仓与 `type=1` 国内仓按国内侧库存参与采购扣减；海外库存与补货分仓排除 `type in (0, 1)`；`country` 可为空；变更仓库国家会级联更新库存最新快照口径 |
-| `third_party_warehouse` | 三方仓主数据 | 独立于赛狐 `warehouse`；`name` 唯一；`country` 可为空，空国家库存不参与 Step 2 计算；有关联当前库存或导入历史时禁止删除 |
-| `third_party_inventory_current` | 当前生效三方仓库存 | `warehouse_id + commodity_sku` 唯一；保存 `available/reserved/source_batch_id/last_operation`；导入确认整批替换，手工新增/编辑/删除只修改当前库存 |
-| `third_party_inventory_import_batch` / `third_party_inventory_import_item` | 三方仓库存导入历史与预览暂存 | 批次状态为 `pending/applied/failed/expired`；预览写入 pending 批次和明细，不影响当前库存；确认后历史明细不随手工维护变化 |
+| `warehouse` | 赛狐仓库基础资料 | `type=0` 默认仓在产品展示层称为“国内仓”，`type=1` 仍是引擎内部国内侧库存；国内仓 / 国内库存页面只读取 `type=0`；`type in (0, 1)` 共同参与采购扣减，海外库存与补货分仓排除它们；`country` 可为空；变更仓库国家会级联更新库存最新快照口径 |
+| `third_party_warehouse` | 产品展示为“海外仓”的内部主数据 | 独立于赛狐 `warehouse`；`name` 唯一；`country` 可为空，空国家库存不参与 Step 2 计算；有关联当前库存或导入历史时禁止删除 |
+| `third_party_inventory_current` | 产品展示为“海外库存”的当前生效库存 | `warehouse_id + commodity_sku` 唯一；保存 `available/reserved/source_batch_id/last_operation`；导入确认整批替换，手工新增/编辑/删除只修改当前库存 |
+| `third_party_inventory_import_batch` / `third_party_inventory_import_item` | 海外库存导入历史与预览暂存 | 批次状态为 `pending/applied/failed/expired`；预览写入 pending 批次和明细，不影响当前库存；确认后历史明细不随手工维护变化 |
 | `order_header` / `order_item` | 订单头与订单明细 | `order_header.source='订单处理'` 为当前订单来源，`order_platform` 保存平台名，`package_sn/package_status/shop_name/postal_code` 保存订单处理列表包裹字段；`UNIQUE(shop_id, amazon_order_id, source, package_sn)` 支持同订单拆包；`country_code` 保存映射后国家，`original_country_code` 保存 EU 合并前国家；`manual_edit_locked/manual_edited_at/manual_edited_by/manual_edit_fields` 标记人工编辑字段并保护后续同步覆盖；按 `shop_id + purchase_date`、`order_platform + purchase_date`、`order_status + purchase_date`、`package_status + purchase_date` 建索引 |
 | `country_name_override` | 人工国家中文名覆盖 | 订单编辑或信息匹配输入 `XX - 中文名` 时写入；`GET /api/config/country-options` 读取后输出 `XX - 中文名`，用于动态国家下拉展示 |
 | `order_detail` / `order_detail_fetch_log` | 历史订单详情与拉取日志 | 作为切换前亚马逊订单详情历史表保留；当前订单处理列表同步不再写入或依赖该表 |
@@ -982,6 +983,7 @@ VITE_API_PROXY_TARGET=http://localhost:8000
 
 | 日期 | 变更 | 相关 PROGRESS 章节 |
 |---|---|---|
+| 2026-05-15 | 国内/海外仓展示命名收敛：国内仓 / 国内库存页面仅展示赛狐默认仓 `type=0`；产品层把原三方仓 / 三方仓库存改名为海外仓 / 海外库存，内部 `third_party_*` 保持不变 | PROGRESS.md §3.126 |
 | 2026-05-15 | 新增三方仓与三方仓库存：独立主数据、导入批次历史、当前库存维护；Step 2 将有国家的当前三方库存并入海外库存 | PROGRESS.md §3.125 |
 | 2026-05-14 | 默认仓 `type=0` 纳入国内侧库存扣减；Step 2 海外库存、直接商品有目标仓在途、组件有仓在途与 Step 5 分仓口径排除 `type in (0, 1)` | PROGRESS.md §3.124 |
 | 2026-05-13 | 用户可见“补货日期”统一为生成建议时选择的 `demand_date`；Step 6 仅保留 `urgent` 判定，编辑、重算、快照和 Excel 同步使用该日期 | PROGRESS.md §3.123 |

@@ -1,12 +1,12 @@
 <template>
   <div class="third-party-inventory-view">
-    <PageSectionCard title="三方仓库存导入" description="预览不会影响当前库存；确认后会整批替换当前三方仓库存。">
+    <PageSectionCard title="海外库存导入">
       <template #actions>
         <el-upload :auto-upload="false" :show-file-list="false" accept=".xlsx,.xls" :on-change="onFileChange">
           <el-button>选择 Excel</el-button>
         </el-upload>
         <el-button type="primary" :disabled="!selectedFile" :loading="previewing" @click="previewImport">预览导入</el-button>
-        <el-button v-if="previewBatch" type="success" :loading="confirming" @click="confirmImport">确认整批替换</el-button>
+        <el-button v-if="previewBatch" type="success" :loading="confirming" @click="confirmImport">确认导入</el-button>
         <el-button v-if="previewBatch" @click="cancelPreview">取消预览</el-button>
       </template>
 
@@ -16,13 +16,13 @@
           <div><span>总行数</span><strong>{{ previewBatch.rowCount }}</strong></div>
           <div><span>有效行</span><strong>{{ previewBatch.validRowCount }}</strong></div>
           <div><span>跳过行</span><strong>{{ previewBatch.skippedRowCount }}</strong></div>
-          <div><span>新仓库</span><strong>{{ previewBatch.newWarehouseCount }}</strong></div>
+          <div><span>新海外仓</span><strong>{{ previewBatch.newWarehouseCount }}</strong></div>
           <div><span>未维护国家</span><strong>{{ previewBatch.unmaintainedWarehouseCount }}</strong></div>
           <div><span>问题行</span><strong>{{ previewBatch.issues.length }}</strong></div>
         </div>
-        <el-alert title="确认导入会删除并重建当前三方仓库存，不会修改导入历史。" type="warning" :closable="false" />
+        <el-alert title="确认导入会删除并重建当前海外库存，不会修改导入历史。" type="warning" :closable="false" />
         <div v-if="previewBatch.newWarehouses.length" class="tag-row">
-          <span>新三方仓</span>
+          <span>新海外仓</span>
           <el-tag v-for="name in previewBatch.newWarehouses" :key="name" type="info">{{ name }}</el-tag>
         </div>
         <div v-if="previewBatch.unmaintainedWarehouses.length" class="tag-row">
@@ -31,7 +31,7 @@
         </div>
         <el-table v-if="previewBatch.issues.length" :data="previewBatch.issues" size="small">
           <el-table-column label="行号" prop="row" width="80" />
-          <el-table-column label="仓库" prop="warehouseName" min-width="160" />
+          <el-table-column label="海外仓" prop="warehouseName" min-width="160" />
           <el-table-column label="SKU" prop="commoditySku" min-width="160" />
           <el-table-column label="问题" prop="message" min-width="260" />
         </el-table>
@@ -69,9 +69,9 @@
       />
     </PageSectionCard>
 
-    <PageSectionCard title="当前三方仓库存" description="手工新增、编辑、删除只影响当前库存，不回写导入历史。">
+    <PageSectionCard title="当前海外库存">
       <template #actions>
-        <el-input v-model="filters.warehouse_keyword" placeholder="搜索三方仓" clearable style="width: 160px" @keyup.enter="reloadInventory(true)" />
+        <el-input v-model="filters.warehouse_keyword" placeholder="搜索海外仓" clearable style="width: 160px" @keyup.enter="reloadInventory(true)" />
         <el-input v-model="filters.sku" placeholder="搜索 SKU" clearable style="width: 160px" @keyup.enter="reloadInventory(true)" />
         <el-select v-model="filters.country" placeholder="国家" clearable filterable style="width: 130px" @change="reloadInventory(true)">
           <el-option v-for="option in countryOptions" :key="option.code" :label="option.label" :value="option.code" />
@@ -82,7 +82,7 @@
         <el-button v-if="auth.hasPermission('data_biz:edit')" type="primary" @click="openItemCreate">新增库存</el-button>
       </template>
 
-      <el-table v-loading="inventoryLoading" :data="warehouseGroups" row-key="warehouseId" empty-text="暂无三方仓库存">
+      <el-table v-loading="inventoryLoading" :data="warehouseGroups" row-key="warehouseId" empty-text="暂无海外库存">
         <el-table-column type="expand">
           <template #default="{ row }">
             <el-table :data="row.items" size="small">
@@ -104,7 +104,7 @@
             </el-table>
           </template>
         </el-table-column>
-        <el-table-column label="三方仓" prop="warehouseName" min-width="220" />
+        <el-table-column label="海外仓" prop="warehouseName" min-width="220" />
         <el-table-column label="国家" width="100">
           <template #default="{ row }">
             <el-tag v-if="row.country" size="small">{{ row.country }}</el-tag>
@@ -130,9 +130,9 @@
       />
     </PageSectionCard>
 
-    <el-dialog v-model="itemDialogVisible" :title="editingItem ? '编辑三方库存' : '新增三方库存'" width="460px">
+    <el-dialog v-model="itemDialogVisible" :title="editingItem ? '编辑海外库存' : '新增海外库存'" width="460px">
       <el-form label-width="84px">
-        <el-form-item label="三方仓" required>
+        <el-form-item label="海外仓" required>
           <el-select v-model="itemForm.warehouseId" filterable style="width: 100%">
             <el-option v-for="warehouse in warehouseOptions" :key="warehouse.id" :label="warehouse.name" :value="warehouse.id" />
           </el-select>
@@ -156,7 +156,7 @@
     <el-drawer v-model="batchDetailVisible" title="导入批次详情" size="720px">
       <el-table v-loading="batchDetailLoading" :data="batchDetailRows" size="small" empty-text="暂无明细">
         <el-table-column label="行号" prop="sourceRowNo" width="80" />
-        <el-table-column label="仓库" prop="warehouseNameRaw" min-width="150" />
+        <el-table-column label="海外仓" prop="warehouseNameRaw" min-width="150" />
         <el-table-column label="SKU" prop="commoditySku" min-width="150" />
         <el-table-column label="可用数" prop="available" width="90" align="right" />
         <el-table-column label="待出库" prop="reserved" width="90" align="right" />
@@ -269,14 +269,14 @@ async function previewImport(): Promise<void> {
 async function confirmImport(): Promise<void> {
   if (!previewBatch.value) return
   try {
-    await ElMessageBox.confirm('确认后将整批替换当前三方仓库存。', '确认导入', { type: 'warning' })
+    await ElMessageBox.confirm('确认导入会删除并重建当前海外库存，不会修改导入历史。', '确认导入', { type: 'warning' })
   } catch {
     return
   }
   confirming.value = true
   try {
     await confirmThirdPartyInventoryImport(previewBatch.value.id)
-    ElMessage.success('三方仓库存已替换')
+    ElMessage.success('海外库存已导入')
     previewBatch.value = null
     selectedFile.value = null
     await Promise.all([reloadHistory(false), reloadInventory(false), loadWarehouseOptions()])
@@ -331,7 +331,7 @@ async function reloadInventory(resetPage = false): Promise<void> {
     warehouseGroups.value = resp.items
     inventoryTotal.value = resp.total
   } catch (err) {
-    ElMessage.error(getActionErrorMessage(err, '加载当前库存失败'))
+    ElMessage.error(getActionErrorMessage(err, '加载当前海外库存失败'))
   } finally {
     inventoryLoading.value = false
   }
@@ -373,7 +373,7 @@ function openItemEdit(item: ThirdPartyInventoryItem): void {
 
 async function saveItem(): Promise<void> {
   if (!itemForm.warehouseId || !itemForm.commoditySku.trim()) {
-    ElMessage.warning('请选择三方仓并填写 SKU')
+    ElMessage.warning('请选择海外仓并填写 SKU')
     return
   }
   itemSaving.value = true
@@ -488,9 +488,21 @@ onMounted(() => {
   gap: $space-4;
 }
 
-.selected-file,
 .muted {
   color: $color-text-secondary;
+}
+
+.selected-file {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  padding: $space-2 $space-3;
+  border: 1px solid $color-success-border;
+  border-radius: $radius-md;
+  background: $color-success-soft;
+  color: $color-success;
+  font-weight: $font-weight-medium;
 }
 
 .mono {

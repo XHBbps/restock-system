@@ -304,7 +304,7 @@ async def upsert_current_item(
         await db.execute(select(ThirdPartyWarehouse).where(ThirdPartyWarehouse.id == warehouse_id))
     ).scalar_one_or_none()
     if warehouse is None:
-        raise NotFound("三方仓不存在")
+        raise NotFound("海外仓不存在")
     stmt = (
         pg_insert(ThirdPartyInventoryCurrent)
         .values(
@@ -344,13 +344,13 @@ async def patch_current_item(
         )
     ).scalar_one_or_none()
     if item is None:
-        raise NotFound("三方库存明细不存在")
+        raise NotFound("海外库存明细不存在")
     warehouse_id = int(values.get("warehouse_id") or item.warehouse_id)
     warehouse = (
         await db.execute(select(ThirdPartyWarehouse).where(ThirdPartyWarehouse.id == warehouse_id))
     ).scalar_one_or_none()
     if warehouse is None:
-        raise NotFound("三方仓不存在")
+        raise NotFound("海外仓不存在")
     item.warehouse_id = warehouse_id
     item.commodity_sku = values.get("commodity_sku") or item.commodity_sku
     if values.get("available") is not None:
@@ -363,7 +363,7 @@ async def patch_current_item(
         await db.commit()
     except Exception as exc:
         await db.rollback()
-        raise ConflictError("同一三方仓下 SKU 已存在") from exc
+        raise ConflictError("同一海外仓下 SKU 已存在") from exc
     await db.refresh(item)
     return item
 
@@ -375,7 +375,7 @@ async def delete_current_item(db: AsyncSession, item_id: int) -> None:
         )
     ).scalar_one_or_none()
     if item is None:
-        raise NotFound("三方库存明细不存在")
+        raise NotFound("海外库存明细不存在")
     await db.delete(item)
     await db.commit()
 

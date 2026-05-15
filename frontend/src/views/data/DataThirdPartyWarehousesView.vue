@@ -1,16 +1,16 @@
 <template>
-  <PageSectionCard title="三方仓" description="维护第三方仓库名称和所属国家。未维护国家的库存不会参与补货计算。">
+  <PageSectionCard title="海外仓">
     <template #actions>
-      <el-input v-model="filters.keyword" placeholder="搜索仓库名" clearable style="width: 180px" @keyup.enter="reload(true)" />
+      <el-input v-model="filters.keyword" placeholder="搜索海外仓名" clearable style="width: 180px" @keyup.enter="reload(true)" />
       <el-select v-model="filters.country" placeholder="国家" clearable filterable style="width: 140px" @change="reload(true)">
         <el-option v-for="option in countryOptions" :key="option.code" :label="option.label" :value="option.code" />
       </el-select>
       <el-checkbox v-model="filters.only_missing_country" @change="reload(true)">仅看未维护国家</el-checkbox>
-      <el-button v-if="auth.hasPermission('data_base:edit')" type="primary" @click="openCreate">新增三方仓</el-button>
+      <el-button v-if="auth.hasPermission('data_base:edit')" type="primary" @click="openCreate">新增海外仓</el-button>
     </template>
 
-    <el-table v-loading="loading" :data="rows" row-key="id" empty-text="暂无三方仓">
-      <el-table-column label="三方仓" prop="name" min-width="220" show-overflow-tooltip />
+    <el-table v-loading="loading" :data="rows" row-key="id" empty-text="暂无海外仓">
+      <el-table-column label="海外仓" prop="name" min-width="220" show-overflow-tooltip />
       <el-table-column label="国家" width="180">
         <template #default="{ row }">
           <el-tag v-if="row.country" size="small">{{ row.country }}</el-tag>
@@ -43,10 +43,10 @@
       @size-change="reload(true)"
     />
 
-    <el-dialog v-model="dialogVisible" :title="editing ? '编辑三方仓' : '新增三方仓'" width="420px">
+    <el-dialog v-model="dialogVisible" :title="editing ? '编辑海外仓' : '新增海外仓'" width="420px">
       <el-form label-width="84px">
-        <el-form-item label="仓库名称" required>
-          <el-input v-model="form.name" placeholder="请输入仓库名称" />
+        <el-form-item label="海外仓名称" required>
+          <el-input v-model="form.name" placeholder="请输入海外仓名称" />
         </el-form-item>
         <el-form-item label="所属国家">
           <el-select v-model="form.country" placeholder="未维护" clearable filterable style="width: 100%">
@@ -109,7 +109,7 @@ async function reload(resetPage = false): Promise<void> {
     rows.value = resp.items
     total.value = resp.total
   } catch (err) {
-    ElMessage.error(getActionErrorMessage(err, '加载三方仓失败'))
+    ElMessage.error(getActionErrorMessage(err, '加载海外仓失败'))
   } finally {
     loading.value = false
   }
@@ -139,17 +139,17 @@ function openEdit(row: ThirdPartyWarehouse): void {
 
 async function save(): Promise<void> {
   if (!form.name.trim()) {
-    ElMessage.warning('请填写仓库名称')
+    ElMessage.warning('请填写海外仓名称')
     return
   }
   saving.value = true
   try {
     if (editing.value) {
       await updateThirdPartyWarehouse(editing.value.id, { name: form.name, country: form.country || null })
-      ElMessage.success('三方仓已更新')
+      ElMessage.success('海外仓已更新')
     } else {
       await createThirdPartyWarehouse({ name: form.name, country: form.country || null })
-      ElMessage.success('三方仓已创建')
+      ElMessage.success('海外仓已创建')
     }
     dialogVisible.value = false
     await reload(false)
@@ -162,9 +162,9 @@ async function save(): Promise<void> {
 
 async function remove(row: ThirdPartyWarehouse): Promise<void> {
   try {
-    await ElMessageBox.confirm(`确认删除三方仓「${row.name}」？`, '删除确认', { type: 'warning' })
+    await ElMessageBox.confirm(`确认删除海外仓「${row.name}」？`, '删除确认', { type: 'warning' })
     await deleteThirdPartyWarehouse(row.id)
-    ElMessage.success('三方仓已删除')
+    ElMessage.success('海外仓已删除')
     await reload(false)
   } catch (err) {
     if (err !== 'cancel') ElMessage.error(getActionErrorMessage(err, '删除失败'))

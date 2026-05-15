@@ -2,7 +2,7 @@
 
 export const WAREHOUSE_TYPE_MAP: Record<number, string> = {
   [-1]: '虚拟仓',
-  0: '默认仓',
+  0: '国内仓',
   1: '国内仓',
   2: 'FBA 仓',
   3: '海外仓',

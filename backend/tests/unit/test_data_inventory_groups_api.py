@@ -52,8 +52,8 @@ def _inventory_row(warehouse_id: str = "WH-1", sku: str = "SKU-1"):
 async def test_list_inventory_warehouse_groups_returns_grouped_page() -> None:
     group_row = SimpleNamespace(
         warehouse_id="WH-1",
-        warehouse_name="Warehouse",
-        warehouse_type=1,
+        warehouse_name="赛狐默认仓",
+        warehouse_type=0,
         sku_count=1,
         total_available=10,
         total_occupy=2,
@@ -62,7 +62,7 @@ async def test_list_inventory_warehouse_groups_returns_grouped_page() -> None:
         [
             _ScalarResult(1),
             _AllResult([group_row]),
-            _AllResult([(_inventory_row(), "Warehouse", 1)]),
+            _AllResult([(_inventory_row(), "赛狐默认仓", 0)]),
             _AllResult([("SKU-1", "Product", "https://example.test/img.jpg")]),
             _AllResult([]),
             _AllResult([]),
@@ -88,6 +88,8 @@ async def test_list_inventory_warehouse_groups_returns_grouped_page() -> None:
     assert result.items[0].total_available == 10
     assert result.items[0].items[0].commodity_name == "Product"
     assert result.items[0].items[0].is_package is False
+    assert "warehouse.type = :type_1" in str(db.statements[0])
+    assert "warehouse.type = :type_1" in str(db.statements[2])
 
 
 @pytest.mark.asyncio
@@ -115,7 +117,7 @@ async def test_list_inventory_marks_unmatched_sku_as_package() -> None:
     db = _FakeSession(
         [
             _ScalarResult(1),
-            _AllResult([(_inventory_row(sku="PKG-1"), "Warehouse", 1)]),
+            _AllResult([(_inventory_row(sku="PKG-1"), "赛狐默认仓", 0)]),
             _AllResult([]),
             _AllResult([]),
             _AllResult([]),
@@ -140,14 +142,15 @@ async def test_list_inventory_marks_unmatched_sku_as_package() -> None:
     assert result.items[0].is_package is True
     assert "EXISTS" in str(db.statements[0])
     assert "NOT" in str(db.statements[0])
+    assert "warehouse.type = :type_1" in str(db.statements[0])
 
 
 @pytest.mark.asyncio
 async def test_list_inventory_warehouse_groups_applies_non_package_filter() -> None:
     group_row = SimpleNamespace(
         warehouse_id="WH-1",
-        warehouse_name="Warehouse",
-        warehouse_type=1,
+        warehouse_name="赛狐默认仓",
+        warehouse_type=0,
         sku_count=1,
         total_available=10,
         total_occupy=2,
@@ -156,7 +159,7 @@ async def test_list_inventory_warehouse_groups_applies_non_package_filter() -> N
         [
             _ScalarResult(1),
             _AllResult([group_row]),
-            _AllResult([(_inventory_row(sku="SKU-1"), "Warehouse", 1)]),
+            _AllResult([(_inventory_row(sku="SKU-1"), "赛狐默认仓", 0)]),
             _AllResult([("SKU-1", "Product", None)]),
             _AllResult([]),
             _AllResult([]),
@@ -178,6 +181,8 @@ async def test_list_inventory_warehouse_groups_applies_non_package_filter() -> N
     assert "EXISTS" in str(db.statements[0])
     assert "NOT" not in str(db.statements[0])
     assert "EXISTS" in str(db.statements[2])
+    assert "warehouse.type = :type_1" in str(db.statements[0])
+    assert "warehouse.type = :type_1" in str(db.statements[2])
 
 
 @pytest.mark.asyncio

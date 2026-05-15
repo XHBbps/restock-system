@@ -82,8 +82,8 @@ function buildResponse(total = 23) {
     items: [
       {
         warehouseId: 'WH-1',
-        warehouseName: 'Warehouse',
-        warehouseType: 1,
+        warehouseName: '赛狐默认仓',
+        warehouseType: 0,
         skuCount: 1,
         totalAvailable: 10,
         totalOccupy: 2,
@@ -93,8 +93,8 @@ function buildResponse(total = 23) {
             commodityName: 'Product',
             mainImage: null,
             warehouseId: 'WH-1',
-            warehouseName: 'Warehouse',
-            warehouseType: 1,
+            warehouseName: '赛狐默认仓',
+            warehouseType: 0,
             country: 'US',
             stockAvailable: 10,
             stockOccupy: 2,
@@ -121,6 +121,7 @@ describe('DataInventoryView', () => {
     const wrapper = shallowMount(View, { global: { stubs: STUBS, directives: { loading: {} } } })
     await flushPromises()
 
+    expect(wrapper.text()).toContain('国内库存')
     expect(wrapper.find('.pagination').attributes('data-total')).toBe('23')
     expect(mockListInventoryWarehouseGroups).toHaveBeenCalledWith({
       sku: undefined,

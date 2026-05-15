@@ -134,7 +134,7 @@ export const appPages: AppPageDefinition[] = [
   {
     name: 'data-warehouses',
     path: 'data/warehouses',
-    title: '仓库',
+    title: '国内仓',
     section: 'DATA',
     permission: 'data_base:view',
     icon: Warehouse,
@@ -144,7 +144,7 @@ export const appPages: AppPageDefinition[] = [
   {
     name: 'data-third-party-warehouses',
     path: 'data/third-party-warehouses',
-    title: '三方仓',
+    title: '海外仓',
     section: 'DATA',
     permission: 'data_base:view',
     icon: Warehouse,
@@ -174,7 +174,7 @@ export const appPages: AppPageDefinition[] = [
   {
     name: 'data-inventory',
     path: 'data/inventory',
-    title: '库存',
+    title: '国内库存',
     section: 'DATA',
     permission: 'data_biz:view',
     icon: Boxes,
@@ -184,7 +184,7 @@ export const appPages: AppPageDefinition[] = [
   {
     name: 'data-third-party-inventory',
     path: 'data/third-party-inventory',
-    title: '三方仓库存',
+    title: '海外库存',
     section: 'DATA',
     permission: 'data_biz:view',
     icon: Boxes,

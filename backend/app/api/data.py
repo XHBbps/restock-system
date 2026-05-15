@@ -347,6 +347,10 @@ def _apply_inventory_filters(
     return stmt
 
 
+def _apply_default_warehouse_scope(stmt: Any) -> Any:
+    return stmt.where(Warehouse.type == 0)
+
+
 def _out_record_item_count_expr() -> ColumnElement[int]:
     return (
         select(func.count())
@@ -831,6 +835,7 @@ async def list_inventory(
         Warehouse.name.label("wh_name"),
         Warehouse.type.label("wh_type"),
     ).join(Warehouse, Warehouse.id == InventorySnapshotLatest.warehouse_id)
+    base = _apply_default_warehouse_scope(base)
     base = _apply_inventory_filters(
         base,
         country=country,
@@ -936,6 +941,7 @@ async def list_inventory_warehouse_groups(
         .group_by(InventorySnapshotLatest.warehouse_id, Warehouse.name, Warehouse.type)
         .order_by(Warehouse.name.asc(), InventorySnapshotLatest.warehouse_id.asc())
     )
+    group_stmt = _apply_default_warehouse_scope(group_stmt)
     group_stmt = _apply_inventory_filters(
         group_stmt,
         country=country,
@@ -973,6 +979,7 @@ async def list_inventory_warehouse_groups(
             InventorySnapshotLatest.commodity_sku.asc(),
         )
     )
+    item_stmt = _apply_default_warehouse_scope(item_stmt)
     item_stmt = _apply_inventory_filters(
         item_stmt,
         country=country,
@@ -1205,7 +1212,10 @@ async def list_data_warehouses(
         .subquery()
     )
 
-    total = (await db.execute(select(func.count()).select_from(Warehouse))).scalar_one()
+    base_warehouses = select(Warehouse).where(Warehouse.type == 0)
+    total = (
+        await db.execute(select(func.count()).select_from(base_warehouses.subquery()))
+    ).scalar_one()
 
     rows = (
         await db.execute(
@@ -1214,6 +1224,7 @@ async def list_data_warehouses(
                 func.coalesce(stock_subquery.c.total_stock, 0).label("total_stock"),
             )
             .outerjoin(stock_subquery, stock_subquery.c.warehouse_id == Warehouse.id)
+            .where(Warehouse.type == 0)
             .order_by(Warehouse.country, Warehouse.id)
             .limit(page_size)
             .offset((page - 1) * page_size)
@@ -1414,7 +1425,7 @@ async def create_third_party_warehouse(
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
-        raise ConflictError("三方仓名称已存在") from exc
+        raise ConflictError("海外仓名称已存在") from exc
     await db.refresh(warehouse)
     return ThirdPartyWarehouseOut.model_validate(
         {
@@ -1438,7 +1449,7 @@ async def patch_third_party_warehouse(
         await db.execute(select(ThirdPartyWarehouse).where(ThirdPartyWarehouse.id == warehouse_id))
     ).scalar_one_or_none()
     if warehouse is None:
-        raise NotFound("三方仓不存在")
+        raise NotFound("海外仓不存在")
     if body.name is not None:
         warehouse.name = body.name
     if "country" in body.model_fields_set:
@@ -1448,7 +1459,7 @@ async def patch_third_party_warehouse(
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
-        raise ConflictError("三方仓名称已存在") from exc
+        raise ConflictError("海外仓名称已存在") from exc
     await db.refresh(warehouse)
     return ThirdPartyWarehouseOut.model_validate(
         {
@@ -1478,12 +1489,12 @@ async def delete_third_party_warehouse(
         )
     ).scalar_one()
     if current_count or history_count:
-        raise ConflictError("三方仓存在当前库存或导入历史，不能删除")
+        raise ConflictError("海外仓存在当前库存或导入历史，不能删除")
     warehouse = (
         await db.execute(select(ThirdPartyWarehouse).where(ThirdPartyWarehouse.id == warehouse_id))
     ).scalar_one_or_none()
     if warehouse is None:
-        raise NotFound("三方仓不存在")
+        raise NotFound("海外仓不存在")
     await db.delete(warehouse)
     await db.commit()
 

@@ -1,5 +1,5 @@
 <template>
-  <PageSectionCard title="库存明细">
+  <PageSectionCard title="国内库存">
     <template #actions>
       <el-input
         v-model="filters.sku"
@@ -32,7 +32,13 @@
       <el-switch v-model="filters.only_nonzero" active-text="仅非零" @change="reloadFirstPage" />
     </template>
 
-    <el-table v-if="!isMobile" v-loading="loading" :data="warehouseGroups" row-key="warehouseId">
+    <el-table
+      v-if="!isMobile"
+      v-loading="loading"
+      :data="warehouseGroups"
+      row-key="warehouseId"
+      empty-text="暂无国内库存"
+    >
       <el-table-column type="expand">
         <template #default="{ row }">
           <div class="expand-wrapper">
@@ -71,7 +77,7 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="仓库" min-width="260">
+      <el-table-column label="国内仓" min-width="260">
         <template #default="{ row }">
           <div class="meta-stack">
             <strong>{{ row.warehouseName }}</strong>
@@ -98,7 +104,7 @@
       :items="warehouseGroups"
       :loading="loading"
       row-key="warehouseId"
-      empty-text="暂无库存"
+      empty-text="暂无国内库存"
     >
       <template #default="{ item: row }">
         <div class="mobile-inventory-card">
@@ -124,7 +130,7 @@
             </div>
           </div>
           <el-collapse v-if="row.items.length > 0" class="mobile-detail-collapse">
-            <el-collapse-item :title="`库存明细（${row.items.length}）`" name="items">
+            <el-collapse-item :title="`国内库存明细（${row.items.length}）`" name="items">
               <div class="mobile-inventory-items">
                 <div v-for="item in row.items" :key="`${item.warehouseId}-${item.commoditySku}`" class="mobile-inventory-item">
                   <SkuCard :sku="item.commoditySku" :name="item.commodityName" :image="item.mainImage" />
@@ -207,7 +213,7 @@ async function reload(resetPage = false): Promise<void> {
     warehouseGroups.value = resp.items
     total.value = resp.total
   } catch (err) {
-    ElMessage.error(getActionErrorMessage(err, '加载失败'))
+    ElMessage.error(getActionErrorMessage(err, '加载国内库存失败'))
   } finally {
     loading.value = false
   }

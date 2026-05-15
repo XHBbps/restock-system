@@ -24,8 +24,10 @@ class _FakeDb:
     def __init__(self, responses) -> None:
         self._responses = list(responses)
         self._idx = 0
+        self.statements = []
 
     async def execute(self, stmt):
+        self.statements.append(stmt)
         result = self._responses[self._idx]
         self._idx += 1
         return result
@@ -34,9 +36,9 @@ class _FakeDb:
 def _warehouse(**overrides):
     base = {
         "id": "WH-001",
-        "name": "美国仓",
-        "type": 3,
-        "country": "US",
+        "name": "赛狐默认仓",
+        "type": 0,
+        "country": None,
         "replenish_site_raw": "ATVPDKIKX0DER",
         "last_sync_at": datetime(2026, 4, 10, 12, 0, 0),
     }
@@ -65,3 +67,17 @@ async def test_list_data_warehouses_returns_total_stock() -> None:
     assert result.items[0].total_stock == 30
     assert result.items[1].id == "WH-002"
     assert result.items[1].total_stock == 0
+
+
+async def test_list_data_warehouses_scopes_to_default_warehouse_type() -> None:
+    db = _FakeDb(
+        [
+            _ScalarResult(0),
+            _RowsResult([]),
+        ]
+    )
+
+    await list_data_warehouses(page=1, page_size=500, db=db, _={})  # type: ignore[arg-type]
+
+    assert "warehouse.type = :type_1" in str(db.statements[0])
+    assert "warehouse.type = :type_1" in str(db.statements[1])
