@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.countries import is_reportable_country_code
 from app.engine.context import InventoryMap, InventoryStock, SaleDaysMap, VelocityMap
 from app.engine.sku_mapping import (
+    WarehouseStock,
     aggregate_component_stock_by_country,
     component_skus_for_rules,
     compute_mapped_stock_by_country,
@@ -28,6 +29,8 @@ from app.engine.warehouse_scope import LOCAL_WAREHOUSE_TYPES
 from app.models.in_transit import InTransitItem, InTransitRecord
 from app.models.third_party_inventory import ThirdPartyInventoryCurrent, ThirdPartyWarehouse
 from app.models.warehouse import Warehouse
+
+THIRD_PARTY_WAREHOUSE_KEY_PREFIX = "third_party"
 
 
 async def load_third_party_inventory(
@@ -42,7 +45,9 @@ async def load_third_party_inventory(
             func.sum(ThirdPartyInventoryCurrent.available).label("avail"),
             func.sum(ThirdPartyInventoryCurrent.reserved).label("reserv"),
         )
-        .join(ThirdPartyWarehouse, ThirdPartyWarehouse.id == ThirdPartyInventoryCurrent.warehouse_id)
+        .join(
+            ThirdPartyWarehouse, ThirdPartyWarehouse.id == ThirdPartyInventoryCurrent.warehouse_id
+        )
         .where(ThirdPartyWarehouse.country.is_not(None))
         .group_by(ThirdPartyInventoryCurrent.commodity_sku, ThirdPartyWarehouse.country)
     )
@@ -56,6 +61,61 @@ async def load_third_party_inventory(
         current = result.setdefault((sku, country), {"available": 0, "reserved": 0})
         current["available"] += int(avail or 0)
         current["reserved"] += int(reserv or 0)
+    return result
+
+
+def _third_party_warehouse_key(warehouse_id: int) -> str:
+    return f"{THIRD_PARTY_WAREHOUSE_KEY_PREFIX}:{warehouse_id}"
+
+
+async def load_third_party_component_inventory_by_warehouse(
+    db: AsyncSession,
+    inventory_skus: list[str],
+    *,
+    sku_to_group_key: dict[str, str] | None = None,
+) -> dict[tuple[str, str], WarehouseStock]:
+    """Load current third-party component inventory by overseas warehouse.
+
+    The synthetic warehouse key is prefixed so manual third-party warehouse IDs
+    cannot collide with Saihu warehouse IDs used by in-transit records.
+    """
+    if not inventory_skus:
+        return {}
+    stmt = (
+        select(
+            ThirdPartyInventoryCurrent.commodity_sku,
+            ThirdPartyInventoryCurrent.warehouse_id,
+            ThirdPartyWarehouse.country,
+            func.sum(
+                ThirdPartyInventoryCurrent.available + ThirdPartyInventoryCurrent.reserved
+            ).label("total"),
+        )
+        .join(
+            ThirdPartyWarehouse, ThirdPartyWarehouse.id == ThirdPartyInventoryCurrent.warehouse_id
+        )
+        .where(ThirdPartyWarehouse.country.is_not(None))
+        .where(ThirdPartyInventoryCurrent.commodity_sku.in_(inventory_skus))
+        .group_by(
+            ThirdPartyInventoryCurrent.commodity_sku,
+            ThirdPartyInventoryCurrent.warehouse_id,
+            ThirdPartyWarehouse.country,
+        )
+    )
+    rows = (await db.execute(stmt)).all()
+    sku_groups = sku_to_group_key or {}
+    result: dict[tuple[str, str], WarehouseStock] = {}
+    for sku, warehouse_id, country, total in rows:
+        if not is_reportable_country_code(country):
+            continue
+        key = (sku_groups.get(sku, sku), _third_party_warehouse_key(int(warehouse_id)))
+        current = result.get(key)
+        if current is None:
+            result[key] = WarehouseStock(country=country, total=int(total or 0))
+        else:
+            result[key] = WarehouseStock(
+                country=current.country or country,
+                total=current.total + int(total or 0),
+            )
     return result
 
 
@@ -161,6 +221,11 @@ async def run_step2(
                 )
             }
         )
+        component_third_party_inventory = await load_third_party_component_inventory_by_warehouse(
+            db,
+            component_query_skus,
+            sku_to_group_key=sku_to_group_key,
+        )
         component_transit = await load_in_transit_totals_by_warehouse(
             db,
             component_query_skus,
@@ -172,7 +237,10 @@ async def run_step2(
             component_query_skus,
             sku_to_group_key=sku_to_group_key,
         )
-        warehouse_component_stock = merge_warehouse_stock(component_transit)
+        warehouse_component_stock = merge_warehouse_stock(
+            component_third_party_inventory,
+            component_transit,
+        )
         mapped = compute_mapped_stock_by_country(
             rules,
             warehouse_component_stock,
