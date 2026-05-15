@@ -17,6 +17,7 @@ from app.models.product_listing import ProductListing
 from app.models.role import Role
 from app.models.sku import SkuConfig
 from app.models.sys_user import SysUser
+from app.models.third_party_inventory import ThirdPartyInventoryCurrent, ThirdPartyWarehouse
 from app.models.warehouse import Warehouse
 
 BEIJING = ZoneInfo("Asia/Shanghai")
@@ -145,6 +146,31 @@ async def seed_inventory(
     return obj
 
 
+async def seed_third_party_inventory(
+    db: AsyncSession,
+    sku: str,
+    warehouse_name: str,
+    country: str | None = None,
+    available: int = 0,
+    reserved: int = 0,
+) -> tuple[ThirdPartyWarehouse, ThirdPartyInventoryCurrent]:
+    """Seed current overseas inventory maintained through the overseas inventory UI."""
+    warehouse = ThirdPartyWarehouse(name=warehouse_name, country=country)
+    db.add(warehouse)
+    await db.flush()
+
+    inventory = ThirdPartyInventoryCurrent(
+        warehouse_id=warehouse.id,
+        commodity_sku=sku,
+        available=available,
+        reserved=reserved,
+        last_operation="manual",
+    )
+    db.add(inventory)
+    await db.flush()
+    return warehouse, inventory
+
+
 async def seed_order(
     db: AsyncSession,
     shop_id: str,
@@ -252,7 +278,7 @@ async def seed_minimum_dataset(
       - 1 sku_config (enabled, no custom lead_time)
       - 1 domestic warehouse (CN, type=1)
       - 1 US overseas warehouse (US, type=3)
-      - US overseas inventory  (available=50)
+      - US overseas current inventory from the overseas inventory page (available=0)
       - Domestic inventory      (available=20)
       - 1 US order 15 days ago  (qty_shipped=5, with postal_code)
       - 1 product_listing entry
@@ -270,8 +296,16 @@ async def seed_minimum_dataset(
     sku = await seed_sku(db, _DEFAULT_SKU, enabled=True, lead_time_days=None)
     wh_local = await seed_warehouse(db, _LOCAL_WH_ID, "国内本地仓", wtype=1, country="CN")
     wh_us = await seed_warehouse(db, _OVERSEAS_WH_ID, "美国FBA仓", wtype=3, country="US")
-    # Set overseas stock to 0 so country_qty is positive (velocity > 0 → replenishment needed)
+    # Historical Saihu overseas stock no longer drives Step 2, but keep the row for data pages.
     inv_us = await seed_inventory(db, _DEFAULT_SKU, _OVERSEAS_WH_ID, country="US", available=0)
+    # Step 2 overseas spot stock now comes only from the overseas inventory page.
+    third_party_wh, third_party_inv = await seed_third_party_inventory(
+        db,
+        _DEFAULT_SKU,
+        "美国海外库存仓",
+        country="US",
+        available=0,
+    )
     # Set local stock to 0 so total_qty is also positive
     inv_local = await seed_inventory(db, _DEFAULT_SKU, _LOCAL_WH_ID, country="CN", available=0)
     header, item, detail = await seed_order(
@@ -294,6 +328,8 @@ async def seed_minimum_dataset(
         "wh_local": wh_local,
         "wh_us": wh_us,
         "inv_us": inv_us,
+        "third_party_wh": third_party_wh,
+        "third_party_inv": third_party_inv,
         "inv_local": inv_local,
         "order_header": header,
         "order_item": item,
